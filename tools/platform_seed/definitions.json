@@ -1,0 +1,1385 @@
+{
+  "_comment": [
+    "The retired Java worker's platform jobs (worker V3, V9, V10, V11, V13 as left by V14) as the platform app's",
+    "EventDefinitions, EventActions and job functions. Read by tools/seed_platform_app.py (which creates them on",
+    "LOCAL through the APIs), tools/make_platform_transport.py (which exports them from LOCAL into a core transport",
+    "file) and crates/core/src/functions/platform_tests.rs (which runs every job function against fakes).",
+    "Each job: a schedule on its EventDefinition (the worker's Quartz cron as five Unix fields, UTC, one run for",
+    "SYSTEM), an EventAction with one CALL_CORE_FUNCTION task calling Platform.Jobs.<job>, and that stored function,",
+    "which calls CoreServices.Platform.<function> with the worker's job data as literal arguments (the task passes",
+    "no arguments: a scheduled tick's event data carries only its _schedule marker)."
+  ],
+  "app": {
+    "appCode": "platform",
+    "clientCode": "SYSTEM",
+    "appName": "Platform",
+    "appType": "APP",
+    "appAccessType": "OWN"
+  },
+  "jobs": [
+    {
+      "name": "SSL_RENEWAL",
+      "workerTask": "ssl-certificate-renewal",
+      "workerJobType": "SSL_RENEWAL",
+      "workerSchedule": "0 0 2 * * ?",
+      "workerJobData": {
+        "daysBeforeExpiry": 3
+      },
+      "description": "Renew expiring SSL certificates",
+      "cron": "0 2 * * *",
+      "function": "CoreServices.Platform.RenewCertificates",
+      "arguments": {
+        "daysBeforeExpiry": 3
+      }
+    },
+    {
+      "name": "TOKEN_CLEANUP",
+      "workerTask": "expired-token-cleanup",
+      "workerJobType": "TOKEN_CLEANUP",
+      "workerSchedule": "0 0 3 * * ?",
+      "workerJobData": {
+        "unusedDays": 90
+      },
+      "description": "Delete expired and unused security and core tokens",
+      "cron": "0 3 * * *",
+      "function": "CoreServices.Platform.CleanupTokens",
+      "arguments": {
+        "unusedDays": 90
+      }
+    },
+    {
+      "name": "SECURITY_METERING",
+      "workerTask": "security-metering",
+      "workerJobType": "SECURITY_METERING",
+      "workerSchedule": "0 0/15 * * * ?",
+      "workerJobData": {},
+      "description": "Charge security-owned token rent (app/site/user) for the current 15-minute window",
+      "cron": "*/15 * * * *",
+      "function": "CoreServices.Platform.Meter",
+      "arguments": {
+        "service": "security"
+      }
+    },
+    {
+      "name": "CORE_METERING",
+      "workerTask": "core-metering",
+      "workerJobType": "CORE_METERING",
+      "workerSchedule": "0 0/15 * * * ?",
+      "workerJobData": {},
+      "description": "Charge core storage-row token rent for the current 15-minute window",
+      "cron": "*/15 * * * *",
+      "function": "CoreServices.Platform.Meter",
+      "arguments": {
+        "service": "core"
+      }
+    },
+    {
+      "name": "ENTITY_PROCESSOR_METERING",
+      "workerTask": "entity-processor-metering",
+      "workerJobType": "ENTITY_PROCESSOR_METERING",
+      "workerSchedule": "0 0/15 * * * ?",
+      "workerJobData": {},
+      "description": "Charge entity-processor deals token rent for the current 15-minute window",
+      "cron": "*/15 * * * *",
+      "function": "CoreServices.Platform.Meter",
+      "arguments": {
+        "service": "entity-processor"
+      }
+    },
+    {
+      "name": "FILES_METERING",
+      "workerTask": "files-metering",
+      "workerJobType": "FILES_METERING",
+      "workerSchedule": "0 0/15 * * * ?",
+      "workerJobData": {},
+      "description": "Charge files (static+secured GB) token rent for the current 15-minute window",
+      "cron": "*/15 * * * *",
+      "function": "CoreServices.Platform.Meter",
+      "arguments": {
+        "service": "files"
+      }
+    },
+    {
+      "name": "BILLING_RECONCILE",
+      "workerTask": "billing-reconcile",
+      "workerJobType": "BILLING_RECONCILE",
+      "workerSchedule": "0 45 0 * * ?",
+      "workerJobData": {},
+      "description": "Back-charge any 15-minute window of the previous day missed to downtime",
+      "cron": "45 0 * * *",
+      "function": "CoreServices.Platform.ReconcileBilling",
+      "arguments": {}
+    },
+    {
+      "name": "FILES_TTL_CLEANUP",
+      "workerTask": "files-ttl-cleanup",
+      "workerJobType": "FILES_TTL_CLEANUP",
+      "workerSchedule": "0 20 * * * ?",
+      "workerJobData": {
+        "limit": 500
+      },
+      "description": "Delete files whose per-file lifetime has expired (secured + static)",
+      "cron": "20 * * * *",
+      "function": "CoreServices.Platform.CleanupExpiredFiles",
+      "arguments": {
+        "limit": 500
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_UI",
+      "workerTask": "transport-cleanup-ui",
+      "workerJobType": "TRANSPORT_CLEANUP",
+      "workerSchedule": "0 40 3 * * ?",
+      "workerJobData": {
+        "service": "ui",
+        "retentionDays": 90,
+        "limit": 200
+      },
+      "description": "Delete ui app-transport import receipts and their versions older than the retention window",
+      "cron": "40 3 * * *",
+      "function": "CoreServices.Platform.CleanupTransports",
+      "arguments": {
+        "service": "ui",
+        "retentionDays": 90,
+        "limit": 200
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_CORE",
+      "workerTask": "transport-cleanup-core",
+      "workerJobType": "TRANSPORT_CLEANUP",
+      "workerSchedule": "0 50 3 * * ?",
+      "workerJobData": {
+        "service": "core",
+        "retentionDays": 90,
+        "limit": 200
+      },
+      "description": "Delete core app-transport import receipts and their versions older than the retention window",
+      "cron": "50 3 * * *",
+      "function": "CoreServices.Platform.CleanupTransports",
+      "arguments": {
+        "service": "core",
+        "retentionDays": 90,
+        "limit": 200
+      }
+    },
+    {
+      "name": "EVENT_RUN_CLEANUP",
+      "workerTask": "event-run-cleanup",
+      "workerJobType": "EVENT_RUN_CLEANUP",
+      "workerSchedule": "0 25 * * * ?",
+      "workerJobData": {
+        "retentionDays": 90,
+        "successRetentionDays": 7,
+        "staleAfterHours": 6,
+        "limit": 50000
+      },
+      "description": "Delete event run log rows older than the retention window and close runs that never reported",
+      "cron": "25 * * * *",
+      "function": "CoreServices.Platform.CleanupEventRuns",
+      "arguments": {
+        "retentionDays": 90,
+        "successRetentionDays": 7,
+        "staleAfterHours": 6,
+        "limit": 50000
+      }
+    }
+  ],
+  "functions": [
+    {
+      "name": "Platform.Jobs.SSL_RENEWAL",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job SSL_RENEWAL (worker ssl-certificate-renewal): Renew expiring SSL certificates",
+      "definition": {
+        "name": "SSL_RENEWAL",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "RenewCertificates",
+            "parameterMap": {
+              "daysBeforeExpiry": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 3,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.TOKEN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job TOKEN_CLEANUP (worker expired-token-cleanup): Delete expired and unused security and core tokens",
+      "definition": {
+        "name": "TOKEN_CLEANUP",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "CleanupTokens",
+            "parameterMap": {
+              "unusedDays": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 90,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.SECURITY_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job SECURITY_METERING (worker security-metering): Charge security-owned token rent (app/site/user) for the current 15-minute window",
+      "definition": {
+        "name": "SECURITY_METERING",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "BOOLEAN"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "Meter",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "security",
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.CORE_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job CORE_METERING (worker core-metering): Charge core storage-row token rent for the current 15-minute window",
+      "definition": {
+        "name": "CORE_METERING",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "BOOLEAN"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "Meter",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "core",
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.ENTITY_PROCESSOR_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job ENTITY_PROCESSOR_METERING (worker entity-processor-metering): Charge entity-processor deals token rent for the current 15-minute window",
+      "definition": {
+        "name": "ENTITY_PROCESSOR_METERING",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "BOOLEAN"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "Meter",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "entity-processor",
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.FILES_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job FILES_METERING (worker files-metering): Charge files (static+secured GB) token rent for the current 15-minute window",
+      "definition": {
+        "name": "FILES_METERING",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "BOOLEAN"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "Meter",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "files",
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.BILLING_RECONCILE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job BILLING_RECONCILE (worker billing-reconcile): Back-charge any 15-minute window of the previous day missed to downtime",
+      "definition": {
+        "name": "BILLING_RECONCILE",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "ReconcileBilling",
+            "parameterMap": {}
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.FILES_TTL_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job FILES_TTL_CLEANUP (worker files-ttl-cleanup): Delete files whose per-file lifetime has expired (secured + static)",
+      "definition": {
+        "name": "FILES_TTL_CLEANUP",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "CleanupExpiredFiles",
+            "parameterMap": {
+              "limit": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 500,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.TRANSPORT_CLEANUP_UI",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job TRANSPORT_CLEANUP_UI (worker transport-cleanup-ui): Delete ui app-transport import receipts and their versions older than the retention window",
+      "definition": {
+        "name": "TRANSPORT_CLEANUP_UI",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "CleanupTransports",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "ui",
+                  "order": 1
+                }
+              },
+              "retentionDays": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 90,
+                  "order": 1
+                }
+              },
+              "limit": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 200,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.TRANSPORT_CLEANUP_CORE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job TRANSPORT_CLEANUP_CORE (worker transport-cleanup-core): Delete core app-transport import receipts and their versions older than the retention window",
+      "definition": {
+        "name": "TRANSPORT_CLEANUP_CORE",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "CleanupTransports",
+            "parameterMap": {
+              "service": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "core",
+                  "order": 1
+                }
+              },
+              "retentionDays": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 90,
+                  "order": 1
+                }
+              },
+              "limit": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 200,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Platform.Jobs.EVENT_RUN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "executeAuth": "Authorities._Event_Runner",
+      "message": "platform job EVENT_RUN_CLEANUP (worker event-run-cleanup): Delete event run log rows older than the retention window and close runs that never reported",
+      "definition": {
+        "name": "EVENT_RUN_CLEANUP",
+        "namespace": "Platform.Jobs",
+        "parameters": {},
+        "events": {
+          "output": {
+            "name": "output",
+            "parameters": {
+              "result": {
+                "name": "result",
+                "type": [
+                  "OBJECT"
+                ]
+              }
+            }
+          }
+        },
+        "steps": {
+          "run": {
+            "statementName": "run",
+            "namespace": "CoreServices.Platform",
+            "name": "CleanupEventRuns",
+            "parameterMap": {
+              "retentionDays": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 90,
+                  "order": 1
+                }
+              },
+              "successRetentionDays": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 7,
+                  "order": 1
+                }
+              },
+              "staleAfterHours": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 6,
+                  "order": 1
+                }
+              },
+              "limit": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": 50000,
+                  "order": 1
+                }
+              }
+            }
+          },
+          "output": {
+            "statementName": "output",
+            "namespace": "System",
+            "name": "GenerateEvent",
+            "parameterMap": {
+              "eventName": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": "output",
+                  "order": 1
+                }
+              },
+              "results": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "order": 1,
+                  "value": {
+                    "name": "result",
+                    "value": {
+                      "isExpression": true,
+                      "value": "Steps.run.output.result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "eventDefinitions": [
+    {
+      "name": "SSL_RENEWAL",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job SSL_RENEWAL (worker ssl-certificate-renewal, 0 0 2 * * ?): Renew expiring SSL certificates",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "0 2 * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "TOKEN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TOKEN_CLEANUP (worker expired-token-cleanup, 0 0 3 * * ?): Delete expired and unused security and core tokens",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "0 3 * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "SECURITY_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job SECURITY_METERING (worker security-metering, 0 0/15 * * * ?): Charge security-owned token rent (app/site/user) for the current 15-minute window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "*/15 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "CORE_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job CORE_METERING (worker core-metering, 0 0/15 * * * ?): Charge core storage-row token rent for the current 15-minute window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "*/15 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "ENTITY_PROCESSOR_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job ENTITY_PROCESSOR_METERING (worker entity-processor-metering, 0 0/15 * * * ?): Charge entity-processor deals token rent for the current 15-minute window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "*/15 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "FILES_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job FILES_METERING (worker files-metering, 0 0/15 * * * ?): Charge files (static+secured GB) token rent for the current 15-minute window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "*/15 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "BILLING_RECONCILE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job BILLING_RECONCILE (worker billing-reconcile, 0 45 0 * * ?): Back-charge any 15-minute window of the previous day missed to downtime",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "45 0 * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "FILES_TTL_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job FILES_TTL_CLEANUP (worker files-ttl-cleanup, 0 20 * * * ?): Delete files whose per-file lifetime has expired (secured + static)",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "20 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_UI",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TRANSPORT_CLEANUP_UI (worker transport-cleanup-ui, 0 40 3 * * ?): Delete ui app-transport import receipts and their versions older than the retention window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "40 3 * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_CORE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TRANSPORT_CLEANUP_CORE (worker transport-cleanup-core, 0 50 3 * * ?): Delete core app-transport import receipts and their versions older than the retention window",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "50 3 * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    },
+    {
+      "name": "EVENT_RUN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job EVENT_RUN_CLEANUP (worker event-run-cleanup, 0 25 * * * ?): Delete event run log rows older than the retention window and close runs that never reported",
+      "schema": {
+        "type": "OBJECT",
+        "properties": {}
+      },
+      "schedule": {
+        "cron": "25 * * * *",
+        "timezone": "UTC",
+        "enabled": true,
+        "perClient": false
+      }
+    }
+  ],
+  "eventActions": [
+    {
+      "name": "SSL_RENEWAL",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job SSL_RENEWAL: run Platform.Jobs.SSL_RENEWAL on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "SSL_RENEWAL"
+          }
+        }
+      }
+    },
+    {
+      "name": "TOKEN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TOKEN_CLEANUP: run Platform.Jobs.TOKEN_CLEANUP on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "TOKEN_CLEANUP"
+          }
+        }
+      }
+    },
+    {
+      "name": "SECURITY_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job SECURITY_METERING: run Platform.Jobs.SECURITY_METERING on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "SECURITY_METERING"
+          }
+        }
+      }
+    },
+    {
+      "name": "CORE_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job CORE_METERING: run Platform.Jobs.CORE_METERING on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "CORE_METERING"
+          }
+        }
+      }
+    },
+    {
+      "name": "ENTITY_PROCESSOR_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job ENTITY_PROCESSOR_METERING: run Platform.Jobs.ENTITY_PROCESSOR_METERING on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "ENTITY_PROCESSOR_METERING"
+          }
+        }
+      }
+    },
+    {
+      "name": "FILES_METERING",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job FILES_METERING: run Platform.Jobs.FILES_METERING on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "FILES_METERING"
+          }
+        }
+      }
+    },
+    {
+      "name": "BILLING_RECONCILE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job BILLING_RECONCILE: run Platform.Jobs.BILLING_RECONCILE on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "BILLING_RECONCILE"
+          }
+        }
+      }
+    },
+    {
+      "name": "FILES_TTL_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job FILES_TTL_CLEANUP: run Platform.Jobs.FILES_TTL_CLEANUP on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "FILES_TTL_CLEANUP"
+          }
+        }
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_UI",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TRANSPORT_CLEANUP_UI: run Platform.Jobs.TRANSPORT_CLEANUP_UI on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "TRANSPORT_CLEANUP_UI"
+          }
+        }
+      }
+    },
+    {
+      "name": "TRANSPORT_CLEANUP_CORE",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job TRANSPORT_CLEANUP_CORE: run Platform.Jobs.TRANSPORT_CLEANUP_CORE on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "TRANSPORT_CLEANUP_CORE"
+          }
+        }
+      }
+    },
+    {
+      "name": "EVENT_RUN_CLEANUP",
+      "appCode": "platform",
+      "clientCode": "SYSTEM",
+      "message": "platform job EVENT_RUN_CLEANUP: run Platform.Jobs.EVENT_RUN_CLEANUP on every tick",
+      "tasks": {
+        "key1": {
+          "key": "key1",
+          "order": 0,
+          "type": "CALL_CORE_FUNCTION",
+          "parameters": {
+            "namespace": "Platform.Jobs",
+            "name": "EVENT_RUN_CLEANUP"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+# notification in production: the /api/notification routes (in-app list, unread count, the SSE
+# stream, preferences) and the notifications1..3 queue consumer (email and in-app sends).
+# NOT APPLIED ANYWHERE: an example for review.
+#
+# Secrets: MODLIX__DATABASE__PASSWORD, MODLIX__MQ__URI (or MODLIX__MQ__PASSWORD), MODLIX__REDIS__URL.
+# Placeholders in <angle brackets> are values to fill in at cutover.
+#
+# Cutover: stop the Java notification containers first (both would consume the same queues and
+# each would push in-app events only to its own streams), then start these and point the
+# gateway's notification pool at them (deploy/README.md). In-app streams live in the process:
+# with two instances, a notification reaches only the streams open on the instance that consumed
+# it, exactly as with two Java instances (crates/notification/DIFFERENCES.md, N1).
+
+[server]
+port = 8114
+# SSE streams stay open; give in-flight sends a moment, the clients reconnect (retry 5000).
+shutdown_grace_seconds = 10
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "production"
+
+[database]
+host = "prod-mysql.sub10150624021.modlixvcn.oraclevcn.com"
+port = 3306
+database = "notification"
+username = "<notification db user>"   # password: MODLIX__DATABASE__PASSWORD
+max_connections = 4
+
+[redis]
+cache_prefix = "cmn"      # url: MODLIX__REDIS__URL
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = ["http://security-admin-1:8113", "http://security-admin-2:8113"]
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = ["http://security-auth-1:8101", "http://security-auth-2:8101"]
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = ["http://security-internal-1:8112", "http://security-internal-2:8112"]
+
+[core]
+# The notification definition read (core-editor) and the notification connection read (core-exec).
+# Before the core cutover use the Java core containers for both:
+# upstream = ["http://core-server-blue:8005", "http://core-server-blue-2:8005", "http://core-server-green:8005", "http://core-server-green-2:8005"]
+upstream = ["http://core-editor-1:8111", "http://core-editor-2:8111"]
+connections_upstream = ["http://core-exec-1:8105", "http://core-exec-2:8105", "http://core-exec-3:8105"]
+timeout_seconds = 60
+
+[eureka]
+# Nothing calls NOTIFICATION through Feign; gateway-rust routes by fixed pools. Turn this on
+# (register_as = "NOTIFICATION") only while the Spring gateway still routes /api/notification.
+register = false
+zones = ["http://eureka-server:9999/eureka/"]
+
+[mq]
+host = "<rabbitmq host>"
+port = 5672
+username = "<rabbitmq user>"
+
+[notifications]
+queues = "notifications1,notifications2,notifications3"
+exchange = "notifications"
+declare = false
+prefetch = 10
+
+[sse]
+heartbeat_seconds = 15
+buffer = 256

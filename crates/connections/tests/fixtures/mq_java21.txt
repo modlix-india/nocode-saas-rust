@@ -1,0 +1,127 @@
+=== EventQueObject
+contentType=application/json contentEncoding=UTF-8 headers={__TypeId__=com.fincity.saas.commons.mq.events.EventQueObject} deliveryMode=PERSISTENT priority=0 contentLength=1469
+amqp=#contentHeader<basic>(content-type=application/json, content-encoding=UTF-8, headers={__TypeId__=com.fincity.saas.commons.mq.events.EventQueObject}, delivery-mode=2, priority=0, correlation-id=null, reply-to=null, expiration=null, message-id=null, timestamp=null, type=null, user-id=null, app-id=null, cluster-id=null)
+BODY<<{
+  "eventName" : "USER_CREATED",
+  "clientCode" : "SYSTEM",
+  "appCode" : "appbuilder",
+  "draft" : false,
+  "data" : {
+    "arr" : [ {
+      "zeta" : 1,
+      "alpha" : "x",
+      "notFoundPage" : null
+    }, [ ] ],
+    "a" : 1,
+    "b" : null,
+    "defaultPage" : "home",
+    "c" : "",
+    "d" : [ 1, "x" ],
+    "e" : { },
+    "f" : {
+      "g" : null,
+      "h" : [ ]
+    },
+    "h" : 1.5,
+    "i" : 10000000000,
+    "j" : true,
+    "k" : 2.5,
+    "notFoundPage" : "nf",
+    "esc" : "q\"u\\o\u0001 /é",
+    "links" : {
+      "x" : 1
+    }
+  },
+  "authentication" : {
+    "user" : {
+      "id" : 142,
+      "createdBy" : 1,
+      "createdAt" : 1700000000,
+      "updatedAt" : 1700000100,
+      "clientId" : 1,
+      "userName" : "sys",
+      "emailId" : "a@b.com",
+      "firstName" : "System",
+      "localeCode" : "en",
+      "timeZone" : "Asia/Kolkata",
+      "accountNonExpired" : true,
+      "accountNonLocked" : true,
+      "credentialsNonExpired" : true,
+      "noFailedAttempt" : 0,
+      "noOtpResendAttempts" : 0,
+      "statusCode" : "ACTIVE",
+      "stringAuthorities" : [ "Authorities.ROLE_Owner", "Authorities.Logged_IN" ]
+    },
+    "loggedInFromClientId" : 1,
+    "loggedInFromClientCode" : "SYSTEM",
+    "clientTypeCode" : "SYS",
+    "clientLevelType" : "SYSTEM",
+    "clientCode" : "SYSTEM",
+    "accessToken" : "tok-123",
+    "accessTokenExpiryAt" : 1760000000,
+    "authenticated" : true,
+    "systemClient" : true,
+    "name" : "System"
+  }
+}>>
+=== EventQueObject
+contentType=application/json contentEncoding=UTF-8 headers={__TypeId__=com.fincity.saas.commons.mq.events.EventQueObject} deliveryMode=PERSISTENT priority=0 contentLength=84
+amqp=#contentHeader<basic>(content-type=application/json, content-encoding=UTF-8, headers={__TypeId__=com.fincity.saas.commons.mq.events.EventQueObject}, delivery-mode=2, priority=0, correlation-id=null, reply-to=null, expiration=null, message-id=null, timestamp=null, type=null, user-id=null, app-id=null, cluster-id=null)
+BODY<<{
+  "eventName" : "X",
+  "appCode" : "app",
+  "draft" : true,
+  "xdebug" : "dbg-1"
+}>>
+=== NotificationQueObject
+contentType=application/json contentEncoding=UTF-8 headers={__TypeId__=com.fincity.saas.commons.mq.notifications.NotificationQueObject} deliveryMode=PERSISTENT priority=0 contentLength=810
+amqp=#contentHeader<basic>(content-type=application/json, content-encoding=UTF-8, headers={__TypeId__=com.fincity.saas.commons.mq.notifications.NotificationQueObject}, delivery-mode=2, priority=0, correlation-id=null, reply-to=null, expiration=null, message-id=null, timestamp=null, type=null, user-id=null, app-id=null, cluster-id=null)
+BODY<<{
+  "id" : "2dc0511b522043ebafdee7eefd9c59b1",
+  "appCode" : "leadzump",
+  "clientCode" : "FIN",
+  "urlClientCode" : "FIN",
+  "triggeredUserId" : 142,
+  "targetId" : 7,
+  "targetType" : "User Id",
+  "filterAuthorization" : "Authorities.X",
+  "notificationName" : "welcome",
+  "notificationCategory" : "cat",
+  "connectionName" : "notification",
+  "draft" : false,
+  "payload" : {
+    "arr" : [ {
+      "zeta" : 1,
+      "alpha" : "x",
+      "notFoundPage" : null
+    }, [ ] ],
+    "a" : 1,
+    "b" : null,
+    "defaultPage" : "home",
+    "c" : "",
+    "d" : [ 1, "x" ],
+    "e" : { },
+    "f" : {
+      "g" : null,
+      "h" : [ ]
+    },
+    "h" : 1.5,
+    "i" : 10000000000,
+    "j" : true,
+    "k" : 2.5,
+    "notFoundPage" : "nf",
+    "esc" : "q\"u\\o\u0001 /é",
+    "links" : {
+      "x" : 1
+    }
+  }
+}>>
+=== NotificationQueObject
+contentType=application/json contentEncoding=UTF-8 headers={__TypeId__=com.fincity.saas.commons.mq.notifications.NotificationQueObject} deliveryMode=PERSISTENT priority=0 contentLength=102
+amqp=#contentHeader<basic>(content-type=application/json, content-encoding=UTF-8, headers={__TypeId__=com.fincity.saas.commons.mq.notifications.NotificationQueObject}, delivery-mode=2, priority=0, correlation-id=null, reply-to=null, expiration=null, message-id=null, timestamp=null, type=null, user-id=null, app-id=null, cluster-id=null)
+BODY<<{
+  "id" : "771241e181304327b8c8eb284a79d599",
+  "appCode" : "a",
+  "draft" : true,
+  "xdebug" : "d"
+}>>

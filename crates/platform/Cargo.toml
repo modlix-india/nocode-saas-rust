@@ -1,0 +1,51 @@
+[package]
+name = "platform"
+description = "The contracts every Modlix Rust service shares with the Java estate: config server, Eureka, cache eviction, security, errors, metrics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+figment.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry-http.workspace = true
+tracing-opentelemetry.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+hex.workspace = true
+http.workspace = true
+local-ip-address.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+moka.workspace = true
+redis.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+mongodb = { workspace = true, optional = true }
+
+[features]
+# The MongoDB helper in `db`, for the units that read the Java services' Mongo databases.
+mongo = ["dep:mongodb"]
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+anyhow.workspace = true
+figment = { version = "0.10", features = ["toml", "env", "test"] }
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,52 @@
+# notification messages, English (codes NOTIF.*). Every key of the Java bundle
+# (notification/src/main/resources/messages_en.properties, three keys) has a code here, named
+# after it, plus the refusals the service raises with a literal text. Requests the service
+# cannot read answer the platform's COMMON.* codes (crates/notification/DIFFERENCES.md, N14).
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# never whether another client's user exists. The Java text stays in debugMessage. An error
+# security answers with its own code is passed on as it came. Format:
+# platform::messages::catalogue.
+
+[NOTIF.USER_PREFERENCE_FORBIDDEN]
+status = 403
+params = ["id"]
+text = "You can't manage this user's notification preferences: you don't manage their account."
+action = "Change your own preferences instead, or ask an owner of the user's organisation."
+java_text = "User don't have access to this user Id : $"
+when = "Reading or changing another user's notification preferences (userId) when security's management check says no."
+audience = "signed-in"
+
+[NOTIF.STREAM_NOT_ACCEPTABLE]
+status = 406
+text = "This address answers with an event stream, which the request does not accept."
+action = "Send the header Accept: text/event-stream, or leave Accept out."
+java_text = "Please try again. A server error - $"
+when = "Subscribing to in-app notifications with an Accept header that leaves out text/event-stream."
+audience = "developers"
+
+# ---- The Java bundle ----
+
+[NOTIF.NOTIFICATION_TYPE_NOT_FOUND]
+status = 400
+text = "Provide a notification type to continue."
+java = "notification_type_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping); Java does not raise it either."
+audience = "signed-in"
+
+[NOTIF.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping). Sending failures are logged, never shown to anyone."
+audience = "anyone"
+
+[NOTIF.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping). An unexpected failure answers COMMON.INTERNAL_ERROR, which says the same."
+audience = "anyone"

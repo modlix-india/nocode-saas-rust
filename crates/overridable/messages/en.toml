@@ -1,0 +1,333 @@
+# Definition messages, English (codes DEF.*): the errors of the overridable-definition library
+# that ui and core both run (pages, apps, styles, themes, functions, schemas, URI paths,
+# fillers, storages, connections, templates, events...), with its draft, version, publish and
+# transport routes. Every key of commons-mongo's message service (the 27 keys the ui and core
+# bundles share) has a code here, named after it, plus the refusals raised with a literal text.
+# `params` names Java's `$` values in order.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the objects they ask for, and signed-in callers never
+# learn whether another organisation's object exists (the 404 and 403 answers stay as Java
+# sends them). Java's text stays in debugMessage. Format: platform::messages::catalogue.
+
+# ---- Finding and reading ----
+
+[DEF.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are working in the right app."
+java = "object_not_found"
+when = "Reading or changing a definition (page, function, schema...), a draft, a transport or a page component that does not exist or that the caller cannot see (the same answer for both)."
+audience = "signed-in"
+
+[DEF.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}] to change it."
+action = "Check that it still exists and that you can change it."
+java = "object_not_found_to_update"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[DEF.DRAFT_NOT_SUPPORTED]
+status = 405
+params = ["draft", "what:entity"]
+text = "Drafts are not available for this kind of item[ ({what})]."
+action = "Save your changes directly instead."
+java = "object_not_found"
+when = "Reading, saving, publishing or discarding a draft of a kind of definition that has no drafts (Java answers \"Draft with id <kind> not found\")."
+audience = "signed-in"
+
+[DEF.INTERNAL_ERROR_RECURSION]
+status = 500
+params = ["what:entity"]
+text = "We couldn't read the {what|item}: it refers back to itself in a loop."
+action = "Remove the reference that leads back to it, then try again."
+java = "internal_error_recursion"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[DEF.APPLICATION_NAME_REQUIRED]
+status = 400
+text = "The app to search in is missing."
+action = "Add the app's code to the request and try again."
+java = "application_name_required"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+# ---- Permissions ----
+
+[DEF.SIGN_IN_REQUIRED]
+status = 403
+text = "Please sign in to continue."
+java = ["forbidden_permission", "forbidden_create", "forbidden_app_access", "unable_to_delete"]
+java_text = ["Permission/Role $ is required to use this operation ", "Unable to delete $ with id $ "]
+when = "An anonymous caller asks to change a definition, save or discard a draft, list an app's definitions or publish (Java names the object type or the app)."
+audience = "anyone"
+
+[DEF.FORBIDDEN_PERMISSION]
+status = 403
+params = ["what:entity"]
+text = "You don't have permission to do this with the {what|item}."
+action = "Ask an owner of your organisation to give you the permission you need."
+java = "forbidden_permission"
+java_text = "Permission/Role $ is required to use this operation "
+when = "A signed-in caller changes, saves a draft of, or discards a definition their role or organisation gives them no access to."
+audience = "signed-in"
+
+[DEF.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create the {what|item} here: your account can't change this app for the organisation in the request."
+action = "Check the app and the organisation you are creating it in. If they are right, ask an owner of the app for access."
+java = "forbidden_create"
+when = "Creating a definition, or making or importing a transport, for an app or organisation the caller cannot change."
+audience = "signed-in"
+
+[DEF.FORBIDDEN_APP_ACCESS]
+status = 403
+params = ["app"]
+text = "You can't work on the definitions of {app|this app}: your organisation has no access to them."
+action = "Check the app and the organisation in the request. If they are right, ask an owner of the app for access."
+java = "forbidden_app_access"
+when = "A signed-in caller lists an app's definitions, its drafts waiting to be published, or publishes them, without access to the app or for an organisation they do not manage."
+audience = "signed-in"
+
+[DEF.FORBIDDEN_EXECUTION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't run this: your account does not have {permission}.|You don't have permission to run this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_execution"
+java_text = "Authorization $ is required"
+when = "Not raised by the Rust units (ui answers UI.FORBIDDEN_EXECUTION)."
+audience = "signed-in"
+
+[DEF.FORBIDDEN_FORK_NOT_OVERRIDABLE]
+status = 403
+params = ["what:entity", "name"]
+text = "[The {what} {name} can't be customised, so only the organisation that owns it can edit it.|This item can't be customised, so only the organisation that owns it can edit it.]"
+action = "Ask the organisation that owns it to make the change."
+java = "forbidden_fork_not_overridable"
+when = "Saving a draft of a definition that its owner marked as not overridable, as an organisation that does not own it."
+audience = "signed-in"
+
+# ---- Changing ----
+
+[DEF.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "[The name {name} is already used by another {what|item}.|This name is already used by another item.]"
+action = "Choose another name, or open the existing one."
+java = "already_exists"
+when = "Creating a definition with a name the app already has for that organisation, or adding a page component with a key the page already has."
+audience = "signed-in"
+
+[DEF.VERSION_MISMATCH]
+status = 412
+text = "A newer version of this was saved while you were editing."
+action = "Reload to get the latest version, then make your changes again."
+java = "version_mismatch"
+java_text = "Please reload to get the new version before making changes"
+when = "Saving a definition or a draft with a version older than the stored one."
+audience = "signed-in"
+
+[DEF.NAME_MISSING]
+status = 400
+text = "The name or the namespace is missing."
+action = "Fill in both and try again."
+java = "name_missing"
+when = "Saving a function or schema without a namespace or a name, or a definition whose name the service needs and cannot find."
+audience = "signed-in"
+
+[DEF.NAME_CHANGE]
+status = 400
+text = "The name and the namespace can't be changed once saved."
+action = "Keep the original name and namespace, or save it as a new item."
+java = "name_change"
+when = "Saving a function or schema with a different namespace or name than the stored one."
+audience = "signed-in"
+
+[DEF.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed this way."
+action = "Change it through its own editor instead."
+java = "object_not_updatable"
+when = "A change the definition's service does not allow (core's editors); ui answers UI.ROOT_COMPONENT_NOT_REMOVABLE for a page's root component."
+audience = "signed-in"
+
+[DEF.CANNOT_BE_UPDATED]
+status = 304
+params = ["what:entity"]
+text = "This {what|item} can't be changed once it is made."
+action = "Make a new one instead."
+java = "cannot_be_updated"
+when = "Updating a transport (Java answers 304, which carries no body to the browser)."
+audience = "signed-in"
+
+[DEF.UNABLE_TO_DELETE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]: it does not exist, or your account can't change it."
+action = "Check that it still exists and that you are working in the right app."
+java = "unable_to_delete"
+java_text = "Unable to delete $ with id $ "
+when = "Deleting a definition the caller has no delete access to (the same answer whether or not it exists)."
+audience = "signed-in"
+
+[DEF.DELETE_BLOCKED_BY_OVERRIDES]
+status = 403
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]: other organisations' customisations are built on it."
+action = "Remove those customisations first, then delete it."
+java = "unable_to_delete"
+java_text = "Unable to delete $ with id $ "
+when = "Deleting a definition, as its owner, while other organisations still have customised copies of it."
+audience = "signed-in"
+
+[DEF.UNABLE_TO_CREATE_OBJECT]
+status = 500
+params = ["what:entity"]
+text = "We couldn't create the {what|item}. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unable_to_create_object"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[DEF.CANNOT_CHANGE_PREF]
+status = 403
+text = "You can't change this saved setting: it belongs to another user."
+java = "cannot_change_pref"
+when = "Not raised by the Rust units (ui answers UI.CANNOT_CHANGE_PREF)."
+audience = "signed-in"
+
+# ---- Transports ----
+
+[DEF.TRANSPORT_ERROR]
+status = 403
+params = ["action", "detail"]
+text = "We couldn't import the transport: the file can't be read as a transport."
+action = "Upload the file a transport export produced (the .zip with its transport.json, or the .json)."
+java = "transport_error"
+when = "Importing a transport file that is not a zip with a transport.json, or not a transport's JSON. The reader's detail is in debugMessage."
+audience = "signed-in"
+
+[DEF.TRANSPORT_UPLOAD_REQUIRED]
+status = 403
+params = ["action", "detail"]
+text = "A transport can't be created from fields: it is made by uploading its file."
+action = "Upload the transport file instead."
+java = "transport_error"
+when = "A plain POST on transports (they are imported with createAndApply)."
+audience = "signed-in"
+
+[DEF.TRANSPORT_FILE_TYPE_UNKNOWN]
+status = 400
+params = ["type"]
+text = "[The transport file type {type} is not known.|The transport file type is not known.]"
+action = "Send fileType as ZIP or JSON."
+java_text = "Unknown file type $"
+when = "Making a transport with a fileType other than ZIP or JSON."
+audience = "signed-in"
+
+# ---- Requests ----
+
+[DEF.HEADER_MISSING]
+status = 400
+params = ["header"]
+text = "[The request is missing the {header} header.|The request is missing a required header.]"
+action = "Send the request through the app, which adds it, or add [{header}|the header] and try again."
+java_text = "Please try again. A server error - $"
+when = "A route that needs the forwarded host and port, clientCode or appCode headers gets a request without them."
+audience = "anyone"
+
+[DEF.CONDITION_INVALID]
+status = 400
+text = "A filter condition names no field."
+action = "Give each condition a field (or a field expression) and try again."
+java_text = "Invalid condition"
+when = "A list or query filter with a condition that has neither a field nor a field expression."
+audience = "signed-in"
+
+[DEF.CONDITION_OPERATOR_UNKNOWN]
+status = 400
+params = ["operator"]
+text = "[The filter operator {operator} is not known.|A filter operator is not known.]"
+action = "Use one of the operators the filter supports (EQUALS, LIKE, IN, BETWEEN...)."
+java_text = ["Unknown operator $", "Unknown operator"]
+when = "A list or query filter with an operator the service does not have."
+audience = "signed-in"
+
+[DEF.SORT_INVALID]
+status = 400
+text = "The sort order of the request is not valid."
+action = "Give each order a property and a direction of ASC or DESC."
+java_text = ["No enum constant Direction.$", "No enum constant NullHandling.$", "an order must be an object", "an order needs a property"]
+when = "A query whose sort names an unknown direction or null handling, or an order without a property."
+audience = "signed-in"
+
+# ---- Shared with every service (kept for the Java bundles' mapping) ----
+
+[DEF.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+java_text = "Authorization token expired, Please re-login"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units (an unexpected failure answers COMMON.INTERNAL_ERROR, which says the same)."
+audience = "anyone"
+
+[DEF.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save your changes."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[DEF.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "[{value} can't be read as {type|the expected type}.|A value can't be read as the expected type.]"
+java = "unable_to_convert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"

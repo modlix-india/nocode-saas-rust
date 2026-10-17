@@ -1,0 +1,3 @@
+target
+config/*.env
+.git

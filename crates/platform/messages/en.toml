@@ -1,0 +1,634 @@
+# Platform messages, English: the codes every service shares (COMMON), and the label tables
+# (PERMISSION, ENTITY, WORD) that turn technical names into words.
+#
+# Format (see platform::messages::catalogue): one table per code; `text` is what happened and
+# why, `action` what to do next. Placeholders: {name}, {name|default}, [optional {name}],
+# [when {name}|otherwise]. {errorId} is the response's error id. Only `text` and `action` are
+# read from translations (pt.toml, ...) and override files.
+
+# ---- Signed out, permissions ----
+
+[COMMON.SIGNED_OUT]
+status = 401
+text = "You're signed out. Please sign in again."
+java_text = ""
+when = "A protected address is called with a token or password that is no longer accepted (expired, revoked, issued for another site)."
+audience = "anyone"
+
+[COMMON.SIGN_IN_REQUIRED]
+status = 401
+text = "Please sign in to continue."
+java_text = ["", "Access Denied"]
+when = "A protected address is called without signing in."
+audience = "anyone"
+
+[COMMON.PERMISSION_REQUIRED]
+status = 403
+params = ["permission:authority", "app", "client"]
+text = "[You can't do this[ in {app}]: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of {client|your organisation} to give you [{permission}|the permission you need]."
+java_text = ["Access Denied", ""]
+when = "A signed-in caller lacks the permission a route requires (@PreAuthorize)."
+audience = "signed-in"
+
+[COMMON.FORBIDDEN]
+status = 403
+text = "You don't have access to this."
+action = "If you think you should, ask an owner of your organisation."
+java_text = ""
+when = "A refusal with nothing more specific to say."
+audience = "signed-in"
+
+# ---- Bad input ----
+
+[COMMON.BAD_REQUEST]
+status = 400
+text = "The request is not valid."
+action = "Check what you sent and try again."
+java_text = "Please try again. A server error - $"
+when = "A request the service cannot use, with nothing more specific to say."
+audience = "anyone"
+
+[COMMON.BODY_MISSING]
+status = 400
+text = "The request has no body."
+action = "Send the details as JSON in the request body."
+java_text = "Please try again. A server error - $"
+when = "A route that needs a JSON body gets none."
+audience = "anyone"
+
+[COMMON.BODY_NOT_JSON]
+status = 400
+text = "The request body must be JSON."
+action = "Send it with the header Content-Type: application/json."
+java_text = "Please try again. A server error - $"
+when = "A body arrives without a JSON content type (415 where Spring answers it)."
+audience = "anyone"
+
+[COMMON.BODY_UNREADABLE]
+status = 400
+text = "The request body is not valid JSON."
+action = "Check the request body and try again."
+java_text = "Please try again. A server error - $"
+when = "The body cannot be read as JSON, or a value in it cannot be converted."
+audience = "anyone"
+
+[COMMON.BODY_INVALID]
+status = 400
+params = ["expected"]
+text = "The request body does not have the expected shape[: a value should be {expected}]."
+action = "Check the request body and try again."
+java_text = "Please try again. A server error - $"
+when = "The body is JSON but a value has the wrong type, and the parser did not say which field."
+audience = "anyone"
+
+[COMMON.FIELD_MISSING]
+status = 400
+params = ["field"]
+text = "[The field {field} is missing.|A required field is missing.]"
+action = "Fill in [{field}|every required field] and try again."
+java_text = "Please try again. A server error - $"
+when = "A required field of the body is missing."
+audience = "anyone"
+
+[COMMON.FIELD_INVALID]
+status = 400
+params = ["field", "expected"]
+text = "[The value of {field} is not valid[: it should be {expected}].|A value in the request is not valid[: it should be {expected}].]"
+action = "Correct [{field}|the value] and try again."
+java_text = "Please try again. A server error - $"
+when = "A field of the body has a value of the wrong type or form."
+audience = "anyone"
+
+[COMMON.PARAM_MISSING]
+status = 400
+params = ["field"]
+text = "[The request is missing the {field} parameter.|The request is missing a required parameter.]"
+action = "Add [{field}|the parameter] to the request and try again."
+java_text = "Please try again. A server error - $"
+when = "A required query parameter is not sent."
+audience = "anyone"
+
+[COMMON.HEADER_MISSING]
+status = 400
+params = ["field"]
+text = "[The request is missing the {field} header.|The request is missing a required header.]"
+action = "Send the request through the gateway, which adds it, or add [{field}|the header] and try again."
+java_text = "Please try again. A server error - $"
+when = "A route that needs a header (appCode, clientCode, X-Forwarded-Host...) is called without it."
+audience = "developers"
+
+[COMMON.PARAM_INVALID]
+status = 400
+params = ["field", "expected"]
+text = "[The value of the {field} parameter is not valid[: it should be {expected}].|A parameter of the request is not valid[: it should be {expected}].]"
+action = "Correct [{field}|the parameter] and try again."
+java_text = "Please try again. A server error - $"
+when = "A query or path parameter does not convert (an id that is not a number, a list written with commas...)."
+audience = "anyone"
+
+[COMMON.METHOD_NOT_ALLOWED]
+status = 405
+params = ["method"]
+text = "This address does not accept [{method} requests|this kind of request]."
+java_text = "Please try again. A server error - $"
+when = "A route is called with an HTTP method it does not have."
+audience = "anyone"
+
+[COMMON.PAYLOAD_TOO_LARGE]
+status = 413
+text = "The request is too large."
+action = "Send less at once and try again."
+java_text = "Please try again. A server error - $"
+when = "The body is larger than the service accepts."
+audience = "anyone"
+
+[COMMON.NOT_FOUND]
+status = 404
+text = "We couldn't find what you asked for."
+action = "Check the address and try again."
+java_text = "Please try again. A server error - $"
+when = "Nothing answers to the address."
+audience = "anyone"
+
+# ---- Our side ----
+
+[COMMON.INTERNAL_ERROR]
+status = 500
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java_text = "Please try again. A server error - $"
+when = "An unexpected failure inside the service. The detail is logged with the error id."
+audience = "anyone"
+
+[COMMON.ERROR]
+status = 500
+text = "Your request could not be completed."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+when = "A code that has no text in any language (never expected; the catalogue tests prevent it)."
+audience = "anyone"
+
+# ---- Words ----
+
+[WORD.OR]
+text = "or"
+
+# ---- Entities: Java class names in words ----
+
+[ENTITY.App]
+text = "app"
+
+[ENTITY.Application]
+text = "app"
+
+[ENTITY.AppProperty]
+text = "app property"
+
+[ENTITY.Client]
+text = "client"
+
+[ENTITY.ClientUrl]
+text = "client address"
+
+[ENTITY.User]
+text = "user"
+
+[ENTITY.Profile]
+text = "profile"
+
+[ENTITY.RoleV2]
+text = "role"
+
+[ENTITY.Role]
+text = "role"
+
+[ENTITY.Permission]
+text = "permission"
+
+[ENTITY.Designation]
+text = "designation"
+
+[ENTITY.Department]
+text = "department"
+
+[ENTITY.UserInvite]
+text = "invitation"
+
+[ENTITY.User_Invite]
+text = "invitation"
+
+[ENTITY.User_Request]
+text = "access request"
+
+# ---- Authorities: how they read in a sentence, and the patterns for unlabelled ones ----
+
+[PERMISSION._ONE]
+text = "the {name} permission"
+
+[PERMISSION._ROLE]
+text = "the {name} role"
+
+[PERMISSION._PROFILE]
+text = "the {name} profile"
+
+[PERMISSION._READ]
+text = "View {name}"
+
+[PERMISSION._CREATE]
+text = "Create {name}"
+
+[PERMISSION._UPDATE]
+text = "Edit {name}"
+
+[PERMISSION._DELETE]
+text = "Delete {name}"
+
+[PERMISSION.Logged_IN]
+text = "Signed in"
+
+[PERMISSION._Anonymous]
+text = "Anonymous access"
+
+[PERMISSION.ROLE_Owner]
+text = "Owner"
+
+# ---- Authorities: the platform's permissions ----
+
+[PERMISSION.Actions_CREATE]
+text = "Create actions"
+
+[PERMISSION.Actions_DELETE]
+text = "Delete actions"
+
+[PERMISSION.Actions_READ]
+text = "View actions"
+
+[PERMISSION.Actions_UPDATE]
+text = "Edit actions"
+
+[PERMISSION.Application_CREATE]
+text = "Create applications"
+
+[PERMISSION.Application_DELETE]
+text = "Delete applications"
+
+[PERMISSION.Application_READ]
+text = "View applications"
+
+[PERMISSION.Application_UPDATE]
+text = "Edit applications"
+
+[PERMISSION.ASSIGN_Package_To_Client]
+text = "Assign packages to clients"
+
+[PERMISSION.ASSIGN_Permission_To_Role]
+text = "Assign permissions to roles"
+
+[PERMISSION.ASSIGN_Permission_To_User]
+text = "Assign permissions to users"
+
+[PERMISSION.ASSIGN_Role_To_Package]
+text = "Assign roles to packages"
+
+[PERMISSION.ASSIGN_Role_To_User]
+text = "Assign roles to users"
+
+[PERMISSION.Campaign_MANAGE]
+text = "Manage campaigns"
+
+[PERMISSION.Client_CREATE]
+text = "Create clients"
+
+[PERMISSION.Client_DELETE]
+text = "Delete clients"
+
+[PERMISSION.Client_MANAGE]
+text = "Manage clients"
+
+[PERMISSION.Client_Password_Policy_CREATE]
+text = "Create password policies"
+
+[PERMISSION.Client_Password_Policy_DELETE]
+text = "Delete password policies"
+
+[PERMISSION.Client_Password_Policy_READ]
+text = "View password policies"
+
+[PERMISSION.Client_Password_Policy_UPDATE]
+text = "Edit password policies"
+
+[PERMISSION.Client_READ]
+text = "View clients"
+
+[PERMISSION.client_removal]
+text = "Remove clients"
+
+[PERMISSION.Client_Type_CREATE]
+text = "Create client types"
+
+[PERMISSION.Client_Type_DELETE]
+text = "Delete client types"
+
+[PERMISSION.Client_Type_READ]
+text = "View client types"
+
+[PERMISSION.Client_Type_UPDATE]
+text = "Edit client types"
+
+[PERMISSION.Client_UPDATE]
+text = "Edit clients"
+
+[PERMISSION.Connection_CREATE]
+text = "Create connections"
+
+[PERMISSION.Connection_DELETE]
+text = "Delete connections"
+
+[PERMISSION.Connection_READ]
+text = "View connections"
+
+[PERMISSION.Connection_UPDATE]
+text = "Edit connections"
+
+[PERMISSION.EventAction_CREATE]
+text = "Create event actions"
+
+[PERMISSION.EventAction_DELETE]
+text = "Delete event actions"
+
+[PERMISSION.EventAction_READ]
+text = "View event actions"
+
+[PERMISSION.EventAction_UPDATE]
+text = "Edit event actions"
+
+[PERMISSION.EventDefinition_CREATE]
+text = "Create event definitions"
+
+[PERMISSION.EventDefinition_DELETE]
+text = "Delete event definitions"
+
+[PERMISSION.EventDefinition_READ]
+text = "View event definitions"
+
+[PERMISSION.EventDefinition_UPDATE]
+text = "Edit event definitions"
+
+[PERMISSION.Files_RETENTION]
+text = "Manage file retention"
+
+[PERMISSION.Function_CREATE]
+text = "Create functions"
+
+[PERMISSION.Function_DELETE]
+text = "Delete functions"
+
+[PERMISSION.Function_READ]
+text = "View functions"
+
+[PERMISSION.Function_UPDATE]
+text = "Edit functions"
+
+[PERMISSION.Integration_CREATE]
+text = "Create integrations"
+
+[PERMISSION.Integration_DELETE]
+text = "Delete integrations"
+
+[PERMISSION.Integration_READ]
+text = "View integrations"
+
+[PERMISSION.Integration_UPDATE]
+text = "Edit integrations"
+
+[PERMISSION.Invoice_CREATE]
+text = "Create invoices"
+
+[PERMISSION.Invoice_DELETE]
+text = "Delete invoices"
+
+[PERMISSION.Invoice_READ]
+text = "View invoices"
+
+[PERMISSION.Invoice_UPDATE]
+text = "Edit invoices"
+
+[PERMISSION.MobileApp_CREATE]
+text = "Create mobile apps"
+
+[PERMISSION.MobileApp_UPLOADER]
+text = "Upload mobile apps"
+
+[PERMISSION.Notification_CREATE]
+text = "Create notifications"
+
+[PERMISSION.Notification_DELETE]
+text = "Delete notifications"
+
+[PERMISSION.Notification_READ]
+text = "View notifications"
+
+[PERMISSION.Notification_UPDATE]
+text = "Edit notifications"
+
+[PERMISSION.Package_CREATE]
+text = "Create packages"
+
+[PERMISSION.Package_DELETE]
+text = "Delete packages"
+
+[PERMISSION.Package_READ]
+text = "View packages"
+
+[PERMISSION.Package_UPDATE]
+text = "Edit packages"
+
+[PERMISSION.Page_CREATE]
+text = "Create pages"
+
+[PERMISSION.Page_DELETE]
+text = "Delete pages"
+
+[PERMISSION.Page_READ]
+text = "View pages"
+
+[PERMISSION.Page_UPDATE]
+text = "Edit pages"
+
+[PERMISSION.Payment_CREATE]
+text = "Create payments"
+
+[PERMISSION.Payment_DELETE]
+text = "Delete payments"
+
+[PERMISSION.Payment_READ]
+text = "View payments"
+
+[PERMISSION.Payment_UPDATE]
+text = "Edit payments"
+
+[PERMISSION.Permission_CREATE]
+text = "Create permissions"
+
+[PERMISSION.Permission_DELETE]
+text = "Delete permissions"
+
+[PERMISSION.Permission_READ]
+text = "View permissions"
+
+[PERMISSION.Permission_UPDATE]
+text = "Edit permissions"
+
+[PERMISSION.Personalization_CLEAR]
+text = "Clear personalisation"
+
+[PERMISSION.Plan_CREATE]
+text = "Create plans"
+
+[PERMISSION.Plan_DELETE]
+text = "Delete plans"
+
+[PERMISSION.Plan_READ]
+text = "View plans"
+
+[PERMISSION.Plan_UPDATE]
+text = "Edit plans"
+
+[PERMISSION.Profile_CREATE]
+text = "Create profiles"
+
+[PERMISSION.Profile_DELETE]
+text = "Delete profiles"
+
+[PERMISSION.Profile_READ]
+text = "View profiles"
+
+[PERMISSION.Profile_UPDATE]
+text = "Edit profiles"
+
+[PERMISSION.Role_CREATE]
+text = "Create roles"
+
+[PERMISSION.Role_DELETE]
+text = "Delete roles"
+
+[PERMISSION.Role_READ]
+text = "View roles"
+
+[PERMISSION.Role_UPDATE]
+text = "Edit roles"
+
+[PERMISSION.Schema_CREATE]
+text = "Create schemas"
+
+[PERMISSION.Schema_DELETE]
+text = "Delete schemas"
+
+[PERMISSION.Schema_READ]
+text = "View schemas"
+
+[PERMISSION.Schema_UPDATE]
+text = "Edit schemas"
+
+[PERMISSION.SECURED_Files_PATH]
+text = "Use secured file paths"
+
+[PERMISSION.STATIC_Files_PATH]
+text = "Use static file paths"
+
+[PERMISSION.Storage_CREATE]
+text = "Create storages"
+
+[PERMISSION.Storage_DELETE]
+text = "Delete storages"
+
+[PERMISSION.Storage_READ]
+text = "View storages"
+
+[PERMISSION.Storage_UPDATE]
+text = "Edit storages"
+
+[PERMISSION.Style_CREATE]
+text = "Create styles"
+
+[PERMISSION.Style_DELETE]
+text = "Delete styles"
+
+[PERMISSION.Style_READ]
+text = "View styles"
+
+[PERMISSION.Style_UPDATE]
+text = "Edit styles"
+
+[PERMISSION.Subscription_CREATE]
+text = "Create subscriptions"
+
+[PERMISSION.Subscription_DELETE]
+text = "Delete subscriptions"
+
+[PERMISSION.Subscription_READ]
+text = "View subscriptions"
+
+[PERMISSION.Subscription_UPDATE]
+text = "Edit subscriptions"
+
+[PERMISSION.Template_CREATE]
+text = "Create templates"
+
+[PERMISSION.Template_DELETE]
+text = "Delete templates"
+
+[PERMISSION.Template_READ]
+text = "View templates"
+
+[PERMISSION.Template_UPDATE]
+text = "Edit templates"
+
+[PERMISSION.Theme_CREATE]
+text = "Create themes"
+
+[PERMISSION.Theme_DELETE]
+text = "Delete themes"
+
+[PERMISSION.Theme_READ]
+text = "View themes"
+
+[PERMISSION.Theme_UPDATE]
+text = "Edit themes"
+
+[PERMISSION.Transport_CREATE]
+text = "Create transports"
+
+[PERMISSION.Transport_DELETE]
+text = "Delete transports"
+
+[PERMISSION.Transport_READ]
+text = "View transports"
+
+[PERMISSION.Transport_UPDATE]
+text = "Edit transports"
+
+[PERMISSION.User_CREATE]
+text = "Create users"
+
+[PERMISSION.User_DELETE]
+text = "Delete users"
+
+[PERMISSION.User_READ]
+text = "View users"
+
+[PERMISSION.User_UPDATE]
+text = "Edit users"
+
+[PERMISSION.Workflow_CREATE]
+text = "Create workflows"
+
+[PERMISSION.Workflow_DELETE]
+text = "Delete workflows"
+
+[PERMISSION.Workflow_READ]
+text = "View workflows"
+
+[PERMISSION.Workflow_UPDATE]
+text = "Edit workflows"
+

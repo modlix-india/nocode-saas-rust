@@ -1,0 +1,91 @@
+//! ui-engine: the read routes of the Java ui service, which are nearly all of its traffic.
+//!
+//! - `EngineController`: application, page, style, theme, function, urlDetails;
+//! - `PersonalizationController`: get, save, delete a user's setting;
+//! - `FunctionController` / `SchemaController`: `repositoryFind`, `repositoryFilter`.
+//!
+//! It reads the Java ui's Mongo database through the `overridable` crate, keeps its
+//! definition caches under the Java cache names (prefix `cmn`) so editor saves made through
+//! the Java ui evict them, and answers with the same status codes, headers, ETags rules and
+//! JSON. Editor CRUD stays on the Java service.
+//!
+//! The second binary, ui-shell ([`shell`]), serves the rest of the request-time surface: the
+//! index page, the URI path routes, SSO, analytics and the cache endpoints.
+
+pub mod authority;
+pub mod catalogue;
+pub mod config;
+pub mod docs;
+pub mod editor;
+pub mod engine;
+pub mod handlers;
+pub mod kirun;
+pub mod personalization;
+pub mod repository;
+pub mod respond;
+pub mod shell;
+pub mod ssr;
+pub mod state;
+
+use anyhow::Result;
+use platform::app::Service;
+use platform::cache::CacheService;
+use platform::eureka::Eureka;
+use platform::health::Health;
+use platform::security::SecurityClient;
+
+use crate::config::UiConfig;
+use crate::state::{AppState, Inner};
+
+pub const NAME: &str = "ui-engine";
+
+/// Loads configuration, connects everything, and serves until shut down.
+pub async fn run() -> Result<()> {
+    let cfg: UiConfig = platform::config::load(NAME)?;
+    catalogue::register();
+    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
+    if let Some(file) = platform::config::config_file(NAME) {
+        tracing::info!(file = %file.display(), "configuration file");
+    }
+    overridable::pojo::set_java_zone_offset_seconds(cfg.ui.zone_offset_seconds()?);
+
+    let db = platform::db::mongo_database(&cfg.mongo).await?;
+
+    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
+        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    } else {
+        None
+    };
+    let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
+
+    let store = overridable::Store::new(db.clone(), security.clone(), &cache);
+    let health = Health::new(telemetry.metrics.clone());
+    {
+        let db = db.clone();
+        health.check("mongo", move || {
+            let db = db.clone();
+            async move {
+                db.run_command(mongodb::bson::doc! {"ping": 1}).await?;
+                Ok(())
+            }
+        });
+    }
+
+    let state = AppState::new(Inner {
+        store,
+        security,
+        properties: cache.family(),
+        fillers: cache.family(),
+        app_status: cache.family(),
+        app_dependencies: cache.family(),
+        cache: cache.clone(),
+        config: cfg.clone(),
+    });
+    cache.spawn_eviction_listener();
+
+    // CORS is answered inside the router, under the security headers, as the Java ui does.
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: false }
+        .run(handlers::router(state))
+        .await
+}

@@ -1,0 +1,447 @@
+# UI service messages, English (codes UI.*): ui-engine (application, page, style, theme and
+# function reads, personal settings), ui-shell (index page, URI path routes, analytics) and
+# ui-editor (the definition editor's own checks: apps, URI paths, page components, mobile apps).
+# Every key of the Java ui bundle (messages_en.properties, 43 keys) has a code here, named after
+# it, plus the refusals ui raises with a literal text. `params` names Java's `$` values in order.
+#
+# The keys ui shares with core are the definition library's: a refusal on a definition answers
+# with its DEF.* code (crates/overridable/messages/en.toml), so most of those UI codes are not
+# raised; they read the same as their DEF twins.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the objects they ask for, and signed-in callers never
+# learn whether another organisation's object exists. Java's text stays in debugMessage.
+# Format: platform::messages::catalogue.
+
+# ---- Pages and routes ----
+
+[UI.PAGE_PERMISSION_REQUIRED]
+status = 403
+params = ["permission:authority"]
+text = "[You can't open this page: your account does not have {permission}.|You can't open this page: your account does not have the permission it needs.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "A signed-in user opens a page whose permission they lack, in an app that names no page to show instead."
+audience = "signed-in"
+
+[UI.FORBIDDEN_EXECUTION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't use this address: your account does not have {permission}.|You can't use this address: your account does not have the permission it needs.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_execution"
+when = "A signed-in caller uses a URI path route whose permission they do not hold."
+audience = "signed-in"
+
+[UI.SIGN_IN_REQUIRED]
+status = 403
+text = "Please sign in to continue."
+java = "forbidden_execution"
+when = "An anonymous caller uses a URI path route that needs a permission (Java names the permission)."
+audience = "anyone"
+
+[UI.PARAM_NOT_BOOLEAN]
+status = 400
+params = ["value", "field"]
+text = "[The value of the {field} parameter is not valid: it should be true or false.|A parameter of the request should be true or false.]"
+action = "Send [{field}|it] as true or false and try again."
+java_text = "Invalid boolean value [$]"
+when = "A function or schema repository read whose includeKIRunRepos is not true or false."
+audience = "anyone"
+
+[UI.ROOT_COMPONENT_NOT_REMOVABLE]
+status = 400
+text = "A page's root component can't be removed."
+action = "Remove the components inside it instead."
+java = "object_not_updatable"
+when = "Removing the root component of a page through the component route."
+audience = "signed-in"
+
+[UI.FUNCTION_VERSION_MISMATCH]
+status = 412
+text = "A newer version of this function was saved while you were editing its steps."
+action = "Reload to get the latest version, then make your changes again."
+java_text = "Version mismatch"
+when = "Changing a function's steps with an expectedVersion older than the stored one."
+audience = "signed-in"
+
+# ---- Personal settings ----
+
+[UI.PERSONALIZATION_NOT_OBJECT]
+status = 400
+text = "A saved setting must be a JSON object."
+action = "Send the setting as a JSON object and try again."
+java_text = "Personalization must be an object"
+when = "Saving a personal setting whose body is a list, a text or a number."
+audience = "signed-in"
+
+[UI.PERSONALIZATION_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "This setting was saved by another request at the same moment."
+action = "Reload and try again."
+java = "already_exists"
+when = "Two first saves of the same personal setting at once: the second finds the record the first made."
+audience = "signed-in"
+
+[UI.CANNOT_CHANGE_PREF]
+status = 403
+text = "You can't change this saved setting: it belongs to another user."
+java = "cannot_change_pref"
+when = "Saving or deleting a personal setting whose record another user made."
+audience = "signed-in"
+
+# ---- Apps and URI paths (ui-editor) ----
+
+[UI.APP_NAME_MISMATCH]
+status = 400
+text = "The app's name must be the same as its app code, and use letters only."
+action = "Use the app code, in letters only, as the name and try again."
+java = "app_name_mismatch"
+when = "Creating an app whose name is blank, differs from its appCode, or has characters other than letters."
+audience = "signed-in"
+
+[UI.URI_PATH_STRING_NULL]
+status = 400
+text = "The URI path needs a path."
+action = "Fill in the path and try again."
+java = "uri_path_string_null"
+when = "Creating a URI path without a path string (or a name)."
+audience = "signed-in"
+
+[UI.URI_PATTERN_PATH_MISMATCH]
+status = 400
+params = ["pattern", "path"]
+text = "The sample path does not match the URI path's pattern."
+action = "Change the pattern or the sample path so that they match, then try again."
+java = "uri_pattern_path_mismatch"
+when = "Saving a URI path whose path string does not match its name pattern."
+audience = "signed-in"
+
+[UI.URI_INVALID_TYPE]
+status = 400
+text = "A method of this URI path has no valid action: it must either run a function or redirect."
+action = "Give each method a function to run or a redirect, not both, and try again."
+java = "uri_invalid_type"
+when = "Saving a URI path where a method's definition is neither a KIRun function nor a redirection, or is both."
+audience = "signed-in"
+
+[UI.URI_INVALID_METHOD]
+status = 400
+text = "The URI path has no method it can answer: only GET, POST, PUT, PATCH and DELETE are supported."
+action = "Define the route for one of those methods and try again."
+java = "uri_invalid_method"
+when = "Saving a URI path whose definitions name none of the supported methods."
+audience = "signed-in"
+
+# ---- Mobile apps (ui-editor) ----
+
+[UI.APP_PERMISSION_REQUIRED]
+status = 403
+params = ["permission:authority"]
+text = "[You can't do this: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "Listing, creating or changing an app's mobile apps without the Create applications permission or write access to the app."
+audience = "signed-in"
+
+[UI.MOBILE_APP_BAD_REQUEST]
+status = 400
+text = "The mobile app request has no app details."
+action = "Fill in the mobile app's details and try again."
+java = "mobile_app_bad_request"
+when = "Creating or updating a mobile app without its details."
+audience = "signed-in"
+
+[UI.MOBILE_APP_UNABLE_TO_GEN_KEYSTORE]
+status = 400
+text = "We couldn't create the signing key for the Android app."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "mobile_app_unable_to_gen_keystore"
+when = "Making the Android keystore of a new mobile app fails."
+audience = "signed-in"
+
+[UI.INTERNAL_ONLY]
+status = 403
+text = "Only the platform's own organisation can do this."
+java = "internal_only"
+when = "Asking for the next mobile app to build, or reporting a build's status, from an organisation other than SYSTEM."
+audience = "signed-in"
+
+[UI.MULTIPLE_GEN_STATUS]
+status = 500
+params = ["app", "client", "status"]
+text = "Something went wrong on our side: the mobile app has more than one build status. Error id {errorId}: give it to support."
+java = "multiple_gen_status"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+# ---- Analytics (ui-shell) ----
+
+[UI.ANALYTICS_NOT_CONFIGURED]
+status = 503
+text = "Analytics is not set up on this server."
+action = "Ask support to set it up."
+java = "analytics_not_configured"
+when = "An analytics query while the analytics engine's address or secret is not configured."
+audience = "anyone"
+
+[UI.ANALYTICS_CODES_REQUIRED]
+status = 400
+text = "The request must name the app and the organisation."
+action = "Send the appCode and clientCode headers and try again."
+java = "analytics_codes_required"
+when = "An analytics query with a blank appCode or clientCode header."
+audience = "anyone"
+
+[UI.ANALYTICS_LOGIN_REQUIRED]
+status = 403
+text = "Please sign in to see this app's analytics."
+java = "analytics_login_required"
+when = "An analytics query from someone not signed in."
+audience = "anyone"
+
+[UI.ANALYTICS_NO_WRITE_ACCESS]
+status = 403
+text = "You can't see this app's analytics: your account can't edit the app."
+action = "Ask an owner of the app to give you the Edit applications permission and access to the app."
+java = "analytics_no_write_access"
+when = "An analytics query by a user without the Edit applications permission, or whose organisation cannot change the app."
+audience = "signed-in"
+
+[UI.ANALYTICS_CLIENT_NOT_MANAGED]
+status = 403
+text = "You can't see analytics for that organisation: your organisation does not manage it."
+action = "Ask for that organisation's analytics from an account that manages it."
+java = "analytics_client_not_managed"
+when = "An analytics query for an organisation the caller's organisation does not manage."
+audience = "signed-in"
+
+[UI.ANALYTICS_NOT_ENABLED]
+status = 403
+text = "Analytics is not turned on for this app."
+action = "Turn on analytics in the app's settings, then try again."
+java = "analytics_not_enabled"
+when = "An analytics query for an app whose analytics setting is off."
+audience = "signed-in"
+
+[UI.ANALYTICS_UNKNOWN_TIMEZONE]
+status = 400
+params = ["zone"]
+text = "[{zone} is not a time zone we know.|The time zone is not one we know.]"
+action = "Use a time zone name such as Asia/Kolkata or Europe/London."
+java = "analytics_unknown_timezone"
+when = "An analytics query naming a time zone that is not in the IANA list."
+audience = "anyone"
+
+# ---- The keys ui shares with core (definition errors answer with DEF.*) ----
+
+[UI.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are working in the right app."
+java = "object_not_found"
+when = "Not raised by the Rust units (definition errors answer with DEF.OBJECT_NOT_FOUND)."
+audience = "signed-in"
+
+[UI.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}] to change it."
+action = "Check that it still exists and that you can change it."
+java = "object_not_found_to_update"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[UI.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create the {what|item} here: your account can't change this app for the organisation in the request."
+action = "Check the app and the organisation you are creating it in. If they are right, ask an owner of the app for access."
+java = "forbidden_create"
+when = "Not raised by the Rust units (definition errors answer with DEF.FORBIDDEN_CREATE)."
+audience = "signed-in"
+
+[UI.FORBIDDEN_PERMISSION]
+status = 403
+params = ["what:entity"]
+text = "You don't have permission to do this with the {what|item}."
+action = "Ask an owner of your organisation to give you the permission you need."
+java = "forbidden_permission"
+when = "Not raised by the Rust units (definition errors answer with DEF.FORBIDDEN_PERMISSION; a page's own permission with UI.PAGE_PERMISSION_REQUIRED)."
+audience = "signed-in"
+
+[UI.UNABLE_TO_DELETE]
+status = 403
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]: other records are built on it."
+action = "Remove the records built on it first, then delete it."
+java = "unable_to_delete"
+when = "Deleting a personal setting that other organisations' copies stand on."
+audience = "signed-in"
+
+[UI.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed this way."
+action = "Change it through its own editor instead."
+java = "object_not_updatable"
+when = "Not raised by the Rust units (definition errors answer with DEF.OBJECT_NOT_UPDATABLE)."
+audience = "signed-in"
+
+[UI.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "[The name {name} is already used by another {what|item}.|This name is already used by another item.]"
+action = "Choose another name, or open the existing one."
+java = "already_exists"
+when = "Not raised by the Rust units (definition errors answer with DEF.ALREADY_EXISTS; personal settings with UI.PERSONALIZATION_EXISTS)."
+audience = "signed-in"
+
+[UI.VERSION_MISMATCH]
+status = 412
+text = "A newer version of this was saved while you were editing."
+action = "Reload to get the latest version, then make your changes again."
+java = "version_mismatch"
+when = "Saving a personal setting that another save changed since it was read (definitions answer with DEF.VERSION_MISMATCH)."
+audience = "signed-in"
+
+[UI.UNABLE_TO_CREATE_OBJECT]
+status = 500
+params = ["what:entity"]
+text = "We couldn't create the {what|item}. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unable_to_create_object"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[UI.APPLICATION_NAME_REQUIRED]
+status = 400
+text = "The app to search in is missing."
+action = "Add the app's code to the request and try again."
+java = "application_name_required"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[UI.FORBIDDEN_APP_ACCESS]
+status = 403
+params = ["app"]
+text = "You can't work on the definitions of {app|this app}: your organisation has no access to them."
+action = "Check the app and the organisation in the request. If they are right, ask an owner of the app for access."
+java = "forbidden_app_access"
+when = "Not raised by the Rust units (definition errors answer with DEF.FORBIDDEN_APP_ACCESS)."
+audience = "signed-in"
+
+[UI.NAME_MISSING]
+status = 400
+text = "The name or the namespace is missing."
+action = "Fill in both and try again."
+java = "name_missing"
+when = "Not raised by the Rust units (definition errors answer with DEF.NAME_MISSING)."
+audience = "signed-in"
+
+[UI.NAME_CHANGE]
+status = 400
+text = "The name and the namespace can't be changed once saved."
+action = "Keep the original name and namespace, or save it as a new item."
+java = "name_change"
+when = "Not raised by the Rust units (definition errors answer with DEF.NAME_CHANGE)."
+audience = "signed-in"
+
+[UI.INTERNAL_ERROR_RECURSION]
+status = 500
+params = ["what:entity"]
+text = "We couldn't read the {what|item}: it refers back to itself in a loop."
+action = "Remove the reference that leads back to it, then try again."
+java = "internal_error_recursion"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[UI.CANNOT_BE_UPDATED]
+status = 304
+params = ["what:entity"]
+text = "This {what|item} can't be changed once it is made."
+action = "Make a new one instead."
+java = "cannot_be_updated"
+when = "Not raised by the Rust units (definition errors answer with DEF.CANNOT_BE_UPDATED)."
+audience = "signed-in"
+
+[UI.TRANSPORT_ERROR]
+status = 403
+params = ["action", "detail"]
+text = "We couldn't import the transport: the file can't be read as a transport."
+action = "Upload the file a transport export produced (the .zip with its transport.json, or the .json)."
+java = "transport_error"
+when = "Not raised by the Rust units (definition errors answer with DEF.TRANSPORT_ERROR)."
+audience = "signed-in"
+
+[UI.FORBIDDEN_FORK_NOT_OVERRIDABLE]
+status = 403
+params = ["what:entity", "name"]
+text = "[The {what} {name} can't be customised, so only the organisation that owns it can edit it.|This item can't be customised, so only the organisation that owns it can edit it.]"
+action = "Ask the organisation that owns it to make the change."
+java = "forbidden_fork_not_overridable"
+when = "Not raised by the Rust units (definition errors answer with DEF.FORBIDDEN_FORK_NOT_OVERRIDABLE)."
+audience = "signed-in"
+
+[UI.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units (an unexpected failure answers COMMON.INTERNAL_ERROR, which says the same)."
+audience = "anyone"
+
+[UI.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save your changes."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[UI.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "[{value} can't be read as {type|the expected type}.|A value can't be read as the expected type.]"
+java = "unable_to_convert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"

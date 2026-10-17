@@ -1,0 +1,62 @@
+# security-admin on the local stack: the rest of the security service's routes (see
+# crates/security/SPLIT.md). Secrets come from config/local.env: MODLIX__DATABASE__PASSWORD,
+# MODLIX__REDIS__URL, MODLIX__JWT__KEY (and MODLIX__MQ__URI to publish events, left out locally on
+# purpose).
+
+[server]
+port = 8113
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[database]
+host = "localhost"
+port = 3306
+database = "security"
+username = "root"
+max_connections = 16
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[jwt]
+# The caller's context is computed here too: the same key and expiries as security-auth.
+default_expiry_minutes = 30
+remember_me_expiry_minutes = 525600
+refresh_minutes = 10
+
+[security]
+app_code_suffix = ".local"
+subdomain_endings = ".local.modlix.com, .local.sitezump.ai"
+one_time_token_max_age_minutes = 5
+
+[otp]
+publish_events = false
+
+[wallet]
+publish_events = false
+
+[events]
+# Local: user, invite and invoice events are logged, not published on the events exchange.
+publish_events = false
+
+[files]
+# IFeignFilesService: files-manage serves internal/accesspath and internal/secured/createKey
+# (Java files on 8003 serves the same routes).
+upstream = "http://localhost:8104"
+
+[mq]
+exchange = "events"
+routing_keys = "events1,events2,events3"
+
+[billing]
+# POST wallets/{walletId}/adjust (an owner's credit or debit of a managed client's wallet). Off:
+# the route answers as Java does, "Type mismatch." for every id (Java's WalletController has no
+# ULong binder).
+serve_wallet_adjust = false
+# Where a purchase's Razorpay calls go (default https://api.razorpay.com/v1). Locally a closed
+# port, so no local run can reach Razorpay: a purchase that gets that far answers 500.
+razorpay_base_url = "http://127.0.0.1:9/razorpay-stub"

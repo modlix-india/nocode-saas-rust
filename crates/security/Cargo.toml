@@ -1,0 +1,49 @@
+[package]
+name = "security"
+description = "The security service: security-auth (sign in, tokens, the caller's context), security-internal (the service-to-service routes) and security-admin (the rest)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "security-auth"
+path = "src/bin/security-auth.rs"
+
+[[bin]]
+name = "security-internal"
+path = "src/bin/security-internal.rs"
+
+[[bin]]
+name = "security-admin"
+path = "src/bin/security-admin.rs"
+
+[dependencies]
+platform.workspace = true
+connections = { path = "../connections" }
+
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+base64 = "0.22"
+bcrypt = "0.17"
+chrono.workspace = true
+chrono-tz.workspace = true
+futures.workspace = true
+hmac.workspace = true
+kirun.workspace = true
+lapin = "4"
+percent-encoding.workspace = true
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+figment = { version = "0.10", features = ["toml", "env", "test"] }
+tower = { workspace = true, features = ["util"] }

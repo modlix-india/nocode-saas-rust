@@ -1,0 +1,499 @@
+# Files service messages, English (codes FILES.*): files-serve (every file read: static,
+# secured, by key, internal) and files-manage (uploads, folders, deletes, zip import and export,
+# image transforms, access paths, secured keys, retention, billing). Every key of the Java files
+# bundle (messages_en.properties, 36 keys) has a code here, named after it, plus the refusals
+# files raises with a literal text. `params` names Java's `$` values in order.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the files they ask for, and signed-in callers never
+# learn whether another organisation's file exists (the 404 and 403 answers stay as Java sends
+# them). Java's text stays in debugMessage. Format: platform::messages::catalogue.
+
+# ---- Reading files ----
+
+[FILES.FORBIDDEN_PATH]
+status = 403
+params = ["kind", "path"]
+text = "[You don't have access to {path}.|You don't have access to this path.]"
+action = "Check the path. If it is right, ask an owner of your organisation for access to it."
+java = "forbidden_path"
+when = "Reading, uploading to, listing, deleting or converting a path the caller's organisation and access rules give no access to."
+audience = "signed-in"
+
+[FILES.INVALID_KEY]
+status = 404
+text = "This download link has expired, or it has been used as many times as it allows."
+action = "Ask whoever shared it for a new link."
+java = "invalid_key"
+when = "Downloading a secured file by a key that is unknown, past its time limit, or used up."
+audience = "anyone"
+
+[FILES.FILE_IS_FOLDER]
+status = 400
+text = "This path is a folder, not a file."
+action = "Give the path of a file inside it."
+java = "unknown_error"
+when = "An internal file read of a folder."
+audience = "anyone"
+
+[FILES.FOLDER_NOT_CONVERTIBLE]
+status = 400
+text = "A folder can't be converted to base64."
+action = "Give the path of a file inside it."
+java = "unable_to_convert"
+when = "Converting a folder to base64 through the internal route."
+audience = "anyone"
+
+[FILES.COPY_SOURCE_MISSING]
+status = 500
+text = "We couldn't copy the file: the file to copy from was not found."
+action = "Check that the source file still exists, then try again."
+java = "unknown_error"
+when = "Copying a file (copyToClientPage) whose source is missing or is a folder (500, as Java answers)."
+audience = "signed-in"
+
+# ---- Paths and names ----
+
+[FILES.NAME_BLANK]
+status = 400
+text = "A file or folder name can't be blank."
+action = "Enter a name and try again."
+java_text = "A file or folder name cannot be blank."
+when = "Creating a file or folder with a blank name."
+audience = "signed-in"
+
+[FILES.NAME_RESERVED]
+status = 400
+params = ["name"]
+text = "[{name} can't be used as a file or folder name.|This can't be used as a file or folder name.]"
+action = "Choose another name."
+java_text = "'$' is not a usable file or folder name."
+when = "Creating a file or folder named . or .."
+audience = "signed-in"
+
+[FILES.NAME_EMPTY_VALUE]
+status = 400
+params = ["name"]
+text = "[{name} can't be used as a name: it is what an empty value looks like in an address.|This can't be used as a name: it is what an empty value looks like in an address.]"
+action = "Check the path the page sends: a part of it is probably missing."
+java_text = "'$' is not a usable name. It is what an empty value looks like once it has been put into a URL, so the caller most likely sent a path with a missing part in it."
+when = "Creating a file or folder named undefined, null, NaN or [object Object] (in any case)."
+audience = "signed-in"
+
+[FILES.NAME_SEPARATOR]
+status = 400
+text = "A file or folder name can't contain a slash, a backslash or a control character."
+action = "Remove those characters from the name and try again."
+java_text = "A file or folder name cannot contain a path separator or a control character."
+when = "Creating a file or folder whose name has a path separator or a control character."
+audience = "signed-in"
+
+[FILES.RETENTION_PREFIX_NOT_REGISTERED]
+status = 400
+params = ["path", "app", "kind"]
+text = "[The path {path} is not a retention folder of {app}.|The path is not one of the app's retention folders.]"
+action = "Pick one of the folders the app's owner registered for file retention."
+java = "retention_prefix_not_registered"
+when = "Creating an organisation's retention rule for a path the app has no registered retention folder for."
+audience = "signed-in"
+
+# ---- Access and permissions ----
+
+[FILES.FORBIDDEN_PERMISSION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't do this: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "Managing access paths or file retention, or uploading a client image, without the permission it needs or outside the caller's own organisation."
+audience = "signed-in"
+
+[FILES.APP_OWNER_REQUIRED]
+status = 403
+params = ["app"]
+text = "Only the organisation that owns {app|the app} can change its file retention folders."
+action = "Ask an owner of the app to make the change."
+java = "forbidden_permission"
+when = "Creating, changing or deleting an app-level retention rule as an organisation that does not own the app."
+audience = "signed-in"
+
+[FILES.CLIENT_MANAGER_REQUIRED]
+status = 403
+params = ["client"]
+text = "You can't manage file retention for {client|that organisation}: your organisation does not manage it."
+action = "Ask an account of an organisation that manages it."
+java = "forbidden_permission"
+when = "Reading or changing another organisation's retention rules without managing it."
+audience = "signed-in"
+
+[FILES.ACCESS_ONLY_TO_ONE]
+status = 400
+text = "An access rule needs a user or an access name (a permission or role)."
+action = "Give the rule a user id or an access name and try again."
+java = "access_only_to_one"
+when = "Creating an access path rule with neither a user nor an access name."
+audience = "signed-in"
+
+[FILES.FORBIDDEN_RESOURCE]
+status = 403
+params = ["action", "kind"]
+text = "You don't have permission to work with these files."
+action = "Ask an owner of your organisation for access."
+java = "forbidden_resource"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+# ---- Secured download links ----
+
+[FILES.TIME_UNIT_ERROR]
+status = 400
+text = "The link's time span has no unit."
+action = "Send timeUnit (for example DAYS or HOURS) with the time span."
+java = "time_unit_error"
+when = "Creating a download key with a time span but no time unit."
+audience = "signed-in"
+
+[FILES.TIME_SPAN_ERROR]
+status = 400
+text = "An access limit needs a time span."
+action = "Send the time span (and its unit) with the access limit."
+java = "time_span_error"
+when = "Creating a download key with an access limit but no time span."
+audience = "signed-in"
+
+[FILES.TIME_SPAN_UNSUPPORTED]
+status = 400
+params = ["span"]
+text = "[The time span {span} can't be used for a link.|This time span can't be used for a link.]"
+action = "Use a shorter span or another unit."
+java_text = "Unsupported time span: $"
+when = "Creating a download key whose time span runs past the dates the service can hold."
+audience = "signed-in"
+
+[FILES.SECURED_KEY_CREATION_ERROR]
+status = 500
+text = "We couldn't create the download link."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "secured_key_creation_error"
+when = "Five new download keys in a row clash with existing ones."
+audience = "signed-in"
+
+# ---- Uploads, zips and conversions ----
+
+[FILES.MISSING_FIELD]
+status = 400
+params = ["field"]
+text = "[The request is missing {field}.|The request is missing a required value.]"
+action = "Add [{field}|it] and try again."
+java = "missing_field"
+when = "An upload without its file, a path, a client code or a resource type; a retention rule without its app, type or level."
+audience = "signed-in"
+
+[FILES.INVALID_FIELD]
+status = 400
+params = ["field", "value"]
+text = "[The value of {field} is not valid.|A value in the request is not valid.]"
+action = "Correct [{field}|the value] and try again."
+java = "invalid_field"
+java_text = "Invalid $"
+when = "A retention rule with an unknown resource type, level or appliesTo, a path that does not normalise, or retentionDays below 1 or not a number."
+audience = "signed-in"
+
+[FILES.UNABLE_TO_READ_UP_FILE]
+status = 400
+text = "We couldn't read the uploaded zip file."
+action = "Check that the file is a zip and try again."
+java = "unable_to_read_up_file"
+when = "A zip import without a file, or whose file is not a zip."
+audience = "signed-in"
+
+[FILES.UNABLE_TO_UPLOAD_ZIP_FILE]
+status = 400
+text = "We couldn't upload the zip file's contents: a folder in it could not be made."
+action = "Check the zip's folders and try again."
+java = "unable_to_upload_zip_file"
+when = "A zip import (in the background) where a folder of the zip could not be created; the job records it."
+audience = "signed-in"
+
+[FILES.FILE_CANNOT_BE_CONVERTED]
+status = 500
+text = "We couldn't convert the file to base64: its address does not name a file."
+action = "Check the file's address and try again."
+java = "file_cannot_be_converted"
+when = "The internal base64 conversion of an address that names no client's file."
+audience = "anyone"
+
+[FILES.FILE_EMPTY]
+status = 400
+text = "The uploaded file is empty."
+action = "Choose a file with content and try again."
+java_text = "File is required and cannot be empty"
+when = "Converting an empty upload to base64."
+audience = "signed-in"
+
+[FILES.FILE_URLS_REQUIRED]
+status = 400
+text = "The request names no files."
+action = "Send the list of file addresses and try again."
+java_text = "A list of file URLs is required"
+when = "Asking for download keys of a list of files without the list."
+audience = "signed-in"
+
+[FILES.BODY_NOT_OBJECT]
+status = 400
+text = "The request body must be a JSON object."
+action = "Send the access rule as a JSON object and try again."
+java_text = "Invalid body"
+when = "Creating or patching an access path rule with a body that is not an object."
+audience = "signed-in"
+
+[FILES.FIELD_UNREADABLE]
+status = 400
+params = ["field"]
+text = "[The value of {field} can't be read.|A value in the request can't be read.]"
+action = "Check [{field}|the value] and try again."
+java_text = "$ field cannot be read"
+when = "An access path rule whose field has a value of the wrong type."
+audience = "signed-in"
+
+[FILES.FIELD_NOT_UPDATABLE]
+status = 400
+params = ["field"]
+text = "[The field {field} can't be changed.|This field can't be changed.]"
+action = "Leave it out of the request and try again."
+java_text = "$ field cannot be updated, it might not be available or unmodifiable"
+when = "A PATCH of an access path rule naming a field that does not exist or cannot take the value."
+audience = "signed-in"
+
+[FILES.QUERY_INVALID]
+status = 400
+text = "The query is not valid."
+action = "Check its page, size, sort and condition, then try again."
+java_text = ["Invalid $", "Page index must not be less than zero", "Page size must not be less than one", "Sort order without a property", "Invalid direction '$'", "Invalid condition", "Invalid operator '$'", "'$' is not a number", "'$' is not a time", "LIKE needs a value"]
+when = "An access path query or filter with a page, size, sort or condition the service cannot use."
+audience = "signed-in"
+
+[FILES.APP_NOT_FOUND]
+status = 404
+params = ["what:entity", "app"]
+text = "[We couldn't find the app {app}.|We couldn't find the app.]"
+action = "Check the app code and try again."
+java = "object_not_found"
+when = "An app-level retention rule for an app code security does not know."
+audience = "signed-in"
+
+[FILES.CLIENT_UNKNOWN]
+status = 404
+params = ["client"]
+text = "[We couldn't find the organisation {client}.|We couldn't find the organisation.]"
+action = "Check the organisation code and try again."
+java_text = "Unknown client $"
+when = "Working out the retention rules that apply to an organisation code security does not know."
+audience = "signed-in"
+
+# ---- Images ----
+
+[FILES.IMAGE_TRANSFORM_ERROR]
+status = 500
+text = "We couldn't change the image."
+action = "Check that the file is an image and that the size and crop values fit it, then try again."
+java = "image_transform_error"
+when = "An image transform (resize, crop, rotate...) that fails on the uploaded or stored image."
+audience = "signed-in"
+
+[FILES.IMAGE_UNREADABLE]
+status = 500
+text = "We couldn't read the image."
+action = "Upload a PNG, JPEG, GIF or WebP image and try again."
+java_text = "Unable to find the reader for the image."
+when = "Transforming a file that is not an image the service can decode."
+audience = "signed-in"
+
+[FILES.IMAGE_TYPE_UNSUPPORTED]
+status = 400
+params = ["type"]
+text = "[Images of type {type} can't be resized.|This type of image can't be resized.]"
+action = "Upload a PNG or JPEG image and try again."
+java_text = "Unsupported image type '$'"
+when = "Resizing an upload whose type is not PNG or JPEG."
+audience = "signed-in"
+
+# ---- The keys files shares with the other services ----
+
+[FILES.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are looking in the right organisation."
+java = "object_not_found"
+when = "Reading, changing or deleting an access path rule or a retention rule that does not exist or that the caller cannot see."
+audience = "signed-in"
+
+[FILES.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "[A {what} for {name} already exists.|This already exists.]"
+action = "Change the existing one instead."
+java = "already_exists"
+when = "Creating a retention rule the organisation already has for that app, path, type and level."
+audience = "signed-in"
+
+[FILES.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}] to change it."
+action = "Check that it still exists and that you can change it."
+java = "object_not_found_to_update"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create the {what|item} for this organisation."
+action = "Ask an owner of your organisation for access."
+java = "forbidden_create"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.UNABLE_TO_DELETE]
+status = 403
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you can change it."
+java = "unable_to_delete"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed."
+java = "object_not_updatable"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.NOT_A_DIRECTORY]
+status = 400
+params = ["path"]
+text = "[{path} is not a folder, so it can't be listed.|This path is not a folder, so it can't be listed.]"
+action = "Give the path of a folder."
+java = "not_a_directory"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.UNABLE_TO_DEL_FILE]
+status = 500
+params = ["path"]
+text = "[We couldn't delete {path}.|We couldn't delete the file or folder.]"
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unable_to_del_file"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.PATH_NOT_FOUND]
+status = 404
+params = ["path"]
+text = "[We couldn't find {path}.|We couldn't find this path.]"
+action = "Check the path and try again."
+java = "path_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.UNABLE_CREATE_DOWNLOAD_FILE]
+status = 500
+text = "We couldn't make a zip of the folder."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unable_create_download_file"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.WRONG_FILE_TYPE]
+status = 400
+text = "This file type is not known."
+action = "Choose one of the listed file types."
+java = "wrong_file_type"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.IMAGE_FILE_REQUIRED]
+status = 400
+text = "The uploaded file must be an image."
+action = "Choose an image file and try again."
+java = "image_file_required"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.UNABLE_TO_COPY_THE_IMAGE_FILE]
+status = 500
+text = "We couldn't copy the image file."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unable_to_copy_the_image_file"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[FILES.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[FILES.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[FILES.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[FILES.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "Not raised by the Rust units (the cases Java answers with it have their own codes)."
+audience = "anyone"
+
+[FILES.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units (an unexpected failure answers COMMON.INTERNAL_ERROR, which says the same)."
+audience = "anyone"
+
+[FILES.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save your changes."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[FILES.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[FILES.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "[{value} can't be read as {type|the expected type}.|A value can't be read as the expected type.]"
+java = "unable_to_convert"
+when = "Not raised by the Rust units (a folder sent for conversion answers FILES.FOLDER_NOT_CONVERTIBLE)."
+audience = "anyone"
+
+# ---- Entities ----
+
+[ENTITY.FilesAccessPath]
+text = "file access rule"

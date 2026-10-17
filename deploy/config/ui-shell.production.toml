@@ -1,0 +1,48 @@
+# ui-shell in production: UniversalController (index pages, manifest, apiDocs, the JS proxy,
+# URI path routes, ACME, SSO pages), analytics and the ui cache endpoints. gateway-rust sends it
+# everything under the ui except the engine GETs (ui-engine) and the editor (Java ui until
+# ui-editor is ported). NOT APPLIED ANYWHERE: an example for review.
+# Secrets: MODLIX__MONGO__URI, MODLIX__REDIS__URL, MODLIX__SHELL__ANALYTICS_ENGINE_SECRET.
+
+[server]
+port = 8106
+
+[telemetry]
+log_format = "json"
+environment = "production"
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = ["http://security-admin-1:8113", "http://security-admin-2:8113"]
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = ["http://security-auth-1:8101", "http://security-auth-2:8101"]
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = ["http://security-internal-1:8112", "http://security-internal-2:8112"]
+
+[core]
+# URI path routes run their KIRun functions on core. core-exec once its gate opens.
+upstream = ["http://core-server-blue:8005", "http://core-server-green:8005"]
+timeout_seconds = 60
+
+[mongo]
+max_pool_size = 32
+
+[ui]
+resource_cache_age = 604800
+java_zone_offset = "+00:00"
+
+[shell]
+# Copy each from the production Java ui config (ui.* and security.appCodeSuffix) before applying.
+cdn_host_name = "<ui.cdnHostName>"
+cdn_strip_api_prefix = true
+cdn_replace_plus = true
+cdn_resize_options_type = "<ui.cdnResizeOptionsType>"
+app_code_suffix = "<security.appCodeSuffix>"
+js_url = "<ui.jsURL>"
+analytics_ingestion_host = "<ui analytics ingestion host>"
+analytics_engine_url = "<ui analytics engine url>"
+ssr_channel = "ssr:cache:invalidation"

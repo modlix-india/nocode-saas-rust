@@ -1,0 +1,89 @@
+[workspace]
+resolver = "3"
+# Explicit, so a crate being written does not break the build for everyone. Add a crate here
+# once it has its Cargo.toml and src/lib.rs (or src/main.rs).
+members = [
+    "crates/platform",
+    "crates/gateway",
+    "crates/files",
+    "crates/overridable",
+    "crates/ui",
+    "crates/core",
+    "crates/appdata",
+    "crates/connections",
+    "crates/multi",
+    "crates/security",
+    "crates/notification",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+platform = { path = "crates/platform" }
+
+anyhow = "1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+http-body-util = "0.1"
+regex = "1"
+parking_lot = "0.12"
+figment = { version = "0.10", features = ["toml", "env"] }
+opentelemetry = "0.30"
+opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.30", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry-http = "0.30"
+tracing-opentelemetry = "0.31"
+async-trait = "0.1"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+dashmap = "6"
+futures = "0.3"
+hex = "0.4"
+http = "1"
+local-ip-address = "0.6"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false }
+mime_guess = "2"
+moka = { version = "0.12", features = ["future"] }
+percent-encoding = "2"
+rand = "0.8"
+redis = { version = "0.27", default-features = false, features = ["aio", "tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql", "chrono", "macros"] }
+thiserror = "2"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = "0.5"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+axum = "0.8"
+
+indexmap = "2"
+mongodb = "3"
+ryu = "1"
+
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
+chrono-tz = "0.10"
+hostname = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
+kirun = { path = "../nocode-kirun/kirun-rust", version = "2.0.0" }
+hmac = "0.12"
+md-5 = "0.10"
+sha1 = "0.10"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+quick-xml = "0.39"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

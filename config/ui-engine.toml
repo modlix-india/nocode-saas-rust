@@ -1,0 +1,34 @@
+# ui-engine on the local stack. Secrets (MODLIX__MONGO__URI, MODLIX__REDIS__URL) come from
+# config/local.env.
+
+[server]
+port = 8102
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[redis]
+# The effective redis.cache.prefix of every Java service (application-<profile>.yml).
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[mongo]
+max_pool_size = 32
+
+[ui]
+resource_cache_age = 604800
+# The Java ui's JVM runs in the developer machine's zone (IST) locally; +00:00 in containers.
+java_zone_offset = "+05:30"

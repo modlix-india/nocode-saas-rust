@@ -1,0 +1,66 @@
+{"name":"get-json","status":200,"headers":{"Content-Type":"application/json","X-Total-Count":"3","Content-Length":"83","Connection":"close"},"data":{"a":1.0,"c":[1.0,null,{"e":2.5}],"f":"x","big":1.2345678901234567E19}}
+{"name":"get-json-array","status":200,"headers":{"Content-Type":"application/json;charset=UTF-8","Content-Length":"25","Connection":"close"},"data":[1.0,"two",null,{}]}
+{"name":"get-json-num","status":200,"headers":{"Content-Type":"application/json","Content-Length":"2","Connection":"close"},"data":42}
+{"name":"get-json-str","status":200,"headers":{"Content-Type":"application/json","Content-Length":"7","Connection":"close"},"data":"hello"}
+{"name":"get-json-blank","status":200,"headers":{"Content-Type":"application/json","Content-Length":"3","Connection":"close"},"data":null}
+{"name":"get-json-bad","status":500,"headers":null,"data":"Error occurred: java.io.EOFException: End of input at line 1 column 6 path $.oops"}
+{"name":"get-text","status":200,"headers":{"Content-Type":"text/plain;charset=UTF-8","Content-Length":"6","Connection":"close"},"data":"héllo"}
+{"name":"get-html","status":201,"headers":{"Content-Type":"text/html","Content-Length":"9","Connection":"close"},"data":"<p>hi</p>"}
+{"name":"get-none","status":200,"headers":{"Content-Length":"20","Connection":"close"},"data":"no content type here"}
+{"name":"get-pdf","status":200,"headers":{"Content-Type":"application/pdf","Content-Length":"6","Connection":"close"},"data":[37,80,68,70,-1,0]}
+{"name":"get-xml","status":200,"headers":{"Content-Type":"application/xml","Content-Length":"4","Connection":"close"},"data":[60,97,47,62]}
+{"name":"get-apijson","status":200,"headers":{"Content-Type":"application/vnd.api+json","Content-Length":"10","Connection":"close"},"data":[123,34,100,97,116,97,34,58,49,125]}
+{"name":"get-disposition","status":200,"headers":{"Content-Type":"text/csv","Content-Disposition":"attachment; filename=\"r.csv\"","Content-Length":"4","Connection":"close"},"data":[97,44,98,10]}
+{"name":"get-204","status":204,"headers":{"Connection":"close"},"data":null}
+{"name":"get-empty200","status":200,"headers":{"Content-Type":"application/json","Content-Length":"0","Connection":"close"},"data":null}
+{"name":"get-404","status":404,"headers":{"Content-Type":"application/json","Content-Length":"19","Connection":"close"},"data":{"error":"missing"}}
+{"name":"get-500","status":500,"headers":{"Content-Type":"text/plain","Content-Length":"4","Connection":"close"},"data":"boom"}
+{"name":"get-lower","status":200,"headers":{"content-type":"application/json","x-lower":"1","X-Dup":"a","Content-Length":"9","Connection":"close"},"data":{"k":"v"}}
+{"name":"get-redirect","status":302,"headers":{"Location":"https://example.com/elsewhere","Content-Length":"0","Connection":"close"},"data":null}
+{"name":"get-full","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"get-ignore","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"get-trailing","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"no-base","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"empty-details","err":"Connection details missing conn"}
+{"name":"bad-mode","err":"No enum constant com.fincity.saas.commons.webclient.WebClientEncodingModes.WRONG"}
+{"name":"mode-URI_COMPONENT","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-plain-URI_COMPONENT","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-VALUES_ONLY","err":"Illegal character in query at index 35: http://127.0.0.1:8191/m/a%20b/x?q=a b+c&r=x/y?z"}
+{"name":"mode-plain-VALUES_ONLY","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-NONE","err":"Illegal character in path at index 25: http://127.0.0.1:8191/m/a b/x?q=a b+c&r=x/y?z"}
+{"name":"mode-plain-NONE","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-MANUAL_VALUES_ENCODED","err":"Illegal character in path at index 25: http://127.0.0.1:8191/m/a b/x?q=a+b%2Bc&r=x%2Fy%3Fz"}
+{"name":"mode-plain-MANUAL_VALUES_ENCODED","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-TEMPLATE_AND_VALUES","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"mode-plain-TEMPLATE_AND_VALUES","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-json","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-json-null","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-no-payload","err":"Cannot invoke \"com.google.gson.JsonElement.isJsonNull()\" because the return value of \"com.fincity.saas.commons.core.dto.RestRequest.getPayload()\" is null"}
+{"name":"post-array","err":"Not a JSON Object: [1,2]"}
+{"name":"post-string","err":"Not a JSON Object: \"x\""}
+{"name":"post-text-ct","status":400,"headers":null,"data":"Url not found with the given connection"}
+{"name":"post-json-ct","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-vnd-ct","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-form","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-form-charset","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-form-no-payload","err":"Cannot invoke \"com.google.gson.JsonElement.isJsonObject()\" because \"payload\" is null"}
+{"name":"post-multipart","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"post-multipart-obj","err":"JsonObject"}
+{"name":"put-json","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"patch-json","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"delete-none","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"delete-payload","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"get-with-payload","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"download-text","status":200,"headers":{"Content-Type":"text/plain;charset=UTF-8","Content-Length":"6","Connection":"close"},"data":[104,-61,-87,108,108,111]}
+{"name":"download-none-ct","status":200,"headers":{"Content-Length":"20","Connection":"close"},"data":"no content type here"}
+{"name":"refused-get","err":"Connection refused: /127.0.0.1:8199"}
+{"name":"refused-post","status":400,"headers":null,"data":"Url not found with the given connection"}
+{"name":"headers-merge","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"auth-and-user-auth","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"username-number","err":"class java.lang.Integer cannot be cast to class java.lang.String (java.lang.Integer and java.lang.String are in module java.base of loader 'bootstrap')"}
+{"name":"query-template","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"query-template-missing","err":"Map has no value for 'nope'"}
+{"name":"bad-url-space","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}
+{"name":"ct-header-bad","err":"Invalid mime type \"json\": does not contain '/'"}
+{"name":"get-gzip","status":200,"headers":{"Content-Type":"application/json","Connection":"close","transfer-encoding":"chunked"},"data":{"zipped":[1.0,2.0,3.0]}}
+{"name":"get-dots","status":200,"headers":{"Content-Type":"application/json","Content-Length":"11","Connection":"close"},"data":{"ok":true}}

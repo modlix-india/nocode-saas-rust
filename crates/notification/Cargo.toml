@@ -1,0 +1,38 @@
+[package]
+name = "notification"
+description = "notification: in-app notifications over SSE, the notifications queue listener (email and in-app sends), and user preferences; the Java notification service in Rust."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "notification"
+path = "src/bin/notification.rs"
+
+[dependencies]
+platform.workspace = true
+connections = { path = "../connections" }
+
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+http.workspace = true
+lapin = "4"
+parking_lot.workspace = true
+percent-encoding.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+sqlx.workspace = true
+tokio.workspace = true
+tokio-stream = "0.1"
+tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tower = { workspace = true, features = ["util"] }

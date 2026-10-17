@@ -1,0 +1,2079 @@
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in query at index 36: https://api.example.com/v1/users?q\u003da b"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com/v1/users?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users?q\u003da b"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/v1/users?q\u003d{v}"}
+{"ok":"https://api.example.com/v1/users?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/v1/users?q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users?q\u003d50%"}
+{"ok":"https://api.example.com/v1/users?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/42"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/caf%C3%A9"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/42?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Illegal character in path at index 34: https://api.example.com/v1/users/a b/c"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/café?q\u003d"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/café"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Illegal character in path at index 34: https://api.example.com/v1/users/a b/c?q\u003d50%25"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/café?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D"}
+{"ok":"https://api.example.com/v1/users/{id}"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003da b"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003d{v}"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/{id}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/{id}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003d"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003d"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users/{id}?q\u003d50%"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users/{id}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/a%20b%2Fc/x?a\u003d1\u0026b\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/a%20b%2Fc/x?a\u003d1\u0026b\u003d2\u0026q\u003d"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/42/x?a\u003d1\u0026b\u003d2\u0026q\u003dhello"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/a%20b%2Fc/x?a\u003d1\u0026b\u003d2\u0026q\u003dhello"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/caf%C3%A9/x?a\u003d1\u0026b\u003d2\u0026q\u003dcaf%C3%A9%20%2541"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/42/x?a\u003d1\u0026b\u003d2\u0026q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/42/x?a\u003d1\u0026b\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"ok":"https://api.example.com/v1/users/café/x?a\u003d1\u0026b\u003d2"}
+{"err":"Map has no value for \u0027id\u0027"}
+{"err":"Illegal character in query at index 49: https://api.example.com/v1/users/café/x?a\u003d1\u0026b\u003d2\u0026k k\u003dv%2Fv%3F"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003da b"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003d{v}"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003d"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003d"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026q\u003d50%"}
+{"ok":"https://api.example.com/v1/users/%7Bid%7D/x?a\u003d1\u0026b\u003d2\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users/{id}/x?a\u003d1\u0026b\u003d2\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/v1/users?q\u003d%241%5C%5C"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"err":"Illegal character in query at index 34: https://api.example.com/v1/users?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 34: https://api.example.com/v1/users?k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/v1/users?q\u003da%2Bb%26c%3Dd"}
+{"err":"Illegal character in query at index 34: https://api.example.com/v1/users?k k\u003dv%2Fv%3F"}
+{"err":"Illegal character in query at index 34: https://api.example.com/v1/users?k k\u003dv%2Fv%3F"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users?q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users?q\u003da b"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/v1/users?q\u003d{v}"}
+{"ok":"https://api.example.com/v1/users?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/v1/users?q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users?q\u003d"}
+{"ok":"https://api.example.com/v1/users?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users?q\u003d50%"}
+{"ok":"https://api.example.com/v1/users?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/v1/users/?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users/?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users/"}
+{"err":"Illegal character in query at index 40: https://api.example.com/v1/users/?q\u003dcafé %41"}
+{"err":"Illegal character in query at index 40: https://api.example.com/v1/users/?q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/?q\u003dx#y"}
+{"err":"Malformed escape pair at index 38: https://api.example.com/v1/users/?q\u003d50%"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b"}
+{"ok":"https://api.example.com/v1/users/?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/"}
+{"ok":"https://api.example.com/v1/users/?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/?q\u003dhello"}
+{"ok":"https://api.example.com/v1/users/?q\u003da%20b"}
+{"ok":"https://api.example.com/v1/users/?q\u003da b"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/v1/users/?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/v1/users/?q\u003d{v}"}
+{"ok":"https://api.example.com/v1/users/?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/v1/users/?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/v1/users/?q\u003dcafé %41"}
+{"ok":"https://api.example.com/v1/users/?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/?k k\u003dv/v?"}
+{"ok":"https://api.example.com/v1/users/?q\u003d"}
+{"ok":"https://api.example.com/v1/users/?q\u003d"}
+{"ok":"https://api.example.com/v1/users/?q\u003dx%23y"}
+{"ok":"https://api.example.com/v1/users/?q\u003dx#y"}
+{"ok":"https://api.example.com/v1/users/?q\u003d50%25"}
+{"ok":"https://api.example.com/v1/users/?q\u003d50%"}
+{"ok":"https://api.example.com/v1/users/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/v1/users/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com?q\u003dx%23y"}
+{"ok":"https://api.example.com?q\u003dx%23y"}
+{"ok":"https://api.example.com?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com?q\u003dhello"}
+{"ok":"https://api.example.com?q\u003dhello"}
+{"ok":"https://api.example.com?q\u003dhello"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com?q\u003dx%23y"}
+{"ok":"https://api.example.com?q\u003dx%23y"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"err":"Illegal character in query at index 25: https://api.example.com?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 25: https://api.example.com?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 27: https://api.example.com?q\u003da b"}
+{"err":"Illegal character in query at index 27: https://api.example.com?q\u003da b"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com?q\u003da+b"}
+{"ok":"https://api.example.com?q\u003da+b"}
+{"ok":"https://api.example.com?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com"}
+{"ok":"https://api.example.com?q\u003dhello"}
+{"ok":"https://api.example.com?q\u003dhello"}
+{"ok":"https://api.example.com?q\u003da%20b"}
+{"ok":"https://api.example.com?q\u003da b"}
+{"ok":"https://api.example.com?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com?q\u003d{v}"}
+{"ok":"https://api.example.com?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com?q\u003dcafé %41"}
+{"ok":"https://api.example.com?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com?k k\u003dv/v?"}
+{"ok":"https://api.example.com?q\u003d"}
+{"ok":"https://api.example.com?q\u003d"}
+{"ok":"https://api.example.com?q\u003dx%23y"}
+{"ok":"https://api.example.com?q\u003dx#y"}
+{"ok":"https://api.example.com?q\u003d50%25"}
+{"ok":"https://api.example.com?q\u003d50%"}
+{"ok":"https://api.example.com?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?q\u003da+b%26c%3Dd"}
+{"ok":"https://api.example.com/?q\u003da+b%26c%3Dd"}
+{"ok":"https://api.example.com/?q\u003dx%23y"}
+{"ok":"https://api.example.com/?q\u003dx%23y"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Malformed escape pair at index 29: https://api.example.com/?q\u003d50%"}
+{"err":"Malformed escape pair at index 29: https://api.example.com/?q\u003d50%"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/?q\u003dx%23y"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?q\u003dhello"}
+{"ok":"https://api.example.com/?q\u003dhello"}
+{"ok":"https://api.example.com/?q\u003dhello"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/"}
+{"ok":"https://api.example.com/?q\u003dhello"}
+{"ok":"https://api.example.com/?q\u003dhello"}
+{"ok":"https://api.example.com/?q\u003da%20b"}
+{"ok":"https://api.example.com/?q\u003da b"}
+{"ok":"https://api.example.com/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/?q\u003d{v}"}
+{"ok":"https://api.example.com/?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/?q\u003dcafé %41"}
+{"ok":"https://api.example.com/?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/?k k\u003dv/v?"}
+{"ok":"https://api.example.com/?q\u003d"}
+{"ok":"https://api.example.com/?q\u003d"}
+{"ok":"https://api.example.com/?q\u003dx%23y"}
+{"ok":"https://api.example.com/?q\u003dx#y"}
+{"ok":"https://api.example.com/?q\u003d50%25"}
+{"ok":"https://api.example.com/?q\u003d50%"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a%20b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a%20b?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a%20b?k%20k\u003dv/v?"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003dhello"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b?q\u003d"}
+{"ok":"https://api.example.com/a%20b?q\u003d"}
+{"ok":"https://api.example.com/a%20b?q\u003d50%25"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003da+b\u0026c\u003dd"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003d%7Bv%7D"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003d%7Bv%7D"}
+{"err":"Illegal character in path at index 25: https://api.example.com/a b?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a b"}
+{"ok":"https://api.example.com/a%20b?q\u003dhello"}
+{"ok":"https://api.example.com/a b?q\u003dhello"}
+{"ok":"https://api.example.com/a%20b?q\u003da%20b"}
+{"ok":"https://api.example.com/a b?q\u003da b"}
+{"ok":"https://api.example.com/a%20b?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a b?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a%20b?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/a b?q\u003d{v}"}
+{"ok":"https://api.example.com/a%20b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a%20b?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/a b?q\u003dcafé %41"}
+{"ok":"https://api.example.com/a%20b?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a b?k k\u003dv/v?"}
+{"ok":"https://api.example.com/a%20b?q\u003d"}
+{"ok":"https://api.example.com/a b?q\u003d"}
+{"ok":"https://api.example.com/a%20b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a b?q\u003dx#y"}
+{"ok":"https://api.example.com/a%20b?q\u003d50%25"}
+{"ok":"https://api.example.com/a b?q\u003d50%"}
+{"ok":"https://api.example.com/a%20b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a%2520b"}
+{"ok":"https://api.example.com/a%2520b"}
+{"ok":"https://api.example.com/a%2520b?q\u003da%20b"}
+{"ok":"https://api.example.com/a%2520b?q\u003da%20b"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b?q\u003dx#y"}
+{"ok":"https://api.example.com/a%20b?q\u003dx#y"}
+{"err":"Illegal character in query at index 33: https://api.example.com/a%20b?q\u003da b"}
+{"err":"Illegal character in query at index 33: https://api.example.com/a%20b?q\u003da b"}
+{"ok":"https://api.example.com/a%2520b"}
+{"ok":"https://api.example.com/a%2520b"}
+{"ok":"https://api.example.com/a%2520b?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a%2520b?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a%2520b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a%2520b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b?q\u003dx#y"}
+{"ok":"https://api.example.com/a%20b?q\u003dx#y"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%20b?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"https://api.example.com/a%20b?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/a%20b?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/a%2520b"}
+{"ok":"https://api.example.com/a%20b"}
+{"ok":"https://api.example.com/a%2520b?q\u003dhello"}
+{"ok":"https://api.example.com/a%20b?q\u003dhello"}
+{"ok":"https://api.example.com/a%2520b?q\u003da%20b"}
+{"ok":"https://api.example.com/a%20b?q\u003da b"}
+{"ok":"https://api.example.com/a%2520b?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a%20b?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a%2520b?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/a%20b?q\u003d{v}"}
+{"ok":"https://api.example.com/a%2520b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a%20b?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a%2520b?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/a%20b?q\u003dcafé %41"}
+{"ok":"https://api.example.com/a%2520b?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a%20b?k k\u003dv/v?"}
+{"ok":"https://api.example.com/a%2520b?q\u003d"}
+{"ok":"https://api.example.com/a%20b?q\u003d"}
+{"ok":"https://api.example.com/a%2520b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a%20b?q\u003dx#y"}
+{"ok":"https://api.example.com/a%2520b?q\u003d50%25"}
+{"ok":"https://api.example.com/a%20b?q\u003d50%"}
+{"ok":"https://api.example.com/a%2520b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a%20b?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"ok":"https://api.example.com/caf%C3%A9"}
+{"ok":"https://api.example.com/caf%C3%A9"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003d50%25"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003d50%25"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/café"}
+{"ok":"https://api.example.com/café?q\u003dx#y"}
+{"ok":"https://api.example.com/café?q\u003dhello"}
+{"ok":"https://api.example.com/caf%C3%A9"}
+{"ok":"https://api.example.com/caf%C3%A9"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003d$1%5C%5C"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/caf%C3%A9?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/café"}
+{"ok":"https://api.example.com/café"}
+{"err":"Illegal character in query at index 30: https://api.example.com/café?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 30: https://api.example.com/café?k k\u003dv/v?"}
+{"ok":"https://api.example.com/café"}
+{"ok":"https://api.example.com/café?q\u003d"}
+{"ok":"https://api.example.com/café?q\u003d"}
+{"ok":"https://api.example.com/café?q\u003d"}
+{"ok":"https://api.example.com/café"}
+{"ok":"https://api.example.com/café"}
+{"ok":"https://api.example.com/café?q\u003dhello"}
+{"ok":"https://api.example.com/café?q\u003dhello"}
+{"ok":"https://api.example.com/café?q\u003da%20b"}
+{"ok":"https://api.example.com/café?q\u003da b"}
+{"ok":"https://api.example.com/café?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/café?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/café?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/café?q\u003d{v}"}
+{"ok":"https://api.example.com/café?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/café?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/café?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/café?q\u003dcafé %41"}
+{"ok":"https://api.example.com/café?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/café?k k\u003dv/v?"}
+{"ok":"https://api.example.com/café?q\u003d"}
+{"ok":"https://api.example.com/café?q\u003d"}
+{"ok":"https://api.example.com/café?q\u003dx%23y"}
+{"ok":"https://api.example.com/café?q\u003dx#y"}
+{"ok":"https://api.example.com/café?q\u003d50%25"}
+{"ok":"https://api.example.com/café?q\u003d50%"}
+{"ok":"https://api.example.com/café?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/café?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dhello"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dhello"}
+{"ok":"https://user:pw@api.example.com:8443/x?k%20k\u003dv/v?"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"err":"Illegal character in query at index 40: https://user:pw@api.example.com:8443/x?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 40: https://user:pw@api.example.com:8443/x?k k\u003dv/v?"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dx#y"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d"}
+{"err":"Illegal character in query at index 42: https://user:pw@api.example.com:8443/x?q\u003da b"}
+{"err":"Illegal character in query at index 42: https://user:pw@api.example.com:8443/x?q\u003da b"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dhello"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dhello"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da%20b"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da b"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d%7Bv%7D"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d{v}"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dcafé%20%2541"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dcafé %41"}
+{"ok":"https://user:pw@api.example.com:8443/x?k%20k\u003dv/v?"}
+{"ok":"https://user:pw@api.example.com:8443/x?k k\u003dv/v?"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dx%23y"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003dx#y"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d50%25"}
+{"ok":"https://user:pw@api.example.com:8443/x?q\u003d50%"}
+{"ok":"https://user:pw@api.example.com:8443/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://user:pw@api.example.com:8443/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d50%25"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d50%25"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dx#y"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dx#y"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da%20b"}
+{"ok":"https://api.example.com:8443/x?q\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in query at index 37: https://api.example.com:8443/x?q\u0026q\u003d$1\\\\"}
+{"err":"Illegal character in query at index 36: https://api.example.com:8443/x?q\u0026q\u003da b"}
+{"err":"Illegal character in query at index 36: https://api.example.com:8443/x?q\u0026q\u003da b"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dhello"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dhello"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da%20b"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da b"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d{v}"}
+{"ok":"https://api.example.com:8443/x?q\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com:8443/x?q\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com:8443/x?q\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com:8443/x?q\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003dx#y"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d50%25"}
+{"ok":"https://api.example.com:8443/x?q\u0026q\u003d50%"}
+{"ok":"https://api.example.com:8443/x?q\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com:8443/x?q\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026a\u003d1\u0026a\u003d3\u0026b\u0026b\u003d2\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026a\u003d1\u0026a\u003d3\u0026b\u0026b\u003d2\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de%3Df\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Malformed escape pair at index 43: https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d50%"}
+{"err":"Malformed escape pair at index 43: https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d50%"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dcaf%C3%A9+%2541"}
+{"err":"Illegal character in query at index 40: https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026k k\u003dv%2Fv%3F"}
+{"err":"Illegal character in query at index 40: https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026k k\u003dv%2Fv%3F"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003da%20b"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003da b"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d{v}"}
+{"ok":"https://api.example.com/x?a\u003d\u0026a\u003d1\u0026a\u003d3\u0026b\u0026b\u003d2\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026a\u003d1\u0026a\u003d3\u0026b\u0026b\u003d2\u0026c\u0026d\u003de\u003df"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026q\u003d50%"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x?a\u003d\u0026b\u0026c\u0026d\u003de\u003df\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x?q\u003da+b%26c%3Dd#frag"}
+{"ok":"https://api.example.com/x?q\u003da%20b#frag"}
+{"ok":"https://api.example.com/x?q\u003da%20b#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x?q\u003dhello#frag"}
+{"ok":"https://api.example.com/x?q\u003dhello#frag"}
+{"err":"Malformed escape pair at index 30: https://api.example.com/x?q\u003d50%#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x?q\u003d50%25#frag"}
+{"ok":"https://api.example.com/x?q\u003d50%25#frag"}
+{"ok":"https://api.example.com/x?q\u003da+b%26c%3Dd#frag"}
+{"ok":"https://api.example.com/x?q\u003da+b%26c%3Dd#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b#frag"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x#frag"}
+{"ok":"https://api.example.com/x?q\u003dhello#frag"}
+{"ok":"https://api.example.com/x?q\u003dhello#frag"}
+{"ok":"https://api.example.com/x?q\u003da%20b#frag"}
+{"ok":"https://api.example.com/x?q\u003da b#frag"}
+{"ok":"https://api.example.com/x?q\u003da+b\u0026c\u003dd#frag"}
+{"ok":"https://api.example.com/x?q\u003da+b\u0026c\u003dd#frag"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D#frag"}
+{"ok":"https://api.example.com/x?q\u003d{v}#frag"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d3\u0026b\u003d2#frag"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d3\u0026b\u003d2#frag"}
+{"ok":"https://api.example.com/x?q\u003dcafé%20%2541#frag"}
+{"ok":"https://api.example.com/x?q\u003dcafé %41#frag"}
+{"ok":"https://api.example.com/x?k%20k\u003dv/v?#frag"}
+{"ok":"https://api.example.com/x?k k\u003dv/v?#frag"}
+{"ok":"https://api.example.com/x?q\u003d#frag"}
+{"ok":"https://api.example.com/x?q\u003d#frag"}
+{"ok":"https://api.example.com/x?q\u003dx%23y#frag"}
+{"ok":"https://api.example.com/x?q\u003dx#y#frag"}
+{"ok":"https://api.example.com/x?q\u003d50%25#frag"}
+{"ok":"https://api.example.com/x?q\u003d50%#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#frag"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#frag"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://[::1]:8080/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://[::1]:8080/x?q\u003d"}
+{"ok":"https://[::1]:8080/x?q\u003d"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x"}
+{"err":"Illegal character in query at index 24: https://[::1]:8080/x?q\u003da b"}
+{"err":"Illegal character in query at index 27: https://[::1]:8080/x?q\u003dcafé %41"}
+{"err":"Illegal character in query at index 27: https://[::1]:8080/x?q\u003dcafé %41"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://[::1]:8080/x?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://[::1]:8080/x?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://[::1]:8080/x?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://[::1]:8080/x?q\u003da+b\u0026c\u003dd"}
+{"err":"Malformed escape pair at index 25: https://[::1]:8080/x?q\u003d50%"}
+{"err":"Malformed escape pair at index 25: https://[::1]:8080/x?q\u003d50%"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x?q\u003dx%23y"}
+{"ok":"https://[::1]:8080/x?q\u003dx%23y"}
+{"ok":"https://[::1]:8080/x?q\u003d50%25"}
+{"ok":"https://[::1]:8080/x?q\u003d50%25"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x"}
+{"ok":"https://[::1]:8080/x?q\u003dhello"}
+{"ok":"https://[::1]:8080/x?q\u003dhello"}
+{"ok":"https://[::1]:8080/x?q\u003da%20b"}
+{"ok":"https://[::1]:8080/x?q\u003da b"}
+{"ok":"https://[::1]:8080/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://[::1]:8080/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://[::1]:8080/x?q\u003d%7Bv%7D"}
+{"ok":"https://[::1]:8080/x?q\u003d{v}"}
+{"ok":"https://[::1]:8080/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://[::1]:8080/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://[::1]:8080/x?q\u003dcafé%20%2541"}
+{"ok":"https://[::1]:8080/x?q\u003dcafé %41"}
+{"ok":"https://[::1]:8080/x?k%20k\u003dv/v?"}
+{"ok":"https://[::1]:8080/x?k k\u003dv/v?"}
+{"ok":"https://[::1]:8080/x?q\u003d"}
+{"ok":"https://[::1]:8080/x?q\u003d"}
+{"ok":"https://[::1]:8080/x?q\u003dx%23y"}
+{"ok":"https://[::1]:8080/x?q\u003dx#y"}
+{"ok":"https://[::1]:8080/x?q\u003d50%25"}
+{"ok":"https://[::1]:8080/x?q\u003d50%"}
+{"ok":"https://[::1]:8080/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://[::1]:8080/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/xy"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/xy?q\u003d"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/xy?q\u003d"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D"}
+{"ok":"https://api.example.com/{a}{b}"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{a}{b}?q\u003dhello"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{a}{b}?q\u003da b"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{a}{b}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{a}{b}?q\u003d{v}"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{a}{b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{a}{b}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{a}{b}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003d"}
+{"ok":"https://api.example.com/{a}{b}?q\u003d"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{a}{b}?q\u003dx#y"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{a}{b}?q\u003d50%"}
+{"ok":"https://api.example.com/%7Ba%7D%7Bb%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{a}{b}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/x"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/x?q\u003d"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/1"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/x?q\u003d"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/1?q\u003d"}
+{"err":"Map has no value for \u0027a\u0027"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D"}
+{"ok":"https://api.example.com/{a:[0-9]+}"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003dhello"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003da b"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003d{v}"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{a:[0-9]+}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{a:[0-9]+}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003d"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003d"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003dx#y"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{a:[0-9]+}?q\u003d50%"}
+{"ok":"https://api.example.com/%7Ba:%5B0-9%5D+%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{a:[0-9]+}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"ok":"https://evil.com/x"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"err":"Map has no value for \u0027host\u0027"}
+{"ok":"https://evil.com/x?q\u003d"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x"}
+{"ok":"https://{host}/x"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003dhello"}
+{"ok":"https://{host}/x?q\u003dhello"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003da%20b"}
+{"ok":"https://{host}/x?q\u003da b"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://{host}/x?q\u003da+b\u0026c\u003dd"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003d%7Bv%7D"}
+{"ok":"https://{host}/x?q\u003d{v}"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://{host}/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003dcafé%20%2541"}
+{"ok":"https://{host}/x?q\u003dcafé %41"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?k%20k\u003dv/v?"}
+{"ok":"https://{host}/x?k k\u003dv/v?"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003d"}
+{"ok":"https://{host}/x?q\u003d"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003dx%23y"}
+{"ok":"https://{host}/x?q\u003dx#y"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?q\u003d50%25"}
+{"ok":"https://{host}/x?q\u003d50%"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: https://{host}/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://{host}/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x?q\u003d"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x?q\u003dhello"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x?q\u003d"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Illegal character in query at index 33: https://api.example.com:80/x?q\u003d$1\\\\"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"ok":"https://api.example.com:80/x"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"Map has no value for \u0027port\u0027"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003dhello"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003da b"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003da+b\u0026c\u003dd"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003d{v}"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003dcafé %41"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?k k\u003dv/v?"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003d"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003dx#y"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?q\u003d50%"}
+{"err":"The port contains a URI variable but has not been expanded yet: {port}"}
+{"ok":"https://api.example.com:{port}/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/x?q\u003d%241%5C%5C"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in query at index 30: https://api.example.com/x?q\u003d$1\\\\\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x?q\u003d{v}"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003da b"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003d{v}"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003d"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003d"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026q\u003d50%"}
+{"ok":"https://api.example.com/x?q\u003d%7Bv%7D\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x?q\u003d{v}\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dx%23y"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dx%23y"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d%241%5C%5C"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"err":"Illegal character in query at index 54: https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dcafé %41"}
+{"err":"Illegal character in query at index 54: https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dcafé %41"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da%20b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da%20b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dhello"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dhello"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da%20b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da b"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d{v}"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dcafé %41"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?k k\u003dv/v?"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dx%23y"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003dx#y"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d50%25"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?q\u003d50%"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/a+b/c;d\u003de/f:g@h!$\u0026\u0027()*,?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"err":"Map has no value for \u0027 id \u0027"}
+{"ok":"https://api.example.com/%7B%20id%20%7D"}
+{"ok":"https://api.example.com/{ id }"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{ id }?q\u003dhello"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{ id }?q\u003da b"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{ id }?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{ id }?q\u003d{v}"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{ id }?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{ id }?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{ id }?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003d"}
+{"ok":"https://api.example.com/{ id }?q\u003d"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{ id }?q\u003dx#y"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{ id }?q\u003d50%"}
+{"ok":"https://api.example.com/%7B%20id%20%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{ id }?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/%7B%7D"}
+{"ok":"https://api.example.com/%7B%7D"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/%7B%7D?q\u003d50%25"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003d"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003d"}
+{"ok":"https://api.example.com/%7B%7D"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dhello"}
+{"ok":"https://api.example.com/%7B%7D?k%20k\u003dv/v?"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003d"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003d"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003dx#y"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003dx#y"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003da+b"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003da%2Bb%26c%3Dd"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{}?q\u003da%2Bb%26c%3Dd"}
+{"ok":"https://api.example.com/%7B%7D"}
+{"ok":"https://api.example.com/{}"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{}?q\u003dhello"}
+{"ok":"https://api.example.com/%7B%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{}?q\u003da b"}
+{"ok":"https://api.example.com/%7B%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7B%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{}?q\u003d{v}"}
+{"ok":"https://api.example.com/%7B%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7B%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7B%7D?q\u003d"}
+{"ok":"https://api.example.com/{}?q\u003d"}
+{"ok":"https://api.example.com/%7B%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{}?q\u003dx#y"}
+{"ok":"https://api.example.com/%7B%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{}?q\u003d50%"}
+{"ok":"https://api.example.com/%7B%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"ok":"https://api.example.com/x?q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026k%20k\u003dv/v?"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003da+b\u0026c\u003dd"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003dx#y"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/x?q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003dx#y"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003dx#y"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003da+b\u0026c\u003dd"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003da+b\u0026c\u003dd"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003d%7Bv%7D"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003d%7Bv%7D"}
+{"err":"Illegal character in query at index 29: https://api.example.com/x?q\u003da b\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x?q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da b"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003da%20b"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003da b"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003d{v}"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003d"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003d"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026q\u003d50%"}
+{"ok":"https://api.example.com/x?q\u003da%20b\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x?q\u003da b\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/%25"}
+{"ok":"https://api.example.com/%25"}
+{"ok":"https://api.example.com/%25?q\u003da%20b"}
+{"ok":"https://api.example.com/%25?q\u003da%20b"}
+{"ok":"https://api.example.com/%25?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%25?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003da b"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003da b"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%25"}
+{"ok":"https://api.example.com/%25"}
+{"ok":"https://api.example.com/%25?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d50%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d50%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d%7Bv%7D"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d%7Bv%7D"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d50%25"}
+{"err":"Malformed escape pair at index 24: https://api.example.com/%?q\u003d50%25"}
+{"ok":"https://api.example.com/%25"}
+{"ok":"https://api.example.com/%"}
+{"ok":"https://api.example.com/%25?q\u003dhello"}
+{"ok":"https://api.example.com/%?q\u003dhello"}
+{"ok":"https://api.example.com/%25?q\u003da%20b"}
+{"ok":"https://api.example.com/%?q\u003da b"}
+{"ok":"https://api.example.com/%25?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%25?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/%?q\u003d{v}"}
+{"ok":"https://api.example.com/%25?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%25?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/%?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%25?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/%?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%25?q\u003d"}
+{"ok":"https://api.example.com/%?q\u003d"}
+{"ok":"https://api.example.com/%25?q\u003dx%23y"}
+{"ok":"https://api.example.com/%?q\u003dx#y"}
+{"ok":"https://api.example.com/%25?q\u003d50%25"}
+{"ok":"https://api.example.com/%?q\u003d50%"}
+{"ok":"https://api.example.com/%25?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/%?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x/%25u00e9"}
+{"ok":"https://api.example.com/x/%25u00e9"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003d50%25"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003d50%25"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dcaf%C3%A9%20%2541"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dhello"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dhello"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dcafé %41"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dcafé %41"}
+{"ok":"https://api.example.com/x/%25u00e9"}
+{"ok":"https://api.example.com/x/%25u00e9"}
+{"ok":"https://api.example.com/x/%25u00e9?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://api.example.com/x/%25u00e9?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dhello"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dhello"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dhello"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dx#y"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dx#y"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?k k\u003dv%2Fv%3F"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dcaf%C3%A9+%2541"}
+{"err":"Malformed escape pair at index 26: https://api.example.com/x/%u00e9?q\u003dcaf%C3%A9+%2541"}
+{"ok":"https://api.example.com/x/%25u00e9"}
+{"ok":"https://api.example.com/x/%u00e9"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dhello"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003dhello"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003da%20b"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003da b"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003d{v}"}
+{"ok":"https://api.example.com/x/%25u00e9?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x/%u00e9?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003dcafé %41"}
+{"ok":"https://api.example.com/x/%25u00e9?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x/%u00e9?k k\u003dv/v?"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003d"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003d"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003dx%23y"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003dx#y"}
+{"ok":"https://api.example.com/x/%25u00e9?q\u003d50%25"}
+{"ok":"https://api.example.com/x/%u00e9?q\u003d50%"}
+{"ok":"https://api.example.com/x/%25u00e9?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x/%u00e9?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x?q\u003d50%25"}
+{"ok":"//api.example.com/x?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"//api.example.com/x?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x?q\u003d"}
+{"ok":"//api.example.com/x?q\u003d"}
+{"ok":"//api.example.com/x?q\u003dcaf%C3%A9%20%2541"}
+{"ok":"//api.example.com/x"}
+{"err":"Malformed escape pair at index 24: //api.example.com/x?q\u003d50%"}
+{"err":"Malformed escape pair at index 24: //api.example.com/x?q\u003d50%"}
+{"err":"Illegal character in query at index 21: //api.example.com/x?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 21: //api.example.com/x?k k\u003dv/v?"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x?q\u003d50%25"}
+{"ok":"//api.example.com/x?q\u003d50%25"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x"}
+{"ok":"//api.example.com/x?q\u003dhello"}
+{"ok":"//api.example.com/x?q\u003dhello"}
+{"ok":"//api.example.com/x?q\u003da%20b"}
+{"ok":"//api.example.com/x?q\u003da b"}
+{"ok":"//api.example.com/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"//api.example.com/x?q\u003da+b\u0026c\u003dd"}
+{"ok":"//api.example.com/x?q\u003d%7Bv%7D"}
+{"ok":"//api.example.com/x?q\u003d{v}"}
+{"ok":"//api.example.com/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"//api.example.com/x?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"//api.example.com/x?q\u003dcafé%20%2541"}
+{"ok":"//api.example.com/x?q\u003dcafé %41"}
+{"ok":"//api.example.com/x?k%20k\u003dv/v?"}
+{"ok":"//api.example.com/x?k k\u003dv/v?"}
+{"ok":"//api.example.com/x?q\u003d"}
+{"ok":"//api.example.com/x?q\u003d"}
+{"ok":"//api.example.com/x?q\u003dx%23y"}
+{"ok":"//api.example.com/x?q\u003dx#y"}
+{"ok":"//api.example.com/x?q\u003d50%25"}
+{"ok":"//api.example.com/x?q\u003d50%"}
+{"ok":"//api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"//api.example.com/x?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path?k%20k\u003dv/v?"}
+{"ok":"/relative/path?k%20k\u003dv/v?"}
+{"ok":"/relative/path?q\u003da%20b"}
+{"ok":"/relative/path?q\u003da%20b"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path?q\u003dx#y"}
+{"ok":"/relative/path?q\u003dx#y"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"/relative/path?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path?q\u003d%7Bv%7D"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path"}
+{"ok":"/relative/path?q\u003dhello"}
+{"ok":"/relative/path?q\u003dhello"}
+{"ok":"/relative/path?q\u003da%20b"}
+{"ok":"/relative/path?q\u003da b"}
+{"ok":"/relative/path?q\u003da+b\u0026c\u003dd"}
+{"ok":"/relative/path?q\u003da+b\u0026c\u003dd"}
+{"ok":"/relative/path?q\u003d%7Bv%7D"}
+{"ok":"/relative/path?q\u003d{v}"}
+{"ok":"/relative/path?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"/relative/path?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"/relative/path?q\u003dcafé%20%2541"}
+{"ok":"/relative/path?q\u003dcafé %41"}
+{"ok":"/relative/path?k%20k\u003dv/v?"}
+{"ok":"/relative/path?k k\u003dv/v?"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path?q\u003d"}
+{"ok":"/relative/path?q\u003dx%23y"}
+{"ok":"/relative/path?q\u003dx#y"}
+{"ok":"/relative/path?q\u003d50%25"}
+{"ok":"/relative/path?q\u003d50%"}
+{"ok":"/relative/path?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"/relative/path?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"relative"}
+{"ok":"relative?q\u003da+b%26c%3Dd"}
+{"ok":"relative?q\u003da+b%26c%3Dd"}
+{"ok":"relative?q\u003dx%23y"}
+{"ok":"relative?q\u003dx%23y"}
+{"ok":"relative"}
+{"err":"Malformed escape pair at index 13: relative?q\u003d50%"}
+{"err":"Malformed escape pair at index 13: relative?q\u003d50%"}
+{"err":"Illegal character in query at index 15: relative?q\u003dcafé %41"}
+{"err":"Illegal character in query at index 15: relative?q\u003dcafé %41"}
+{"ok":"/relative"}
+{"ok":"/relative"}
+{"ok":"/relative?q\u003dx%23y"}
+{"ok":"/relative?q\u003dx%23y"}
+{"ok":"relative"}
+{"ok":"relative"}
+{"err":"Illegal character in query at index 15: relative?q\u003dcafé %41"}
+{"err":"Illegal character in query at index 15: relative?q\u003dcafé %41"}
+{"ok":"relative?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"relative?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"relative"}
+{"ok":"relative"}
+{"ok":"relative?q\u003d"}
+{"ok":"relative?q\u003d"}
+{"ok":"relative"}
+{"ok":"relative"}
+{"ok":"relative?q\u003dhello"}
+{"ok":"relative?q\u003dhello"}
+{"ok":"relative?q\u003da%20b"}
+{"ok":"relative?q\u003da b"}
+{"ok":"relative?q\u003da+b\u0026c\u003dd"}
+{"ok":"relative?q\u003da+b\u0026c\u003dd"}
+{"ok":"relative?q\u003d%7Bv%7D"}
+{"ok":"relative?q\u003d{v}"}
+{"ok":"relative?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"relative?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"relative?q\u003dcafé%20%2541"}
+{"ok":"relative?q\u003dcafé %41"}
+{"ok":"relative?k%20k\u003dv/v?"}
+{"ok":"relative?k k\u003dv/v?"}
+{"ok":"relative?q\u003d"}
+{"ok":"relative?q\u003d"}
+{"ok":"relative?q\u003dx%23y"}
+{"ok":"relative?q\u003dx#y"}
+{"ok":"relative?q\u003d50%25"}
+{"ok":"relative?q\u003d50%"}
+{"ok":"relative?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"relative?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:?q\u003da+b%26c%3Dd"}
+{"ok":"mailto:?q\u003dx%23y"}
+{"ok":"mailto:?q\u003dx%23y"}
+{"ok":"mailto:someone@example.com"}
+{"err":"Illegal character in opaque part at index 14: mailto:?q\u003dcafé %41"}
+{"err":"Illegal character in opaque part at index 14: mailto:?q\u003dcafé %41"}
+{"err":"Illegal character in opaque part at index 9: mailto:?k k\u003dv/v?"}
+{"err":"Expected scheme-specific part at index 7: mailto:"}
+{"err":"Expected scheme-specific part at index 7: mailto:"}
+{"ok":"mailto:?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"mailto:?q\u003d"}
+{"ok":"mailto:?q\u003d"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:someone@example.com"}
+{"err":"Illegal character in opaque part at index 9: mailto:?k k\u003dv/v?"}
+{"err":"Illegal character in opaque part at index 9: mailto:?k k\u003dv/v?"}
+{"err":"Illegal character in opaque part at index 11: mailto:?q\u003da b"}
+{"err":"Illegal character in opaque part at index 11: mailto:?q\u003da b"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:?q\u003d%7Bv%7D"}
+{"ok":"mailto:?q\u003d%7Bv%7D"}
+{"ok":"mailto:?q\u003d50%25"}
+{"ok":"mailto:?q\u003d50%25"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:someone@example.com"}
+{"ok":"mailto:?q\u003dhello"}
+{"ok":"mailto:?q\u003dhello"}
+{"ok":"mailto:?q\u003da%20b"}
+{"ok":"mailto:?q\u003da b"}
+{"ok":"mailto:?q\u003da+b\u0026c\u003dd"}
+{"ok":"mailto:?q\u003da+b\u0026c\u003dd"}
+{"ok":"mailto:?q\u003d%7Bv%7D"}
+{"ok":"mailto:?q\u003d{v}"}
+{"ok":"mailto:?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"mailto:?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"mailto:?q\u003dcafé%20%2541"}
+{"ok":"mailto:?q\u003dcafé %41"}
+{"ok":"mailto:?k%20k\u003dv/v?"}
+{"ok":"mailto:?k k\u003dv/v?"}
+{"ok":"mailto:?q\u003d"}
+{"ok":"mailto:?q\u003d"}
+{"ok":"mailto:?q\u003dx%23y"}
+{"ok":"mailto:?q\u003dx#y"}
+{"ok":"mailto:?q\u003d50%25"}
+{"ok":"mailto:?q\u003d50%"}
+{"ok":"mailto:?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"mailto:?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da+b\u0026c\u003dd"}
+{"err":"Illegal character in query at index 46: https://graph.facebook.com/v21.0/me/accounts?k k\u003dv/v?"}
+{"err":"Illegal character in query at index 46: https://graph.facebook.com/v21.0/me/accounts?k k\u003dv/v?"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx%23y"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx%23y"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx#y"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx#y"}
+{"err":"Malformed escape pair at index 49: https://graph.facebook.com/v21.0/me/accounts?q\u003d50%"}
+{"err":"Malformed escape pair at index 49: https://graph.facebook.com/v21.0/me/accounts?q\u003d50%"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d50%25"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d50%25"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d%7Bv%7D"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d%7Bv%7D"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dhello"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dhello"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da%20b"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da b"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d%7Bv%7D"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d{v}"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dcafé%20%2541"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dcafé %41"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?k%20k\u003dv/v?"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?k k\u003dv/v?"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx%23y"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003dx#y"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d50%25"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?q\u003d50%"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://graph.facebook.com/v21.0/me/accounts?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/%20a%20/%20b%20"}
+{"ok":"https://api.example.com/%20a%20/%20b%20"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003d"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003d50%25"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/a/b"}
+{"ok":"https://api.example.com/a/b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a/b?q\u003dx%23y"}
+{"ok":"https://api.example.com/a/b"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003dhello"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003dhello"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b "}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003da%2Bb%26c%3Dd"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003da%2Bb%26c%3Dd"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003d50%25"}
+{"err":"Illegal character in path at index 24: https://api.example.com/ a / b ?q\u003d50%25"}
+{"ok":"https://api.example.com/%20a%20/%20b%20"}
+{"ok":"https://api.example.com/ a / b "}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003dhello"}
+{"ok":"https://api.example.com/ a / b ?q\u003dhello"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003da%20b"}
+{"ok":"https://api.example.com/ a / b ?q\u003da b"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/ a / b ?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/ a / b ?q\u003d{v}"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/ a / b ?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/ a / b ?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/ a / b ?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003d"}
+{"ok":"https://api.example.com/ a / b ?q\u003d"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003dx%23y"}
+{"ok":"https://api.example.com/ a / b ?q\u003dx#y"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?q\u003d50%25"}
+{"ok":"https://api.example.com/ a / b ?q\u003d50%"}
+{"ok":"https://api.example.com/%20a%20/%20b%20?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/ a / b ?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x%7Cy"}
+{"ok":"https://api.example.com/x%7Cy"}
+{"ok":"https://api.example.com/x%7Cy?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x%7Cy?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da+b%26c%3Dd"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da+b%26c%3Dd"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003da b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003da b"}
+{"ok":"https://api.example.com/x%7Cy"}
+{"ok":"https://api.example.com/x%7Cy"}
+{"ok":"https://api.example.com/x%7Cy?q\u003dx%23y"}
+{"ok":"https://api.example.com/x%7Cy?q\u003dx%23y"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da+b%26c%3Dd"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da+b%26c%3Dd"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003dcafé %41"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003dcafé %41"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003da b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003da b"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003d%7Bv%7D"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x|y?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x%7Cy"}
+{"ok":"https://api.example.com/x|y"}
+{"ok":"https://api.example.com/x%7Cy?q\u003dhello"}
+{"ok":"https://api.example.com/x|y?q\u003dhello"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da%20b"}
+{"ok":"https://api.example.com/x|y?q\u003da b"}
+{"ok":"https://api.example.com/x%7Cy?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x|y?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x%7Cy?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x|y?q\u003d{v}"}
+{"ok":"https://api.example.com/x%7Cy?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x|y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x%7Cy?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x|y?q\u003dcafé %41"}
+{"ok":"https://api.example.com/x%7Cy?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x|y?k k\u003dv/v?"}
+{"ok":"https://api.example.com/x%7Cy?q\u003d"}
+{"ok":"https://api.example.com/x|y?q\u003d"}
+{"ok":"https://api.example.com/x%7Cy?q\u003dx%23y"}
+{"ok":"https://api.example.com/x|y?q\u003dx#y"}
+{"ok":"https://api.example.com/x%7Cy?q\u003d50%25"}
+{"ok":"https://api.example.com/x|y?q\u003d50%"}
+{"ok":"https://api.example.com/x%7Cy?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x|y?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x%22y"}
+{"ok":"https://api.example.com/x%22y"}
+{"ok":"https://api.example.com/x%22y?q\u003d50%25"}
+{"ok":"https://api.example.com/x%22y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x%22y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"ok":"https://api.example.com/x%22y"}
+{"ok":"https://api.example.com/x%22y"}
+{"ok":"https://api.example.com/x%22y?q\u003dx%23y"}
+{"ok":"https://api.example.com/x%22y?q\u003dx%23y"}
+{"ok":"https://api.example.com/x%22y?q\u003dx%23y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?q\u003dhello"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"err":"Illegal character in path at index 25: https://api.example.com/x\"y?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"https://api.example.com/x%22y"}
+{"ok":"https://api.example.com/x\"y"}
+{"ok":"https://api.example.com/x%22y?q\u003dhello"}
+{"ok":"https://api.example.com/x\"y?q\u003dhello"}
+{"ok":"https://api.example.com/x%22y?q\u003da%20b"}
+{"ok":"https://api.example.com/x\"y?q\u003da b"}
+{"ok":"https://api.example.com/x%22y?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x\"y?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x%22y?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x\"y?q\u003d{v}"}
+{"ok":"https://api.example.com/x%22y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x\"y?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x%22y?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x\"y?q\u003dcafé %41"}
+{"ok":"https://api.example.com/x%22y?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x\"y?k k\u003dv/v?"}
+{"ok":"https://api.example.com/x%22y?q\u003d"}
+{"ok":"https://api.example.com/x\"y?q\u003d"}
+{"ok":"https://api.example.com/x%22y?q\u003dx%23y"}
+{"ok":"https://api.example.com/x\"y?q\u003dx#y"}
+{"ok":"https://api.example.com/x%22y?q\u003d50%25"}
+{"ok":"https://api.example.com/x\"y?q\u003d50%"}
+{"ok":"https://api.example.com/x%22y?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x\"y?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da%20b#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da%20b#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dhello#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dhello#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dx%23y#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dx%23y#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d50%25#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d50%25#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"err":"Illegal character in query at index 31: https://api.example.com/x?a\u003d1\u0026k k\u003dv/v?#f?g"}
+{"err":"Illegal character in query at index 31: https://api.example.com/x?a\u003d1\u0026k k\u003dv/v?#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dhello#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dhello#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da%20b#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da b#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da+b\u0026c\u003dd#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003da+b\u0026c\u003dd#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d%7Bv%7D#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d{v}#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dcafé%20%2541#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dcafé %41#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026k%20k\u003dv/v?#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026k k\u003dv/v?#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dx%23y#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003dx#y#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d50%25#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026q\u003d50%#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#f?g"}
+{"ok":"https://api.example.com/x?a\u003d1\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2#f?g"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"ok":"https://api.example.com/x/Y/z?w\u003dY\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"ok":"https://api.example.com/x/Y/z?w\u003dY\u0026q\u003da+b\u0026c\u003dd"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"ok":"https://api.example.com/x/Y/z?w\u003dY"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"err":"Map has no value for \u0027y\u0027"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003dhello"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003da%20b"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003da b"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003d{v}"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003dcafé %41"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026k k\u003dv/v?"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003d"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003d"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003dx%23y"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003dx#y"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026q\u003d50%25"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026q\u003d50%"}
+{"ok":"https://api.example.com/x/%7By%7D/z?w\u003d%7By%7D\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/x/{y}/z?w\u003d{y}\u0026redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"*"}
+{"ok":"*?q\u003dx%23y"}
+{"ok":"*?q\u003dx%23y"}
+{"err":"Map has no value for \u0027v\u0027"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*?q\u003dx#y"}
+{"ok":"*?q\u003dx#y"}
+{"ok":"*?q\u003d"}
+{"ok":"/*"}
+{"ok":"/*"}
+{"ok":"/*?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"/*?q\u003dhello"}
+{"ok":"/*?q\u003dhello"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*?q\u003dhello"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*?q\u003da%2Bb%26c%3Dd"}
+{"ok":"*?q\u003da%2Bb%26c%3Dd"}
+{"ok":"*?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"*?redirect_uri\u003dhttps%3A%2F%2Fx.com%2Fcb%3Fy%3D1%26z%3D2"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*?q\u003dhello"}
+{"ok":"*?q\u003dhello"}
+{"ok":"*?q\u003da%20b"}
+{"ok":"*?q\u003da b"}
+{"ok":"*?q\u003da+b\u0026c\u003dd"}
+{"ok":"*?q\u003da+b\u0026c\u003dd"}
+{"ok":"*?q\u003d%7Bv%7D"}
+{"ok":"*?q\u003d{v}"}
+{"ok":"*?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"*?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"*?q\u003dcafé%20%2541"}
+{"ok":"*?q\u003dcafé %41"}
+{"ok":"*?k%20k\u003dv/v?"}
+{"ok":"*?k k\u003dv/v?"}
+{"ok":"*?q\u003d"}
+{"ok":"*?q\u003d"}
+{"ok":"*?q\u003dx%23y"}
+{"ok":"*?q\u003dx#y"}
+{"ok":"*?q\u003d50%25"}
+{"ok":"*?q\u003d50%"}
+{"ok":"*?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"*?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?k%20k\u003dv/v?"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?k%20k\u003dv/v?"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003d50%"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003d50%"}
+{"ok":"https://api.example.com/%7Ba/b%7D"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003d"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003d"}
+{"ok":"https://api.example.com/%7Ba/b%7D?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003dcafé %41"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003d50%"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003d50%"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?q\u003dhello"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?k k\u003dv%2Fv%3F"}
+{"err":"Illegal character in path at index 24: https://api.example.com/{a/b}?k k\u003dv%2Fv%3F"}
+{"ok":"https://api.example.com/%7Ba/b%7D"}
+{"ok":"https://api.example.com/{a/b}"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{a/b}?q\u003dhello"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{a/b}?q\u003da b"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{a/b}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{a/b}?q\u003d{v}"}
+{"ok":"https://api.example.com/%7Ba/b%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{a/b}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{a/b}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7Ba/b%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{a/b}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003d"}
+{"ok":"https://api.example.com/{a/b}?q\u003d"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{a/b}?q\u003dx#y"}
+{"ok":"https://api.example.com/%7Ba/b%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{a/b}?q\u003d50%"}
+{"ok":"https://api.example.com/%7Ba/b%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{a/b}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?redirect_uri\u003dhttps://x.com/cb?y%3D1%26z%3D2"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"err":"Map has no value for \u0027{a\u0027"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D"}
+{"ok":"https://api.example.com/{{a}}"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003dhello"}
+{"ok":"https://api.example.com/{{a}}?q\u003dhello"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003da%20b"}
+{"ok":"https://api.example.com/{{a}}?q\u003da b"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/{{a}}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003d%7Bv%7D"}
+{"ok":"https://api.example.com/{{a}}?q\u003d{v}"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/{{a}}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003dcafé%20%2541"}
+{"ok":"https://api.example.com/{{a}}?q\u003dcafé %41"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?k%20k\u003dv/v?"}
+{"ok":"https://api.example.com/{{a}}?k k\u003dv/v?"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003d"}
+{"ok":"https://api.example.com/{{a}}?q\u003d"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003dx%23y"}
+{"ok":"https://api.example.com/{{a}}?q\u003dx#y"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?q\u003d50%25"}
+{"ok":"https://api.example.com/{{a}}?q\u003d50%"}
+{"ok":"https://api.example.com/%7B%7Ba%7D%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://api.example.com/{{a}}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"ok":"https://a.com/X"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"ok":"https://a.com/X"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Map has no value for \u0027x\u0027"}
+{"err":"Illegal character in query at index 17: https://a.com/X?k k\u003dv%2Fv%3F"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D"}
+{"ok":"https://a.com/{x:{y}}"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003dhello"}
+{"ok":"https://a.com/{x:{y}}?q\u003dhello"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003da%20b"}
+{"ok":"https://a.com/{x:{y}}?q\u003da b"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://a.com/{x:{y}}?q\u003da+b\u0026c\u003dd"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003d%7Bv%7D"}
+{"ok":"https://a.com/{x:{y}}?q\u003d{v}"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://a.com/{x:{y}}?a\u003d1\u0026a\u003d3\u0026b\u003d2"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003dcafé%20%2541"}
+{"ok":"https://a.com/{x:{y}}?q\u003dcafé %41"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?k%20k\u003dv/v?"}
+{"ok":"https://a.com/{x:{y}}?k k\u003dv/v?"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003d"}
+{"ok":"https://a.com/{x:{y}}?q\u003d"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003dx%23y"}
+{"ok":"https://a.com/{x:{y}}?q\u003dx#y"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?q\u003d50%25"}
+{"ok":"https://a.com/{x:{y}}?q\u003d50%"}
+{"ok":"https://a.com/%7Bx:%7By%7D%7D?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}
+{"ok":"https://a.com/{x:{y}}?redirect_uri\u003dhttps://x.com/cb?y\u003d1\u0026z\u003d2"}

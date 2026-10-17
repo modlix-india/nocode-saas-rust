@@ -1,0 +1,26 @@
+{"ok":"7"}
+{"err":"_MiscTemplateException"}
+{"ok":"ltdltedx"}
+{"ok":"0"}
+{"err":"_TemplateModelException"}
+{"ok":"(5) -pre5 suf it's 5"}
+{"ok":"0 0 .0"}
+{"ok":"0.001 0.002 0.001 0.002"}
+{"ok":"a\nb"}
+{"ok":""}
+{"ok":"x  \ny"}
+{"ok":"p,q"}
+{"ok":"hne"}
+{"ok":"XXbB -AbB aZbB <a>AbB"}
+{"ok":"bAbB"}
+{"err":"_TemplateModelException"}
+{"err":"InvalidReferenceException"}
+{"ok":"1 dd"}
+{"err":"ParseException"}
+{"err":"_MiscTemplateException"}
+{"ok":"false"}
+{"err":"NonBooleanException"}
+{"ok":"2"}
+{"ok":"true"}
+{"ok":"1,000,000.5"}
+{"ok":"1E-4"}

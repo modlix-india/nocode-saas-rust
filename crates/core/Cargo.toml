@@ -1,0 +1,71 @@
+[package]
+name = "core"
+description = "core units: core-exec (function execution on the kirun crate, the function and schema repositories) and, later, storage, connections, worker and editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "modlix_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "core-exec"
+path = "src/bin/core-exec.rs"
+
+[[bin]]
+name = "core-scheduler"
+path = "src/bin/core-scheduler.rs"
+
+[[bin]]
+name = "core-events"
+path = "src/bin/core-events.rs"
+
+[[bin]]
+name = "core-editor"
+path = "src/bin/core-editor.rs"
+
+[dependencies]
+platform = { workspace = true, features = ["mongo"] }
+overridable = { path = "../overridable" }
+appdata = { path = "../appdata" }
+connections = { path = "../connections" }
+kirun.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+axum = { workspace = true, features = ["multipart"] }
+bytes.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+rand.workspace = true
+lapin = "4"
+uuid = { version = "1", features = ["v4"] }
+hex.workspace = true
+hmac.workspace = true
+http.workspace = true
+indexmap.workspace = true
+md-5.workspace = true
+mongodb.workspace = true
+parking_lot.workspace = true
+percent-encoding.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha1.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip.workspace = true
+quick-xml.workspace = true
+redis.workspace = true
+
+[dev-dependencies]
+toml = "0.8"
+tokio = { version = "1", features = ["full", "test-util"] }
+tower.workspace = true

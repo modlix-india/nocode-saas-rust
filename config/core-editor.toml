@@ -1,0 +1,45 @@
+# core-editor on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
+# from config/local.env; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
+# It runs core-exec's state as well (a storage's definition triggers are core functions), so it
+# needs the same databases and services; RabbitMQ is left unconfigured (publishing off).
+
+[server]
+port = 8111
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[mongo]
+uri = "mongodb://localhost:27017"
+database = "core"
+
+[database]
+host = "localhost"
+port = 3306
+database = "core"
+username = "root"
+max_connections = 8
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[entity_processor]
+upstream = "eureka:ENTITY-PROCESSOR"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[core]
+function_timeout_seconds = 300
+java_zone_offset = "+05:30"

@@ -1,0 +1,51 @@
+# gateway-rust messages, English: the gateway's own errors (a service's errors pass through
+# untouched). Format: see platform::messages::catalogue. The pool, the upstream address and the
+# underlying error go to debugMessage only; people see what to do.
+
+[GW.NO_ROUTE]
+status = 404
+text = "There is nothing at this address."
+action = "Check the address and try again."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 404, \"error\": \"Not Found\""
+when = "No route of the gateway matches the path and method."
+audience = "anyone"
+
+[GW.HOST_UNRESOLVED]
+status = 502
+text = "We couldn't tell which app this address belongs to."
+action = "Try again in a few seconds. If it keeps happening, give support the error id {errorId}."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 500, \"error\": \"Internal Server Error\""
+when = "The security service could not be asked which client and app the host belongs to."
+audience = "anyone"
+
+[GW.SERVICE_STARTING]
+status = 503
+text = "The service is restarting. Try again in a few seconds."
+action = "If it keeps happening, give support the error id {errorId}."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 503, \"error\": \"Service Unavailable\""
+when = "No instance of the service behind the route is registered or healthy (a deploy or restart is under way)."
+audience = "anyone"
+
+[GW.SERVICE_UNAVAILABLE]
+status = 503
+text = "The service is not answering right now. Try again in a few seconds."
+action = "If it keeps happening, give support the error id {errorId}."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 503, \"error\": \"Service Unavailable\""
+when = "Every instance tried refused the connection."
+audience = "anyone"
+
+[GW.SERVICE_TIMEOUT]
+status = 504
+text = "The service took too long to answer."
+action = "Try again. If it keeps happening, give support the error id {errorId}."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 504, \"error\": \"Gateway Timeout\""
+when = "The service did not answer within the route's timeout."
+audience = "anyone"
+
+[GW.SERVICE_FAILED]
+status = 502
+text = "The service stopped answering before it finished."
+action = "Try again. If it keeps happening, give support the error id {errorId}."
+java_text = "Spring Cloud Gateway's own error body: \"status\": 500, \"error\": \"Internal Server Error\""
+when = "The connection to the service broke before a full answer arrived."
+audience = "anyone"

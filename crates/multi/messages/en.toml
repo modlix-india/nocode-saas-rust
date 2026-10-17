@@ -1,0 +1,223 @@
+# multi messages, English (codes MULTI.*). Every key of the Java bundle
+# (multi/src/main/resources/messages_en.properties) has a code here, named after it, plus the
+# refusals the Rust unit raises with a literal text. `params` names Java's `$` values in order.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the objects they ask for. The Java text stays in
+# debugMessage. An error another service answers with its own code is passed on as it came
+# (crates/multi/DIFFERENCES.md). Format: platform::messages::catalogue.
+
+# ---- Exporting and creating apps ----
+
+[MULTI.TRANSPORT_EXPORT_FORBIDDEN]
+status = 403
+text = "You can't export this app: your organisation does not have write access to it."
+action = "Ask the app's owner to give your organisation write access to it."
+java = "forbidden_create"
+when = "Exporting an app (transport) whose owner has not given the caller's organisation write access; the same answer when no such app exists."
+audience = "signed-in"
+
+[MULTI.APP_CREATE_FORBIDDEN]
+status = 403
+text = "You can't create apps: your account does not have the Create applications permission."
+action = "Ask an owner of your organisation to give you the Create applications permission."
+java = "forbidden_create"
+when = "Creating an app without the Application CREATE permission."
+audience = "signed-in"
+
+# ---- App definitions (create or update from a transport) ----
+
+[MULTI.DEFINITION_URL_FAILED]
+status = 400
+params = ["status"]
+text = "We couldn't download the app definition from its address[: the address answered with status {status}]."
+action = "Check that the definition's address is right and can be reached, then try again."
+java_text = "Please try again. A server error - $"
+when = "Creating or updating an app from transportDefinitionURL when the address cannot be reached or answers an error."
+audience = "signed-in"
+
+[MULTI.DEFINITION_TOO_LARGE]
+status = 400
+text = "The app definition is too large: the limit is 50 MB."
+action = "Use a smaller definition and try again."
+java_text = "Please try again. A server error - $"
+when = "The definition downloaded from transportDefinitionURL is larger than 50 MB."
+audience = "signed-in"
+
+[MULTI.ENCODED_MODL_INVALID]
+status = 400
+text = "The uploaded app file could not be read."
+action = "Upload a .modl file exported from an app and try again."
+java = "multi_transport_error"
+java_text = "Please try again. A server error - $"
+when = "Creating or updating an app from an uploaded file (encodedModl) that is not valid base64. Java fails such an upload later, in its zip reader, with a 500."
+audience = "signed-in"
+
+[MULTI.DEFINITION_UNREADABLE]
+status = 400
+text = "The app definition could not be read: it is neither a JSON definition nor an exported app file."
+action = "Check the definition, or export the app again, and try again."
+java = "multi_transport_error"
+java_text = "Please try again. A server error - $"
+when = "A definition (uploaded, downloaded or sent as JSON) that is not valid JSON or not a readable .modl zip. Java answers multi_transport_error or, when its zip reader fails outside the IOException catch, the catch-all 500."
+audience = "signed-in"
+
+# ---- The services multi calls ----
+
+[MULTI.SERVICE_UNAVAILABLE]
+status = 503
+params = ["service"]
+text = "[The {service} service is|A service this needs is] not answering right now. Try again in a few seconds."
+action = "If it keeps happening, give support the error id {errorId}."
+java_text = "Please try again. A server error - $"
+when = "Security, core or ui could not be reached: no instance registered, connection refused, or no answer in time (then 504)."
+audience = "anyone"
+
+[MULTI.SERVICE_FAILED]
+status = 502
+params = ["service"]
+text = "We couldn't finish the request: [the {service} service|another service] did not answer as expected."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java_text = "Please try again. A server error - $"
+when = "Security, core or ui answered an error without a readable body (its status is passed on). An empty 401 reads COMMON.SIGNED_OUT and an empty 403 COMMON.FORBIDDEN instead."
+audience = "anyone"
+
+[MULTI.HEADER_MISSING]
+status = 400
+params = ["header"]
+text = "[The request is missing the {header} header.|The request is missing a required header.]"
+action = "Call this address through the gateway, which adds it, or send [the {header} header|the missing header] yourself."
+java_text = "Please try again. A server error - $"
+when = "A call without X-Forwarded-Host, X-Forwarded-Port, clientCode or appCode. The gateway always sends them, so only a direct call misses one."
+audience = "developers"
+
+# ---- The Java bundle's other keys (the commons ones every bundle carries) ----
+
+[MULTI.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create this {what|item}: you don't manage the organisation it would belong to."
+action = "Choose an organisation you manage, or ask an owner of that one."
+java = "forbidden_create"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping). Exporting and creating apps answer MULTI.TRANSPORT_EXPORT_FORBIDDEN and MULTI.APP_CREATE_FORBIDDEN."
+audience = "signed-in"
+
+[MULTI.MULTI_TRANSPORT_ERROR]
+status = 500
+text = "We couldn't create or update the app from its definition."
+action = "Try again. If it keeps happening, give support the error id {errorId}."
+java = "multi_transport_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping). A definition that cannot be read answers MULTI.ENCODED_MODL_INVALID or MULTI.DEFINITION_UNREADABLE."
+audience = "signed-in"
+
+[MULTI.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are looking in the right organisation."
+java = "object_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[MULTI.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}] to change it."
+action = "Check that it still exists and that you can manage it."
+java = "object_not_found_to_update"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[MULTI.FORBIDDEN_PERMISSION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't do this: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[MULTI.UNABLE_TO_DELETE]
+status = 400
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]."
+java = "unable_to_delete"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[MULTI.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed."
+java = "object_not_updatable"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[MULTI.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping). An unexpected failure answers COMMON.INTERNAL_ERROR, which says the same."
+audience = "anyone"
+
+[MULTI.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save your changes."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "[{value} can't be read as {type|the expected type}.|A value can't be read as the expected type.]"
+java = "unable_to_convert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[MULTI.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "[A {what|item} named {name} already exists.|This already exists.]"
+java = "already_exists"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"

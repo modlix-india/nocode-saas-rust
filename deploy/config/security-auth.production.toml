@@ -1,0 +1,47 @@
+# security-auth in production: security's AuthenticationController, alongside Java security on
+# the same database until all of security is ported. gateway-rust sends the browser-facing
+# authentication paths here; Java services keep reaching security through Feign (eureka:SECURITY),
+# so this unit does not register in Eureka.
+# NOT APPLIED ANYWHERE: an example for review.
+
+[server]
+port = 8101
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "production"
+
+[database]
+host = "prod-mysql.sub10150624021.modlixvcn.oraclevcn.com"
+port = 3306
+database = "security"
+username = "security"     # password: MODLIX__DATABASE__PASSWORD
+max_connections = 16
+
+[redis]
+cache_prefix = "cmn"      # url: MODLIX__REDIS__URL
+eviction_channel = "evictionChannel"
+
+[jwt]
+# key: MODLIX__JWT__KEY (the same jwt.key Java security signs with)
+default_expiry_minutes = 30
+remember_me_expiry_minutes = 525600
+refresh_minutes = 10
+
+[security]
+# Copy both from the production Spring config (security.appCodeSuffix,
+# security.subdomain.endings) before applying.
+app_code_suffix = "<security.appCodeSuffix>"
+subdomain_endings = "<security.subdomain.endings>"
+one_time_token_max_age_minutes = 5
+
+[mq]
+# uri: MODLIX__MQ__URI (amqp://user:password@host:5672/%2f)
+exchange = "events"
+routing_keys = "events1,events2,events3"
+
+[otp]
+publish_events = true
+
+# [sms] two_factor_api_key: MODLIX__SMS__TWO_FACTOR_API_KEY

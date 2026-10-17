@@ -1,0 +1,40 @@
+[package]
+name = "appdata"
+description = "The app-data storage engines of the Java core service: Mongo and MySQL backends behind one trait, with the MySQL DDL, migration journal and drift report."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+platform.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+futures.workspace = true
+hex.workspace = true
+hostname.workspace = true
+http.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
+mongodb.workspace = true
+rand.workspace = true
+regex.workspace = true
+ryu.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest.workspace = true
+
+# The read parity run against the Java core service; lives with the other parity tools.
+[[example]]
+name = "parity_appdata"
+path = "../../tools/parity_appdata/parity_appdata.rs"

@@ -1,0 +1,1192 @@
+# Core service messages, English (codes CORE.*): the errors of core-exec, core-editor,
+# core-events and core-scheduler, and of the libraries they run (appdata: the storage engines;
+# connections: REST, e-mail, AI, tokens). Every key of the Java core bundle
+# (core/src/main/resources/messages_en.properties, 79 keys) has a code here, named after it,
+# plus the refusals Java raises with a literal text (`java_text`, `$` for each value).
+# `params` names Java's `$` values in order.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the objects they ask for, and signed-in callers never
+# learn whether another organisation's object exists (the 404 and 403 answers stay as Java
+# sends them). Java's text stays in debugMessage. Format: platform::messages::catalogue.
+
+# ---- Running functions ----
+
+[CORE.FUNCTION_NOT_FOUND]
+status = 404
+params = ["what", "function"]
+text = "We couldn't find the function[ {function}]."
+action = "Check the function's namespace and name, and that it is saved in this app."
+java = "object_not_found"
+when = "Running a function (the execute routes, an event's CALL_CORE_FUNCTION task, a step that names a function) that no repository of the app has."
+audience = "anyone"
+
+[CORE.FUNCTION_NO_RESULT]
+status = 404
+params = ["what", "function"]
+text = "The function[ {function}] found nothing to answer with."
+action = "Check the values given to it (ids, codes)."
+java = "object_not_found"
+when = "A CoreServices.Security function whose call to security answers with nothing."
+audience = "anyone"
+
+[CORE.FORBIDDEN_EXECUTION]
+status = 403
+params = ["authorization", "function"]
+text = "You can't run [the function {function}|this function]: it needs a permission your account does not have."
+action = "Sign in with an account that has it, or ask an owner of your organisation for it."
+java = "forbidden_execution"
+when = "Running a function whose execution authorization the caller's permissions do not meet."
+audience = "anyone"
+
+[CORE.EMPTY_FUNCTION_RESPONSE]
+status = 500
+params = ["function"]
+text = "The function[ {function}] gave no answer."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "empty_function_response"
+when = "A function served by entity-processor (a remote repository) answers with nothing."
+audience = "anyone"
+
+[CORE.FUNCTION_TIMED_OUT]
+status = 500
+params = ["function"]
+text = "The function[ {function}] took too long and was stopped."
+action = "Try again later. If it keeps happening, make the function do less in one run."
+java_text = "Function execution timed out : $. Please try again later."
+when = "A stored function runs longer than the time core allows one run."
+audience = "anyone"
+
+[CORE.FUNCTION_STEP_FAILED]
+status = 500
+params = ["step", "stepFunction", "function", "reason"]
+text = "[Step {step}|A step][ ({stepFunction})][ in {function}] failed[: {reason}]."
+action = "Check what that step is given. If it keeps happening, give support the error id {errorId}."
+java_text = "Please try again. A server error - $"
+when = "A server function fails inside one of its steps (a value that does not fit a step's parameter, an expression that cannot be worked out, a function a step calls that fails). The step is the innermost one that failed; the whole chain is in debugMessage."
+audience = "anyone"
+
+[CORE.FUNCTION_FAILED]
+status = 500
+params = ["function", "reason"]
+text = "The function[ {function}] failed[: {reason}]."
+action = "Check the values given to the function. If it keeps happening, give support the error id {errorId}."
+java_text = "Please try again. A server error - $"
+when = "A function fails where no step accounts for it (a system function given a value that does not fit, a function with no steps)."
+audience = "anyone"
+
+[CORE.UNABLE_TO_EXECUTE]
+status = 500
+params = ["name", "namespace", "parameters"]
+text = "The event's task names no function to run."
+action = "Set the namespace and name of the function in the event action's task."
+java = "unable_to_execute"
+when = "An event action's CALL_CORE_FUNCTION task without a function namespace or name (core-events; kept in the event run log)."
+audience = "developers"
+
+[CORE.SERVER_FUNCTION_ONLY]
+status = 403
+params = ["function"]
+text = "[{function}|This function] can only be used inside a server function."
+action = "Call it from a step of a server function."
+java_text = "$ can only be called from a server function"
+when = "A security or messaging function of core called directly (the execute address, a page) instead of from a server function's step."
+audience = "anyone"
+
+[CORE.SECURITY_CONTEXT_MISSING]
+status = 403
+params = ["function"]
+text = "[{function}|This function] can only run while serving a request."
+action = "Run it from a function a page or an address calls, not from an event or a schedule."
+java_text = "$ needs a security context"
+when = "A security function of core running with no request (an event or a schedule)."
+audience = "anyone"
+
+[CORE.SIGNED_IN_USER_REQUIRED]
+status = 403
+params = ["function"]
+text = "[{function}|This function] needs a signed-in user."
+action = "Sign in and try again."
+java_text = "$ needs a signed in user"
+when = "A function that acts as the caller (CoreServices.Security user and client changes) run by an anonymous caller."
+audience = "anyone"
+
+[CORE.CALLER_TOKEN_MISSING]
+status = 403
+params = ["function"]
+text = "[{function}|This function] has no sign-in to act with."
+action = "Sign in again and try again."
+java_text = "$ has no caller token to act with"
+when = "A function that acts as the caller run for a signed-in caller whose request carries no token."
+audience = "signed-in"
+
+[CORE.CALLER_REQUEST_REQUIRED]
+status = 403
+params = ["function"]
+text = "[{function}|This function] acts for the signed-in user, so it can only run while serving their request."
+action = "Run it from a function a page calls, not from an event, a schedule or an internal call."
+java_text = "$ acts only inside a caller's request; this execution (an event, a schedule or an internal call) has no request to act as"
+when = "A function that acts as the caller run outside a caller's request."
+audience = "signed-in"
+
+[CORE.PLATFORM_FUNCTION_REFUSED]
+status = 403
+params = ["function"]
+text = "[{function}|This function] runs only as a task of the platform app's events."
+java_text = "$ runs only as a task of the platform app's events"
+when = "A CoreServices.Platform function called from anywhere but a core-events task of the platform app (SYSTEM)."
+audience = "anyone"
+
+[CORE.PLATFORM_PARTIAL_FAILURE]
+status = 502
+params = ["function", "errors", "result"]
+text = "Some of the calls[ of {function}] failed[: {errors}]."
+action = "Try again in a moment. The calls that worked are listed in debugMessage."
+java_text = "$: $ (result: $)"
+when = "A CoreServices.Platform function whose independent calls to the services did not all succeed."
+audience = "developers"
+
+[CORE.PLATFORM_ARGUMENT_INVALID]
+status = 400
+params = ["function", "argument", "expected"]
+text = "[The argument {argument}[ of {function}] is not valid|An argument is not valid][: it should be {expected}]."
+action = "Correct [{argument}|the argument] in the event action's task and try again."
+java_text = ["$.Meter has no service '$'. Expected security, core, entity-processor or files.", "$.CleanupTransports has no 'service'. Expected 'ui' or 'core'.", "Unknown service in transport cleanup: '$'. Expected 'ui' or 'core'."]
+when = "A CoreServices.Platform function given a service it does not know."
+audience = "developers"
+
+# ---- Function arguments ----
+
+[CORE.ARGUMENT_REQUIRED]
+status = 400
+params = ["argument"]
+text = "[The argument {argument} is missing.|A required argument is missing.]"
+action = "Pass [{argument}|it] to the function and try again."
+java_text = "$ is required"
+when = "A security, messaging or schedule function of core called without a value it needs (clientId, userId, appCode, to...)."
+audience = "anyone"
+
+[CORE.ARGUMENT_INVALID]
+status = 400
+params = ["argument", "expected"]
+text = "[The argument {argument} is not valid[: it should be {expected}].|An argument is not valid[: it should be {expected}].]"
+action = "Correct [{argument}|the argument] and try again."
+java_text = ["$ must be a number or a numeric string", "$ is not an id : $", "$ must be an object", "status must be ACTIVE or INACTIVE"]
+when = "A security function of core given a value of the wrong kind (an id that is not a whole number, a status that is not ACTIVE or INACTIVE)."
+audience = "anyone"
+
+[CORE.CONDITION_INVALID]
+status = 400
+text = "The filter condition is not valid."
+action = "Give each condition a field and a value, or sub-conditions."
+java_text = "Invalid condition"
+when = "A storage function (CoreServices.Storage.ReadPage, DeleteByFilter...) or a user query of CoreServices.Security given a filter condition with neither a field nor an expression."
+audience = "anyone"
+
+[CORE.HASH_ALGORITHM_MISSING]
+status = 400
+text = "No hash algorithm was given."
+action = "Pass an algorithm such as SHA-256."
+java_text = "Algorithm cannot be null or empty"
+when = "CoreServices.Hash called without an algorithm."
+audience = "anyone"
+
+[CORE.HASH_ALGORITHM_UNSUPPORTED]
+status = 400
+params = ["algorithm"]
+text = "The hash algorithm[ {algorithm}] is not supported."
+action = "Use SHA-256, SHA-384, SHA-512, SHA-1, MD5 or MD2."
+java_text = "Hash algorithm not supported: $"
+when = "CoreServices.Hash called with an algorithm the platform does not have."
+audience = "anyone"
+
+[CORE.KEY_TOO_SHORT]
+status = 500
+params = ["use", "bits", "algorithm"]
+text = "The [{use} ]key is too short for [the {algorithm} algorithm|its algorithm][: it has {bits} bits]."
+action = "Use a longer key."
+java_text = "The $ key's size is $ bits which is not secure enough for the $ algorithm."
+when = "CoreServices.Crypto signing or verifying with a key shorter than the algorithm needs."
+audience = "anyone"
+
+# ---- Security functions (acting for the caller) ----
+
+[CORE.FORBIDDEN_PERMISSION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't do this: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "A CoreServices.Security function refused the way security would refuse it (client managers, client updates and deletes, client activities)."
+audience = "signed-in"
+
+[CORE.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create this {what|item}: you don't manage the organisation it would belong to."
+action = "Choose an organisation you manage, or ask an owner of that one."
+java = "forbidden_create"
+when = "CoreServices.Security.CreateUser for a client the caller does not manage."
+audience = "signed-in"
+
+[CORE.USER_UPDATE_FORBIDDEN]
+status = 403
+text = "You can't change this user: you don't manage the organisation they belong to."
+action = "Ask an owner of that organisation."
+java_text = "Cannot update user for the selected client"
+when = "CoreServices.Security.UpdateUser or DeleteUser for a user of a client the caller does not manage."
+audience = "signed-in"
+
+[CORE.USER_STATUS_FORBIDDEN]
+status = 403
+text = "You can't change whether this user is active."
+action = "Ask an owner of the user's organisation."
+java_text = "selected user doesn't have access to change status code"
+when = "CoreServices.Security.SetUserStatus for a user the caller does not manage."
+audience = "signed-in"
+
+[CORE.CLIENT_STATUS_FORBIDDEN]
+status = 403
+text = "You can't change whether this organisation is active."
+action = "Ask an owner of the organisation that manages it."
+java_text = "selected client doesn't have access to change status code"
+when = "CoreServices.Security.SetClientStatus for a client the caller does not manage."
+audience = "signed-in"
+
+[CORE.PROFILE_FORBIDDEN_FOR_USER]
+status = 403
+params = ["profile", "user"]
+text = "You can't give this profile to this user."
+action = "Assign only profiles available to the user's organisation, and only to users you manage."
+java_text = "$ profile forbidden for the $ user"
+when = "CoreServices.Security.AssignProfile or RemoveProfile for a user the caller does not manage."
+audience = "signed-in"
+
+[CORE.OWN_CLIENT_REFUSED]
+status = 403
+params = ["function", "client"]
+text = "[{function}|This function] does not act on your own organisation."
+action = "Choose an organisation your organisation manages."
+java_text = "$ does not act on the caller's own client $"
+when = "A client-changing CoreServices.Security function (status, update, delete) aimed at the caller's own client."
+audience = "signed-in"
+
+[CORE.CLIENT_OUT_OF_SCOPE]
+status = 403
+params = ["function", "client"]
+text = "You can't act for [the client {client}|that client]: it is not your organisation or one it manages."
+action = "Choose your own organisation or one it manages."
+java_text = ["$: client $ is neither the caller's client nor one it manages", "$: client $ is not the caller's client, one it manages or the client that manages it"]
+when = "A CoreServices.Security function (user query, client managers, client reads) aimed at a client outside the caller's scope."
+audience = "signed-in"
+
+[CORE.APP_NOT_FOUND]
+status = 404
+params = ["app"]
+text = "We couldn't find the app[ {app}]."
+action = "Check the app's code."
+java_text = "No app found with code : $"
+when = "CoreServices.Security.GetAppProfiles for an app code security does not know."
+audience = "signed-in"
+
+[CORE.USER_NOT_FOUND]
+status = 400
+params = ["id"]
+text = "We couldn't find the user[ with id {id}]."
+action = "Check the user's id."
+java_text = "No user found with id : $"
+when = "CoreServices.Security.GetUserSubOrg for a user id security does not know."
+audience = "signed-in"
+
+[CORE.USER_NOT_RELATED]
+status = 403
+params = ["user"]
+text = "You can't look up this user: they belong to an organisation not related to yours."
+java_text = "User $ is not in a client related to the current user's"
+when = "CoreServices.Security.GetUserSubOrg for a user of a client unrelated to the caller's."
+audience = "signed-in"
+
+[CORE.OTHER_USER_REFUSED]
+status = 403
+params = ["function"]
+text = "[{function}|This function] answers only for the signed-in user."
+action = "Leave out userId, or pass your own."
+java_text = "GetManagedClientIds answers only for the current user; security exposes no other user's roles"
+when = "CoreServices.Security.GetManagedClientIds asked about another user."
+audience = "signed-in"
+
+[CORE.CLIENT_NOT_RELATED]
+status = 403
+params = ["client"]
+text = "You can't act for [the client {client}|that client]: it is not related to your organisation."
+action = "Choose your own organisation or one related to it."
+java_text = ["Client $ is not related to the current user's client", "Not allowed to list the users of client $"]
+when = "A CoreServices.Security function (users for distribution, a client's users page) aimed at a client unrelated to the caller's."
+audience = "signed-in"
+
+# ---- Messages and schedules ----
+
+[CORE.WHATSAPP_OWN_CLIENT_ONLY]
+status = 403
+params = ["own", "client"]
+text = "You can manage only your own organisation's WhatsApp numbers."
+java_text = "Only client $ may manage its own WhatsApp numbers, not $"
+when = "A CoreServices.Message WhatsApp-number function aimed at another client."
+audience = "signed-in"
+
+[CORE.MESSAGE_APP_FORBIDDEN]
+status = 403
+params = ["app"]
+text = "You can't send messages for the app[ {app}]."
+action = "Send messages only for apps your organisation can use."
+java_text = "Not allowed to message for app $"
+when = "A CoreServices.Message function for an app the caller's client has no access to."
+audience = "signed-in"
+
+[CORE.MESSAGE_CLIENT_FORBIDDEN]
+status = 403
+params = ["client"]
+text = "You can't send messages for [the client {client}|that client]: it is not your organisation or one it manages."
+action = "Send messages only for your organisation or one it manages."
+java_text = "Not allowed to message on behalf of client $"
+when = "A CoreServices.Message function on behalf of a client the caller's client does not manage."
+audience = "signed-in"
+
+[CORE.WHATSAPP_NOT_LINKED]
+status = 409
+params = ["client", "app"]
+text = "No WhatsApp number is linked[ for {client}][ in {app}]."
+action = "Link a WhatsApp number in the app's messaging settings first."
+java_text = "No WhatsApp number is linked for $ in $"
+when = "CoreServices.Message.SendWhatsapp for a client with no linked WhatsApp number."
+audience = "signed-in"
+
+[CORE.SCHEDULE_CLIENT_FORBIDDEN]
+status = 403
+params = ["client"]
+text = "You can't schedule events for [the client {client}|that client]: it is not your organisation or one it manages."
+action = "Schedule events only for your organisation or one it manages."
+java_text = "Not allowed to schedule events for client $"
+when = "A CoreServices.Schedule function for a client the caller's client does not manage."
+audience = "signed-in"
+
+# ---- Storage: who may read and write ----
+
+[CORE.STORAGE_NOT_FOUND]
+status = 404
+params = ["storage"]
+text = "We couldn't find the storage[ {storage}]."
+action = "Check the storage's name, and that it is saved in this app."
+java = "storage_not_found"
+when = "Reading or writing data in a storage the app does not have."
+audience = "anyone"
+
+[CORE.FORBIDDEN_CREATE_STORAGE]
+status = 403
+params = ["storage"]
+text = "[You can't add data to {storage}: your account does not have the permission this storage needs for adding data.|You can't add this data without signing in.]"
+action = "[Ask an owner of your organisation for the permission to add data to {storage}.|Sign in and try again.]"
+java = "forbidden_create_storage"
+when = "Adding a row to a storage without the storage's create permission (an anonymous caller is only asked to sign in)."
+audience = "anyone"
+
+[CORE.FORBIDDEN_READ_STORAGE]
+status = 403
+params = ["storage"]
+text = "[You can't view the data in {storage}: your account does not have the permission this storage needs for reading.|You can't view this data without signing in.]"
+action = "[Ask an owner of your organisation for the permission to view the data in {storage}.|Sign in and try again.]"
+java = "forbidden_read_storage"
+when = "Reading rows of a storage without the storage's read permission (an anonymous caller is only asked to sign in)."
+audience = "anyone"
+
+[CORE.FORBIDDEN_UPDATE_STORAGE]
+status = 403
+params = ["storage"]
+text = "[You can't change the data in {storage}: your account does not have the permission this storage needs for changes.|You can't change this data without signing in.]"
+action = "[Ask an owner of your organisation for the permission to change the data in {storage}.|Sign in and try again.]"
+java = "forbidden_update_storage"
+when = "Changing a row of a storage without the storage's update permission (an anonymous caller is only asked to sign in)."
+audience = "anyone"
+
+[CORE.FORBIDDEN_DELETE_STORAGE]
+status = 403
+params = ["storage"]
+text = "[You can't delete data in {storage}: your account does not have the permission this storage needs for deleting.|You can't delete this data without signing in.]"
+action = "[Ask an owner of your organisation for the permission to delete data in {storage}.|Sign in and try again.]"
+java = "forbidden_delete_storage"
+when = "Deleting rows of a storage without the storage's delete permission, or deleting rows that another storage's delete would cascade to (an anonymous caller is only asked to sign in)."
+audience = "anyone"
+
+[CORE.CASCADE_DELETE_FORBIDDEN]
+status = 403
+params = ["storages"]
+text = "You can't delete this row: deleting it would also delete rows[ in {storages}], and your account does not have the permission to delete data there."
+action = "Ask an owner of your organisation for that permission, or delete the related rows first."
+java = "forbidden_delete_storage"
+when = "Deleting a row whose cascading relations reach storages the caller may not delete from."
+audience = "signed-in"
+
+[CORE.STORAGE_ROW_GONE]
+status = 403
+params = ["storage"]
+text = "We couldn't change the row[ in {storage}]: it is no longer there."
+action = "Reload the data and try again."
+java = "forbidden_update_storage"
+when = "Changing a row of a MySQL storage that was deleted before the change was saved (Java answers it with the update refusal)."
+audience = "signed-in"
+
+[CORE.STORAGE_BUILDER_ONLY]
+status = 403
+params = ["app"]
+text = "Only someone who can edit the app[ {app}] can do this to its data."
+action = "Ask an owner of the app for edit access."
+java = "forbidden_update_storage"
+when = "Copying live data into the draft, or clearing draft data, without write access to the app."
+audience = "signed-in"
+
+[CORE.FORBIDDEN_CLIENT_CODE]
+status = 403
+params = ["client"]
+text = "You can't act for [the client {client}|that client]: it is not your organisation or one it manages."
+action = "Use your own client code, or one your organisation manages."
+java = "forbidden_client_code"
+when = "A data call or an event run search naming a client the caller's organisation does not manage (or, for event runs, does not have the app for)."
+audience = "signed-in"
+
+[CORE.STORAGE_ONLY_THRU_KIRUN]
+status = 403
+params = ["storage"]
+text = "[The data in {storage} can only be reached through a server function.|This data can only be reached through a server function.]"
+action = "Read and change it from a server function of the app."
+java = "storage_only_thru_kirun"
+when = "Reaching the rows of a storage marked onlyThruKIRun through the data routes, outside a KIRun function and a builder app."
+audience = "anyone"
+
+[CORE.FORBIDDEN_EXPLICIT_DRAFT_SURFACE]
+status = 403
+params = ["app"]
+text = "Only someone who can edit the app[ {app}] can choose between its live and draft data."
+action = "Leave out the draft choice to use the data this address serves, or ask an owner of the app for edit access."
+java = "forbidden_explicit_draft_surface"
+when = "A data call naming the live or the draft surface without write access to the app."
+audience = "signed-in"
+
+# ---- Storage: rows ----
+
+[CORE.ROW_NOT_FOUND]
+status = 404
+params = ["storage", "id"]
+text = "We couldn't find the row[ {id}][ in {storage}]."
+action = "Check the row's id. It may have been deleted."
+java = "object_not_found"
+when = "Reading, changing or deleting a row (or a version of one) that is not in the storage."
+audience = "anyone"
+
+[CORE.VERSION_NOT_FOUND]
+status = 404
+params = ["storage", "id"]
+text = "We couldn't find the version[ {id}] of the row[ in {storage}]."
+action = "Check the version's id."
+java = "object_not_found"
+when = "Reading a version of a row that is not in the storage's version history."
+audience = "anyone"
+
+[CORE.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["storage", "id"]
+text = "We couldn't find the row[ {id}][ in {storage}] to change it."
+action = "Check the row's id. It may have been deleted."
+java = "object_not_found_to_update"
+when = "Changing a row of a Mongo storage that is not there."
+audience = "anyone"
+
+[CORE.STORAGE_OBJECT_ID_EXISTS]
+status = 409
+params = ["id", "storage"]
+text = "A row with [id {id}|this id] already exists[ in {storage}]."
+action = "Leave out _id to add a new row, or update the existing row instead."
+java = "storage_object_id_exists"
+when = "Adding a row whose _id is already taken."
+audience = "anyone"
+
+[CORE.ROW_ID_REQUIRED]
+status = 400
+params = ["field"]
+text = "The row's id[ ({field})] is needed to change a row."
+action = "Put the row's id in the request and try again."
+java = "row_id_required"
+when = "Changing a MySQL row without its id."
+audience = "anyone"
+
+[CORE.FIELD_CANNOT_BE_NULL]
+status = 400
+params = ["fields", "storage"]
+text = "[{fields}|A required field] can't be empty[ in {storage}]."
+action = "Fill in [{fields}|the required fields] and try again."
+java = "field_cannot_be_null"
+when = "Writing a MySQL row with a required field left empty."
+audience = "anyone"
+
+[CORE.STORAGE_DELETE_ALL_NOT_CONFIRMED]
+status = 400
+params = ["storage"]
+text = "Deleting every row[ of {storage}] needs confirmation."
+action = "Send deleteAll=true to delete every row. To delete one row, put its id in the address."
+java = "storage_delete_all_not_confirmed"
+when = "A delete on the data routes with no row id and without deleteAll=true."
+audience = "signed-in"
+
+[CORE.CANNOT_DELETE_STORAGE_WITH_RESTRICT]
+status = 400
+params = ["objects"]
+text = "This row can't be deleted: other rows still refer to it[ ({objects})]."
+action = "Delete or change the rows that refer to it first."
+java = "cannot_delete_storage_with_restrict"
+when = "Deleting a row that rows of another storage refer to through a restricting relation."
+audience = "anyone"
+
+[CORE.CASCADE_TOO_DEEP]
+status = 400
+params = ["objects"]
+text = "This row can't be deleted: deleting it would go on to delete rows through too many levels of relations[ ({objects})]."
+action = "Check the relations between the storages: some point at each other. Delete the related rows first."
+java = "cannot_delete_storage_with_restrict"
+when = "Deleting a row whose cascading deletes go deeper than core allows (relations that point at each other)."
+audience = "anyone"
+
+[CORE.INVALID_RELATION_DATA]
+status = 400
+params = ["field", "data"]
+text = "The value of the relation field[ {field}] is not valid."
+action = "Check the value of [{field}|the field] and try again."
+java = "invalid_relation_data"
+when = "Writing a row whose related object could not be written or found; the objects this write created are deleted again."
+audience = "anyone"
+
+[CORE.DRAFT_COPY_SOURCE_EMPTY]
+status = 400
+params = ["storage"]
+text = "[{storage}|This storage] has no live rows to copy into the draft."
+action = "Add rows to the live data first, or start the draft empty."
+java = "draft_copy_source_empty"
+when = "Copying a storage's live rows into the draft when it has none."
+audience = "signed-in"
+
+# ---- Storage: queries ----
+
+[CORE.UNSUPPORTED_CONDITION]
+status = 400
+params = ["condition"]
+text = "The data filter uses a condition it does not support[: {condition}]."
+action = "Change the filter to use a supported condition."
+java = "unsupported_condition"
+when = "A data filter with a condition the storage's backend cannot apply."
+audience = "anyone"
+
+[CORE.UNSUPPORTED_ON_BACKEND]
+status = 501
+params = ["what", "backend"]
+text = "This storage[ ({backend})] does not support [{what}|this] yet."
+action = "Get the data another way, or ask support when it will be available."
+java = "unsupported_on_backend"
+when = "A data feature (a kind of aggregation or join) one storage backend does not have yet."
+audience = "anyone"
+
+[CORE.INVALID_AGGREGATION]
+status = 400
+params = ["reason"]
+text = "The aggregation is not valid[: {reason}]."
+action = "Correct the aggregation and try again."
+java = "invalid_aggregation"
+when = "An aggregation request the storage engines cannot run."
+audience = "anyone"
+
+[CORE.INVALID_JOIN]
+status = 400
+params = ["reason"]
+text = "The join is not valid[: {reason}]."
+action = "Correct the join and try again."
+java = "invalid_join"
+when = "A join request the storage engines cannot run."
+audience = "anyone"
+
+# ---- Storage: connections ----
+
+[CORE.CONNECTION_DETAILS_MISSING]
+status = 404
+params = ["connection"]
+text = "We couldn't find the connection[ {connection}]."
+action = "Check the connection's name, and that it is set up for this app."
+java = "connection_details_missing"
+when = "Using a connection (data, AI, e-mail) the app does not have."
+audience = "anyone"
+
+[CORE.DATA_CONNECTION_INCOMPLETE]
+status = 404
+params = ["detail"]
+text = "The app's data connection is missing a setting[: {detail}]."
+action = "Complete the data connection's settings."
+java = "connection_details_missing"
+when = "A storage on a data connection whose details lack the database address."
+audience = "anyone"
+
+[CORE.CONNECTION_INCOMPLETE]
+status = 400
+params = ["connection"]
+text = "The connection[ {connection}] is missing details it needs to make the call."
+action = "Complete the connection's settings (its address and sign-in details) and try again."
+java = "connection_details_missing"
+when = "A REST call through a connection whose details cannot be applied to the request."
+audience = "anyone"
+
+[CORE.AI_CONNECTION_UNSUPPORTED]
+status = 404
+params = ["provider"]
+text = "This AI connection's provider[ ({provider})] can't be used here."
+action = "Choose an OpenAI connection."
+java = "connection_details_missing"
+when = "CoreServices.AI.Chat through a connection that is not an OpenAI one."
+audience = "anyone"
+
+[CORE.MAIL_CONNECTION_UNSUPPORTED]
+status = 404
+params = ["provider"]
+text = "This mail connection's provider[ ({provider})] can't send e-mail here."
+action = "Choose an SMTP or SendGrid connection."
+java = "connection_details_missing"
+when = "Sending e-mail through a connection that is neither SMTP nor SendGrid."
+audience = "anyone"
+
+[CORE.CONNECTION_NOT_AVAILABLE]
+status = 404
+params = ["backend"]
+text = "The [{backend} ]data connection is not available."
+action = "Check the app's data connection settings. If they are right, give support the error id {errorId}."
+java = "connection_not_available"
+when = "A storage on a backend whose data connection is not set up for the app and client."
+audience = "anyone"
+
+# ---- Storage: files ----
+
+[CORE.TEMPLATE_GENERATION_ERROR]
+status = 500
+params = ["format"]
+text = "We couldn't make the[ {format}] template file."
+action = "Try again, or choose another file format."
+java = "template_generation_error"
+when = "Downloading an empty upload template for a storage."
+audience = "signed-in"
+
+[CORE.NOT_ABLE_TO_DOWNLOAD_DATA]
+status = 500
+text = "We couldn't prepare the download of this data."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "not_able_to_download_data"
+when = "Downloading a storage's rows as a file."
+audience = "signed-in"
+
+[CORE.NOT_ABLE_TO_OPEN_FILE_ERROR]
+status = 500
+text = "We couldn't write the file."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "not_able_to_open_file_error"
+java_text = "Unable to create file"
+when = "Writing rows into a download file fails."
+audience = "signed-in"
+
+[CORE.NOT_ABLE_TO_READ_FILE_FORMAT]
+status = 400
+params = ["format"]
+text = "We can't read files in the[ {format}] format."
+action = "Upload a CSV, Excel or JSON file."
+java = "not_able_to_read_file_format"
+when = "Uploading rows from a file whose format core cannot read."
+audience = "signed-in"
+
+[CORE.UPLOAD_UNREADABLE]
+status = 400
+params = ["format"]
+text = "We couldn't read the uploaded[ {format}] file."
+action = "Check that the file is complete and in the format you chose, then try again."
+java_text = "Unable to read the uploaded $ file."
+when = "Uploading rows from a file that cannot be read in its format."
+audience = "signed-in"
+
+[CORE.UPLOAD_INVALID_JSON]
+status = 400
+text = "The uploaded file is not valid JSON."
+action = "Check the file and try again."
+java_text = "Invalid JSON file"
+when = "Uploading rows from a JSON file that does not hold JSON objects."
+audience = "signed-in"
+
+# ---- Connections: REST, OAuth and tokens ----
+
+[CORE.PRIVATE_TARGET_REFUSED]
+status = 400
+params = ["url", "reason"]
+text = "We didn't call[ {url}][: {reason}]."
+action = "Use an address reachable from the public internet."
+java_text = ["Refusing to call \"$\": $. Only addresses reachable from the public internet can be called."]
+when = "A REST call, file fetch or OAuth exchange aimed at a private or internal address, or at one that is not a valid http or https address."
+audience = "anyone"
+
+[CORE.CONNECTION_TARGET_REFUSED]
+status = 400
+params = ["field", "value", "reason"]
+text = "The connection can't be saved with [{field}|its address] set to [{value}|this value][: {reason}]."
+action = "Use an address reachable from the public internet."
+java_text = "$ cannot be saved as \"$\": $. A connection may only point at an address reachable from the public internet."
+when = "Saving a connection whose address points at a private or internal address, or is not a valid http or https address."
+audience = "signed-in"
+
+[CORE.INTEGRATION_TOKEN_EXPIRED]
+status = 400
+text = "The connection's sign-in has expired or is not available."
+action = "Sign in to the connection again."
+java_text = "Access denied: Integration token unavailable or expired"
+when = "Refreshing an OAuth connection's access token without an active refresh token, or outside an app and client."
+audience = "anyone"
+
+[CORE.CONNECTION_GRANT_TYPE_INVALID]
+status = 400
+text = "This connection does not sign in with an authorization code, so it has no consent page to open."
+action = "Use a connection set up with the authorization code grant type."
+java_text = "Invalid Connection Grant Type."
+when = "Starting the OAuth consent flow for a connection with another grant type."
+audience = "signed-in"
+
+[CORE.AUTHORIZATION_URL_MISSING]
+status = 400
+text = "The connection has no authorization address for its consent page."
+action = "Add the authorization URL to the connection's consent details."
+java_text = "Authorization URL is required"
+when = "Starting the OAuth consent flow for a connection without an authorization URL."
+audience = "signed-in"
+
+[CORE.NOT_ABLE_TO_CREATE_TOKEN]
+status = 400
+params = ["connection", "reason"]
+text = "We couldn't sign in to the service of the connection[ {connection}][: {reason}]."
+action = "Check the connection's sign-in details and try again."
+java = "not_able_to_create_token"
+when = "A REST connection's sign-in (a token from its auth function or token address) fails."
+audience = "anyone"
+
+[CORE.CANNOT_DELETE_TOKEN_WITH_CLIENT_CODE]
+status = 400
+params = ["connection"]
+text = "There is no active sign-in to revoke for the connection[ {connection}]."
+java = "cannot_delete_token_with_client_code"
+when = "Revoking the caller's token for a connection that has none active (or with no app and client)."
+audience = "signed-in"
+
+[CORE.BASE64_INVALID]
+status = 400
+text = "A file in the request is not valid base64."
+action = "Send the file's content as base64 (data:<type>;name:<file>;base64,<content>)."
+java_text = "Not a base64 encoded string"
+when = "A REST call with a form part whose file content is not base64."
+audience = "anyone"
+
+[CORE.CONNECTION_TYPE_INVALID]
+status = 400
+params = ["type"]
+text = "The connection type[ {type}] is not one core knows."
+action = "Use one of the connection types (APP_DATA, MAIL, REST_API, AI...)."
+java_text = "Failed to convert value of type 'java.lang.String' to required type 'com.fincity.saas.commons.core.enums.ConnectionType'; Failed to convert from type [java.lang.String] to type [@org.springframework.web.bind.annotation.RequestParam com.fincity.saas.commons.core.enums.ConnectionType] for value [$]"
+when = "The internal connection lookup asked for a connection type that does not exist."
+audience = "developers"
+
+# ---- E-mail, templates, AI ----
+
+[CORE.TEMPLATE_DETAILS_MISSING]
+status = 404
+params = ["template"]
+text = "We couldn't find the template[ {template}]."
+action = "Check the template's name, and that it is saved in this app."
+java = "template_details_missing"
+when = "Sending an e-mail or making a file from a template the app does not have."
+audience = "anyone"
+
+[CORE.TEMPLATE_BODY_MISSING]
+status = 500
+text = "The template has no body to make the file from."
+action = "Add a body to the template, then try again."
+java_text = "template_details_missing"
+when = "Making a PDF from a template whose body is empty in the chosen language (Java sends the bundle key itself as the message)."
+audience = "anyone"
+
+[CORE.FILE_FORMAT_INVALID]
+status = 404
+params = ["format"]
+text = "Files can't be made in the[ {format}] format."
+action = "Use pdf."
+java = "file_format_invalid"
+when = "Making a file from a template in a format other than pdf."
+audience = "anyone"
+
+[CORE.MAIL_SEND_ERROR]
+status = 500
+params = ["reason"]
+text = "We couldn't send the e-mail[: {reason}]."
+action = "Check the mail connection's settings and the addresses, then try again."
+java = "mail_send_error"
+when = "Sending an e-mail fails (no addresses, a SendGrid connection without an API key, the mail server refusing it)."
+audience = "anyone"
+
+[CORE.UNABLE_AI_CONNECTION]
+status = 500
+params = ["connection"]
+text = "We couldn't use the AI connection[ {connection}]: it has no API key."
+action = "Add the API key to the connection's settings."
+java = "unable_ai_connection"
+when = "CoreServices.AI.Chat through a connection without an API key."
+audience = "anyone"
+
+[CORE.EMPTY_AI_RESPONSE]
+status = 500
+text = "The AI service gave an empty answer."
+action = "Try again in a moment."
+java = "empty_ai_response"
+when = "The AI service answers without any content."
+audience = "anyone"
+
+# ---- Event runs ----
+
+[CORE.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are working in the right app."
+java = "object_not_found"
+when = "Reading an event run (or a user, for the CoreServices.Security functions) that does not exist or that the caller cannot see (the same answer for both)."
+audience = "signed-in"
+
+[CORE.APPLICATION_NAME_REQUIRED]
+status = 400
+text = "The app code is missing: searching needs one."
+action = "Add appCode to the request."
+java = "application_name_required"
+when = "Searching event runs without an app code."
+audience = "signed-in"
+
+# ---- Storage definitions (core-editor) ----
+
+[CORE.STORAGE_IS_APP_LEVEL]
+status = 403
+text = "This storage is shared by the whole app, so a client can't change it."
+action = "Change it in the app's own organisation."
+java = "storage_is_app_level"
+when = "Saving a client's copy of an app-level storage."
+audience = "signed-in"
+
+[CORE.INVALID_STORAGE_SCHEMA]
+status = 400
+params = ["reason"]
+text = "The storage's schema is not valid[: {reason}]."
+action = "Correct the schema and save again."
+java = "invalid_storage_schema"
+when = "Saving a storage whose schema cannot be read."
+audience = "signed-in"
+
+[CORE.STORAGE_SCHEMA_ALWAYS_OBJECT]
+status = 400
+text = "A storage's schema must be of type Object."
+action = "Make the schema an Object with the fields as its properties."
+java = "storage_schema_always_object"
+when = "Saving a storage whose schema is not an object."
+audience = "signed-in"
+
+[CORE.INVALID_COLUMN_DEFINITION]
+status = 400
+params = ["reason"]
+text = "Some fields of the storage can't be stored as columns[: {reason}]."
+action = "Rename or change those fields and save again."
+java = "invalid_column_definition"
+when = "Saving a MySQL storage whose field names or types cannot become columns."
+audience = "signed-in"
+
+[CORE.STORAGE_SCHEMA_FIELD_ALREADY_EXISTS]
+status = 400
+params = ["field"]
+text = "The field[ {field}] appears twice in the storage's schema."
+action = "Remove or rename one of them."
+java = "storage_schema_field_already_exists"
+when = "Saving a storage whose schema names a field the storage already has (a relation and a field of the same name)."
+audience = "signed-in"
+
+[CORE.NO_STORAGE_FOUND_WITH_NAME]
+status = 400
+params = ["storage"]
+text = "A relation points at a storage that does not exist[: {storage}]."
+action = "Create that storage first, or correct the relation."
+java = "no_storage_found_with_name"
+when = "Saving a storage with a relation to a storage the app does not have."
+audience = "signed-in"
+
+[CORE.WORKFLOW_TRIGGER_MISSING]
+status = 500
+text = "The workflow has no trigger."
+action = "Add a trigger to the workflow and save again."
+java = "workflow_trigger_missing"
+when = "Saving a workflow without a trigger."
+audience = "signed-in"
+
+# ---- Java core bundle keys no Rust core path raises ----
+# Kept so every key of the bundle has its code. Where the definition library (crates/overridable)
+# raises the same key for definitions, it does so as DEF.*.
+
+[CORE.UNABLE_TO_DELETE]
+status = 400
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]."
+java = "unable_to_delete"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.UNABLE_TO_DELETE)."
+audience = "signed-in"
+
+[CORE.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed."
+java = "object_not_updatable"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.OBJECT_NOT_UPDATABLE)."
+audience = "signed-in"
+
+[CORE.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; signing in is security's)."
+audience = "anyone"
+
+[CORE.UNKNOWN_ERROR]
+status = 500
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.UNKNOWN_ERROR_WITH_ID]
+status = 500
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Not raised by the Rust units as such: unexpected failures answer COMMON.INTERNAL_ERROR (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save this: something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "The value[ {value}] can't be read[ as {type}]."
+java = "unable_to_convert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; sessions are security's)."
+audience = "anyone"
+
+[CORE.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; sessions are security's)."
+audience = "anyone"
+
+[CORE.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "The name[ {name}] is already taken[ by another {what}]."
+action = "Choose another name."
+java = "already_exists"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.ALREADY_EXISTS)."
+audience = "signed-in"
+
+[CORE.VERSION_MISMATCH]
+status = 412
+text = "Someone saved a newer version of this while you were editing."
+action = "Reload to get the newer version, then make your changes again."
+java = "version_mismatch"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.VERSION_MISMATCH)."
+audience = "signed-in"
+
+[CORE.CANNOT_CHANGE_PREF]
+status = 400
+text = "This preference can't be changed."
+java = "cannot_change_pref"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[CORE.UNABLE_TO_CREATE_OBJECT]
+status = 500
+params = ["what:entity"]
+text = "We couldn't create the {what|item}."
+action = "Try again in a moment."
+java = "unable_to_create_object"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.UNABLE_TO_CREATE_OBJECT)."
+audience = "signed-in"
+
+[CORE.FORBIDDEN_APP_ACCESS]
+status = 403
+params = ["app"]
+text = "You can't use the app[ {app}]: your organisation has no access to it."
+action = "Ask an owner of the app for access."
+java = "forbidden_app_access"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.FORBIDDEN_APP_ACCESS)."
+audience = "signed-in"
+
+[CORE.SCHEMA_VALIDATION_ERROR]
+status = 400
+text = "The data does not fit the storage's schema."
+action = "Correct the values and try again."
+java = "schema_validation_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; the storage validator reports each field)."
+audience = "anyone"
+
+[CORE.NAME_MISSING]
+status = 400
+text = "The namespace or the name is missing."
+action = "Give it a namespace and a name."
+java = "name_missing"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.NAME_MISSING)."
+audience = "signed-in"
+
+[CORE.NAME_CHANGE]
+status = 400
+text = "The namespace and the name can't be changed."
+action = "Save it under the new name as a new item instead."
+java = "name_change"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.NAME_CHANGE)."
+audience = "signed-in"
+
+[CORE.INTERNAL_ERROR_RECURSION]
+status = 500
+params = ["what:entity"]
+text = "We couldn't read the {what|item}: it refers back to itself in a loop."
+action = "Remove the reference that leads back to it, then try again."
+java = "internal_error_recursion"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[CORE.BULK_UPLOAD_MESSAGE]
+status = 200
+params = ["format"]
+text = "This row was uploaded from a file[ in the {format} format]."
+java = "bulk_upload_message"
+when = "Not an error: the note Java writes on rows uploaded in bulk. Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[CORE.NOT_ABLE_TO_READ_FROM_FILE]
+status = 400
+text = "We couldn't read the data from the file."
+action = "Check the file and try again."
+java = "not_able_to_read_from_file"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[CORE.CANNOT_BE_UPDATED]
+status = 400
+text = "This item can't be changed."
+java = "cannot_be_updated"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.CANNOT_BE_UPDATED)."
+audience = "signed-in"
+
+[CORE.TEMPLATE_CONVERT_ERROR]
+status = 500
+params = ["template", "format"]
+text = "We couldn't turn the template[ {template}] into a file[ in the {format} format]."
+action = "Check the template and try again."
+java = "template_convert_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.FS_STREAM_ERROR]
+status = 500
+text = "We couldn't read the file."
+action = "Try again in a moment."
+java = "fs_stream_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.UNABLE_TO_FETCH_INTERNAL_RESOURCE]
+status = 500
+text = "We couldn't fetch a file the platform holds."
+action = "Try again in a moment."
+java = "unable_to_fetch_internal_resource"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.UNABLE_TO_FETCH_EXTERNAL_RESOURCE]
+status = 500
+text = "We couldn't fetch a file from its address."
+action = "Check the address and try again."
+java = "unable_to_fetch_external_resource"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.ONLY_SCHEMA_OBJECT_TYPE]
+status = 400
+text = "A storage needs a schema of type Object."
+java = "only_schema_object_type"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[CORE.STORAGE_RELATION_DATA_TYPE_MISMATCH]
+status = 400
+params = ["relation", "type"]
+text = "The relation[ {relation}] must hold text or an object[, not {type}]."
+java = "storage_relation_data_type_mismatch"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.STORAGE_RELATION_OBJECT_CREATION_ERROR]
+status = 500
+text = "We couldn't create the related row."
+action = "Try again in a moment."
+java = "storage_relation_object_creation_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[CORE.TRANSPORT_ERROR]
+status = 400
+params = ["action", "reason"]
+text = "[Something went wrong while {action} the transport|The transport failed][: {reason}]."
+java = "transport_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; transports raise DEF.TRANSPORT_ERROR)."
+audience = "signed-in"
+
+[CORE.FORBIDDEN_FORK_NOT_OVERRIDABLE]
+status = 403
+params = ["what:entity", "name"]
+text = "This {what|item}[ {name}] can't be changed by your organisation: it belongs to another one and can't be overridden."
+java = "forbidden_fork_not_overridable"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping; definitions raise DEF.FORBIDDEN_FORK_NOT_OVERRIDABLE)."
+audience = "signed-in"
+
+[CORE.INVALID_USER_FOR_CLIENT]
+status = 400
+params = ["user", "client"]
+text = "The user[ {user}] does not belong to the client[ {client}]."
+java = "invalid_user_for_client"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"

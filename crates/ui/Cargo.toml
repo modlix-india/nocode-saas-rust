@@ -1,0 +1,50 @@
+[package]
+name = "ui"
+description = "ui-engine, ui-shell and ui-editor: the Java ui service (the engine read path; the shell: index.html, URI paths, SSO, analytics, cache control; the editor: CRUD, drafts, versions, publish, transport)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ui-engine"
+path = "src/bin/ui-engine.rs"
+
+[[bin]]
+name = "ui-shell"
+path = "src/bin/ui-shell.rs"
+
+[[bin]]
+name = "ui-editor"
+path = "src/bin/ui-editor.rs"
+
+[dependencies]
+platform = { workspace = true, features = ["mongo"] }
+overridable = { path = "../overridable" }
+
+anyhow.workspace = true
+async-trait.workspace = true
+rand.workspace = true
+ring = "0.17"
+rsa = { version = "0.9", features = ["sha2"] }
+sha1.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono-tz.workspace = true
+md-5.workspace = true
+percent-encoding.workspace = true
+redis.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+futures.workspace = true
+http.workspace = true
+mongodb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }

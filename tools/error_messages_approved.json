@@ -1,0 +1,1266 @@
+{
+ "COMMON.BAD_REQUEST": {
+  "date": "2026-10-17",
+  "digest": "17774a3fa6c2"
+ },
+ "COMMON.BODY_INVALID": {
+  "date": "2026-10-17",
+  "digest": "2734ed463c7f"
+ },
+ "COMMON.BODY_MISSING": {
+  "date": "2026-10-17",
+  "digest": "c88e1c668e4a"
+ },
+ "COMMON.BODY_NOT_JSON": {
+  "date": "2026-10-17",
+  "digest": "b9f99e067aff"
+ },
+ "COMMON.BODY_UNREADABLE": {
+  "date": "2026-10-17",
+  "digest": "b1d5b657721c"
+ },
+ "COMMON.ERROR": {
+  "date": "2026-10-17",
+  "digest": "12b6470cd19d"
+ },
+ "COMMON.FIELD_INVALID": {
+  "date": "2026-10-17",
+  "digest": "c161ebdeb372"
+ },
+ "COMMON.FIELD_MISSING": {
+  "date": "2026-10-17",
+  "digest": "20a89afc5e25"
+ },
+ "COMMON.FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "2e4ed1d843b5"
+ },
+ "COMMON.INTERNAL_ERROR": {
+  "date": "2026-10-17",
+  "digest": "b6ebca5ceccc"
+ },
+ "COMMON.METHOD_NOT_ALLOWED": {
+  "date": "2026-10-17",
+  "digest": "c08c10532aa4"
+ },
+ "COMMON.NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "0f9b4a08e93c"
+ },
+ "COMMON.PARAM_INVALID": {
+  "date": "2026-10-17",
+  "digest": "7f1ecd11589b"
+ },
+ "COMMON.PARAM_MISSING": {
+  "date": "2026-10-17",
+  "digest": "4aaaad7d8c8e"
+ },
+ "COMMON.PAYLOAD_TOO_LARGE": {
+  "date": "2026-10-17",
+  "digest": "e8b025420a96"
+ },
+ "COMMON.PERMISSION_REQUIRED": {
+  "date": "2026-10-17",
+  "digest": "9e968867e8f4"
+ },
+ "COMMON.SIGNED_OUT": {
+  "date": "2026-10-17",
+  "digest": "f1fd983081bf"
+ },
+ "COMMON.SIGN_IN_REQUIRED": {
+  "date": "2026-10-17",
+  "digest": "7ae4cd57a6df"
+ },
+ "ENTITY.App": {
+  "date": "2026-10-17",
+  "digest": "c21a7c823969"
+ },
+ "ENTITY.AppProperty": {
+  "date": "2026-10-17",
+  "digest": "99517dcfcd39"
+ },
+ "ENTITY.Application": {
+  "date": "2026-10-17",
+  "digest": "c21a7c823969"
+ },
+ "ENTITY.Client": {
+  "date": "2026-10-17",
+  "digest": "226003a68cda"
+ },
+ "ENTITY.ClientUrl": {
+  "date": "2026-10-17",
+  "digest": "cea6772a8bd2"
+ },
+ "ENTITY.Department": {
+  "date": "2026-10-17",
+  "digest": "d0a389396989"
+ },
+ "ENTITY.Designation": {
+  "date": "2026-10-17",
+  "digest": "82d8ecd640ba"
+ },
+ "ENTITY.Permission": {
+  "date": "2026-10-17",
+  "digest": "92f0f2bcf2e3"
+ },
+ "ENTITY.Profile": {
+  "date": "2026-10-17",
+  "digest": "9a13bc6334fa"
+ },
+ "ENTITY.Role": {
+  "date": "2026-10-17",
+  "digest": "061ef7025b54"
+ },
+ "ENTITY.RoleV2": {
+  "date": "2026-10-17",
+  "digest": "061ef7025b54"
+ },
+ "ENTITY.User": {
+  "date": "2026-10-17",
+  "digest": "3a863cadd084"
+ },
+ "ENTITY.UserInvite": {
+  "date": "2026-10-17",
+  "digest": "d8dbd71e8e13"
+ },
+ "ENTITY.User_Invite": {
+  "date": "2026-10-17",
+  "digest": "d8dbd71e8e13"
+ },
+ "ENTITY.User_Request": {
+  "date": "2026-10-17",
+  "digest": "c69bb2f81ac4"
+ },
+ "GW.HOST_UNRESOLVED": {
+  "date": "2026-10-17",
+  "digest": "7694246ebc48"
+ },
+ "GW.NO_ROUTE": {
+  "date": "2026-10-17",
+  "digest": "7f940f1071d4"
+ },
+ "GW.SERVICE_FAILED": {
+  "date": "2026-10-17",
+  "digest": "f541de836af7"
+ },
+ "GW.SERVICE_STARTING": {
+  "date": "2026-10-17",
+  "digest": "80f96054e790"
+ },
+ "GW.SERVICE_TIMEOUT": {
+  "date": "2026-10-17",
+  "digest": "eaebfeb16546"
+ },
+ "GW.SERVICE_UNAVAILABLE": {
+  "date": "2026-10-17",
+  "digest": "a20ab50ffc01"
+ },
+ "PERMISSION.ASSIGN_Package_To_Client": {
+  "date": "2026-10-17",
+  "digest": "ab9fc259f8fd"
+ },
+ "PERMISSION.ASSIGN_Permission_To_Role": {
+  "date": "2026-10-17",
+  "digest": "28b549c0e76d"
+ },
+ "PERMISSION.ASSIGN_Permission_To_User": {
+  "date": "2026-10-17",
+  "digest": "b4c4884226d8"
+ },
+ "PERMISSION.ASSIGN_Role_To_Package": {
+  "date": "2026-10-17",
+  "digest": "675c6e6af7c5"
+ },
+ "PERMISSION.ASSIGN_Role_To_User": {
+  "date": "2026-10-17",
+  "digest": "57897fe0da54"
+ },
+ "PERMISSION.Actions_CREATE": {
+  "date": "2026-10-17",
+  "digest": "e23c702c6dca"
+ },
+ "PERMISSION.Actions_DELETE": {
+  "date": "2026-10-17",
+  "digest": "56dfa0dfc473"
+ },
+ "PERMISSION.Actions_READ": {
+  "date": "2026-10-17",
+  "digest": "267970dc143d"
+ },
+ "PERMISSION.Actions_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "60875d1a15e1"
+ },
+ "PERMISSION.Application_CREATE": {
+  "date": "2026-10-17",
+  "digest": "561bda41f0ed"
+ },
+ "PERMISSION.Application_DELETE": {
+  "date": "2026-10-17",
+  "digest": "ce7be6684609"
+ },
+ "PERMISSION.Application_READ": {
+  "date": "2026-10-17",
+  "digest": "cdfcd467d6ac"
+ },
+ "PERMISSION.Application_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "64706f1ac526"
+ },
+ "PERMISSION.Campaign_MANAGE": {
+  "date": "2026-10-17",
+  "digest": "845a69d34824"
+ },
+ "PERMISSION.Client_CREATE": {
+  "date": "2026-10-17",
+  "digest": "a307f84d2b51"
+ },
+ "PERMISSION.Client_DELETE": {
+  "date": "2026-10-17",
+  "digest": "e46d7a50d9b8"
+ },
+ "PERMISSION.Client_MANAGE": {
+  "date": "2026-10-17",
+  "digest": "e883f8997297"
+ },
+ "PERMISSION.Client_Password_Policy_CREATE": {
+  "date": "2026-10-17",
+  "digest": "81f3a347ae17"
+ },
+ "PERMISSION.Client_Password_Policy_DELETE": {
+  "date": "2026-10-17",
+  "digest": "09319f823bbf"
+ },
+ "PERMISSION.Client_Password_Policy_READ": {
+  "date": "2026-10-17",
+  "digest": "f74e244b8e6f"
+ },
+ "PERMISSION.Client_Password_Policy_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "43eb7740a6e7"
+ },
+ "PERMISSION.Client_READ": {
+  "date": "2026-10-17",
+  "digest": "09c51a7f2153"
+ },
+ "PERMISSION.Client_Type_CREATE": {
+  "date": "2026-10-17",
+  "digest": "900b8e8391aa"
+ },
+ "PERMISSION.Client_Type_DELETE": {
+  "date": "2026-10-17",
+  "digest": "8fc3a31c1dd8"
+ },
+ "PERMISSION.Client_Type_READ": {
+  "date": "2026-10-17",
+  "digest": "d35a801da133"
+ },
+ "PERMISSION.Client_Type_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "d3cd71e0b2d2"
+ },
+ "PERMISSION.Client_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "10921096f3ed"
+ },
+ "PERMISSION.Connection_CREATE": {
+  "date": "2026-10-17",
+  "digest": "4151d97f9a3f"
+ },
+ "PERMISSION.Connection_DELETE": {
+  "date": "2026-10-17",
+  "digest": "0cdef628b2e7"
+ },
+ "PERMISSION.Connection_READ": {
+  "date": "2026-10-17",
+  "digest": "158c7d35d5b8"
+ },
+ "PERMISSION.Connection_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "851ace5e60dd"
+ },
+ "PERMISSION.EventAction_CREATE": {
+  "date": "2026-10-17",
+  "digest": "40d086eaf4ab"
+ },
+ "PERMISSION.EventAction_DELETE": {
+  "date": "2026-10-17",
+  "digest": "aafe66263a7d"
+ },
+ "PERMISSION.EventAction_READ": {
+  "date": "2026-10-17",
+  "digest": "cb33b2db2e31"
+ },
+ "PERMISSION.EventAction_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "e6d074dda11d"
+ },
+ "PERMISSION.EventDefinition_CREATE": {
+  "date": "2026-10-17",
+  "digest": "db2f1a5359dc"
+ },
+ "PERMISSION.EventDefinition_DELETE": {
+  "date": "2026-10-17",
+  "digest": "2a31d4d6042a"
+ },
+ "PERMISSION.EventDefinition_READ": {
+  "date": "2026-10-17",
+  "digest": "8870b07f0377"
+ },
+ "PERMISSION.EventDefinition_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "0ba411b6fa7b"
+ },
+ "PERMISSION.Files_RETENTION": {
+  "date": "2026-10-17",
+  "digest": "e8bd166f8d1c"
+ },
+ "PERMISSION.Function_CREATE": {
+  "date": "2026-10-17",
+  "digest": "343aafba2f62"
+ },
+ "PERMISSION.Function_DELETE": {
+  "date": "2026-10-17",
+  "digest": "d850879faf6e"
+ },
+ "PERMISSION.Function_READ": {
+  "date": "2026-10-17",
+  "digest": "f8be33256952"
+ },
+ "PERMISSION.Function_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "bdfcbaa04776"
+ },
+ "PERMISSION.Integration_CREATE": {
+  "date": "2026-10-17",
+  "digest": "996e13d0cd31"
+ },
+ "PERMISSION.Integration_DELETE": {
+  "date": "2026-10-17",
+  "digest": "c85b929f254d"
+ },
+ "PERMISSION.Integration_READ": {
+  "date": "2026-10-17",
+  "digest": "b943016be204"
+ },
+ "PERMISSION.Integration_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "c79e568fcede"
+ },
+ "PERMISSION.Invoice_CREATE": {
+  "date": "2026-10-17",
+  "digest": "d10acd46f638"
+ },
+ "PERMISSION.Invoice_DELETE": {
+  "date": "2026-10-17",
+  "digest": "9ff17e102d64"
+ },
+ "PERMISSION.Invoice_READ": {
+  "date": "2026-10-17",
+  "digest": "45de169f3eb9"
+ },
+ "PERMISSION.Invoice_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "124cddb9c7fe"
+ },
+ "PERMISSION.Logged_IN": {
+  "date": "2026-10-17",
+  "digest": "e6a61607d406"
+ },
+ "PERMISSION.MobileApp_CREATE": {
+  "date": "2026-10-17",
+  "digest": "7887829b68b6"
+ },
+ "PERMISSION.MobileApp_UPLOADER": {
+  "date": "2026-10-17",
+  "digest": "12eaed1b4145"
+ },
+ "PERMISSION.Notification_CREATE": {
+  "date": "2026-10-17",
+  "digest": "03bac44e8dda"
+ },
+ "PERMISSION.Notification_DELETE": {
+  "date": "2026-10-17",
+  "digest": "b1bce5ced032"
+ },
+ "PERMISSION.Notification_READ": {
+  "date": "2026-10-17",
+  "digest": "87ec48564fe4"
+ },
+ "PERMISSION.Notification_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "74c7ec23156f"
+ },
+ "PERMISSION.Package_CREATE": {
+  "date": "2026-10-17",
+  "digest": "5dd5d617a5d7"
+ },
+ "PERMISSION.Package_DELETE": {
+  "date": "2026-10-17",
+  "digest": "dd1b1fa78785"
+ },
+ "PERMISSION.Package_READ": {
+  "date": "2026-10-17",
+  "digest": "2620e2e97c19"
+ },
+ "PERMISSION.Package_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "03d0314e4f6d"
+ },
+ "PERMISSION.Page_CREATE": {
+  "date": "2026-10-17",
+  "digest": "9e451d07380c"
+ },
+ "PERMISSION.Page_DELETE": {
+  "date": "2026-10-17",
+  "digest": "0d5c58ae262d"
+ },
+ "PERMISSION.Page_READ": {
+  "date": "2026-10-17",
+  "digest": "2a641e7f2e6b"
+ },
+ "PERMISSION.Page_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "592dc636cfca"
+ },
+ "PERMISSION.Payment_CREATE": {
+  "date": "2026-10-17",
+  "digest": "f0e35195b3ed"
+ },
+ "PERMISSION.Payment_DELETE": {
+  "date": "2026-10-17",
+  "digest": "fd975260cc34"
+ },
+ "PERMISSION.Payment_READ": {
+  "date": "2026-10-17",
+  "digest": "e89cc28062ed"
+ },
+ "PERMISSION.Payment_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "eca8da14536e"
+ },
+ "PERMISSION.Permission_CREATE": {
+  "date": "2026-10-17",
+  "digest": "00d17ca8346d"
+ },
+ "PERMISSION.Permission_DELETE": {
+  "date": "2026-10-17",
+  "digest": "fedfa8a7ef66"
+ },
+ "PERMISSION.Permission_READ": {
+  "date": "2026-10-17",
+  "digest": "60ed6289b7b9"
+ },
+ "PERMISSION.Permission_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "2f65e79cf282"
+ },
+ "PERMISSION.Personalization_CLEAR": {
+  "date": "2026-10-17",
+  "digest": "ec7edf7aaa88"
+ },
+ "PERMISSION.Plan_CREATE": {
+  "date": "2026-10-17",
+  "digest": "549584f7dee3"
+ },
+ "PERMISSION.Plan_DELETE": {
+  "date": "2026-10-17",
+  "digest": "eb89a747b609"
+ },
+ "PERMISSION.Plan_READ": {
+  "date": "2026-10-17",
+  "digest": "d6c1bb1e107f"
+ },
+ "PERMISSION.Plan_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "d15b6a9888eb"
+ },
+ "PERMISSION.Profile_CREATE": {
+  "date": "2026-10-17",
+  "digest": "d0f0a40dbd51"
+ },
+ "PERMISSION.Profile_DELETE": {
+  "date": "2026-10-17",
+  "digest": "2f6bdbfee788"
+ },
+ "PERMISSION.Profile_READ": {
+  "date": "2026-10-17",
+  "digest": "6c211f58b821"
+ },
+ "PERMISSION.Profile_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "7fa64f5a9dd9"
+ },
+ "PERMISSION.ROLE_Owner": {
+  "date": "2026-10-17",
+  "digest": "06e4d0a76c12"
+ },
+ "PERMISSION.Role_CREATE": {
+  "date": "2026-10-17",
+  "digest": "89fc05373727"
+ },
+ "PERMISSION.Role_DELETE": {
+  "date": "2026-10-17",
+  "digest": "b05da8ac552b"
+ },
+ "PERMISSION.Role_READ": {
+  "date": "2026-10-17",
+  "digest": "8750f4049fc3"
+ },
+ "PERMISSION.Role_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "c9229c3c0bd5"
+ },
+ "PERMISSION.SECURED_Files_PATH": {
+  "date": "2026-10-17",
+  "digest": "2a7b4268863e"
+ },
+ "PERMISSION.STATIC_Files_PATH": {
+  "date": "2026-10-17",
+  "digest": "7d10cfcf3b60"
+ },
+ "PERMISSION.Schema_CREATE": {
+  "date": "2026-10-17",
+  "digest": "42fadd0476e6"
+ },
+ "PERMISSION.Schema_DELETE": {
+  "date": "2026-10-17",
+  "digest": "0bb6395c588a"
+ },
+ "PERMISSION.Schema_READ": {
+  "date": "2026-10-17",
+  "digest": "087b0148ec74"
+ },
+ "PERMISSION.Schema_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "803a8caf9042"
+ },
+ "PERMISSION.Storage_CREATE": {
+  "date": "2026-10-17",
+  "digest": "221e85658c2a"
+ },
+ "PERMISSION.Storage_DELETE": {
+  "date": "2026-10-17",
+  "digest": "b7422f3b4e3e"
+ },
+ "PERMISSION.Storage_READ": {
+  "date": "2026-10-17",
+  "digest": "a27e2f505ca2"
+ },
+ "PERMISSION.Storage_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "4fe502ca141c"
+ },
+ "PERMISSION.Style_CREATE": {
+  "date": "2026-10-17",
+  "digest": "cb8edcbd6b45"
+ },
+ "PERMISSION.Style_DELETE": {
+  "date": "2026-10-17",
+  "digest": "0213ffc89b4d"
+ },
+ "PERMISSION.Style_READ": {
+  "date": "2026-10-17",
+  "digest": "a9772d08a936"
+ },
+ "PERMISSION.Style_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "f8700cdfde19"
+ },
+ "PERMISSION.Subscription_CREATE": {
+  "date": "2026-10-17",
+  "digest": "4fc1f9a2701b"
+ },
+ "PERMISSION.Subscription_DELETE": {
+  "date": "2026-10-17",
+  "digest": "ce1d5a74f3ab"
+ },
+ "PERMISSION.Subscription_READ": {
+  "date": "2026-10-17",
+  "digest": "79d63832b8a3"
+ },
+ "PERMISSION.Subscription_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "60a31c799bb1"
+ },
+ "PERMISSION.Template_CREATE": {
+  "date": "2026-10-17",
+  "digest": "ccaeaff2557a"
+ },
+ "PERMISSION.Template_DELETE": {
+  "date": "2026-10-17",
+  "digest": "f1925d313360"
+ },
+ "PERMISSION.Template_READ": {
+  "date": "2026-10-17",
+  "digest": "6117f8c84380"
+ },
+ "PERMISSION.Template_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "843198ff593f"
+ },
+ "PERMISSION.Theme_CREATE": {
+  "date": "2026-10-17",
+  "digest": "6516266d3570"
+ },
+ "PERMISSION.Theme_DELETE": {
+  "date": "2026-10-17",
+  "digest": "b913aea5ca90"
+ },
+ "PERMISSION.Theme_READ": {
+  "date": "2026-10-17",
+  "digest": "f277606a28bc"
+ },
+ "PERMISSION.Theme_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "e184f8484ff2"
+ },
+ "PERMISSION.Transport_CREATE": {
+  "date": "2026-10-17",
+  "digest": "26d3184ae5ac"
+ },
+ "PERMISSION.Transport_DELETE": {
+  "date": "2026-10-17",
+  "digest": "ea001a7f1c04"
+ },
+ "PERMISSION.Transport_READ": {
+  "date": "2026-10-17",
+  "digest": "5e2b69c6ac27"
+ },
+ "PERMISSION.Transport_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "fee5fb83b017"
+ },
+ "PERMISSION.User_CREATE": {
+  "date": "2026-10-17",
+  "digest": "e0203ca1cd01"
+ },
+ "PERMISSION.User_DELETE": {
+  "date": "2026-10-17",
+  "digest": "5b3aaebc841e"
+ },
+ "PERMISSION.User_READ": {
+  "date": "2026-10-17",
+  "digest": "409205884033"
+ },
+ "PERMISSION.User_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "9ef34e1022eb"
+ },
+ "PERMISSION.Workflow_CREATE": {
+  "date": "2026-10-17",
+  "digest": "157842925cb9"
+ },
+ "PERMISSION.Workflow_DELETE": {
+  "date": "2026-10-17",
+  "digest": "940a3a3a63d4"
+ },
+ "PERMISSION.Workflow_READ": {
+  "date": "2026-10-17",
+  "digest": "879fe0d3c85c"
+ },
+ "PERMISSION.Workflow_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "177e2c7bd829"
+ },
+ "PERMISSION._Anonymous": {
+  "date": "2026-10-17",
+  "digest": "15aac8323b1a"
+ },
+ "PERMISSION._CREATE": {
+  "date": "2026-10-17",
+  "digest": "fd35a0c07f59"
+ },
+ "PERMISSION._DELETE": {
+  "date": "2026-10-17",
+  "digest": "871fb5c1f369"
+ },
+ "PERMISSION._ONE": {
+  "date": "2026-10-17",
+  "digest": "e06d73db25da"
+ },
+ "PERMISSION._PROFILE": {
+  "date": "2026-10-17",
+  "digest": "9b950f3c1776"
+ },
+ "PERMISSION._READ": {
+  "date": "2026-10-17",
+  "digest": "9bdb06d7a86d"
+ },
+ "PERMISSION._ROLE": {
+  "date": "2026-10-17",
+  "digest": "b3ef0b5be443"
+ },
+ "PERMISSION._UPDATE": {
+  "date": "2026-10-17",
+  "digest": "cf7ee9e9e1b6"
+ },
+ "PERMISSION.client_removal": {
+  "date": "2026-10-17",
+  "digest": "6307290a3a6b"
+ },
+ "SEC.ACCESS_REQUEST_REQUIRED": {
+  "date": "2026-10-17",
+  "digest": "284aa724756f"
+ },
+ "SEC.ACTIVE_INACTIVE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "7d13176a35ff"
+ },
+ "SEC.ALREADY_EXISTS": {
+  "date": "2026-10-17",
+  "digest": "8910e823883a"
+ },
+ "SEC.APPLICATION_ACCESS_ERROR": {
+  "date": "2026-10-17",
+  "digest": "960932515c9e"
+ },
+ "SEC.APP_CODE_NO_SPL_CHAR": {
+  "date": "2026-10-17",
+  "digest": "51ef52e4b5bb"
+ },
+ "SEC.APP_DEPENDENCY_SAME_APP_CODE": {
+  "date": "2026-10-17",
+  "digest": "8aba8318ca77"
+ },
+ "SEC.APP_POLICY_EMPTY": {
+  "date": "2026-10-17",
+  "digest": "5e46da65d8ce"
+ },
+ "SEC.APP_SUBDOMAIN_TAKEN": {
+  "date": "2026-10-17",
+  "digest": "59534d550631"
+ },
+ "SEC.ASSIGN_PACKAGE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "dc1bd80e59b9"
+ },
+ "SEC.ASSIGN_PACKAGE_TO_CLIENT_AND_APP": {
+  "date": "2026-10-17",
+  "digest": "99c981d20954"
+ },
+ "SEC.ASSIGN_PERMISSION_ERROR": {
+  "date": "2026-10-17",
+  "digest": "f4b3d34b2b52"
+ },
+ "SEC.ASSIGN_PERMISSION_ERROR_FOR_ROLE": {
+  "date": "2026-10-17",
+  "digest": "2699d74eec57"
+ },
+ "SEC.ASSIGN_ROLE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "2d56b297b60d"
+ },
+ "SEC.ASSIGN_ROLE_TO_APP_ERROR": {
+  "date": "2026-10-17",
+  "digest": "166eaa54a592"
+ },
+ "SEC.BAD_CERT_REQUEST": {
+  "date": "2026-10-17",
+  "digest": "e8d426375be9"
+ },
+ "SEC.BILLING_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "02af292223a8"
+ },
+ "SEC.BUNDLE_LIST_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "08ef7adaac1b"
+ },
+ "SEC.CANNOT_DELETE_APP": {
+  "date": "2026-10-17",
+  "digest": "426f0c53e16c"
+ },
+ "SEC.CAPITAL_LETTERS_MISSING": {
+  "date": "2026-10-17",
+  "digest": "c5792e78c1dc"
+ },
+ "SEC.CERTIFICATE_PROBLEM": {
+  "date": "2026-10-17",
+  "digest": "3edc79366cc6"
+ },
+ "SEC.CLIENT_CODE_OR_ID_ONLY_ONE": {
+  "date": "2026-10-17",
+  "digest": "f92259b4a657"
+ },
+ "SEC.CLIENT_HIERARCHY_MISSING": {
+  "date": "2026-10-17",
+  "digest": "f8f9cf24d407"
+ },
+ "SEC.CLIENT_PASSWORD_POLICY_ERROR": {
+  "date": "2026-10-17",
+  "digest": "76468b451683"
+ },
+ "SEC.CLIENT_REGISTRATION_ERROR": {
+  "date": "2026-10-17",
+  "digest": "56cf8b3eab2c"
+ },
+ "SEC.CRT_KEY_ISSUE": {
+  "date": "2026-10-17",
+  "digest": "aa4a2aa6ae3b"
+ },
+ "SEC.DELETE_PACKAGE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "2dcd8512d4c4"
+ },
+ "SEC.DELETE_PERMISSION_ERROR": {
+  "date": "2026-10-17",
+  "digest": "2c4eccf66638"
+ },
+ "SEC.DELETE_ROLE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "4466ce8362b9"
+ },
+ "SEC.ERROR_KEY_CSR": {
+  "date": "2026-10-17",
+  "digest": "3fb2fd2d96b3"
+ },
+ "SEC.FETCH_PACKAGE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "9712984caf5f"
+ },
+ "SEC.FETCH_PERMISSION_ERROR": {
+  "date": "2026-10-17",
+  "digest": "a951804aad18"
+ },
+ "SEC.FETCH_PERMISSION_ERROR_FOR_USER": {
+  "date": "2026-10-17",
+  "digest": "556694529302"
+ },
+ "SEC.FETCH_ROLE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "88633f4fd76a"
+ },
+ "SEC.FETCH_ROLE_ERROR_FOR_USER": {
+  "date": "2026-10-17",
+  "digest": "2459de6b2bbb"
+ },
+ "SEC.FIELDS_MISSING": {
+  "date": "2026-10-17",
+  "digest": "4fe3b0b9262f"
+ },
+ "SEC.FIELD_NOT_UPDATABLE": {
+  "date": "2026-10-17",
+  "digest": "ffa2d01bd18e"
+ },
+ "SEC.FORBIDDEN_APP_REG_OBJECTS": {
+  "date": "2026-10-17",
+  "digest": "55b866fdff21"
+ },
+ "SEC.FORBIDDEN_CREATE": {
+  "date": "2026-10-17",
+  "digest": "002107f1f39c"
+ },
+ "SEC.FORBIDDEN_DELETE": {
+  "date": "2026-10-17",
+  "digest": "4fefe0ebc115"
+ },
+ "SEC.FORBIDDEN_PERMISSION": {
+  "date": "2026-10-17",
+  "digest": "03a81092c9a4"
+ },
+ "SEC.FORBIDDEN_ROLE_ACCESS": {
+  "date": "2026-10-17",
+  "digest": "b9436ea95dc3"
+ },
+ "SEC.FORBIDDEN_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "8af5afda702e"
+ },
+ "SEC.FORBIDDEN_WRITE_APPLICATION_ACCESS": {
+  "date": "2026-10-17",
+  "digest": "5d9cdfe9f8fb"
+ },
+ "SEC.HIERARCHY_ERROR": {
+  "date": "2026-10-17",
+  "digest": "ae3cbefeaf6b"
+ },
+ "SEC.INACTIVE_CLIENT": {
+  "date": "2026-10-17",
+  "digest": "d637afa705a2"
+ },
+ "SEC.INVITE_ACCEPT_FAILED": {
+  "date": "2026-10-17",
+  "digest": "70034389cac3"
+ },
+ "SEC.LENGTH_ERROR": {
+  "date": "2026-10-17",
+  "digest": "6f6ba3100407"
+ },
+ "SEC.LETS_ENCRYPT_CREDENTIALS": {
+  "date": "2026-10-17",
+  "digest": "5ce093233487"
+ },
+ "SEC.LETS_ENCRYPT_ISSUE": {
+  "date": "2026-10-17",
+  "digest": "894d0136c503"
+ },
+ "SEC.LOGIN_REQUIRED": {
+  "date": "2026-10-17",
+  "digest": "7ae4cd57a6df"
+ },
+ "SEC.MAIL_CANNOT_BE_TRIGGERED": {
+  "date": "2026-10-17",
+  "digest": "142420dd4078"
+ },
+ "SEC.MANDATORY_APP_CODE": {
+  "date": "2026-10-17",
+  "digest": "1eb70f75c7f2"
+ },
+ "SEC.MANDATORY_APP_ID_CODE": {
+  "date": "2026-10-17",
+  "digest": "3f919541492d"
+ },
+ "SEC.MANDATORY_APP_ID_NAME": {
+  "date": "2026-10-17",
+  "digest": "547d312086c6"
+ },
+ "SEC.MAX_LENGTH_ERROR": {
+  "date": "2026-10-17",
+  "digest": "5c988ca15d63"
+ },
+ "SEC.MIN_LENGTH_ERROR": {
+  "date": "2026-10-17",
+  "digest": "2576945bc687"
+ },
+ "SEC.MISMATCH_DOMAINS": {
+  "date": "2026-10-17",
+  "digest": "a812a7360af4"
+ },
+ "SEC.MISSING_PASSWORD": {
+  "date": "2026-10-17",
+  "digest": "6a0d24c39fb7"
+ },
+ "SEC.NAME_MANDATORY": {
+  "date": "2026-10-17",
+  "digest": "893adc7b866e"
+ },
+ "SEC.NAME_TAKEN": {
+  "date": "2026-10-17",
+  "digest": "2ead64bdf09e"
+ },
+ "SEC.NEW_PASSWORD_MATCH": {
+  "date": "2026-10-17",
+  "digest": "aa0232b49394"
+ },
+ "SEC.NEW_PASSWORD_MISSING": {
+  "date": "2026-10-17",
+  "digest": "a3d4cc855db6"
+ },
+ "SEC.NO_PACKAGE_ASSIGNED_TO_APP": {
+  "date": "2026-10-17",
+  "digest": "404e2ee19067"
+ },
+ "SEC.NO_PROFILE_ASSIGNED_TO_USER": {
+  "date": "2026-10-17",
+  "digest": "c16e266b1edb"
+ },
+ "SEC.NO_REGISTRATION_AVAILABLE": {
+  "date": "2026-10-17",
+  "digest": "ac46b0335fc6"
+ },
+ "SEC.NO_ROLE_ASSIGNED_TO_APP": {
+  "date": "2026-10-17",
+  "digest": "872efdd33771"
+ },
+ "SEC.NUMBERS_MISSING": {
+  "date": "2026-10-17",
+  "digest": "920f11d610b3"
+ },
+ "SEC.OBJECT_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "83eba8841e67"
+ },
+ "SEC.OBJECT_NOT_FOUND_TO_UPDATE": {
+  "date": "2026-10-17",
+  "digest": "1d7ba5631641"
+ },
+ "SEC.OBJECT_NOT_UPDATABLE": {
+  "date": "2026-10-17",
+  "digest": "4f287e5d71b6"
+ },
+ "SEC.OLD_PASSWORD_MATCH": {
+  "date": "2026-10-17",
+  "digest": "c0b428d10b63"
+ },
+ "SEC.ONLY_SYS_USER_CERTS": {
+  "date": "2026-10-17",
+  "digest": "c68ecabb0c89"
+ },
+ "SEC.ORG_ITEM_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "db1ed59ea802"
+ },
+ "SEC.PARAMS_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "153a3284d060"
+ },
+ "SEC.PASSWORD_USED_ERROR": {
+  "date": "2026-10-17",
+  "digest": "23163cfb4bf3"
+ },
+ "SEC.PASS_RESET_REQ_ERROR": {
+  "date": "2026-10-17",
+  "digest": "691d747245fc"
+ },
+ "SEC.PLAN_CONFLICT_PLAN_ALREADY_EXISTS": {
+  "date": "2026-10-17",
+  "digest": "28eb0843b95b"
+ },
+ "SEC.PLAN_CYCLE_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "aa021225825c"
+ },
+ "SEC.PLAN_DEFAULT_PLAN_MUST_HAVE_ONE_APP": {
+  "date": "2026-10-17",
+  "digest": "1b0863f1664c"
+ },
+ "SEC.PROFILE_FORBIDDEN_FOR_SELECTED_USER": {
+  "date": "2026-10-17",
+  "digest": "06820a2869c0"
+ },
+ "SEC.PROFILE_NEEDS_APP": {
+  "date": "2026-10-17",
+  "digest": "dd496d359784"
+ },
+ "SEC.REGEX_MISMATCH": {
+  "date": "2026-10-17",
+  "digest": "808b8f9ec7aa"
+ },
+ "SEC.REMOVE_PACKAGE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "c417ca0a13f1"
+ },
+ "SEC.REMOVE_PACKAGE_FROM_APP_ERROR": {
+  "date": "2026-10-17",
+  "digest": "3b1e8f87edd9"
+ },
+ "SEC.REMOVE_PERMISSION_ERROR": {
+  "date": "2026-10-17",
+  "digest": "987d9d1418ed"
+ },
+ "SEC.REMOVE_PERMISSION_FROM_ROLE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "52f5d9ee86f5"
+ },
+ "SEC.REMOVE_ROLE_FROM_APP_ERROR": {
+  "date": "2026-10-17",
+  "digest": "989b301d2bf8"
+ },
+ "SEC.REQUEST_EXISITING": {
+  "date": "2026-10-17",
+  "digest": "f25a6cae98cd"
+ },
+ "SEC.ROLE_FORBIDDEN_FOR_SELECTED_USER": {
+  "date": "2026-10-17",
+  "digest": "88dbbc2f536a"
+ },
+ "SEC.ROLE_REMOVE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "455ff4950344"
+ },
+ "SEC.ROLE_REMOVE_FROM_PACKAGE_ERROR": {
+  "date": "2026-10-17",
+  "digest": "54b7438c9ddd"
+ },
+ "SEC.ROOT_PROFILE_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "916d4ca2d175"
+ },
+ "SEC.SECRET_NOT_UPDATABLE": {
+  "date": "2026-10-17",
+  "digest": "9666864ea55e"
+ },
+ "SEC.SESSION_EXPIRED": {
+  "date": "2026-10-17",
+  "digest": "c9feed8ac81d"
+ },
+ "SEC.SIGN_IN_FAILED": {
+  "date": "2026-10-17",
+  "digest": "f5ffafff11f2"
+ },
+ "SEC.SIGN_IN_SECRET_MISSING": {
+  "date": "2026-10-17",
+  "digest": "c8c06beb4d65"
+ },
+ "SEC.SMALL_LETTERS_MISSING": {
+  "date": "2026-10-17",
+  "digest": "1f342376e33c"
+ },
+ "SEC.SMS_OTP_ERROR": {
+  "date": "2026-10-17",
+  "digest": "a6d1f57d96b1"
+ },
+ "SEC.SOCIAL_LOGIN_FAILED": {
+  "date": "2026-10-17",
+  "digest": "a163af0eb0ea"
+ },
+ "SEC.SOCIAL_PLATFORM_UNSUPPORTED": {
+  "date": "2026-10-17",
+  "digest": "9db340a3fa82"
+ },
+ "SEC.SPACES_MISSING": {
+  "date": "2026-10-17",
+  "digest": "890906f1d67c"
+ },
+ "SEC.SPECIAL_CHARACTERS_MISSING": {
+  "date": "2026-10-17",
+  "digest": "8bed5b903ce9"
+ },
+ "SEC.SSO_TARGET_APP_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "5059a8068c91"
+ },
+ "SEC.SUBDOMAIN_ALREADY_EXISTS": {
+  "date": "2026-10-17",
+  "digest": "8c8ab2de7914"
+ },
+ "SEC.SUBDOMAIN_SUFFIX_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "9e2b36e23223"
+ },
+ "SEC.SUB_ROLE_CYCLE": {
+  "date": "2026-10-17",
+  "digest": "c9487880adfa"
+ },
+ "SEC.SUB_ROLE_SELF": {
+  "date": "2026-10-17",
+  "digest": "ea0eab0c30b9"
+ },
+ "SEC.TOKEN_EXPIRED": {
+  "date": "2026-10-17",
+  "digest": "9b75541da24f"
+ },
+ "SEC.TOKEN_FORBIDDEN": {
+  "date": "2026-10-17",
+  "digest": "7ae4cd57a6df"
+ },
+ "SEC.TOKEN_UNAUTHORIZED": {
+  "date": "2026-10-17",
+  "digest": "f1fd983081bf"
+ },
+ "SEC.TRIGGER_FAILED": {
+  "date": "2026-10-17",
+  "digest": "6cc81b8d7d89"
+ },
+ "SEC.UNABLE_TO_CONVERT": {
+  "date": "2026-10-17",
+  "digest": "feeaf31b7f7d"
+ },
+ "SEC.UNABLE_TO_DELETE": {
+  "date": "2026-10-17",
+  "digest": "8fa2e41ab1ce"
+ },
+ "SEC.UNKNOWN_CLIENT": {
+  "date": "2026-10-17",
+  "digest": "ebd620204e7b"
+ },
+ "SEC.UNKNOWN_ERROR": {
+  "date": "2026-10-17",
+  "digest": "28cd62574c27"
+ },
+ "SEC.UNKNOWN_ERROR_WITH_ID": {
+  "date": "2026-10-17",
+  "digest": "b6ebca5ceccc"
+ },
+ "SEC.UNKNOWN_TOKEN": {
+  "date": "2026-10-17",
+  "digest": "813e9143425e"
+ },
+ "SEC.UNKONWN_ERROR_INSERT": {
+  "date": "2026-10-17",
+  "digest": "df4f3bfa417f"
+ },
+ "SEC.UNSUPPORTED_AUTH_MODE": {
+  "date": "2026-10-17",
+  "digest": "ef8094211806"
+ },
+ "SEC.URL_IS_APP_SUBDOMAIN": {
+  "date": "2026-10-17",
+  "digest": "dd818d833ee8"
+ },
+ "SEC.USER_ACCOUNT_BLOCKED": {
+  "date": "2026-10-17",
+  "digest": "420467a47bbb"
+ },
+ "SEC.USER_ACCOUNT_BLOCKED_LIMIT": {
+  "date": "2026-10-17",
+  "digest": "612dd532d2b4"
+ },
+ "SEC.USER_ACCOUNT_PASS_EXPIRED": {
+  "date": "2026-10-17",
+  "digest": "a0ea448b396a"
+ },
+ "SEC.USER_ALREADY_CREATED": {
+  "date": "2026-10-17",
+  "digest": "c87a7f6b9533"
+ },
+ "SEC.USER_ALREADY_EXISTS": {
+  "date": "2026-10-17",
+  "digest": "7034c6dbb775"
+ },
+ "SEC.USER_ALREADY_HAVING_APP_ACCESS": {
+  "date": "2026-10-17",
+  "digest": "5a00fa7d7a61"
+ },
+ "SEC.USER_APP_REQUEST_ACCEPT_INCORRECT_DATA": {
+  "date": "2026-10-17",
+  "digest": "3afd3018fba8"
+ },
+ "SEC.USER_APP_REQUEST_ALREADY_EXISTS": {
+  "date": "2026-10-17",
+  "digest": "4790a85fa377"
+ },
+ "SEC.USER_APP_REQUEST_INCORRECT_STATUS": {
+  "date": "2026-10-17",
+  "digest": "0ff4e276aca7"
+ },
+ "SEC.USER_APP_REQUEST_MANDATORY_REQUEST_ID": {
+  "date": "2026-10-17",
+  "digest": "a207a7602e87"
+ },
+ "SEC.USER_CREDENTIALS_MISMATCHED": {
+  "date": "2026-10-17",
+  "digest": "28f459444f51"
+ },
+ "SEC.USER_DESIGNATION_MISMATCH": {
+  "date": "2026-10-17",
+  "digest": "7157e236e048"
+ },
+ "SEC.USER_IDENTIFICATION_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "5b55b1f3c854"
+ },
+ "SEC.USER_IDENTITY_TAKEN": {
+  "date": "2026-10-17",
+  "digest": "6a832e432571"
+ },
+ "SEC.USER_INVITE_PENDING": {
+  "date": "2026-10-17",
+  "digest": "18bfb651a907"
+ },
+ "SEC.USER_NOT_ACTIVE": {
+  "date": "2026-10-17",
+  "digest": "c8f2ac422ef7"
+ },
+ "SEC.USER_PASSWORD_INVALID": {
+  "date": "2026-10-17",
+  "digest": "c8df847d2dc1"
+ },
+ "SEC.USER_PASSWORD_INVALID_ATTEMPTS": {
+  "date": "2026-10-17",
+  "digest": "10a6dcb2eb7a"
+ },
+ "SEC.USER_REPORTING_ERROR": {
+  "date": "2026-10-17",
+  "digest": "b2f622434134"
+ },
+ "SEC.VALUEOF_METHOD_NOT_FOUND": {
+  "date": "2026-10-17",
+  "digest": "e87e25a93fc2"
+ },
+ "WORD.OR": {
+  "date": "2026-10-17",
+  "digest": "fee4b2101345"
+ }
+}

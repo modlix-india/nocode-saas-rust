@@ -1,0 +1,57 @@
+# core-events, local. Consumes SCRATCH queues only: the real events1..3 belong to the local Java
+# core. The scratch exchange and queues are declared on start.
+# core-exec on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
+# from config/local.env; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
+
+[server]
+port = 8109
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[mongo]
+uri = "mongodb://localhost:27017"
+database = "core"
+
+[database]
+host = "localhost"
+port = 3306
+database = "core"
+username = "root"
+max_connections = 8
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[entity_processor]
+upstream = "eureka:ENTITY-PROCESSOR"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[core]
+function_timeout_seconds = 300
+java_zone_offset = "+05:30"
+
+[mq]
+# The password (or the whole URI) comes from MODLIX__MQ__PASSWORD / MODLIX__MQ__URI.
+host = "localhost"
+username = "guest"
+events_exchange = "rs_scratch_events"
+events_routing_keys = "rs_scratch_events1,rs_scratch_events2,rs_scratch_events3"
+
+[events]
+queues = "rs_scratch_events1,rs_scratch_events2,rs_scratch_events3"
+prefetch = 16
+declare = true

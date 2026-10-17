@@ -1,0 +1,80 @@
+{"ok":"Hi Ann!"}
+{"ok":"1,234,567"}
+{"ok":"1,234.568"}
+{"ok":"2.5"}
+{"ok":"0"}
+{"ok":"-1,234.5"}
+{"ok":"123,456,789,012"}
+{"ok":"0.001"}
+{"ok":"0.125"}
+{"ok":"2.062"}
+{"ok":"1,234,567.00"}
+{"ok":"1234.57"}
+{"ok":"1235"}
+{"ok":"2"}
+{"ok":"2.062"}
+{"ok":"0.12"}
+{"ok":"123,456,789,012"}
+{"ok":"1,237.068"}
+{"ok":"-1,233,332.432"}
+{"ok":"3,703,701"}
+{"ok":"176,366.714"}
+{"ok":"5"}
+{"ok":"2.5"}
+{"ok":"-2.5"}
+{"ok":"1,235"}
+{"ok":"1234567"}
+{"ok":"1,234.5"}
+{"ok":"0.18"}
+{"ok":"|d|dn|v|q"}
+{"ok":"d"}
+{"err":"InvalidReferenceException"}
+{"err":"InvalidReferenceException"}
+{"err":"InvalidReferenceException"}
+{"ok":"nyn"}
+{"ok":"nynn"}
+{"ok":"TENF"}
+{"ok":"okok2bigp"}
+{"ok":"eqlelt"}
+{"err":"NonBooleanException"}
+{"err":"_MiscTemplateException"}
+{"err":"_MiscTemplateException"}
+{"ok":"yes|no"}
+{"ok":"A|B"}
+{"ok":"0:a, 1:b, 2:c"}
+{"ok":"1-2-3"}
+{"ok":"none"}
+{"ok":"pen: 20\nink: 10\n"}
+{"ok":"10.00;2.50;"}
+{"ok":"3 ANN ann pad| Abc y"}
+{"ok":"numnotnum"}
+{"ok":"y n"}
+{"ok":"3 3"}
+{"ok":"a1,234,567 1,234,567b x2.5"}
+{"ok":"b v"}
+{"ok":"deep 6"}
+{"ok":"3 2 3 1,234.5 1,234"}
+{"ok":"Hello\n  World\nBye"}
+{"ok":"Hello\nBye"}
+{"ok":"  \n    a\nend"}
+{"ok":"<table>\n      <tr><td>pen</td></tr>\n    <tr><td>ink</td></tr>\n</table>"}
+{"ok":"x y z\nAnn\n"}
+{"ok":"a\nb\n"}
+{"ok":"\n\n\n\n"}
+{"ok":"Ann\n  x\n"}
+{"ok":"line1\r\n  line2\r\nline3"}
+{"ok":"\t\n\ta\n\n\tb\n\n\tc\n"}
+{"ok":"<p>\nB\n</p>"}
+{"ok":"text"}
+{"ok":"ab\nc"}
+{"ok":"  a,\n  b,\n  c"}
+{"ok":"Ann has"}
+{"ok":"hi"}
+{"ok":"nz"}
+{"ok":"B"}
+{"ok":"x"}
+{"err":"NonUserDefinedDirectiveLikeException"}
+{"ok":"1"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}

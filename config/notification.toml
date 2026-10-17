@@ -1,0 +1,62 @@
+# notification on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
+# from config/local.env.
+#
+# Consumes SCRATCH queues only. The real notifications1..3 hold ~600 local messages nobody has
+# consumed (Java notification is not running locally); consuming them would send real email to
+# real addresses. Switch [notifications] to the real queues (and declare = false) only on purpose.
+# Registers as NOTIFICATION-RS so it takes no traffic meant for Java notification.
+
+[server]
+port = 8114
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[database]
+host = "localhost"
+port = 3306
+database = "notification"
+username = "root"
+max_connections = 4
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[core]
+# Java core answers both definition reads. With the Rust core units instead:
+# upstream = "http://localhost:8111" (core-editor), connections_upstream = "http://localhost:8105" (core-exec).
+upstream = "eureka:CORE"
+timeout_seconds = 60
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+register = true
+register_as = "NOTIFICATION-RS"
+
+[mq]
+# RabbitMQ's default account, which the broker accepts from localhost only. Elsewhere the
+# password (or the whole URI) comes from MODLIX__MQ__PASSWORD / MODLIX__MQ__URI.
+host = "localhost"
+port = 5672
+username = "guest"
+password = "guest"
+
+[notifications]
+queues = "rs_scratch_notifications1,rs_scratch_notifications2,rs_scratch_notifications3"
+exchange = "rs_scratch_notifications"
+declare = true
+prefetch = 10
+
+[sse]
+heartbeat_seconds = 15

@@ -1,0 +1,161 @@
+# TEST VARIANT on 8181: files traffic to the Rust units. gateway-rust on the local stack: the same routes as the Spring gateway (nocode-saas configfiles
+# gateway.yml), with every Java service followed through the local Eureka. Listens on 8180 next to
+# the Spring gateway on 8080.
+
+[server]
+port = 8181
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[redis]
+# The Java services' effective prefix; security's evictions of the host cache reach the gateway.
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+upstream = "eureka:SECURITY"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[pools.security]
+upstreams = "eureka:SECURITY"
+health_path = "/actuator/health"
+
+[pools.files]
+upstreams = "eureka:FILES"
+health_path = "/actuator/health"
+
+[pools.core]
+upstreams = "eureka:CORE"
+health_path = "/actuator/health"
+
+[pools.ui]
+upstreams = "eureka:UI"
+health_path = "/actuator/health"
+
+[pools.multi]
+upstreams = "eureka:MULTI"
+health_path = "/actuator/health"
+
+[pools.entity-processor]
+upstreams = "eureka:ENTITY-PROCESSOR"
+health_path = "/actuator/health"
+
+[pools.notification]
+upstreams = "eureka:NOTIFICATION"
+health_path = "/actuator/health"
+
+[pools.message]
+upstreams = "eureka:MESSAGE"
+health_path = "/actuator/health"
+
+[pools.worker]
+upstreams = "eureka:WORKER"
+health_path = "/actuator/health"
+
+[pools.schedular]
+upstreams = "eureka:SCHEDULAR"
+health_path = "/actuator/health"
+
+[pools.data]
+upstreams = "eureka:DATA"
+health_path = "/actuator/health"
+
+[pools.adzump]
+upstreams = "eureka:ADZUMP"
+health_path = "/actuator/health"
+
+[pools.ai]
+upstreams = "eureka:AI"
+health_path = "/health"
+
+[[routes]]
+id = "security"
+prefix = "/api/security"
+pool = "security"
+
+[[routes]]
+id = "files-read"
+prefix = "/api/files"
+contains = ["/api/files/static/file/", "/api/files/secured/file/", "/api/files/secured/downloadFileByKey/"]
+methods = ["GET", "HEAD"]
+pool = "files-serve"
+
+[[routes]]
+id = "files"
+prefix = "/api/files"
+pool = "files-manage"
+
+[[routes]]
+id = "data"
+prefix = "/api/data"
+pool = "data"
+
+[[routes]]
+id = "core"
+prefix = "/api/core"
+pool = "core"
+
+[[routes]]
+id = "schedular"
+prefix = "/api/schedular"
+pool = "schedular"
+
+[[routes]]
+id = "multi"
+prefix = "/api/multi"
+pool = "multi"
+
+[[routes]]
+id = "entity-processor"
+prefix = "/api/entity/processor"
+pool = "entity-processor"
+
+[[routes]]
+id = "notification"
+prefix = "/api/notification"
+pool = "notification"
+
+[[routes]]
+id = "message"
+prefix = "/api/message"
+pool = "message"
+
+[[routes]]
+id = "worker"
+prefix = "/api/worker"
+pool = "worker"
+
+[[routes]]
+id = "entity-collector"
+prefix = "/api/entity/collector"
+pool = "entity-processor"
+
+[[routes]]
+id = "ai"
+prefix = "/api/ai"
+pool = "ai"
+
+[[routes]]
+id = "adzump"
+prefix = "/api/adzump"
+pool = "adzump"
+
+[[routes]]
+id = "ui"
+prefix = "/"
+pool = "ui"
+
+[pools.files-serve]
+upstreams = ["http://localhost:8103"]
+health_path = "/readyz"
+
+[pools.files-manage]
+upstreams = ["http://localhost:8104"]
+health_path = "/readyz"

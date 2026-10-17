@@ -1,0 +1,931 @@
+{
+ "functions": {
+  "names": [
+   "System.Math.Add",
+   "System.Math.Minimum",
+   "System.Math.Maximum",
+   "System.Math.Random",
+   "System.Math.Hypotenuse",
+   "System.JSON.JSONStringify",
+   "System.JSON.JSONParse",
+   "System.Object.ObjectEntries",
+   "System.Object.ObjectKeys",
+   "System.Object.ObjectDeleteKey",
+   "System.Object.ObjectValues",
+   "System.Object.ObjectConvert",
+   "System.Object.ObjectPutValue",
+   "System.Loop.RangeLoop",
+   "System.Loop.CountLoop",
+   "System.Loop.Break",
+   "System.Loop.ForEachLoop",
+   "System.Context.Set",
+   "System.Context.Create",
+   "System.Context.Get",
+   "System.Array.Delete",
+   "System.Array.Fill",
+   "System.Array.DeleteFirst",
+   "System.Array.Reverse",
+   "System.Array.Rotate",
+   "System.Array.Max",
+   "System.Array.ArrayToArrayOfObjects",
+   "System.Array.Insert",
+   "System.Array.LastIndexOfArray",
+   "System.Array.Disjoint",
+   "System.Array.Sort",
+   "System.Array.Compare",
+   "System.Array.MisMatch",
+   "System.Array.AddFirst",
+   "System.Array.Shuffle",
+   "System.Array.BinarySearch",
+   "System.Array.IndexOf",
+   "System.Array.ArrayToObjects",
+   "System.Array.SubArray",
+   "System.Array.Join",
+   "System.Array.InsertLast",
+   "System.Array.RemoveDuplicates",
+   "System.Array.DeleteFrom",
+   "System.Array.Equals",
+   "System.Array.Min",
+   "System.Array.Copy",
+   "System.Array.Concatenate",
+   "System.Array.LastIndexOf",
+   "System.Array.Frequency",
+   "System.Array.DeleteLast",
+   "System.Array.IndexOfArray",
+   "System.Date.GetNames",
+   "System.Date.ToDateString",
+   "System.Date.IsValidISODate",
+   "System.Date.GetCurrentTimestamp",
+   "System.Date.FromDateString",
+   "System.Date.SetTimeZone",
+   "System.Date.IsBetween",
+   "System.Date.FromNow",
+   "System.Date.Difference",
+   "System.Print",
+   "System.GenerateEvent",
+   "System.WaitForSignal",
+   "System.Make",
+   "System.WaitUntil",
+   "System.Wait",
+   "System.If",
+   "System.ValidateSchema",
+   "System.String.Reverse",
+   "System.String.Matches",
+   "System.String.InsertAtGivenPosition",
+   "System.String.PrePad",
+   "System.String.RegionMatches",
+   "System.String.DeleteForGivenLength",
+   "System.String.TrimTo",
+   "System.String.PostPad",
+   "System.String.Concatenate",
+   "System.String.Frequency",
+   "System.String.Split",
+   "System.String.ToString",
+   "System.String.ReplaceAtGivenPosition",
+   "System.Math.Floor",
+   "System.Math.ToRadians",
+   "System.Math.ExponentialMinus1",
+   "System.Math.Sine",
+   "System.Math.ArcCosine",
+   "System.Math.Log10",
+   "System.Math.Round",
+   "System.Math.ArcTangent",
+   "System.Math.Power",
+   "System.Math.HyperbolicTangent",
+   "System.Math.SquareRoot",
+   "System.Math.HyperbolicCosine",
+   "System.Math.Exponential",
+   "System.Math.HyperbolicSine",
+   "System.Math.LogNatural",
+   "System.Math.Ceiling",
+   "System.Math.Absolute",
+   "System.Math.Tangent",
+   "System.Math.CubeRoot",
+   "System.Math.Cosine",
+   "System.Math.ArcSine",
+   "System.Math.ArcTangent2",
+   "System.Math.ToDegrees",
+   "System.String.TrimStart",
+   "System.String.LowerCase",
+   "System.String.Length",
+   "System.String.IndexOf",
+   "System.String.Contains",
+   "System.String.IsEmpty",
+   "System.String.IsBlank",
+   "System.String.Repeat",
+   "System.String.UpperCase",
+   "System.String.StartsWith",
+   "System.String.Replace",
+   "System.String.SubString",
+   "System.String.Matches",
+   "System.String.LastIndexOf",
+   "System.String.Trim",
+   "System.String.EqualsIgnoreCase",
+   "System.String.EndsWith",
+   "System.String.TrimEnd",
+   "System.String.ReplaceFirst",
+   "System.String.LastIndexOfWithStartPoint",
+   "System.String.IndexOfWithStartPoint",
+   "System.Math.RandomInt",
+   "System.Math.RandomDouble",
+   "System.Math.RandomFloat",
+   "System.Math.RandomLong",
+   "System.Math.Random",
+   "System.Date.LastOf",
+   "System.Date.GetTimeZoneName",
+   "System.Date.TimestampToEpochMilliseconds",
+   "System.Date.GetMinutes",
+   "System.Date.GetYear",
+   "System.Date.StartOf",
+   "System.Date.SetDay",
+   "System.Date.GetTimeZoneOffsetShort",
+   "System.Date.GetMonth",
+   "System.Date.IsSameOrAfter",
+   "System.Date.SetSeconds",
+   "System.Date.TimeAsArray",
+   "System.Date.FirstOf",
+   "System.Date.GetMilliseconds",
+   "System.Date.TimestampToEpochSeconds",
+   "System.Date.IsInDST",
+   "System.Date.EpochSecondsToTimestamp",
+   "System.Date.IsSameOrBefore",
+   "System.Date.SubtractTime",
+   "System.Date.SetMinutes",
+   "System.Date.SetYear",
+   "System.Date.GetTimeZoneOffsetLong",
+   "System.Date.SetHours",
+   "System.Date.GetSeconds",
+   "System.Date.GetDay",
+   "System.Date.EndOf",
+   "System.Date.IsAfter",
+   "System.Date.GetDaysInYear",
+   "System.Date.GetDaysInMonth",
+   "System.Date.IsBefore",
+   "System.Date.GetHours",
+   "System.Date.TimeAsObject",
+   "System.Date.IsInLeapYear",
+   "System.Date.SetMilliseconds",
+   "System.Date.IsSame",
+   "System.Date.GetTimeZoneOffset",
+   "System.Date.GetDayOfWeek",
+   "System.Date.EpochMillisecondsToTimestamp",
+   "System.Date.SetMonth",
+   "System.Date.AddTime"
+  ],
+  "find": {
+   "System.Math.Add": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Math.Minimum": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Math.Maximum": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Math.Random": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Math.Hypotenuse": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.JSON.JSONStringify": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.JSON\",\"name\":\"JSONStringify\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.JSON.JSONParse": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.JSON\",\"name\":\"JSONParse\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"error\":{\"name\":\"error\",\"parameters\":{\"errorMessage\":{\"namespace\":\"_\",\"name\":\"errorMessage\",\"version\":1,\"type\":\"STRING\"}}},\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}"
+   },
+   "System.Object.ObjectEntries": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Object\",\"name\":\"ObjectEntries\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"tuple\",\"version\":1,\"type\":\"ARRAY\",\"items\":[{\"namespace\":\"_\",\"name\":\"key\",\"version\":1,\"type\":\"STRING\"},{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}]}}}}}}}"
+   },
+   "System.Object.ObjectKeys": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Object\",\"name\":\"ObjectKeys\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":\"STRING\"}}}}}}}"
+   },
+   "System.Object.ObjectDeleteKey": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Object\",\"name\":\"ObjectDeleteKey\",\"parameters\":{\"key\":{\"schema\":{\"namespace\":\"_\",\"name\":\"key\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"key\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}"
+   },
+   "System.Object.ObjectValues": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Object\",\"name\":\"ObjectValues\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"value\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Object.ObjectConvert": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Object.ObjectPutValue": {
+    "status": 200,
+    "body": "{\"parameterSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"source\",\"version\":1,\"type\":\"OBJECT\"},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"parameterKey\":{\"schema\":{\"namespace\":\"_\",\"name\":\"key\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"key\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"parameterValue\":{\"schema\":{\"namespace\":\"_\",\"name\":\"value\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"value\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"parameterOverwrite\":{\"schema\":{\"namespace\":\"_\",\"name\":\"overwrite\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":false},\"parameterName\":\"overwrite\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"parameterDeleteKeyOnNull\":{\"schema\":{\"namespace\":\"_\",\"name\":\"deleteKeyOnNull\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":false},\"parameterName\":\"deleteKeyOnNull\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}}"
+   },
+   "System.Loop.RangeLoop": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Loop.CountLoop": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Loop.Break": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Loop.ForEachLoop": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Context.Set": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Context.Create": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Context.Get": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Array.Delete": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Delete\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":true,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Fill": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Fill\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.DeleteFirst": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"DeleteFirst\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Reverse": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Reverse\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Rotate": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Rotate\",\"parameters\":{\"rotateLength\":{\"schema\":{\"namespace\":\"_\",\"name\":\"rotateLength\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":1,\"minimum\":1},\"parameterName\":\"rotateLength\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Max": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Max\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"STRING\",\"INTEGER\",\"NULL\",\"DOUBLE\",\"LONG\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}"
+   },
+   "System.Array.ArrayToArrayOfObjects": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"ArrayToArrayOfObjects\",\"parameters\":{\"keyName\":{\"schema\":{\"namespace\":\"_\",\"name\":\"keyName\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"keyName\",\"variableArgument\":true,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Insert": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Insert\",\"parameters\":{\"offset\":{\"schema\":{\"namespace\":\"_\",\"name\":\"offset\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"offset\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.LastIndexOfArray": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"LastIndexOfArray\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"secondSource\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.Disjoint": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Disjoint\",\"parameters\":{\"secondSrcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"secondSrcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"secondSrcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"secondSource\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Sort": {
+    "status": 200,
+    "body": "{\"ove\":{\"store\":{},\"prefix\":\"Data.\"},\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Sort\",\"parameters\":{\"keyPath\":{\"schema\":{\"namespace\":\"_\",\"name\":\"keyPath\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"\"},\"parameterName\":\"keyPath\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"ascending\":{\"schema\":{\"namespace\":\"_\",\"name\":\"ascending\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":true},\"parameterName\":\"ascending\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Compare": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Compare\",\"parameters\":{\"find\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachFind\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachFind\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"find\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.MisMatch": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"MisMatch\",\"parameters\":{\"secondSrcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"secondSrcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"secondSrcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"secondSource\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.AddFirst": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"AddFirst\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Shuffle": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Shuffle\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.BinarySearch": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"BinarySearch\",\"parameters\":{\"findPrimitive\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findPrimitive\",\"version\":1,\"type\":[\"DOUBLE\",\"STRING\",\"FLOAT\",\"LONG\",\"INTEGER\"]},\"parameterName\":\"findPrimitive\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"STRING\",\"INTEGER\",\"NULL\",\"DOUBLE\",\"LONG\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"index\":{\"namespace\":\"_\",\"name\":\"index\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.IndexOf": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"IndexOf\",\"parameters\":{\"elementObject\":{\"schema\":{\"namespace\":\"_\",\"name\":\"elementObject\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"elementObject\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.ArrayToObjects": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"ArrayToObjects\",\"parameters\":{\"keyPath\":{\"schema\":{\"namespace\":\"_\",\"name\":\"keyPath\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"keyPath\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"ignoreNullKeys\":{\"schema\":{\"namespace\":\"_\",\"name\":\"ignoreNullKeys\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":true},\"parameterName\":\"ignoreNullKeys\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"ignoreNullValues\":{\"schema\":{\"namespace\":\"_\",\"name\":\"ignoreNullValues\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":false},\"parameterName\":\"ignoreNullValues\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"ignoreDuplicateKeys\":{\"schema\":{\"namespace\":\"_\",\"name\":\"ignoreDuplicateKeys\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":false},\"parameterName\":\"ignoreDuplicateKeys\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"valuePath\":{\"schema\":{\"namespace\":\"_\",\"name\":\"valuePath\",\"version\":1,\"type\":[\"STRING\",\"NULL\"]},\"parameterName\":\"valuePath\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}"
+   },
+   "System.Array.SubArray": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"SubArray\",\"parameters\":{\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Join": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Join\",\"parameters\":{\"delimiter\":{\"schema\":{\"namespace\":\"_\",\"name\":\"delimiter\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"\"},\"parameterName\":\"delimiter\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"STRING\",\"INTEGER\",\"NULL\",\"DOUBLE\",\"LONG\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.Array.InsertLast": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"InsertLast\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.RemoveDuplicates": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"RemoveDuplicates\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.DeleteFrom": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"DeleteFrom\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Equals": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Equals\",\"parameters\":{\"find\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachFind\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachFind\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"find\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"BOOLEAN\"}}}}}}"
+   },
+   "System.Array.Min": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Min\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"STRING\",\"INTEGER\",\"NULL\",\"DOUBLE\",\"LONG\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}"
+   },
+   "System.Array.Copy": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Copy\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"deepCopy\":{\"schema\":{\"namespace\":\"_\",\"name\":\"deepCopy\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":true},\"parameterName\":\"deepCopy\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.Concatenate": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Concatenate\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"secondSource\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.LastIndexOf": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"LastIndexOf\",\"parameters\":{\"elementObject\":{\"schema\":{\"namespace\":\"_\",\"name\":\"elementObject\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"elementObject\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.Frequency": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"Frequency\",\"parameters\":{\"srcFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"srcFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0,\"minimum\":0},\"parameterName\":\"srcFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":-1},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"element\":{\"schema\":{\"namespace\":\"_\",\"name\":\"element\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"element\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Array.DeleteLast": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"DeleteLast\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}}}}}}}"
+   },
+   "System.Array.IndexOfArray": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Array\",\"name\":\"IndexOfArray\",\"parameters\":{\"source\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"source\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"findFrom\":{\"schema\":{\"namespace\":\"_\",\"name\":\"findFrom\",\"version\":1,\"type\":\"INTEGER\",\"defaultValue\":0},\"parameterName\":\"findFrom\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondSource\":{\"schema\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"eachSecondSource\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]}},\"parameterName\":\"secondSource\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.Date.GetNames": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"GetNames\",\"parameters\":{\"unit\":{\"schema\":{\"namespace\":\"_\",\"name\":\"unit\",\"version\":1,\"type\":\"STRING\",\"enums\":[\"TIMEZONES\",\"MONTHS\",\"WEEKDAYS\"]},\"parameterName\":\"unit\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"locale\":{\"schema\":{\"namespace\":\"_\",\"name\":\"locale\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"system\"},\"parameterName\":\"locale\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"names\":{\"name\":\"names\",\"parameters\":{\"names\":{\"namespace\":\"_\",\"name\":\"names\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"names\",\"version\":1,\"type\":\"STRING\"}}}}}}}"
+   },
+   "System.Date.ToDateString": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"ToDateString\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"format\":{\"schema\":{\"namespace\":\"_\",\"name\":\"format\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"format\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"locale\":{\"schema\":{\"namespace\":\"_\",\"name\":\"locale\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"en\"},\"parameterName\":\"locale\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.Date.IsValidISODate": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Date.GetCurrentTimestamp": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"GetCurrentTimestamp\",\"parameters\":{},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.FromDateString": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"FromDateString\",\"parameters\":{\"format\":{\"schema\":{\"namespace\":\"_\",\"name\":\"format\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"format\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"timestampString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"timestampString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"timestampString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.SetTimeZone": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"SetTimeZone\",\"parameters\":{\"timezone\":{\"schema\":{\"namespace\":\"_\",\"name\":\"timezone\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"timezone\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.IsBetween": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"IsBetween\",\"parameters\":{\"checkTimestamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"checkTimestamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"endTimestamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"endTimestamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"startTimestamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"startTimestamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"BOOLEAN\"}}}}}}"
+   },
+   "System.Date.FromNow": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"FromNow\",\"parameters\":{\"unit\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timeunit\"},\"parameterName\":\"unit\",\"variableArgument\":true,\"type\":\"EXPRESSION\"},\"round\":{\"schema\":{\"namespace\":\"_\",\"name\":\"round\",\"version\":1,\"type\":\"BOOLEAN\",\"defaultValue\":true},\"parameterName\":\"round\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"format\":{\"schema\":{\"namespace\":\"_\",\"name\":\"format\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"LONG\",\"enums\":[\"LONG\",\"SHORT\",\"NARROW\"]},\"parameterName\":\"format\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"locale\":{\"schema\":{\"namespace\":\"_\",\"name\":\"locale\",\"version\":1,\"type\":\"STRING\",\"defaultValue\":\"system\"},\"parameterName\":\"locale\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"base\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\",\"defaultValue\":\"\"},\"parameterName\":\"base\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.Date.Difference": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"Difference\",\"parameters\":{\"unit\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timeunit\"},\"parameterName\":\"unit\",\"variableArgument\":true,\"type\":\"EXPRESSION\"},\"isoTimeStamp2\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp2\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp1\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp1\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Duration\"}}}}}}"
+   },
+   "System.Print": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.GenerateEvent": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.WaitForSignal": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Make": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.WaitUntil": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.Wait": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.If": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.ValidateSchema": {
+    "status": 500,
+    "body": ""
+   },
+   "System.String.Reverse": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.String.Matches": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.String.InsertAtGivenPosition": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"InsertAtGivenPosition\",\"parameters\":{\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"insertString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"insertString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"insertString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"position\":{\"schema\":{\"namespace\":\"_\",\"name\":\"position\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"position\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.PrePad": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"PrePad\",\"parameters\":{\"prepadString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"prepadString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"prepadString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.RegionMatches": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"RegionMatches\",\"parameters\":{\"firstOffset\":{\"schema\":{\"namespace\":\"_\",\"name\":\"firstOffset\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"firstOffset\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"secondOffset\":{\"schema\":{\"namespace\":\"_\",\"name\":\"secondOffset\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"secondOffset\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"otherString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"otherString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"otherString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"boolean\":{\"schema\":{\"namespace\":\"_\",\"name\":\"boolean\",\"version\":1,\"type\":\"BOOLEAN\"},\"parameterName\":\"boolean\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"BOOLEAN\"}}}}}}"
+   },
+   "System.String.DeleteForGivenLength": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"DeleteForGivenLength\",\"parameters\":{\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"endPosition\":{\"schema\":{\"namespace\":\"_\",\"name\":\"endPosition\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"endPosition\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"startPosition\":{\"schema\":{\"namespace\":\"_\",\"name\":\"startPosition\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"startPosition\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.TrimTo": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"TrimTo\",\"parameters\":{\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.PostPad": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"PostPad\",\"parameters\":{\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"length\":{\"schema\":{\"namespace\":\"_\",\"name\":\"length\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"length\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"postpadString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"postpadString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"postpadString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.Concatenate": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.String.Frequency": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"Frequency\",\"parameters\":{\"searchString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"searchString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"searchString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"INTEGER\"}}}}}}"
+   },
+   "System.String.Split": {
+    "status": 200,
+    "body": "{}"
+   },
+   "System.String.ToString": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"ToString\",\"parameters\":{\"anytype\":{\"schema\":{\"namespace\":\"_\",\"name\":\"anytype\",\"version\":1,\"type\":[\"FLOAT\",\"OBJECT\",\"NULL\",\"INTEGER\",\"LONG\",\"STRING\",\"BOOLEAN\",\"DOUBLE\",\"ARRAY\"]},\"parameterName\":\"anytype\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.String.ReplaceAtGivenPosition": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.String\",\"name\":\"ReplaceAtGivenPosition\",\"parameters\":{\"string\":{\"schema\":{\"namespace\":\"_\",\"name\":\"string\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"string\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"lengthPosition\":{\"schema\":{\"namespace\":\"_\",\"name\":\"lengthPosition\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"lengthPosition\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"replaceString\":{\"schema\":{\"namespace\":\"_\",\"name\":\"replaceString\",\"version\":1,\"type\":\"STRING\"},\"parameterName\":\"replaceString\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"startPosition\":{\"schema\":{\"namespace\":\"_\",\"name\":\"startPosition\",\"version\":1,\"type\":\"INTEGER\"},\"parameterName\":\"startPosition\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"STRING\"}}}}}}"
+   },
+   "System.Math.Floor": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ToRadians": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ExponentialMinus1": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Sine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ArcCosine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Log10": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Round": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ArcTangent": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Power": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.HyperbolicTangent": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.SquareRoot": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.HyperbolicCosine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Exponential": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.HyperbolicSine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.LogNatural": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Ceiling": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Absolute": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Tangent": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.CubeRoot": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.Cosine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ArcSine": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ArcTangent2": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.ToDegrees": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.TrimStart": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.LowerCase": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.Length": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.IndexOf": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.Contains": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.IsEmpty": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.IsBlank": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.Repeat": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.UpperCase": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.StartsWith": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.Replace": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.SubString": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.LastIndexOf": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.Trim": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.EqualsIgnoreCase": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.EndsWith": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.TrimEnd": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.ReplaceFirst": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.LastIndexOfWithStartPoint": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.String.IndexOfWithStartPoint": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Math.RandomInt": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Math.RandomDouble": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Math.RandomFloat": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Math.RandomLong": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Date.LastOf": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"LastOf\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":true,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}},\"isLast\":true}"
+   },
+   "System.Date.GetTimeZoneName": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.TimestampToEpochMilliseconds": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"TimestampToEpochMilliseconds\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"LONG\"}}}}},\"isSeconds\":false}"
+   },
+   "System.Date.GetMinutes": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetYear": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.StartOf": {
+    "status": 200,
+    "body": "{\"isStart\":true,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"StartOf\",\"parameters\":{\"unit\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timeunit\"},\"parameterName\":\"unit\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.SetDay": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetTimeZoneOffsetShort": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetMonth": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.IsSameOrAfter": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.SetSeconds": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.TimeAsArray": {
+    "status": 200,
+    "body": "{\"isArray\":true,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"TimeAsArray\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"array\":{\"namespace\":\"_\",\"name\":\"array\",\"version\":1,\"type\":\"ARRAY\",\"items\":{\"namespace\":\"_\",\"name\":\"timeParts\",\"version\":1,\"type\":\"INTEGER\"}}}}}}}"
+   },
+   "System.Date.FirstOf": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"FirstOf\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":true,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}},\"isLast\":false}"
+   },
+   "System.Date.GetMilliseconds": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.TimestampToEpochSeconds": {
+    "status": 200,
+    "body": "{\"signature\":{\"namespace\":\"System.Date\",\"name\":\"TimestampToEpochSeconds\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"result\":{\"namespace\":\"_\",\"name\":\"result\",\"version\":1,\"type\":\"LONG\"}}}}},\"isSeconds\":true}"
+   },
+   "System.Date.IsInDST": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.EpochSecondsToTimestamp": {
+    "status": 200,
+    "body": "{\"isSeconds\":true,\"paramName\":\"epochSeconds\",\"signature\":{\"namespace\":\"System.Date\",\"name\":\"EpochSecondsToTimestamp\",\"parameters\":{\"epochSeconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"epochSeconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"STRING\"]},\"parameterName\":\"epochSeconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.IsSameOrBefore": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.SubtractTime": {
+    "status": 200,
+    "body": "{\"isAdd\":false,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"SubtractTime\",\"parameters\":{\"milliseconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"milliseconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"milliseconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"hours\":{\"schema\":{\"namespace\":\"_\",\"name\":\"hours\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"hours\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"seconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"seconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"seconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"months\":{\"schema\":{\"namespace\":\"_\",\"name\":\"months\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"months\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"minutes\":{\"schema\":{\"namespace\":\"_\",\"name\":\"minutes\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"minutes\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"days\":{\"schema\":{\"namespace\":\"_\",\"name\":\"days\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"days\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"years\":{\"schema\":{\"namespace\":\"_\",\"name\":\"years\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"years\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.SetMinutes": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.SetYear": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetTimeZoneOffsetLong": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.SetHours": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetSeconds": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetDay": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.EndOf": {
+    "status": 200,
+    "body": "{\"isStart\":false,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"EndOf\",\"parameters\":{\"unit\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timeunit\"},\"parameterName\":\"unit\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.IsAfter": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetDaysInYear": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetDaysInMonth": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.IsBefore": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetHours": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.TimeAsObject": {
+    "status": 200,
+    "body": "{\"isArray\":false,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"TimeAsObject\",\"parameters\":{\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"object\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.TimeObject\"}}}}}}"
+   },
+   "System.Date.IsInLeapYear": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.SetMilliseconds": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.IsSame": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetTimeZoneOffset": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.GetDayOfWeek": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.EpochMillisecondsToTimestamp": {
+    "status": 200,
+    "body": "{\"isSeconds\":false,\"paramName\":\"epochMilliseconds\",\"signature\":{\"namespace\":\"System.Date\",\"name\":\"EpochMillisecondsToTimestamp\",\"parameters\":{\"epochMilliseconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"epochMilliseconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"STRING\"]},\"parameterName\":\"epochMilliseconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   },
+   "System.Date.SetMonth": {
+    "status": 200,
+    "body": "null"
+   },
+   "System.Date.AddTime": {
+    "status": 200,
+    "body": "{\"isAdd\":true,\"signature\":{\"namespace\":\"System.Date\",\"name\":\"AddTime\",\"parameters\":{\"milliseconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"milliseconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"milliseconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"hours\":{\"schema\":{\"namespace\":\"_\",\"name\":\"hours\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"hours\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"seconds\":{\"schema\":{\"namespace\":\"_\",\"name\":\"seconds\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"seconds\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"months\":{\"schema\":{\"namespace\":\"_\",\"name\":\"months\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"months\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"minutes\":{\"schema\":{\"namespace\":\"_\",\"name\":\"minutes\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"minutes\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"isoTimeStamp\":{\"schema\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"},\"parameterName\":\"isoTimeStamp\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"days\":{\"schema\":{\"namespace\":\"_\",\"name\":\"days\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"days\",\"variableArgument\":false,\"type\":\"EXPRESSION\"},\"years\":{\"schema\":{\"namespace\":\"_\",\"name\":\"years\",\"version\":1,\"type\":[\"INTEGER\",\"LONG\",\"DOUBLE\",\"FLOAT\"],\"defaultValue\":0},\"parameterName\":\"years\",\"variableArgument\":false,\"type\":\"EXPRESSION\"}},\"events\":{\"output\":{\"name\":\"output\",\"parameters\":{\"isoTimeStamp\":{\"namespace\":\"_\",\"version\":1,\"ref\":\"System.Date.Timestamp\"}}}}}}"
+   }
+  }
+ },
+ "schemas": {
+  "names": [
+   "System.Null",
+   "System.string",
+   "System.double",
+   "System.Date.Timeunit",
+   "System.Schema",
+   "System.Date.TimeObject",
+   "System.Date.Duration",
+   "System.integer",
+   "System.float",
+   "System.any",
+   "System.Date.Timestamp",
+   "System.long",
+   "System.number",
+   "System.boolean",
+   "System.ParameterExpression"
+  ],
+  "find": {
+   "System.Null": {
+    "status": 500,
+    "body": ""
+   },
+   "System.string": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"string\",\n  \"version\" : 1,\n  \"type\" : \"STRING\",\n  \"title\" : \"System.string\",\n  \"fullName\" : \"System.string\"\n}"
+   },
+   "System.double": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"double\",\n  \"version\" : 1,\n  \"type\" : \"DOUBLE\",\n  \"title\" : \"System.double\",\n  \"fullName\" : \"System.double\"\n}"
+   },
+   "System.Date.Timeunit": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Schema": {
+    "status": 500,
+    "body": ""
+   },
+   "System.Date.TimeObject": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System.Date\",\n  \"name\" : \"TimeObject\",\n  \"version\" : 1,\n  \"type\" : \"OBJECT\",\n  \"properties\" : {\n    \"second\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"second\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"second\",\n      \"fullName\" : \"_.second\"\n    },\n    \"year\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"year\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"year\",\n      \"fullName\" : \"_.year\"\n    },\n    \"hour\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"hour\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"hour\",\n      \"fullName\" : \"_.hour\"\n    },\n    \"day\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"day\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"day\",\n      \"fullName\" : \"_.day\"\n    },\n    \"month\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"month\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"month\",\n      \"fullName\" : \"_.month\"\n    },\n    \"minute\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"minute\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"minute\",\n      \"fullName\" : \"_.minute\"\n    },\n    \"millisecond\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"millisecond\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"millisecond\",\n      \"fullName\" : \"_.millisecond\"\n    }\n  },\n  \"title\" : \"System.Date.TimeObject\",\n  \"fullName\" : \"System.Date.TimeObject\"\n}"
+   },
+   "System.Date.Duration": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System.Date\",\n  \"name\" : \"Duration\",\n  \"version\" : 1,\n  \"type\" : \"OBJECT\",\n  \"properties\" : {\n    \"milliseconds\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"milliseconds\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"milliseconds\",\n      \"fullName\" : \"_.milliseconds\"\n    },\n    \"minutes\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"minutes\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"minutes\",\n      \"fullName\" : \"_.minutes\"\n    },\n    \"quarters\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"quarters\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"quarters\",\n      \"fullName\" : \"_.quarters\"\n    },\n    \"days\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"days\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"days\",\n      \"fullName\" : \"_.days\"\n    },\n    \"months\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"months\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"months\",\n      \"fullName\" : \"_.months\"\n    },\n    \"hours\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"hours\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"hours\",\n      \"fullName\" : \"_.hours\"\n    },\n    \"weeks\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"weeks\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"weeks\",\n      \"fullName\" : \"_.weeks\"\n    },\n    \"years\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"years\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"years\",\n      \"fullName\" : \"_.years\"\n    },\n    \"seconds\" : {\n      \"namespace\" : \"_\",\n      \"name\" : \"seconds\",\n      \"version\" : 1,\n      \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n      \"title\" : \"seconds\",\n      \"fullName\" : \"_.seconds\"\n    }\n  },\n  \"title\" : \"System.Date.Duration\",\n  \"fullName\" : \"System.Date.Duration\"\n}"
+   },
+   "System.integer": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"integer\",\n  \"version\" : 1,\n  \"type\" : \"INTEGER\",\n  \"title\" : \"System.integer\",\n  \"fullName\" : \"System.integer\"\n}"
+   },
+   "System.float": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"float\",\n  \"version\" : 1,\n  \"type\" : \"FLOAT\",\n  \"title\" : \"System.float\",\n  \"fullName\" : \"System.float\"\n}"
+   },
+   "System.any": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"any\",\n  \"version\" : 1,\n  \"type\" : [ \"FLOAT\", \"OBJECT\", \"NULL\", \"INTEGER\", \"LONG\", \"STRING\", \"BOOLEAN\", \"DOUBLE\", \"ARRAY\" ],\n  \"title\" : \"System.any\",\n  \"fullName\" : \"System.any\"\n}"
+   },
+   "System.Date.Timestamp": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System.Date\",\n  \"name\" : \"Timestamp\",\n  \"version\" : 1,\n  \"type\" : \"STRING\",\n  \"title\" : \"System.Date.Timestamp\",\n  \"fullName\" : \"System.Date.Timestamp\"\n}"
+   },
+   "System.long": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"long\",\n  \"version\" : 1,\n  \"type\" : \"LONG\",\n  \"title\" : \"System.long\",\n  \"fullName\" : \"System.long\"\n}"
+   },
+   "System.number": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"number\",\n  \"version\" : 1,\n  \"type\" : [ \"INTEGER\", \"LONG\", \"DOUBLE\", \"FLOAT\" ],\n  \"title\" : \"System.number\",\n  \"fullName\" : \"System.number\"\n}"
+   },
+   "System.boolean": {
+    "status": 200,
+    "body": "{\n  \"namespace\" : \"System\",\n  \"name\" : \"boolean\",\n  \"version\" : 1,\n  \"type\" : \"BOOLEAN\",\n  \"title\" : \"System.boolean\",\n  \"fullName\" : \"System.boolean\"\n}"
+   },
+   "System.ParameterExpression": {
+    "status": 500,
+    "body": ""
+   }
+  }
+ }
+}

@@ -1,0 +1,35 @@
+# files-serve on the local stack.
+
+[server]
+port = 8103
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[database]
+host = "localhost"
+port = 3306
+database = "files"
+username = "root"
+max_connections = 8
+
+[storage]
+endpoint = "https://ae81e53db5aca470c4e4073aa03498cd.r2.cloudflarestorage.com"
+bucket_prefix = "local"
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]

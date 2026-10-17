@@ -1,0 +1,1134 @@
+{"kind": "touri", "url": "*", "query": []}
+{"kind": "touristring", "url": "*", "query": []}
+{"kind": "rest", "url": "*", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "*", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "*", "query": [["a", "b"]]}
+{"kind": "rest", "url": "*", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "*", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "*", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "*", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "*x", "query": []}
+{"kind": "touristring", "url": "*x", "query": []}
+{"kind": "rest", "url": "*x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "*x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "*x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "*x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "*x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "*x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "*x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "*x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "/a;b", "query": []}
+{"kind": "touristring", "url": "/a;b", "query": []}
+{"kind": "rest", "url": "/a;b", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "/a;b", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "/a;b", "query": [["a", "b"]]}
+{"kind": "rest", "url": "/a;b", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "/a;b", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "/a;b", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "/a;b", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "/a;b", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "./x", "query": []}
+{"kind": "touristring", "url": "./x", "query": []}
+{"kind": "rest", "url": "./x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "./x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "./x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "./x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "./x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "./x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "./x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "./x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": ".x", "query": []}
+{"kind": "touristring", "url": ".x", "query": []}
+{"kind": "rest", "url": ".x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": ".x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": ".x", "query": [["a", "b"]]}
+{"kind": "rest", "url": ".x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": ".x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": ".x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": ".x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": ".x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%41/x", "query": []}
+{"kind": "touristring", "url": "%41/x", "query": []}
+{"kind": "rest", "url": "%41/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%41/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "%41/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "%41/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%41/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "%41/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "%41/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%41/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%zz", "query": []}
+{"kind": "touristring", "url": "%zz", "query": []}
+{"kind": "rest", "url": "%zz", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%zz", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "%zz", "query": [["a", "b"]]}
+{"kind": "rest", "url": "%zz", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "%zz", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "%zz", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "%zz", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "%zz", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "?q=1", "query": []}
+{"kind": "touristring", "url": "?q=1", "query": []}
+{"kind": "rest", "url": "?q=1", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "?q=1", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "?q=1", "query": [["a", "b"]]}
+{"kind": "rest", "url": "?q=1", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "?q=1", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "?q=1", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "?q=1", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "?q=1", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "#frag", "query": []}
+{"kind": "touristring", "url": "#frag", "query": []}
+{"kind": "rest", "url": "#frag", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "#frag", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "#frag", "query": [["a", "b"]]}
+{"kind": "rest", "url": "#frag", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "#frag", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "#frag", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "#frag", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "#frag", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x?y", "query": []}
+{"kind": "touristring", "url": "x?y", "query": []}
+{"kind": "rest", "url": "x?y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x?y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x?y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x?y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x?y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x?y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x?y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x?y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x#y", "query": []}
+{"kind": "touristring", "url": "x#y", "query": []}
+{"kind": "rest", "url": "x#y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x#y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x#y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x#y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x#y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x#y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x#y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x#y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x%41y", "query": []}
+{"kind": "touristring", "url": "x%41y", "query": []}
+{"kind": "rest", "url": "x%41y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x%41y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x%41y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x%41y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x%41y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x%41y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x%41y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x%41y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x/y", "query": []}
+{"kind": "touristring", "url": "x/y", "query": []}
+{"kind": "rest", "url": "x/y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x/y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x/y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x/y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x/y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x/y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x/y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x/y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x;y", "query": []}
+{"kind": "touristring", "url": "x;y", "query": []}
+{"kind": "rest", "url": "x;y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x;y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x;y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x;y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x;y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x;y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x;y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x;y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x:y", "query": []}
+{"kind": "touristring", "url": "x:y", "query": []}
+{"kind": "rest", "url": "x:y", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x:y", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "x:y", "query": [["a", "b"]]}
+{"kind": "rest", "url": "x:y", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "x:y", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "x:y", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "x:y", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "x:y", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com#f", "query": []}
+{"kind": "touristring", "url": "http://h.com#f", "query": []}
+{"kind": "rest", "url": "http://h.com#f", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com#f", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com#f", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com#f", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com#f", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com#f", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com#f", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com#f", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com?q", "query": []}
+{"kind": "touristring", "url": "http://h.com?q", "query": []}
+{"kind": "rest", "url": "http://h.com?q", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com?q", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com?q", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com?q", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com?q", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com?q", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com?q", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com?q", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8?q", "query": []}
+{"kind": "touristring", "url": "http://h.com:8?q", "query": []}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8?q", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com:8?q", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8?q", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com:8?q", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8?q", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8#f", "query": []}
+{"kind": "touristring", "url": "http://h.com:8#f", "query": []}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8#f", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com:8#f", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8#f", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com:8#f", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8#f", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u:p@h.com:80/x", "query": []}
+{"kind": "touristring", "url": "http://u:p@h.com:80/x", "query": []}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u:p@h.com:80/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://u:p@h.com:80/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u:p@h.com:80/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://u:p@h.com:80/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u:p@h.com:80/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8a@x.com/", "query": []}
+{"kind": "touristring", "url": "http://h.com:8a@x.com/", "query": []}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8a@x.com/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com:8a@x.com/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:8a@x.com/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com:8a@x.com/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:8a@x.com/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8@x.com/", "query": []}
+{"kind": "touristring", "url": "http://h:8@x.com/", "query": []}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8@x.com/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h:8@x.com/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8@x.com/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h:8@x.com/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8@x.com/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u@h:8@x/", "query": []}
+{"kind": "touristring", "url": "http://u@h:8@x/", "query": []}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u@h:8@x/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://u@h:8@x/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u@h:8@x/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://u@h:8@x/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u@h:8@x/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8x/", "query": []}
+{"kind": "touristring", "url": "http://h:8x/", "query": []}
+{"kind": "rest", "url": "http://h:8x/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8x/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h:8x/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h:8x/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:8x/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h:8x/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h:8x/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:8x/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:{p}/", "query": []}
+{"kind": "touristring", "url": "http://h:{p}/", "query": []}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:{p}/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h:{p}/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:{p}/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h:{p}/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:{p}/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:%41/", "query": []}
+{"kind": "touristring", "url": "http://h:%41/", "query": []}
+{"kind": "rest", "url": "http://h:%41/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:%41/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h:%41/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h:%41/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h:%41/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h:%41/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h:%41/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h:%41/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:/x", "query": []}
+{"kind": "touristring", "url": "http://h.com:/x", "query": []}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com:/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com:/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%41.com/", "query": []}
+{"kind": "touristring", "url": "http://h%41.com/", "query": []}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%41.com/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h%41.com/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%41.com/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h%41.com/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%41.com/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%4/", "query": []}
+{"kind": "touristring", "url": "http://h%4/", "query": []}
+{"kind": "rest", "url": "http://h%4/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%4/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h%4/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h%4/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%4/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h%4/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h%4/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%4/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%zz/", "query": []}
+{"kind": "touristring", "url": "http://h%zz/", "query": []}
+{"kind": "rest", "url": "http://h%zz/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%zz/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h%zz/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h%zz/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h%zz/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h%zz/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h%zz/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h%zz/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]:8080/x", "query": []}
+{"kind": "touristring", "url": "http://[::1]:8080/x", "query": []}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]:8080/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[::1]:8080/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]:8080/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[::1]:8080/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]:8080/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]x", "query": []}
+{"kind": "touristring", "url": "http://[::1]x", "query": []}
+{"kind": "rest", "url": "http://[::1]x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[::1]x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[::1]x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[::1]x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[::1]x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]/x", "query": []}
+{"kind": "touristring", "url": "http://[::1]/x", "query": []}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[::1]/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[::1]/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]", "query": []}
+{"kind": "touristring", "url": "http://[::1]", "query": []}
+{"kind": "rest", "url": "http://[::1]", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[::1]", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[::1]", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1]", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[::1]", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[::1]", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1]", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1", "query": []}
+{"kind": "touristring", "url": "http://[::1", "query": []}
+{"kind": "rest", "url": "http://[::1", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[::1", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[::1", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[::1", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[::1", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[::1", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[::1", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://x[::1]/", "query": []}
+{"kind": "touristring", "url": "http://x[::1]/", "query": []}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://x[::1]/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://x[::1]/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://x[::1]/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://x[::1]/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://x[::1]/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[g]/", "query": []}
+{"kind": "touristring", "url": "http://[g]/", "query": []}
+{"kind": "rest", "url": "http://[g]/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[g]/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://[g]/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://[g]/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://[g]/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://[g]/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://[g]/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://[g]/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h^/", "query": []}
+{"kind": "touristring", "url": "http://h^/", "query": []}
+{"kind": "rest", "url": "http://h^/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h^/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h^/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h^/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h^/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h^/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h^/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h^/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x}/", "query": []}
+{"kind": "touristring", "url": "http://h{x}/", "query": []}
+{"kind": "rest", "url": "http://h{x}/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x}/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h{x}/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h{x}/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x}/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h{x}/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h{x}/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x}/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x/", "query": []}
+{"kind": "touristring", "url": "http://h{x/", "query": []}
+{"kind": "rest", "url": "http://h{x/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h{x/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h{x/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h{x/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h{x/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h{x/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h{x/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h}/", "query": []}
+{"kind": "touristring", "url": "http://h}/", "query": []}
+{"kind": "rest", "url": "http://h}/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h}/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h}/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h}/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h}/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h}/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h}/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h}/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://{h}.com/x", "query": []}
+{"kind": "touristring", "url": "http://{h}.com/x", "query": []}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://{h}.com/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://{h}.com/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://{h}.com/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://{h}.com/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://{h}.com/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00e9", "query": []}
+{"kind": "touristring", "url": "http://h.com/%u00e9", "query": []}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00e9", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/%u00e9", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00e9", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/%u00e9", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00e9", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u12", "query": []}
+{"kind": "touristring", "url": "http://h.com/%u12", "query": []}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u12", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/%u12", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u12", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/%u12", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u12", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00zz", "query": []}
+{"kind": "touristring", "url": "http://h.com/%u00zz", "query": []}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00zz", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/%u00zz", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%u00zz", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/%u00zz", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%u00zz", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%", "query": []}
+{"kind": "touristring", "url": "http://h.com/%", "query": []}
+{"kind": "rest", "url": "http://h.com/%", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/%", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/%", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/%", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/%", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/%", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/%", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a%", "query": []}
+{"kind": "touristring", "url": "http://h.com/a%", "query": []}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a%", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/a%", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a%", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/a%", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a%", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b", "query": []}
+{"kind": "touristring", "url": "mailto:a@b", "query": []}
+{"kind": "rest", "url": "mailto:a@b", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "mailto:a@b", "query": [["a", "b"]]}
+{"kind": "rest", "url": "mailto:a@b", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "mailto:a@b", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "mailto:a@b", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b?subject=x", "query": []}
+{"kind": "touristring", "url": "mailto:a@b?subject=x", "query": []}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b?subject=x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "mailto:a@b?subject=x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "mailto:a@b?subject=x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "mailto:a@b?subject=x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "mailto:a@b?subject=x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "urn:a:b", "query": []}
+{"kind": "touristring", "url": "urn:a:b", "query": []}
+{"kind": "rest", "url": "urn:a:b", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "urn:a:b", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "urn:a:b", "query": [["a", "b"]]}
+{"kind": "rest", "url": "urn:a:b", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "urn:a:b", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "urn:a:b", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "urn:a:b", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "urn:a:b", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "foo:bar/baz", "query": []}
+{"kind": "touristring", "url": "foo:bar/baz", "query": []}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "foo:bar/baz", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "foo:bar/baz", "query": [["a", "b"]]}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "foo:bar/baz", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "foo:bar/baz", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "foo:bar/baz", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "ftp:x", "query": []}
+{"kind": "touristring", "url": "ftp:x", "query": []}
+{"kind": "rest", "url": "ftp:x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "ftp:x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "ftp:x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "ftp:x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "ftp:x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "ftp:x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "ftp:x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "ftp:x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "file:x", "query": []}
+{"kind": "touristring", "url": "file:x", "query": []}
+{"kind": "rest", "url": "file:x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "file:x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "file:x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "file:x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "file:x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "file:x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "file:x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "file:x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a/b/", "query": []}
+{"kind": "touristring", "url": "http://h.com/a/b/", "query": []}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a/b/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/a/b/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/a/b/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/a/b/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/a/b/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com//", "query": []}
+{"kind": "touristring", "url": "http://h.com//", "query": []}
+{"kind": "rest", "url": "http://h.com//", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com//", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com//", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com//", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com//", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com//", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com//", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com//", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": []}
+{"kind": "touristring", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": []}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com/{a}/{b}?x={c}#{d}", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com/{a}/{b}?x={c}#{d}", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u{x}@h.com/", "query": []}
+{"kind": "touristring", "url": "http://u{x}@h.com/", "query": []}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u{x}@h.com/", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://u{x}@h.com/", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://u{x}@h.com/", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://u{x}@h.com/", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://u{x}@h.com/", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:80/{a:\\d+}", "query": []}
+{"kind": "touristring", "url": "http://h.com:80/{a:\\d+}", "query": []}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:80/{a:\\d+}", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://h.com:80/{a:\\d+}", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://h.com:80/{a:\\d+}", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://h.com:80/{a:\\d+}", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://h.com:80/{a:\\d+}", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:/x", "query": []}
+{"kind": "touristring", "url": "http:/x", "query": []}
+{"kind": "rest", "url": "http:/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http:/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http:/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http:/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http:/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:x", "query": []}
+{"kind": "touristring", "url": "http:x", "query": []}
+{"kind": "rest", "url": "http:x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http:x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http:x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http:x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http:x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http:x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http:x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "//h.com/x", "query": []}
+{"kind": "touristring", "url": "//h.com/x", "query": []}
+{"kind": "rest", "url": "//h.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "//h.com/x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "//h.com/x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "//h.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "//h.com/x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "//h.com/x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "//h.com/x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "//h.com/x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "///x", "query": []}
+{"kind": "touristring", "url": "///x", "query": []}
+{"kind": "rest", "url": "///x", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "///x", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "///x", "query": [["a", "b"]]}
+{"kind": "rest", "url": "///x", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "///x", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "///x", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "///x", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "///x", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://", "query": []}
+{"kind": "touristring", "url": "http://", "query": []}
+{"kind": "rest", "url": "http://", "mode": "TEMPLATE_AND_VALUES", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "URI_COMPONENT", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "VALUES_ONLY", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "NONE", "query": [], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://", "query": [["a", "b"]]}
+{"kind": "touristring", "url": "http://", "query": [["a", "b"]]}
+{"kind": "rest", "url": "http://", "mode": "TEMPLATE_AND_VALUES", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "URI_COMPONENT", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "VALUES_ONLY", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "NONE", "query": [["a", "b"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "touri", "url": "http://", "query": [["q", "{v}"]]}
+{"kind": "touristring", "url": "http://", "query": [["q", "{v}"]]}
+{"kind": "rest", "url": "http://", "mode": "TEMPLATE_AND_VALUES", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "URI_COMPONENT", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "VALUES_ONLY", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}
+{"kind": "rest", "url": "http://", "mode": "NONE", "query": [["q", "{v}"]], "path": {"a": "1", "b": "2", "c": "3", "d": "4", "v": "V", "x": "X", "h": "H", "p": "80"}}

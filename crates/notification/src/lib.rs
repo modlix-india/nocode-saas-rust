@@ -1,0 +1,148 @@
+//! The notification service in Rust: in-app notifications over SSE, the `notifications` queue
+//! listener that sends email and in-app notifications, and user preferences. It replaces the
+//! Java `notification` service (commons2, servlet) and keeps its MySQL schema.
+//!
+//! - HTTP: [`handlers`] (`/api/notification/...`).
+//! - Queue: [`queue`] consumes `notifications.queues` and runs [`send::SendService`] per message,
+//!   which reads the definitions from core ([`calls::CoreClient`]) and the recipients from
+//!   security ([`calls::DirectoryClient`]), then hands out email ([`email`]) and in-app
+//!   ([`inapp`]) notifications; in-app ones reach the open streams of this process ([`sse`]).
+
+pub mod calls;
+pub mod catalogue;
+pub mod config;
+pub mod dao;
+pub mod email;
+pub mod errors;
+pub mod handlers;
+pub mod inapp;
+pub mod messages;
+pub mod model;
+pub mod preference;
+pub mod queue;
+pub mod send;
+pub mod spring;
+pub mod sse;
+pub mod template;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Result;
+use platform::app::Service;
+use platform::cache::CacheService;
+use platform::eureka::Eureka;
+use platform::health::Health;
+use platform::security::SecurityClient;
+use platform::upstream::Upstream;
+
+use crate::calls::{CoreClient, DirectoryClient};
+use crate::config::NotificationConfig;
+use crate::dao::Dao;
+use crate::email::EmailService;
+use crate::handlers::AppState;
+use crate::inapp::InAppService;
+use crate::preference::PreferenceService;
+use crate::send::SendService;
+use crate::sse::Hub;
+
+pub const NAME: &str = "notification";
+
+/// Everything a running unit holds, built from configuration (separate from serving, so tests
+/// can build one against fakes).
+pub struct Built {
+    pub state: Arc<AppState>,
+    pub send: Arc<SendService>,
+    pub hub: Arc<Hub>,
+    pub eureka: Option<Eureka>,
+    pub pool: sqlx::MySqlPool,
+}
+
+pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
+    let pool = platform::db::mysql_pool(&cfg.database).await?;
+    let dao = Dao::new(pool.clone());
+    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
+        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    } else {
+        None
+    };
+    let cache = if cfg.redis.url.is_empty() {
+        None
+    } else {
+        Some(CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?)
+    };
+    let timeout = Duration::from_secs(cfg.core.timeout_seconds.max(1));
+    let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, eureka.as_ref())?, timeout)?;
+    let core_up = Upstream::from_config(&cfg.core.upstream, eureka.as_ref())?;
+    let connections_up = if cfg.core.connections_upstream.entries().is_empty() {
+        core_up.clone()
+    } else {
+        Upstream::from_config(&cfg.core.connections_upstream, eureka.as_ref())?
+    };
+    let core = CoreClient::with_connections(core_up, connections_up, timeout)?;
+    let hub = Hub::new(cfg.sse.buffer);
+
+    let in_app = InAppService { dao: dao.clone(), hub: hub.clone() };
+    let send = Arc::new(SendService {
+        core,
+        directory: directory.clone(),
+        email: Arc::new(EmailService::new(&cfg.email.sendgrid_url)?),
+        in_app: Arc::new(InAppService { dao: dao.clone(), hub: hub.clone() }),
+    });
+    let state = Arc::new(AppState {
+        security: SecurityClient::from_config(&cfg.security, eureka.as_ref())?,
+        inapp: in_app,
+        prefs: PreferenceService { dao, directory, cache },
+        hub: hub.clone(),
+        server_port: cfg.server.port,
+    });
+    Ok(Built { state, send, hub, eureka, pool })
+}
+
+/// Loads configuration, connects everything, starts the queue consumer and the heartbeat, and
+/// serves until shut down.
+pub async fn run() -> Result<()> {
+    let cfg: NotificationConfig = platform::config::load(NAME)?;
+    catalogue::register();
+    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
+    if let Some(file) = platform::config::config_file(NAME) {
+        tracing::info!(file = %file.display(), "configuration file");
+    }
+    let built = build(&cfg).await?;
+    built.hub.spawn_heartbeat(Duration::from_secs(cfg.sse.heartbeat_seconds.max(1)));
+
+    let health = Health::new(telemetry.metrics.clone());
+    {
+        let pool = built.pool.clone();
+        health.check("mysql", move || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query("SELECT 1").execute(&pool).await?;
+                Ok(())
+            }
+        });
+    }
+    if cfg.mq.enabled && !cfg.notifications.names().is_empty() {
+        match cfg.mq.amqp_uri() {
+            Some(uri) => {
+                let state = queue::ConsumerState::default();
+                tokio::spawn(queue::consume_forever(built.send.clone(), uri, cfg.notifications.clone(), state.clone()));
+                health.check("rabbitmq", move || {
+                    let state = state.clone();
+                    async move {
+                        if state.connected() {
+                            Ok(())
+                        } else {
+                            Err(anyhow::anyhow!("not consuming"))
+                        }
+                    }
+                });
+            }
+            None => tracing::warn!("[mq] has no uri or host: the notifications queues are not consumed"),
+        }
+    }
+
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: built.eureka.clone(), cors: false }
+        .run(handlers::router(built.state.clone()))
+        .await
+}

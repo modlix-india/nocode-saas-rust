@@ -1,0 +1,521 @@
+# gateway-rust in production, next to the Java services in the same docker-compose project.
+# Replaces gateway-server on :8080 (nginx keeps proxying /api/ to :8080 unchanged).
+#
+# Pools list every blue/green container of a service. Only the live colour answers; health
+# checks take the stopped one out within a few seconds, so keepup's colour flip needs no
+# gateway change. NOT APPLIED ANYWHERE: an example for review.
+
+[server]
+port = 8080
+shutdown_grace_seconds = 10
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "production"
+# otlp_endpoint = "http://alloy:4318"
+
+[redis]
+# url comes from MODLIX__REDIS__URL (secret)
+cache_prefix = "cmn"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = ["http://security-admin-1:8113", "http://security-admin-2:8113"]
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = ["http://security-internal-1:8112", "http://security-internal-2:8112"]
+
+[proxy]
+response_timeout_seconds = 3600
+
+[pools.security]
+upstreams = ["http://security-server-blue:8001", "http://security-server-green:8001"]
+health_path = "/actuator/health"
+
+[pools.core]
+upstreams = ["http://core-server-blue:8005", "http://core-server-blue-2:8005", "http://core-server-green:8005", "http://core-server-green-2:8005"]
+health_path = "/actuator/health"
+
+[pools.ui]
+upstreams = ["http://ui-server-blue:8002", "http://ui-server-blue-2:8002", "http://ui-server-green:8002", "http://ui-server-green-2:8002"]
+health_path = "/actuator/health"
+
+[pools.multi]
+upstreams = ["http://multi-1:8110", "http://multi-2:8110"]
+health_path = "/readyz"
+
+[pools.entity-processor]
+upstreams = ["http://entity-processor-blue:8009", "http://entity-processor-blue-2:8009", "http://entity-processor-green:8009", "http://entity-processor-green-2:8009"]
+health_path = "/actuator/health"
+
+[pools.message]
+upstreams = ["http://message-server-blue:8010", "http://message-server-green:8010"]
+health_path = "/actuator/health"
+
+[pools.notification]
+# Rust notification. Stop the Java notification containers first: both would consume the
+# same notifications1..3 queues.
+upstreams = ["http://notification-1:8114", "http://notification-2:8114"]
+health_path = "/readyz"
+
+[pools.worker]
+upstreams = ["http://worker-server-blue:8011", "http://worker-server-green:8011"]
+health_path = "/actuator/health"
+
+[pools.ai]
+upstreams = ["http://ai-server-blue:5001", "http://ai-server-green:5001"]
+health_path = "/health"
+
+# The Rust units.
+[pools.files-serve]
+upstreams = ["http://files-serve-1:8103", "http://files-serve-2:8103"]
+health_path = "/readyz"
+
+[pools.ui-engine]
+upstreams = ["http://ui-engine-1:8102", "http://ui-engine-2:8102", "http://ui-engine-3:8102"]
+health_path = "/readyz"
+
+[pools.core-exec]
+upstreams = ["http://core-exec-1:8105", "http://core-exec-2:8105", "http://core-exec-3:8105"]
+health_path = "/readyz"
+
+[pools.files-manage]
+upstreams = ["http://files-manage-1:8104", "http://files-manage-2:8104"]
+health_path = "/readyz"
+
+[[routes]]
+id = "files-read"
+prefix = "/api/files"
+contains = ["/api/files/static/file/", "/api/files/secured/file/", "/api/files/secured/downloadFileByKey/"]
+methods = ["GET", "HEAD"]
+pool = "files-serve"
+
+[[routes]]
+id = "files"
+prefix = "/api/files"
+pool = "files-manage"
+
+# ui-engine: the runtime reads (editor CRUD stays on the Java ui until ui-editor ships).
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/application"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/page"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/style"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/theme"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/function"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/urlDetails"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/personalization"
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/functions/repositoryFind"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/functions/repositoryFilter"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/schemas/repositoryFind"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/schemas/repositoryFilter"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+# core-exec: function execution and the definition reads (the rest of core stays on Java).
+# Every CoreServices function is ported (72/72, same list as Java), plus the data, spreadsheet
+# and connection oauth/internal routes. The core editor (CRUD, drafts, publish...) stays on Java.
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/function"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/eventRuns"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/events/internal"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/data"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/internal/data"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/spreadsheet"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/connections/oauth"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/connections/internal"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/functions/repositoryFind"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/functions/repositoryFilter"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/schemas/repositoryFind"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/schemas/repositoryFilter"
+pool = "core-exec"
+
+# security-auth: security's AuthenticationController (the rest of security stays on Java).
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/authenticate"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/revoke"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/refreshToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/verifyToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/makeOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/makeOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/authenticateWithOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/securityContextAuthentication"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/securityContextAuthentication"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/user/access"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/tokens/cleanup"
+pool = "security-auth"
+
+# security-internal: every route the units' classifier sends there (platform::security).
+[[routes]]
+id = "security-internal"
+prefix = "/api/security"
+classifier = "security-internal"
+pool = "security-internal"
+
+# Everything else under /api/security: security-admin (Java security gets no gateway traffic).
+[[routes]]
+id = "security-admin"
+prefix = "/api/security"
+pool = "security-admin"
+
+# core-editor: core's editor (CRUD, drafts, publish, versions, transports, index, cache, billing).
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/functions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/schemas"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/storages"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/connections"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/templates"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/notifications"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/eventDefinitions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/eventActions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/workflows"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/workflow"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/filler"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/transports"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/versions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/publish"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/index"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/internal/cache"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/internal/billing"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core"
+exact = true
+methods = ["DELETE"]
+pool = "core-editor"
+
+# Anything else under /api/core: core-editor (answers unmapped paths as Spring does).
+[[routes]]
+id = "core-editor"
+prefix = "/api/core"
+pool = "core-editor"
+
+[[routes]]
+id = "multi"
+prefix = "/api/multi"
+pool = "multi"
+
+[[routes]]
+id = "entity-processor"
+prefix = "/api/entity/processor"
+pool = "entity-processor"
+
+[[routes]]
+id = "entity-collector"
+prefix = "/api/entity/collector"
+pool = "entity-processor"
+
+[[routes]]
+id = "notification"
+prefix = "/api/notification"
+pool = "notification"
+
+[[routes]]
+id = "message"
+prefix = "/api/message"
+pool = "message"
+
+[[routes]]
+id = "worker"
+prefix = "/api/worker"
+pool = "worker"
+
+[[routes]]
+id = "ai"
+prefix = "/api/ai"
+pool = "ai"
+
+# The ui editor (CRUD, drafts, versions, publish, transport, filler, mobile apps): ui-editor.
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/applications"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/pages"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/styles"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/themes"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/functions"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/schemas"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/filler"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/publish"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/uripaths"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/transports"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/versions"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui"
+exact = true
+methods = ["DELETE"]
+pool = "ui-editor"
+
+# Everything else: UniversalController, analytics and the cache endpoints (ui-shell).
+[[routes]]
+id = "ui-shell"
+prefix = "/"
+pool = "ui-shell"
+
+[pools.security-auth]
+upstreams = ["http://security-auth-1:8101", "http://security-auth-2:8101"]
+health_path = "/readyz"
+
+[pools.ui-shell]
+upstreams = ["http://ui-shell-1:8106", "http://ui-shell-2:8106"]
+health_path = "/readyz"
+
+[pools.ui-editor]
+upstreams = ["http://ui-editor-1:8107", "http://ui-editor-2:8107"]
+health_path = "/readyz"
+
+[pools.core-editor]
+upstreams = ["http://core-editor-1:8111", "http://core-editor-2:8111"]
+health_path = "/readyz"
+
+[pools.security-internal]
+upstreams = ["http://security-internal-1:8112", "http://security-internal-2:8112"]
+health_path = "/readyz"
+
+[pools.security-admin]
+upstreams = ["http://security-admin-1:8113", "http://security-admin-2:8113"]
+health_path = "/readyz"

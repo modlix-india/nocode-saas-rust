@@ -1,0 +1,1157 @@
+# Security service messages, English (codes SEC.*). Every key of the Java bundle
+# (messages_en.properties) has a code here, named after it, plus the refusals Java raises with a
+# literal text or a key its bundle lacks. `params` names Java's `$` values in order.
+#
+# Rules: what happened, on what, why; what to do next in `action`; names rather than codes;
+# anonymous callers learn nothing about the objects they ask for. The Java text stays in
+# debugMessage. Format: platform::messages::catalogue.
+
+# ---- Signing in ----
+
+[SEC.USER_CREDENTIALS_MISMATCHED]
+status = 403
+text = "The user name or password is not correct."
+action = "Check them and try again, or reset your password if you've forgotten it."
+java = "user_credentials_mismatched"
+when = "Sign-in with an unknown user or a wrong secret (the same answer for both)."
+audience = "anyone"
+
+[SEC.USER_PASSWORD_INVALID_ATTEMPTS]
+status = 403
+params = ["what:entity", "left"]
+text = "The {what|password} is not correct.[ Attempts left before your account is locked: {left}.]"
+action = "Try again, or reset your {what|password} if you've forgotten it."
+java = "user_password_invalid_attempts"
+when = "Sign-in with a wrong password, PIN or one-time code, before the limit is reached."
+audience = "anyone"
+
+[SEC.USER_PASSWORD_INVALID]
+status = 403
+params = ["what:entity", "again:entity"]
+text = "The {what|code} you entered is not correct."
+action = "Check it and try again, or ask for a new one."
+java = "user_password_invalid"
+when = "A wrong one-time code when resetting a password or registering."
+audience = "anyone"
+
+[SEC.USER_ACCOUNT_BLOCKED]
+status = 403
+text = "Your account is blocked."
+action = "Ask your administrator or support to unblock it."
+java = "user_account_blocked"
+when = "Sign-in, or any request, by a user whose status is blocked."
+audience = "the user"
+
+[SEC.USER_ACCOUNT_BLOCKED_LIMIT]
+status = 403
+params = ["reason:entity", "minutes"]
+text = "Your account is locked after too many wrong[ {reason}] attempts."
+action = "[Try again in {minutes} minutes, or reset your password.|Try again later, or reset your password.]"
+java = "user_account_blocked_limit"
+when = "Sign-in, or any request, while the account is locked after failed attempts."
+audience = "the user"
+
+[SEC.USER_ACCOUNT_PASS_EXPIRED]
+status = 403
+params = ["what:entity"]
+text = "Your {what|password} has expired."
+action = "Reset it to continue."
+java = "user_account_pass_expired"
+when = "Sign-in, or any request, by a user whose password has expired."
+audience = "the user"
+
+[SEC.USER_NOT_ACTIVE]
+status = 403
+text = "Your account is not active."
+action = "Ask your administrator to activate it."
+java = "user_not_active"
+when = "A password reset or one-time code for an inactive account."
+audience = "the user"
+
+[SEC.TOKEN_EXPIRED]
+status = 401
+text = "Your session has expired. Please sign in again."
+java = "token_expired"
+when = "A token that cannot be read or has expired."
+audience = "anyone"
+
+[SEC.UNKNOWN_TOKEN]
+status = 401
+text = "Your sign-in is no longer valid. Please sign in again."
+java = "unknown_token"
+when = "A token or Basic credentials that do not match a session (revoked, issued for another site, unknown user)."
+audience = "anyone"
+
+[SEC.LOGIN_REQUIRED]
+status = 403
+text = "Please sign in to continue."
+java = "login_required"
+when = "An action that needs a signed-in user, asked anonymously."
+audience = "anyone"
+
+[SEC.TOKEN_FORBIDDEN]
+status = 403
+text = "Please sign in to continue."
+java_text = "Forbidden"
+when = "verifyToken without any token."
+audience = "anyone"
+
+[SEC.TOKEN_UNAUTHORIZED]
+status = 401
+text = "You're signed out. Please sign in again."
+java_text = "Unauthorized"
+when = "verifyToken or refreshToken with a token that is no longer accepted."
+audience = "anyone"
+
+[SEC.UNSUPPORTED_AUTH_MODE]
+status = 400
+text = "The sign-in mode must be COOKIE or BEARER."
+action = "Send authMode as COOKIE or BEARER."
+java = "unsupported_auth_mode"
+when = "A one-time token request with another authMode (an integration's mistake)."
+audience = "developers"
+
+[SEC.SIGN_IN_SECRET_MISSING]
+status = 400
+text = "Enter your password, PIN or one-time code to sign in."
+java = "unknown_error"
+when = "Sign-in without any password, PIN or one-time code in the request."
+audience = "anyone"
+
+[SEC.SOCIAL_LOGIN_FAILED]
+status = 403
+text = "We couldn't finish signing you in with your social account."
+action = "Start the sign-in again."
+java = "social_login_failed"
+java_text = "Internal Server Error (Unknown)"
+when = "Social sign-in or registration whose state is missing or names another user (the key is missing from the Java bundle)."
+audience = "anyone"
+
+[SEC.SESSION_EXPIRED]
+status = 403
+text = "The sign-in took too long and expired."
+action = "Start again."
+java = "session_expired"
+java_text = "Internal Server Error (Unknown)"
+when = "Social sign-in or registration whose state has outlived its window (the key is missing from the Java bundle)."
+audience = "anyone"
+
+[SEC.SOCIAL_PLATFORM_UNSUPPORTED]
+status = 400
+text = "This social sign-in provider is not supported."
+action = "Use Google or Meta."
+java = "unsupported_platform"
+java_text = "Internal Server Error (Unknown)"
+when = "Social registration with an integration that is neither Google nor Meta (the key is missing from the Java bundle)."
+audience = "anyone"
+
+[SEC.SSO_TARGET_APP_FORBIDDEN]
+status = 403
+text = "You can't sign in to that app from here: your account has no access to it."
+action = "Ask an owner of the app's organisation for access."
+java = "forbidden_permission"
+when = "A one-time (SSO) token for an app the user cannot use."
+audience = "signed-in"
+
+[SEC.ACCESS_REQUEST_REQUIRED]
+status = 409
+text = "Your account already belongs to an organisation."
+action = "Ask for access to this app instead of signing up again."
+java = "access_request_required"
+when = "Social sign-up by someone who already has an account in another organisation on the platform."
+audience = "anyone"
+
+[SEC.SIGN_IN_FAILED]
+status = 403
+text = "We couldn't sign you in with these details."
+action = "Check your user name and password and try again. If you don't have an account for this app yet, sign up first."
+java = "no_registration_available"
+when = "Sign-in with a user name the site's organisation does not know, or whose user holds no app here (one answer for both)."
+audience = "anyone"
+
+[SEC.NO_REGISTRATION_AVAILABLE]
+status = 403
+text = "Signing up is not open for this organisation on this app."
+action = "Sign in with an existing account, or ask the app's owner to open sign-up."
+java = "no_registration_available"
+when = "Sign-up or social sign-in where the app has no registration for the site's organisation."
+audience = "anyone"
+
+[SEC.SMS_OTP_ERROR]
+status = 500
+text = "We couldn't send the code by SMS."
+action = "Check the phone number and try again in a few minutes."
+java = "sms_otp_error"
+java_text = "sms_otp_error"
+when = "The SMS provider refused or failed to send a one-time code (Java answers the key itself)."
+audience = "anyone"
+
+[SEC.UNKNOWN_CLIENT]
+status = 401
+text = "This address does not belong to any organisation we know."
+action = "Check the address. If it is right, give support the error id {errorId}."
+java = "unknown_client"
+when = "The clientCode header or the host names no client."
+audience = "anyone"
+
+[SEC.INACTIVE_CLIENT]
+status = 400
+text = "This organisation's account is not active."
+action = "Ask its administrator or support to reactivate it."
+java = "inactive_client"
+when = "Sign-in or a check on a client that (or whose managing client) is not active."
+audience = "anyone"
+
+# ---- Passwords and PINs ----
+
+[SEC.CAPITAL_LETTERS_MISSING]
+status = 400
+text = "The password needs at least one capital letter."
+action = "Add a capital letter (A to Z) and try again."
+java = "capital_letters_missing"
+when = "A new password against a policy that asks for capitals."
+audience = "the user"
+
+[SEC.SMALL_LETTERS_MISSING]
+status = 400
+text = "The password needs at least one small letter."
+action = "Add a small letter (a to z) and try again."
+java = "small_letters_missing"
+when = "A new password against a policy that asks for small letters."
+audience = "the user"
+
+[SEC.NUMBERS_MISSING]
+status = 400
+text = "The password needs at least one number."
+action = "Add a digit (0 to 9) and try again."
+java = "numbers_missing"
+when = "A new password against a policy that asks for numbers."
+audience = "the user"
+
+[SEC.SPECIAL_CHARACTERS_MISSING]
+status = 400
+text = "The password needs at least one special character."
+action = "Add a character such as ! @ # or % and try again."
+java = "special_characters_missing"
+when = "A new password against a policy that asks for special characters."
+audience = "the user"
+
+[SEC.SPACES_MISSING]
+status = 400
+text = "The password can't contain spaces."
+action = "Remove the spaces and try again."
+java = "spaces_missing"
+when = "A new password with spaces, against a policy that forbids them."
+audience = "the user"
+
+[SEC.REGEX_MISMATCH]
+status = 400
+text = "The password doesn't follow your organisation's password pattern."
+action = "Check the password rules and try again."
+java = "regex_mismatch"
+when = "A new password that does not match the policy's pattern."
+audience = "the user"
+
+[SEC.MIN_LENGTH_ERROR]
+status = 400
+params = ["min"]
+text = "The password is too short[: use at least {min} characters]."
+java = "min_length_error"
+when = "A new password shorter than the policy allows."
+audience = "the user"
+
+[SEC.MAX_LENGTH_ERROR]
+status = 400
+params = ["max"]
+text = "The password is too long[: use at most {max} characters]."
+java = "max_length_error"
+when = "A new password longer than the policy allows."
+audience = "the user"
+
+[SEC.LENGTH_ERROR]
+status = 400
+params = ["what:entity", "length"]
+text = "[The {what|value} must be {length} characters long.|The {what|value} does not have the required length.]"
+java = "length_error"
+when = "A PIN of the wrong length."
+audience = "the user"
+
+[SEC.PASSWORD_USED_ERROR]
+status = 400
+params = ["what:entity", "again:entity"]
+text = "You have used this {what|password} before."
+action = "Choose a {what|password} you haven't used recently."
+java = "password_used_error"
+when = "A new password or PIN equal to one of the last ones."
+audience = "the user"
+
+[SEC.OLD_PASSWORD_MATCH]
+status = 403
+text = "The current password is not correct."
+action = "Check it and try again."
+java = "old_password_match"
+when = "Changing a password with a wrong current password."
+audience = "the user"
+
+[SEC.NEW_PASSWORD_MATCH]
+status = 403
+text = "The new password must be different from the current one."
+action = "Choose a different password."
+java = "new_password_match"
+when = "Changing a password to the same one."
+audience = "the user"
+
+[SEC.NEW_PASSWORD_MISSING]
+status = 403
+text = "There is no new password to set."
+action = "Enter a new password and try again."
+java = "new_password_missing"
+when = "Changing a password without a new one."
+audience = "the user"
+
+[SEC.PASS_RESET_REQ_ERROR]
+status = 403
+text = "You can't ask for a password reset while you are signed in."
+action = "Sign out first, or change your password from your profile."
+java = "pass_reset_req_error"
+when = "A password reset request from a signed-in user."
+audience = "signed-in"
+
+[SEC.HIERARCHY_ERROR]
+status = 403
+params = ["what"]
+text = "You can't do this for that user: you don't manage their organisation."
+action = "Ask an owner of their organisation."
+java = "hierarchy_error"
+when = "Changing another user's password, or their client managers, without managing their client."
+audience = "signed-in"
+
+[SEC.SECRET_NOT_UPDATABLE]
+status = 403
+params = ["what:entity"]
+text = "We couldn't change the {what|password}."
+action = "Try again. If it keeps happening, give support the error id {errorId}."
+java = "$ cannot be updated"
+java_text = "Internal Server Error (Unknown)"
+when = "A password or PIN update that changed no row (Java passes a text that is not a bundle key)."
+audience = "the user"
+
+[SEC.CLIENT_PASSWORD_POLICY_ERROR]
+status = 400
+text = "The password does not meet your organisation's password rules."
+java = "client_password_policy_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "the user"
+
+# ---- Permissions and management ----
+
+[SEC.FORBIDDEN_PERMISSION]
+status = 403
+params = ["permission:authority"]
+text = "[You can't do this: your account does not have {permission}.|You don't have permission to do this.]"
+action = "Ask an owner of your organisation to give you [{permission}|the permission you need]."
+java = "forbidden_permission"
+when = "A service-level permission check fails (client managers, users, client activities, client reads and updates)."
+audience = "signed-in"
+
+[SEC.BILLING_FORBIDDEN]
+status = 403
+params = ["what"]
+text = "You're not allowed to do this[: {what}]."
+action = "Ask an owner of your organisation, or of the client you are acting for."
+java = "forbidden_permission"
+when = "A billing action (buying, paying, wallets, billing configurations) the caller may not take."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_CREATE]
+status = 403
+params = ["what:entity"]
+text = "You can't create this {what|item}: you don't manage the organisation it would belong to."
+action = "Choose an organisation you manage, or ask an owner of that one."
+java = "forbidden_create"
+when = "Creating a user, role, profile, app, invitation, client or policy for a client the caller does not manage."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_UPDATE]
+status = 403
+params = ["what:entity"]
+text = "You can't change this {what|item}: you don't manage the organisation it belongs to."
+action = "Ask an owner of that organisation."
+java = "forbidden_update"
+when = "Changing a user, role or access request of a client the caller does not manage."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_DELETE]
+status = 403
+params = ["what:entity"]
+text = "You can't delete this {what|item}: you don't manage the organisation it belongs to."
+action = "Ask an owner of that organisation."
+java = "forbidden_delete"
+when = "Deleting an invitation of a client the caller does not manage."
+audience = "signed-in"
+
+[SEC.ORG_ITEM_FORBIDDEN]
+status = 403
+text = "You can't add this designation or department to that organisation: you don't manage it."
+action = "Choose an organisation you manage."
+java = "Designation"
+java_text = "Internal Server Error (Unknown)"
+when = "Creating a designation or department for a client the caller does not manage (Java passes a text that is not a bundle key)."
+audience = "signed-in"
+
+[SEC.ACTIVE_INACTIVE_ERROR]
+status = 403
+params = ["what:entity"]
+text = "You can't change whether this {what|account} is active."
+action = "Ask an owner of its organisation."
+java = "active_inactive_error"
+when = "Making a user or client active or inactive without managing it."
+audience = "signed-in"
+
+[SEC.ROLE_FORBIDDEN_FOR_SELECTED_USER]
+status = 403
+params = ["role", "user"]
+text = "You can't give this role to this user."
+action = "Assign only roles available to the user's organisation, and only to users you manage."
+java = "role_forbidden_for_selected_user"
+when = "Assigning a role the user's client cannot have, or to a user the caller does not manage."
+audience = "signed-in"
+
+[SEC.PROFILE_FORBIDDEN_FOR_SELECTED_USER]
+status = 403
+params = ["profile", "user"]
+text = "You can't give this profile to this user."
+action = "Assign only profiles available to the user's organisation, and only to users you manage."
+java = "profile_forbidden_for_selected_user"
+when = "Assigning or removing a profile the user's client cannot have, or for a user the caller does not manage."
+audience = "signed-in"
+
+[SEC.ROLE_REMOVE_ERROR]
+status = 403
+params = ["role", "user"]
+text = "You can't remove this role from this user."
+action = "Remove roles only from users you manage."
+java = "role_remove_error"
+when = "Removing a role from a user the caller does not manage."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_ROLE_ACCESS]
+status = 403
+text = "You can't use this role: it isn't available to your organisation."
+action = "Choose a role your organisation has."
+java = "forbidden_role_access"
+when = "Reading a role, or putting one in a profile, that the caller's client cannot use."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_WRITE_APPLICATION_ACCESS]
+status = 403
+text = "You can't make changes to this app: your organisation has no write access to it."
+action = "Ask the app's owner for write access."
+java = "forbidden_write_application_access"
+when = "Changing an app's addresses or settings with read-only access to the app."
+audience = "signed-in"
+
+[SEC.FORBIDDEN_APP_REG_OBJECTS]
+status = 403
+params = ["what:entity"]
+text = "You can't add {what|this} to the app's registration settings."
+action = "Only the app's owner can change how the app registers organisations."
+java = "forbidden_app_reg_objects"
+when = "Changing an app's registration objects without owning the app."
+audience = "signed-in"
+
+[SEC.ONLY_SYS_USER_CERTS]
+status = 500
+text = "Only the platform's system users can manage certificates."
+java = "only_sys_user_certs"
+when = "A certificate route called by a user outside the SYSTEM client (Java answers 500)."
+audience = "signed-in"
+
+[SEC.DELETE_ROLE_ERROR]
+status = 403
+text = "This can't be deleted while profiles or users still use it."
+action = "Remove it from those profiles and users first."
+java = "delete_role_error"
+when = "Deleting a role or profile that is still assigned."
+audience = "signed-in"
+
+[SEC.SUB_ROLE_CYCLE]
+status = 400
+params = ["role", "other"]
+text = "[The role {role} already contains {other}, so adding it would make a loop.|Adding this role would make a loop.]"
+action = "Add a role that doesn't already contain this one."
+java = "sub_role_cycle"
+when = "Adding a sub-role that already contains the role."
+audience = "signed-in"
+
+[SEC.SUB_ROLE_SELF]
+status = 400
+text = "A role can't be added under itself."
+java = "sub_role_self"
+when = "Adding a role as its own sub-role."
+audience = "signed-in"
+
+[SEC.PROFILE_NEEDS_APP]
+status = 400
+text = "A profile needs an app."
+action = "Choose the app the profile is for."
+java = "profile_needs_app"
+when = "Creating a profile without an app."
+audience = "signed-in"
+
+[SEC.ROOT_PROFILE_NOT_FOUND]
+status = 400
+text = "We couldn't find the profile this one is based on."
+action = "Check the profile and try again."
+java_text = "Root profile not found"
+when = "Reading a profile override whose base profile is not visible."
+audience = "signed-in"
+
+# ---- Users ----
+
+[SEC.USER_IDENTIFICATION_NOT_FOUND]
+status = 403
+text = "A user needs a user name, an email address or a phone number."
+action = "Give the user at least one of them."
+java = "user_identification_not_found"
+when = "Creating a user without any identity."
+audience = "signed-in"
+
+[SEC.USER_ALREADY_EXISTS]
+status = 409
+params = ["user"]
+text = "[An account for {user} already exists.|This account already exists.]"
+action = "Sign in instead, or reset your password if you've forgotten it."
+java = "user_already_exists"
+when = "Registering, inviting or creating a user whose identity is taken (in the business, for registration and invitations)."
+audience = "anyone"
+
+[SEC.USER_IDENTITY_TAKEN]
+status = 409
+params = ["identity"]
+text = "[A user with this {identity} already exists in this organisation.|A user with these details already exists in this organisation.]"
+action = "Use a different {identity|email address or phone number}, or edit the existing user."
+java = "user_identity_taken"
+when = "Inviting or editing a user with an email or phone another user of the organisation has."
+audience = "signed-in"
+
+[SEC.USER_INVITE_PENDING]
+status = 409
+params = ["identity"]
+text = "[An invitation for this {identity} is already waiting in this organisation.|An invitation with these details is already waiting.]"
+action = "Resend or cancel the existing invitation instead."
+java = "user_invite_pending"
+when = "Inviting someone who already has a pending invitation."
+audience = "signed-in"
+
+[SEC.INVITE_ACCEPT_FAILED]
+status = 403
+text = "We couldn't create your account from this invitation."
+action = "Open the invitation link again. If it keeps happening, ask the person who invited you for a new one."
+java = "User"
+java_text = "Internal Server Error (Unknown)"
+when = "Accepting an invitation without an app, or when the password could not be stored (Java passes a text that is not a bundle key)."
+audience = "anyone"
+
+[SEC.USER_REPORTING_ERROR]
+status = 400
+text = "That person can't be this user's manager."
+action = "Choose a manager in the same organisation who doesn't report to this user."
+java = "user_reporting_error"
+when = "Setting a reporting manager outside the organisation, or one that would make a loop."
+audience = "signed-in"
+
+[SEC.USER_DESIGNATION_MISMATCH]
+status = 400
+text = "This designation can't be given to the user."
+action = "Choose a designation of the user's organisation."
+java = "user_designation_mismatch"
+when = "Setting a designation of another organisation."
+audience = "signed-in"
+
+[SEC.USER_APP_REQUEST_ALREADY_EXISTS]
+status = 400
+params = ["app"]
+text = "[You have already asked for access to {app}.|You have already asked for access to this app.]"
+action = "Wait for an owner to answer your request."
+java = "user_app_request_already_exists"
+when = "Asking again for access to an app while a request is pending."
+audience = "signed-in"
+
+[SEC.USER_ALREADY_HAVING_APP_ACCESS]
+status = 400
+params = ["app"]
+text = "[You already have access to {app}.|You already have access to this app.]"
+action = "Sign in to continue."
+java = "user_already_having_app_access"
+when = "Asking for access to an app the user can already use."
+audience = "signed-in"
+
+[SEC.USER_APP_REQUEST_ACCEPT_INCORRECT_DATA]
+status = 400
+text = "To accept an access request, give the request and the profile to assign."
+java = "user_app_request_accept_incorrect_data"
+when = "Accepting an access request without its id or a profile."
+audience = "signed-in"
+
+[SEC.USER_APP_REQUEST_INCORRECT_STATUS]
+status = 400
+text = "This access request has already been answered."
+java = "user_app_request_incorrect_status"
+when = "Accepting or rejecting an access request that is no longer pending."
+audience = "signed-in"
+
+[SEC.USER_APP_REQUEST_MANDATORY_REQUEST_ID]
+status = 400
+text = "The access request is required."
+java = "user_app_request_mandatory_request_id"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.NO_PROFILE_ASSIGNED_TO_USER]
+status = 403
+text = "You don't have access to this app: no profile is assigned to you."
+action = "Ask an owner of your organisation to give you a profile in this app."
+java = "no_profile_assigned_to_user"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.USER_ALREADY_CREATED]
+status = 409
+text = "An account with that email address already exists."
+action = "Sign in instead, or reset your password if you've forgotten it."
+java = "user_already_created"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[SEC.MISSING_PASSWORD]
+status = 400
+text = "A user needs a password."
+java = "missing_password"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.MAIL_CANNOT_BE_TRIGGERED]
+status = 400
+text = "We couldn't send the email to this user."
+java = "mail_cannot_be_triggered"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+# ---- Objects ----
+
+[SEC.OBJECT_NOT_FOUND]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}]."
+action = "Check that it still exists and that you are looking in the right organisation."
+java = "object_not_found"
+when = "Reading or changing an object that does not exist or is not visible to the caller (the same answer for both)."
+audience = "signed-in"
+
+[SEC.OBJECT_NOT_FOUND_TO_UPDATE]
+status = 404
+params = ["what:entity", "id"]
+text = "We couldn't find the {what|item}[ with id {id}] to change it."
+action = "Check that it still exists and that you can manage it."
+java = "object_not_found_to_update"
+when = "Changing an app access that does not exist or is not visible."
+audience = "signed-in"
+
+[SEC.PARAMS_NOT_FOUND]
+status = 400
+params = ["params", "target"]
+text = "[The request is missing, or has a wrong value for, {params}[ ({target})].|The request is missing some required details.]"
+action = "Check [{params}|the request] and try again."
+java = "params_not_found"
+when = "A required value is missing or out of range (manager lists, billing token counts)."
+audience = "signed-in"
+
+[SEC.NAME_MANDATORY]
+status = 400
+params = ["what:entity"]
+text = "The {what|item} needs a name."
+action = "Enter a name and try again."
+java = "name_mandatory"
+when = "Creating a profile, designation, department or activity without a name."
+audience = "signed-in"
+
+[SEC.NAME_TAKEN]
+status = 409
+params = ["what:entity", "name"]
+text = "[A {what|item} named {name} already exists.|An item with this name already exists.]"
+action = "Choose another name."
+java = "name_taken"
+when = "Creating or renaming a profile, designation or department to a name the organisation has."
+audience = "signed-in"
+
+[SEC.FIELD_NOT_UPDATABLE]
+status = 400
+params = ["field"]
+text = "[The field {field} can't be changed.|This field can't be changed.]"
+action = "Leave it out of the request and try again."
+java_text = "$ field cannot be updated, it might not be available or unmodifiable"
+when = "A PATCH naming a field that does not exist or cannot take the value."
+audience = "signed-in"
+
+[SEC.UNKNOWN_ERROR]
+status = 500
+text = "We couldn't complete the request."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unknown_error"
+when = "A refusal the Java code raises with a key its bundle lacks, with nothing more specific known."
+audience = "anyone"
+
+[SEC.UNKNOWN_ERROR_WITH_ID]
+status = 500
+params = ["id"]
+text = "Something went wrong on our side. Error id {errorId}: give it to support."
+action = "Try again in a moment."
+java = "unknown_error_with_id"
+when = "Any unexpected failure (the Rust units answer COMMON.INTERNAL_ERROR, which says the same)."
+audience = "anyone"
+
+[SEC.CLIENT_HIERARCHY_MISSING]
+status = 500
+params = ["client"]
+text = "Something went wrong on our side: the organisation's setup is incomplete. Error id {errorId}: give it to support."
+java_text = "No client hierarchy found for client id: $"
+when = "A client with no hierarchy row."
+audience = "anyone"
+
+# ---- Clients, apps and addresses ----
+
+[SEC.CLIENT_REGISTRATION_ERROR]
+status = 400
+params = ["reason"]
+text = "We couldn't register the organisation[: {reason}]."
+action = "Check the details and try again."
+java = "client_registration_error"
+when = "Registration refused for a stated reason (app type rules, social sign-in not completed, details changed)."
+audience = "anyone"
+
+[SEC.FIELDS_MISSING]
+status = 400
+text = "Please give an email address or a user name."
+java = "fields_missing"
+when = "Registration without a usable name."
+audience = "anyone"
+
+[SEC.SUBDOMAIN_ALREADY_EXISTS]
+status = 409
+params = ["subdomain"]
+text = "[The subdomain {subdomain} is already taken.|This subdomain is already taken.]"
+action = "Choose another subdomain."
+java = "subdomain_already_exists"
+when = "Registration asking for a subdomain another client has."
+audience = "anyone"
+
+[SEC.SUBDOMAIN_SUFFIX_FORBIDDEN]
+status = 403
+params = ["suffix"]
+text = "[{suffix} can't be used as a subdomain ending.|This subdomain ending can't be used.]"
+action = "Use one of the platform's subdomain endings."
+java = "subdomain_suffix_forbidden"
+when = "Registration asking for a subdomain ending the platform does not serve."
+audience = "anyone"
+
+[SEC.URL_IS_APP_SUBDOMAIN]
+status = 409
+params = ["host", "app"]
+text = "[{host} is already the platform address of the app {app}.|This is already the platform address of an app.]"
+action = "Pick another hostname."
+java = "url_is_app_subdomain"
+when = "Adding a client address equal to an app's platform hostname."
+audience = "signed-in"
+
+[SEC.APP_SUBDOMAIN_TAKEN]
+status = 409
+params = ["host", "app"]
+text = "[The address {host} is already registered to another organisation, so the app {app} can't use it.|The app's platform address is already registered to another organisation.]"
+action = "Pick another app code."
+java = "app_subdomain_taken"
+when = "Creating an app whose platform hostname another client registered."
+audience = "signed-in"
+
+[SEC.APP_CODE_NO_SPL_CHAR]
+status = 400
+text = "The app code can use only letters and numbers."
+action = "Remove spaces and special characters from the app code."
+java = "app_code_no_spl_char"
+when = "Creating an app with special characters in its code."
+audience = "signed-in"
+
+[SEC.MANDATORY_APP_CODE]
+status = 400
+text = "The app code is required."
+action = "Add the app code and try again."
+java = "mandatory_app_code"
+when = "A client address or lookup without an app code."
+audience = "signed-in"
+
+[SEC.MANDATORY_APP_ID_CODE]
+status = 400
+text = "Give the app's id or its code."
+java = "mandatory_app_id_code"
+when = "App property or access calls with neither the app's id nor its code."
+audience = "signed-in"
+
+[SEC.MANDATORY_APP_ID_NAME]
+status = 400
+text = "The app, the organisation and the property name are all required."
+java = "mandatory_app_id_name"
+when = "Updating an app property without the app id, the client id or the name."
+audience = "signed-in"
+
+[SEC.CLIENT_CODE_OR_ID_ONLY_ONE]
+status = 400
+text = "Give the organisation's code or its id, not both."
+java = "client_code_or_id_only_one"
+when = "App registration calls naming the client both ways."
+audience = "signed-in"
+
+[SEC.APP_DEPENDENCY_SAME_APP_CODE]
+status = 400
+text = "An app can't depend on itself, and a dependency needs an app code."
+java = "app_dependency_same_app_code"
+when = "Adding an app dependency that is empty or the app itself."
+audience = "signed-in"
+
+[SEC.CANNOT_DELETE_APP]
+status = 403
+text = "This app can't be deleted while other organisations use it."
+java = "cannot_delete_app"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.APP_POLICY_EMPTY]
+status = 400
+text = "This app doesn't offer this feature."
+action = "Ask the app's administrator to turn it on."
+java = "app_policy_empty"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+# ---- Certificates ----
+
+[SEC.REQUEST_EXISITING]
+status = 409
+text = "A certificate request for this address is already in progress."
+action = "Wait for it to finish before asking again."
+java = ["request_exisiting", "request_existing"]
+java_text = "Internal Server Error (Unknown)"
+when = "Asking for a certificate while one is being issued (Java misspells the key, so it answers the unknown error)."
+audience = "system admins"
+
+[SEC.BAD_CERT_REQUEST]
+status = 400
+text = "The certificate request needs an address and its domain names."
+action = "Add the address and the domain names, then try again."
+java = "bad_cert_request"
+when = "A certificate request without an address or domains."
+audience = "system admins"
+
+[SEC.MISMATCH_DOMAINS]
+status = 400
+params = ["domains"]
+text = "[These domains don't belong to the address: {domains}.|Some domains don't belong to the address.]"
+action = "Use only domains of the address the certificate is for."
+java = "mismatch_domains"
+when = "A certificate request with domains outside the address."
+audience = "system admins"
+
+[SEC.ERROR_KEY_CSR]
+status = 500
+text = "We couldn't create the certificate's key or signing request."
+action = "Try again. If it keeps happening, give support the error id {errorId}."
+java = "error_key_csr"
+when = "Key or CSR generation failed."
+audience = "system admins"
+
+[SEC.LETS_ENCRYPT_CREDENTIALS]
+status = 500
+text = "Certificates can't be issued: the Let's Encrypt account is not set up."
+action = "Ask support to set up the Let's Encrypt login, session and key."
+java = "lets_encrypt_credentials"
+when = "The ACME account is not configured."
+audience = "system admins"
+
+[SEC.LETS_ENCRYPT_ISSUE]
+status = 500
+params = ["detail"]
+text = "Let's Encrypt refused the request[: {detail}]."
+action = "Check the domain's DNS and try again. If it keeps happening, give support the error id {errorId}."
+java = "lets_encrypt_issue"
+when = "The ACME server answered with an error."
+audience = "system admins"
+
+[SEC.TRIGGER_FAILED]
+status = 500
+text = "We couldn't start the domain check for the certificate."
+action = "Try again in a moment."
+java = "trigger_failed"
+when = "Triggering the ACME challenge failed."
+audience = "system admins"
+
+[SEC.CRT_KEY_ISSUE]
+status = 400
+params = ["detail"]
+text = "The certificate or its key can't be used[: {detail}]."
+action = "Check that the certificate, its chain and the private key belong together, then try again."
+java = "crt_key_issue"
+when = "Uploading a certificate whose files do not parse or do not match."
+audience = "system admins"
+
+[SEC.CERTIFICATE_PROBLEM]
+status = 500
+text = "The issued certificate has a problem."
+java = "certificate_problem"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "system admins"
+
+# ---- Billing ----
+
+[SEC.BUNDLE_LIST_FORBIDDEN]
+status = 403
+text = "Billing bundles can't be listed all at once."
+action = "Open the bundles of one billing configuration instead."
+java_text = "Listing all billing bundles is not permitted"
+when = "The generic billing bundle list."
+audience = "signed-in"
+
+[SEC.PLAN_CONFLICT_PLAN_ALREADY_EXISTS]
+status = 409
+text = "A plan with the same apps already exists for this organisation."
+java = "plan_conflict_plan_already_exists"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.PLAN_DEFAULT_PLAN_MUST_HAVE_ONE_APP]
+status = 400
+text = "A default plan must have exactly one app."
+java = "plan_default_plan_must_have_one_app"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.PLAN_CYCLE_NOT_FOUND]
+status = 404
+text = "The plan has no such billing cycle."
+java = "plan_cycle_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+# ---- Java bundle keys the Rust units never raise (kept so every Java text has a code) ----
+
+[SEC.UNABLE_TO_DELETE]
+status = 400
+params = ["what:entity", "id"]
+text = "We couldn't delete the {what|item}[ with id {id}]."
+java = "unable_to_delete"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.OBJECT_NOT_UPDATABLE]
+status = 400
+text = "This item can't be changed."
+java = "object_not_updatable"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.UNKONWN_ERROR_INSERT]
+status = 500
+text = "We couldn't save your changes."
+action = "Try again in a moment. If it keeps happening, give support the error id {errorId}."
+java = "unkonwn_error_insert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[SEC.VALUEOF_METHOD_NOT_FOUND]
+status = 500
+text = "Something went wrong on our side while reading a value. Error id {errorId}: give it to support."
+java = "valueof_method_not_found"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[SEC.UNABLE_TO_CONVERT]
+status = 400
+params = ["value", "type"]
+text = "[{value} can't be read as {type|the expected type}.|A value can't be read as the expected type.]"
+java = "unable_to_convert"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "anyone"
+
+[SEC.ALREADY_EXISTS]
+status = 409
+params = ["what:entity", "name"]
+text = "[A {what|item} named {name} already exists.|This already exists.]"
+java = "already_exists"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_PERMISSION_ERROR]
+status = 403
+params = ["permission", "user"]
+text = "We couldn't give the permission to the user."
+java = "assign_permission_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_PACKAGE_ERROR]
+status = 403
+params = ["package", "client"]
+text = "We couldn't give the package to the organisation."
+java = "assign_package_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_ROLE_ERROR]
+status = 403
+params = ["role", "package"]
+text = "We couldn't add the role to the package."
+java = "assign_role_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.REMOVE_PERMISSION_ERROR]
+status = 403
+params = ["permission", "user"]
+text = "We couldn't remove the permission from the user."
+java = "remove_permission_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_PERMISSION_ERROR_FOR_ROLE]
+status = 403
+params = ["permission", "role"]
+text = "We couldn't add the permission to the role."
+java = "assign_permission_error_for_role"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.REMOVE_PERMISSION_FROM_ROLE_ERROR]
+status = 403
+params = ["permission", "role"]
+text = "We couldn't remove the permission from the role."
+java = "remove_permission_from_role_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.REMOVE_PACKAGE_ERROR]
+status = 403
+params = ["package", "client"]
+text = "We couldn't remove the package from the organisation."
+java = "remove_package_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ROLE_REMOVE_FROM_PACKAGE_ERROR]
+status = 403
+params = ["role", "package"]
+text = "We couldn't remove the role from the package."
+java = "role_remove_from_package_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.DELETE_PERMISSION_ERROR]
+status = 403
+text = "This permission can't be deleted while users or roles still have it."
+java = "delete_permission_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.DELETE_PACKAGE_ERROR]
+status = 403
+text = "This package can't be deleted while organisations still use it."
+java = "delete_package_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.FETCH_PACKAGE_ERROR]
+status = 403
+params = ["client"]
+text = "You can't see this organisation's packages."
+java = "fetch_package_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.FETCH_ROLE_ERROR]
+status = 403
+params = ["package"]
+text = "You can't see this package's roles."
+java = "fetch_role_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.FETCH_PERMISSION_ERROR]
+status = 403
+params = ["role"]
+text = "You can't see this role's permissions."
+java = "fetch_permission_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.FETCH_PERMISSION_ERROR_FOR_USER]
+status = 403
+params = ["user"]
+text = "You can't see this user's permissions."
+java = "fetch_permission_error_for_user"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.FETCH_ROLE_ERROR_FOR_USER]
+status = 403
+params = ["user"]
+text = "You can't see this user's roles."
+java = "fetch_role_error_for_user"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_PACKAGE_TO_CLIENT_AND_APP]
+status = 403
+params = ["package"]
+text = "This package can't be given to this organisation."
+java = "assign_package_to_client_and_app"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.APPLICATION_ACCESS_ERROR]
+status = 403
+text = "This app is not available to the organisation."
+java = "application_access_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.NO_PACKAGE_ASSIGNED_TO_APP]
+status = 400
+text = "The package is not part of this app."
+java = "no_package_assigned_to_app"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.REMOVE_PACKAGE_FROM_APP_ERROR]
+status = 403
+text = "The package can't be removed from the app."
+java = "remove_package_from_app_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.ASSIGN_ROLE_TO_APP_ERROR]
+status = 403
+text = "The role can't be added to the app."
+java = "assign_role_to_app_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.REMOVE_ROLE_FROM_APP_ERROR]
+status = 403
+text = "The role can't be removed from the app."
+java = "remove_role_from_app_error"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"
+
+[SEC.NO_ROLE_ASSIGNED_TO_APP]
+status = 400
+text = "The role is not part of this app."
+java = "no_role_assigned_to_app"
+when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
+audience = "signed-in"

@@ -1,0 +1,45 @@
+# security-internal on the local stack: the security service's service-to-service routes (see
+# crates/security/SPLIT.md). Secrets come from config/local.env: MODLIX__DATABASE__PASSWORD,
+# MODLIX__REDIS__URL, MODLIX__JWT__KEY (and MODLIX__MQ__URI to publish wallet events, left out
+# locally on purpose).
+
+[server]
+port = 8112
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[database]
+host = "localhost"
+port = 3306
+database = "security"
+username = "root"
+max_connections = 16
+
+[redis]
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[jwt]
+# The caller's context is computed here too: the same key and expiries as security-auth.
+default_expiry_minutes = 30
+remember_me_expiry_minutes = 525600
+refresh_minutes = 10
+
+[security]
+app_code_suffix = ".local"
+subdomain_endings = ".local.modlix.com, .local.sitezump.ai"
+one_time_token_max_age_minutes = 5
+
+[otp]
+publish_events = false
+
+[wallet]
+# Local: WALLET_LOW_BALANCE / WALLET_SUSPENDED are logged, not published on the events exchange.
+publish_events = false
+
+[mq]
+exchange = "events"
+routing_keys = "events1,events2,events3"

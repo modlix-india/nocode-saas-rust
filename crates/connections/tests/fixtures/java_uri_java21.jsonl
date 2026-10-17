@@ -1,0 +1,493 @@
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"http","host":"[::1%eth0]","port":-1}
+{"reason":"scope id expected","index":-1}
+{"scheme":"http","host":"[1:2:3:4:5:6:7:8]","port":-1}
+{"reason":"IPv6 address too long","index":8}
+{"reason":"IPv6 address too short","index":8}
+{"reason":"Malformed IPv6 address","index":8}
+{"scheme":"http","host":"[::1.2.3.4]","port":-1}
+{"scheme":"http","host":"[1:2:3:4:5:6:1.2.3.4]","port":-1}
+{"reason":"IPv6 address too long","index":8}
+{"reason":"IPv6 hexadecimal digit sequence too long","index":8}
+{"reason":"IPv6 hexadecimal digit sequence too long","index":10}
+{"reason":"Malformed IPv4 address","index":22}
+{"reason":"Malformed IPv4 address","index":20}
+{"reason":"Expected digits for an IPv6 address","index":15}
+{"reason":"Expected digits for an IPv6 address","index":15}
+{"reason":"Expected digits for an IPv6 address","index":10}
+{"reason":"Malformed IPv6 address","index":8}
+{"reason":"Expected closing bracket for IPv6 address","index":8}
+{"reason":"Malformed IPv6 address","index":8}
+{"scheme":"http","host":"[::1]","port":80}
+{"reason":"Expected port number","index":12}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":"h.com","port":8}
+{"scheme":"http","host":"[::1]","port":8}
+{"scheme":"http","host":"1.2.3.4","port":5}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"a.b.","port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":8}
+{"reason":"Malformed escape pair","index":13}
+{"reason":"Malformed escape pair","index":13}
+{"reason":"Illegal character in path","index":14}
+{"reason":"Illegal character in query","index":17}
+{"reason":"Illegal character in fragment","index":15}
+{"reason":"Illegal character in fragment","index":15}
+{"scheme":"mailto","host":null,"port":-1}
+{"reason":"Expected scheme-specific part","index":7}
+{"scheme":"urn","host":null,"port":-1}
+{"reason":"Expected scheme name","index":0}
+{"reason":"Expected scheme-specific part","index":2}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Illegal character in scheme name","index":1}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":null,"host":"h.com","port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Expected authority","index":2}
+{"reason":"Expected authority","index":7}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"reason":"Illegal character in path","index":13}
+{"reason":"Illegal character in path","index":13}
+{"reason":"Illegal character in path","index":13}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":8080}
+{"scheme":"http","host":"[::1]","port":-1}
+{"reason":"Malformed IPv6 address","index":8}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"ftp","host":"1.2.3.4","port":21}
+{"reason":"Expected port number","index":12}
+{"scheme":"http","host":"[fe80::1%25eth0]","port":-1}
+{"scheme":"http","host":"[fe80::1%eth_0.1]","port":-1}
+{"reason":"Illegal character in scope id","index":17}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"s+.-","host":null,"port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"[1:2:3:4:5:6:7::]","port":-1}
+{"scheme":"http","host":"[::2:3:4:5:6:7:8]","port":-1}
+{"scheme":"http","host":"[1::]","port":-1}
+{"scheme":"http","host":"[::]","port":-1}
+{"reason":"Malformed IPv6 address","index":8}
+{"scheme":"http","host":"[0001:2:3:4:5:6:7:8]","port":-1}
+{"reason":"IPv6 hexadecimal digit sequence too long","index":8}
+{"reason":"Illegal character in authority","index":11}
+{"reason":"Malformed escape pair","index":8}
+{"reason":"Expected closing bracket for IPv6 address","index":10}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Malformed escape pair","index":18}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":19}
+{"reason":"Malformed escape pair","index":6}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":19}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"u","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":5}
+{"reason":"Malformed escape pair","index":18}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"u","host":null,"port":-1}
+{"scheme":"https","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Illegal character in authority","index":12}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Illegal character in opaque part","index":5}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":8}
+{"reason":"Illegal character in opaque part","index":4}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"reason":"Illegal character in authority","index":13}
+{"reason":"Malformed escape pair","index":8}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":16}
+{"reason":"Illegal character in opaque part","index":5}
+{"scheme":null,"host":"[::1]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in authority","index":9}
+{"scheme":"https","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":11}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"reason":"Malformed escape pair","index":16}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Illegal character in authority","index":7}
+{"reason":"Malformed escape pair","index":17}
+{"reason":"Malformed escape pair","index":14}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Malformed escape pair","index":15}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Malformed escape pair","index":8}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Malformed escape pair","index":14}
+{"reason":"Illegal character in authority","index":9}
+{"reason":"Illegal character in opaque part","index":3}
+{"reason":"Illegal character in authority","index":7}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Malformed escape pair","index":15}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Illegal character in authority","index":3}
+{"reason":"Malformed escape pair","index":13}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":18}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"reason":"Illegal character in authority","index":12}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Malformed escape pair","index":14}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":13}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Expected closing bracket for IPv6 address","index":11}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"h.com","port":8}
+{"reason":"Illegal character in authority","index":7}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"reason":"Malformed escape pair","index":11}
+{"scheme":"https","host":"h.com","port":8}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":14}
+{"reason":"Illegal character in authority","index":11}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"u","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":19}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in opaque part","index":5}
+{"reason":"Malformed escape pair","index":17}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Malformed escape pair","index":8}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":19}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"reason":"Expected closing bracket for IPv6 address","index":6}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"u","host":null,"port":-1}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in opaque part","index":3}
+{"scheme":"h.com","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":6}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in path","index":3}
+{"reason":"Malformed escape pair","index":5}
+{"scheme":"https","host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":14}
+{"reason":"Illegal character in authority","index":10}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":"https","host":"h.com","port":8}
+{"reason":"Illegal character in opaque part","index":5}
+{"scheme":null,"host":"[::1]","port":-1}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in scheme name","index":1}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":14}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":8}
+{"reason":"Malformed escape pair","index":8}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Illegal character in path","index":1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":null,"host":"[::1]","port":-1}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in authority","index":12}
+{"reason":"Illegal character in opaque part","index":4}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Illegal character in authority","index":13}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in scheme name","index":1}
+{"scheme":"https","host":"h.com","port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":null,"host":"h.com","port":-1}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Illegal character in authority","index":11}
+{"scheme":"http","host":"[::1]","port":-1}
+{"reason":"Malformed escape pair","index":15}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Illegal character in opaque part","index":7}
+{"scheme":"http","host":"[::1]","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":12}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"https","host":"[::1]","port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":7}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":"https","host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":null,"host":"[::1]","port":-1}
+{"scheme":"https","host":"h.com","port":-1}
+{"reason":"Illegal character in authority","index":7}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":"http","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":6}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":11}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":14}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"reason":"Malformed escape pair","index":6}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"http","host":"h.com","port":8}
+{"reason":"Illegal character in authority","index":12}
+{"reason":"Illegal character in authority","index":3}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"reason":"Expected closing bracket for IPv6 address","index":15}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"reason":"Malformed escape pair","index":17}
+{"scheme":null,"host":"h.com","port":-1}
+{"scheme":"http","host":"[::1]","port":-1}
+{"reason":"Malformed escape pair","index":18}
+{"reason":"Expected closing bracket for IPv6 address","index":6}
+{"scheme":"https","host":"h.com","port":8}
+{"reason":"Malformed escape pair","index":19}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in opaque part","index":4}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Illegal character in path","index":3}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":"https","host":"h.com","port":-1}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":11}
+{"reason":"Illegal character in authority","index":7}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":"http","host":"h.com","port":8}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":10}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Illegal character in path","index":2}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":15}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":"https","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"http","host":"h.com","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":7}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Illegal character in authority","index":9}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"https","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":12}
+{"reason":"Malformed escape pair","index":13}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":"https","host":null,"port":-1}
+{"scheme":"https","host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":17}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":"http","host":"[::1]","port":-1}
+{"scheme":"http","host":null,"port":-1}
+{"scheme":null,"host":"[::1]","port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in authority","index":9}
+{"reason":"Illegal character in authority","index":3}
+{"scheme":"http","host":"h.com","port":8}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":"https","host":"h.com","port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":8}
+{"reason":"Illegal character in authority","index":9}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in path","index":2}
+{"reason":"Illegal character in path","index":3}
+{"reason":"Illegal character in opaque part","index":5}
+{"reason":"Illegal character in opaque part","index":7}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in path","index":3}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"scheme":null,"host":"h.com","port":8}
+{"reason":"Illegal character in scheme name","index":1}
+{"scheme":"http","host":"[::%x]","port":-1}
+{"scheme":"u","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":7}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":null,"host":"h.com","port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"http","host":"1.2.3.4","port":-1}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"scheme":"https","host":"h.com","port":-1}
+{"reason":"Illegal character in opaque part","index":4}
+{"reason":"Illegal character in authority","index":10}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Illegal character in scheme name","index":1}
+{"scheme":"https","host":"[::%x]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":null,"port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":15}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":8}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Illegal character in opaque part","index":5}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Expected closing bracket for IPv6 address","index":10}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":12}
+{"reason":"Illegal character in authority","index":9}
+{"scheme":"https","host":"h.com","port":-1}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"scheme":"https","host":null,"port":-1}
+{"reason":"Illegal character in opaque part","index":3}
+{"reason":"Expected closing bracket for IPv6 address","index":13}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":8}
+{"reason":"Malformed escape pair","index":12}
+{"reason":"Illegal character in scheme name","index":0}
+{"scheme":"https","host":"h.com","port":8}
+{"scheme":"http","host":"h.com","port":8}
+{"scheme":"http","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":7}
+{"reason":"Illegal character in path","index":2}
+{"scheme":null,"host":null,"port":-1}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Illegal character in opaque part","index":3}
+{"reason":"Malformed escape pair","index":20}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Illegal character in authority","index":3}
+{"scheme":"https","host":null,"port":-1}
+{"reason":"Malformed escape pair","index":9}
+{"reason":"Malformed escape pair","index":5}
+{"reason":"Malformed escape pair","index":7}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"[::1]","port":-1}
+{"reason":"Illegal character in path","index":3}
+{"scheme":null,"host":"[::%x]","port":-1}
+{"reason":"Illegal character in authority","index":10}
+{"reason":"Expected closing bracket for IPv6 address","index":12}
+{"reason":"Illegal character in scheme name","index":1}
+{"reason":"Illegal character in scheme name","index":0}
+{"reason":"Malformed escape pair","index":7}
+{"reason":"Malformed escape pair","index":12}
+{"scheme":"x","host":null,"port":-1}
+{"scheme":"https","host":"h.com","port":8}
+{"scheme":null,"host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":16}
+{"reason":"Malformed escape pair","index":14}
+{"scheme":"x","host":null,"port":-1}
+{"reason":"Expected closing bracket for IPv6 address","index":12}
+{"reason":"Illegal character in opaque part","index":3}
+{"reason":"Malformed escape pair","index":16}
+{"scheme":null,"host":"1.2.3.4","port":-1}
+{"reason":"Malformed escape pair","index":10}
+{"scheme":null,"host":null,"port":-1}

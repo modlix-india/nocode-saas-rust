@@ -1,0 +1,27 @@
+# multi on the local stack (Java multi is on 8006).
+
+[server]
+port = 8110
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# AuthenticationController (the caller context on every request) runs in security-auth.
+auth_upstream = "http://localhost:8101"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[core]
+upstream = "eureka:CORE"
+
+[ui]
+# index, makeTransport, createAndApply and DELETE /api/ui are all editor routes: ui-editor.
+upstream = "http://localhost:8107"

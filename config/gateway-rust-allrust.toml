@@ -1,0 +1,546 @@
+# TEST VARIANT on 8182: every path with a Rust unit goes to it (files, multi, ui-engine, core-exec). gateway-rust on the local stack: the same routes as the Spring gateway (nocode-saas configfiles
+# gateway.yml), with every Java service followed through the local Eureka. Listens on 8180 next to
+# the Spring gateway on 8080.
+
+[server]
+port = 8182
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[eureka]
+zones = ["http://localhost:9999/eureka/"]
+
+[redis]
+# The Java services' effective prefix; security's evictions of the host cache reach the gateway.
+cache_prefix = "cmn"
+eviction_channel = "evictionChannel"
+
+[security]
+# security-admin: every security route that is neither auth nor internal.
+upstream = "http://localhost:8113"
+# The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
+internal_upstream = "http://localhost:8112"
+
+[pools.security]
+upstreams = "eureka:SECURITY"
+health_path = "/actuator/health"
+
+[pools.files]
+upstreams = "eureka:FILES"
+health_path = "/actuator/health"
+
+[pools.core]
+upstreams = "eureka:CORE"
+health_path = "/actuator/health"
+
+[pools.ui]
+upstreams = "eureka:UI"
+health_path = "/actuator/health"
+
+[pools.multi]
+upstreams = "eureka:MULTI"
+health_path = "/actuator/health"
+
+[pools.entity-processor]
+upstreams = "eureka:ENTITY-PROCESSOR"
+health_path = "/actuator/health"
+
+[pools.notification]
+# Rust notification (it consumes scratch queues locally; its HTTP routes read the real tables).
+upstreams = ["http://localhost:8114"]
+health_path = "/readyz"
+
+[pools.message]
+upstreams = "eureka:MESSAGE"
+health_path = "/actuator/health"
+
+[pools.worker]
+upstreams = "eureka:WORKER"
+health_path = "/actuator/health"
+
+[pools.schedular]
+upstreams = "eureka:SCHEDULAR"
+health_path = "/actuator/health"
+
+[pools.data]
+upstreams = "eureka:DATA"
+health_path = "/actuator/health"
+
+[pools.adzump]
+upstreams = "eureka:ADZUMP"
+health_path = "/actuator/health"
+
+[pools.ai]
+upstreams = "eureka:AI"
+health_path = "/health"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/application"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/page"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/style"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/theme"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/function"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/urlDetails"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/personalization"
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/functions/repositoryFind"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/functions/repositoryFilter"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/schemas/repositoryFind"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "ui-engine"
+prefix = "/api/ui/schemas/repositoryFilter"
+methods = ["GET", "HEAD"]
+pool = "ui-engine"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/function"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/eventRuns"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/events/internal"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/data"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/internal/data"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/spreadsheet"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/connections/oauth"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/connections/internal"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/functions/repositoryFind"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/functions/repositoryFilter"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/schemas/repositoryFind"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
+prefix = "/api/core/schemas/repositoryFilter"
+pool = "core-exec"
+
+# security-auth: security's AuthenticationController (the rest of security stays on Java).
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/authenticate"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/revoke"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/refreshToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/verifyToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/makeOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/makeOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/authenticateWithOneTimeToken"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/securityContextAuthentication"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/securityContextAuthentication"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/user/access"
+pool = "security-auth"
+
+[[routes]]
+id = "security-auth"
+prefix = "/api/security/internal/tokens/cleanup"
+pool = "security-auth"
+
+# security-internal: every route the units' classifier sends there (platform::security).
+[[routes]]
+id = "security-internal"
+prefix = "/api/security"
+classifier = "security-internal"
+pool = "security-internal"
+
+# Everything else under /api/security: security-admin (Java security gets no gateway traffic).
+[[routes]]
+id = "security-admin"
+prefix = "/api/security"
+pool = "security-admin"
+
+[[routes]]
+id = "files-read"
+prefix = "/api/files"
+contains = ["/api/files/static/file/", "/api/files/secured/file/", "/api/files/secured/downloadFileByKey/"]
+methods = ["GET", "HEAD"]
+pool = "files-serve"
+
+[[routes]]
+id = "files"
+prefix = "/api/files"
+pool = "files-manage"
+
+[[routes]]
+id = "data"
+prefix = "/api/data"
+pool = "data"
+
+# core-editor: core's editor (CRUD, drafts, publish, versions, transports, index, cache, billing).
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/functions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/schemas"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/storages"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/connections"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/templates"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/notifications"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/eventDefinitions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/eventActions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/workflows"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/workflow"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/filler"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/transports"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/versions"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/publish"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/index"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/internal/cache"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core/internal/billing"
+pool = "core-editor"
+
+[[routes]]
+id = "core-editor"
+prefix = "/api/core"
+exact = true
+methods = ["DELETE"]
+pool = "core-editor"
+
+# Anything else under /api/core: core-editor (answers unmapped paths as Spring does).
+[[routes]]
+id = "core-editor"
+prefix = "/api/core"
+pool = "core-editor"
+
+[[routes]]
+id = "schedular"
+prefix = "/api/schedular"
+pool = "schedular"
+
+[[routes]]
+id = "multi"
+prefix = "/api/multi"
+pool = "multi-rs"
+
+[[routes]]
+id = "entity-processor"
+prefix = "/api/entity/processor"
+pool = "entity-processor"
+
+[[routes]]
+id = "notification"
+prefix = "/api/notification"
+pool = "notification"
+
+[[routes]]
+id = "message"
+prefix = "/api/message"
+pool = "message"
+
+[[routes]]
+id = "worker"
+prefix = "/api/worker"
+pool = "worker"
+
+[[routes]]
+id = "entity-collector"
+prefix = "/api/entity/collector"
+pool = "entity-processor"
+
+[[routes]]
+id = "ai"
+prefix = "/api/ai"
+pool = "ai"
+
+[[routes]]
+id = "adzump"
+prefix = "/api/adzump"
+pool = "adzump"
+
+# The ui editor (CRUD, drafts, versions, publish, transport, filler, mobile apps): ui-editor.
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/applications"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/pages"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/styles"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/themes"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/functions"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/schemas"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/filler"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/publish"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/uripaths"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/transports"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui/versions"
+pool = "ui-editor"
+
+[[routes]]
+id = "ui-editor"
+prefix = "/api/ui"
+exact = true
+methods = ["DELETE"]
+pool = "ui-editor"
+
+# Everything else: UniversalController, analytics and the cache endpoints (ui-shell).
+[[routes]]
+id = "ui-shell"
+prefix = "/"
+pool = "ui-shell"
+
+[pools.files-serve]
+upstreams = ["http://localhost:8103"]
+health_path = "/readyz"
+
+[pools.files-manage]
+upstreams = ["http://localhost:8104"]
+health_path = "/readyz"
+
+[pools.ui-engine]
+upstreams = ["http://localhost:8102"]
+health_path = "/readyz"
+
+[pools.core-exec]
+upstreams = ["http://localhost:8105"]
+health_path = "/readyz"
+
+[pools.multi-rs]
+upstreams = ["http://localhost:8110"]
+health_path = "/readyz"
+
+[pools.security-auth]
+upstreams = ["http://localhost:8101"]
+health_path = "/readyz"
+
+[pools.ui-shell]
+upstreams = ["http://localhost:8106"]
+health_path = "/readyz"
+
+[pools.ui-editor]
+upstreams = ["http://localhost:8107"]
+health_path = "/readyz"
+
+[pools.core-editor]
+upstreams = ["http://localhost:8111"]
+health_path = "/readyz"
+
+[pools.security-internal]
+upstreams = ["http://localhost:8112"]
+health_path = "/readyz"
+
+[pools.security-admin]
+upstreams = ["http://localhost:8113"]
+health_path = "/readyz"

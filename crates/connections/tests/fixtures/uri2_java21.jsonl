@@ -1,0 +1,1134 @@
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"/*"}
+{"ok":"*"}
+{"ok":"*"}
+{"ok":"*?a\u003db"}
+{"ok":"*?a\u003db"}
+{"ok":"*?a\u003db"}
+{"ok":"/*?a\u003db"}
+{"ok":"*?a\u003db"}
+{"ok":"*?a\u003db"}
+{"ok":"*?q\u003d%7Bv%7D"}
+{"ok":"*?q\u003d{v}"}
+{"ok":"*?q\u003dV"}
+{"ok":"/*?q\u003dV"}
+{"ok":"*?q\u003dV"}
+{"ok":"*?q\u003dV"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"err":"Bad character \u0027*\u0027"}
+{"ok":"/a;b"}
+{"ok":"/a;b"}
+{"ok":"/a;b"}
+{"ok":"/a;b"}
+{"ok":"/a;b"}
+{"ok":"/a;b"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?a\u003db"}
+{"ok":"/a;b?q\u003d%7Bv%7D"}
+{"ok":"/a;b?q\u003d{v}"}
+{"ok":"/a;b?q\u003dV"}
+{"ok":"/a;b?q\u003dV"}
+{"ok":"/a;b?q\u003dV"}
+{"ok":"/a;b?q\u003dV"}
+{"ok":"./x"}
+{"ok":"./x"}
+{"ok":"./x"}
+{"ok":"/./x"}
+{"ok":"./x"}
+{"ok":"./x"}
+{"ok":"./x?a\u003db"}
+{"ok":"./x?a\u003db"}
+{"ok":"./x?a\u003db"}
+{"ok":"/./x?a\u003db"}
+{"ok":"./x?a\u003db"}
+{"ok":"./x?a\u003db"}
+{"ok":"./x?q\u003d%7Bv%7D"}
+{"ok":"./x?q\u003d{v}"}
+{"ok":"./x?q\u003dV"}
+{"ok":"/./x?q\u003dV"}
+{"ok":"./x?q\u003dV"}
+{"ok":"./x?q\u003dV"}
+{"ok":".x"}
+{"ok":".x"}
+{"ok":".x"}
+{"ok":"/.x"}
+{"ok":".x"}
+{"ok":".x"}
+{"ok":".x?a\u003db"}
+{"ok":".x?a\u003db"}
+{"ok":".x?a\u003db"}
+{"ok":"/.x?a\u003db"}
+{"ok":".x?a\u003db"}
+{"ok":".x?a\u003db"}
+{"ok":".x?q\u003d%7Bv%7D"}
+{"ok":".x?q\u003d{v}"}
+{"ok":".x?q\u003dV"}
+{"ok":"/.x?q\u003dV"}
+{"ok":".x?q\u003dV"}
+{"ok":".x?q\u003dV"}
+{"ok":"%2541/x"}
+{"ok":"%41/x"}
+{"ok":"%2541/x"}
+{"ok":"/%2541/x"}
+{"ok":"%41/x"}
+{"ok":"%41/x"}
+{"ok":"%2541/x?a\u003db"}
+{"ok":"%41/x?a\u003db"}
+{"ok":"%2541/x?a\u003db"}
+{"ok":"/%2541/x?a\u003db"}
+{"ok":"%41/x?a\u003db"}
+{"ok":"%41/x?a\u003db"}
+{"ok":"%2541/x?q\u003d%7Bv%7D"}
+{"ok":"%41/x?q\u003d{v}"}
+{"ok":"%2541/x?q\u003dV"}
+{"ok":"/%2541/x?q\u003dV"}
+{"ok":"%41/x?q\u003dV"}
+{"ok":"%41/x?q\u003dV"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026a\u003db"}
+{"ok":"?q\u003d1\u0026q\u003d%7Bv%7D"}
+{"ok":"?q\u003d1\u0026q\u003d{v}"}
+{"ok":"?q\u003d1\u0026q\u003dV"}
+{"ok":"?q\u003d1\u0026q\u003dV"}
+{"ok":"?q\u003d1\u0026q\u003dV"}
+{"ok":"?q\u003d1\u0026q\u003dV"}
+{"ok":"#frag"}
+{"ok":"#frag"}
+{"ok":"#frag"}
+{"ok":"#frag"}
+{"ok":"#frag"}
+{"ok":"#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?a\u003db#frag"}
+{"ok":"?q\u003d%7Bv%7D#frag"}
+{"ok":"?q\u003d{v}#frag"}
+{"ok":"?q\u003dV#frag"}
+{"ok":"?q\u003dV#frag"}
+{"ok":"?q\u003dV#frag"}
+{"ok":"?q\u003dV#frag"}
+{"ok":"x?y"}
+{"ok":"x?y"}
+{"ok":"x?y"}
+{"ok":"/x?y"}
+{"ok":"x?y"}
+{"ok":"x?y"}
+{"ok":"x?y\u0026a\u003db"}
+{"ok":"x?y\u0026a\u003db"}
+{"ok":"x?y\u0026a\u003db"}
+{"ok":"/x?y\u0026a\u003db"}
+{"ok":"x?y\u0026a\u003db"}
+{"ok":"x?y\u0026a\u003db"}
+{"ok":"x?y\u0026q\u003d%7Bv%7D"}
+{"ok":"x?y\u0026q\u003d{v}"}
+{"ok":"x?y\u0026q\u003dV"}
+{"ok":"/x?y\u0026q\u003dV"}
+{"ok":"x?y\u0026q\u003dV"}
+{"ok":"x?y\u0026q\u003dV"}
+{"ok":"x#x%23y"}
+{"ok":"x#x#y"}
+{"ok":"x#x%23y"}
+{"ok":"/x#x%23y"}
+{"err":"Illegal character in fragment at index 3: x#x#y"}
+{"err":"Illegal character in fragment at index 3: x#x#y"}
+{"ok":"x?a\u003db#x%23y"}
+{"ok":"x?a\u003db#x#y"}
+{"ok":"x?a\u003db#x%23y"}
+{"ok":"/x?a\u003db#x%23y"}
+{"err":"Illegal character in fragment at index 7: x?a\u003db#x#y"}
+{"err":"Illegal character in fragment at index 7: x?a\u003db#x#y"}
+{"ok":"x?q\u003d%7Bv%7D#x%23y"}
+{"ok":"x?q\u003d{v}#x#y"}
+{"ok":"x?q\u003dV#x%23y"}
+{"ok":"/x?q\u003dV#x%23y"}
+{"err":"Illegal character in fragment at index 7: x?q\u003dV#x#y"}
+{"err":"Illegal character in fragment at index 7: x?q\u003dV#x#y"}
+{"ok":"x%2541y"}
+{"ok":"x%41y"}
+{"ok":"x%2541y"}
+{"ok":"/x%2541y"}
+{"ok":"x%41y"}
+{"ok":"x%41y"}
+{"ok":"x%2541y?a\u003db"}
+{"ok":"x%41y?a\u003db"}
+{"ok":"x%2541y?a\u003db"}
+{"ok":"/x%2541y?a\u003db"}
+{"ok":"x%41y?a\u003db"}
+{"ok":"x%41y?a\u003db"}
+{"ok":"x%2541y?q\u003d%7Bv%7D"}
+{"ok":"x%41y?q\u003d{v}"}
+{"ok":"x%2541y?q\u003dV"}
+{"ok":"/x%2541y?q\u003dV"}
+{"ok":"x%41y?q\u003dV"}
+{"ok":"x%41y?q\u003dV"}
+{"ok":"x/y"}
+{"ok":"x/y"}
+{"ok":"x/y"}
+{"ok":"/x/y"}
+{"ok":"x/y"}
+{"ok":"x/y"}
+{"ok":"x/y?a\u003db"}
+{"ok":"x/y?a\u003db"}
+{"ok":"x/y?a\u003db"}
+{"ok":"/x/y?a\u003db"}
+{"ok":"x/y?a\u003db"}
+{"ok":"x/y?a\u003db"}
+{"ok":"x/y?q\u003d%7Bv%7D"}
+{"ok":"x/y?q\u003d{v}"}
+{"ok":"x/y?q\u003dV"}
+{"ok":"/x/y?q\u003dV"}
+{"ok":"x/y?q\u003dV"}
+{"ok":"x/y?q\u003dV"}
+{"ok":"x;y"}
+{"ok":"x;y"}
+{"ok":"x;y"}
+{"ok":"/x;y"}
+{"ok":"x;y"}
+{"ok":"x;y"}
+{"ok":"x;y?a\u003db"}
+{"ok":"x;y?a\u003db"}
+{"ok":"x;y?a\u003db"}
+{"ok":"/x;y?a\u003db"}
+{"ok":"x;y?a\u003db"}
+{"ok":"x;y?a\u003db"}
+{"ok":"x;y?q\u003d%7Bv%7D"}
+{"ok":"x;y?q\u003d{v}"}
+{"ok":"x;y?q\u003dV"}
+{"ok":"/x;y?q\u003dV"}
+{"ok":"x;y?q\u003dV"}
+{"ok":"x;y?q\u003dV"}
+{"ok":"x:y"}
+{"ok":"x:y"}
+{"ok":"x:y"}
+{"err":"Expected scheme-specific part at index 2: x:"}
+{"ok":"x:y"}
+{"ok":"x:y"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?a\u003db"}
+{"ok":"x:?q\u003d%7Bv%7D"}
+{"ok":"x:?q\u003d{v}"}
+{"ok":"x:?q\u003dV"}
+{"ok":"x:?q\u003dV"}
+{"ok":"x:?q\u003dV"}
+{"ok":"x:?q\u003dV"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?a\u003db"}
+{"ok":"http://h.com?q\u003d%7Bv%7D"}
+{"ok":"http://h.com?q\u003d{v}"}
+{"ok":"http://h.com?q\u003dV"}
+{"ok":"http://h.com?q\u003dV"}
+{"ok":"http://h.com?q\u003dV"}
+{"ok":"http://h.com?q\u003dV"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026a\u003db"}
+{"ok":"http://h.com?q\u0026q\u003d%7Bv%7D"}
+{"ok":"http://h.com?q\u0026q\u003d{v}"}
+{"ok":"http://h.com?q\u0026q\u003dV"}
+{"ok":"http://h.com?q\u0026q\u003dV"}
+{"ok":"http://h.com?q\u0026q\u003dV"}
+{"ok":"http://h.com?q\u0026q\u003dV"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026a\u003db"}
+{"ok":"http://h.com:8?q\u0026q\u003d%7Bv%7D"}
+{"ok":"http://h.com:8?q\u0026q\u003d{v}"}
+{"ok":"http://h.com:8?q\u0026q\u003dV"}
+{"ok":"http://h.com:8?q\u0026q\u003dV"}
+{"ok":"http://h.com:8?q\u0026q\u003dV"}
+{"ok":"http://h.com:8?q\u0026q\u003dV"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?a\u003db"}
+{"ok":"http://h.com:8?q\u003d%7Bv%7D"}
+{"ok":"http://h.com:8?q\u003d{v}"}
+{"ok":"http://h.com:8?q\u003dV"}
+{"ok":"http://h.com:8?q\u003dV"}
+{"ok":"http://h.com:8?q\u003dV"}
+{"ok":"http://h.com:8?q\u003dV"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?a\u003db"}
+{"ok":"http://u:p@h.com:80/x?q\u003d%7Bv%7D"}
+{"ok":"http://u:p@h.com:80/x?q\u003d{v}"}
+{"ok":"http://u:p@h.com:80/x?q\u003dV"}
+{"ok":"http://u:p@h.com:80/x?q\u003dV"}
+{"ok":"http://u:p@h.com:80/x?q\u003dV"}
+{"ok":"http://u:p@h.com:80/x?q\u003dV"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?a\u003db"}
+{"ok":"http://h.com:8a@x.com/?q\u003d%7Bv%7D"}
+{"ok":"http://h.com:8a@x.com/?q\u003d{v}"}
+{"ok":"http://h.com:8a@x.com/?q\u003dV"}
+{"ok":"http://h.com:8a@x.com/?q\u003dV"}
+{"ok":"http://h.com:8a@x.com/?q\u003dV"}
+{"ok":"http://h.com:8a@x.com/?q\u003dV"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?a\u003db"}
+{"ok":"http://h:8@x.com/?q\u003d%7Bv%7D"}
+{"ok":"http://h:8@x.com/?q\u003d{v}"}
+{"ok":"http://h:8@x.com/?q\u003dV"}
+{"ok":"http://h:8@x.com/?q\u003dV"}
+{"ok":"http://h:8@x.com/?q\u003dV"}
+{"ok":"http://h:8@x.com/?q\u003dV"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"The port contains a URI variable but has not been expanded yet: {p}"}
+{"ok":"http://h:{p}/"}
+{"ok":"http://h:80/"}
+{"ok":"http://h:80/"}
+{"ok":"http://h:80/"}
+{"ok":"http://h:80/"}
+{"err":"The port contains a URI variable but has not been expanded yet: {p}"}
+{"ok":"http://h:{p}/?a\u003db"}
+{"ok":"http://h:80/?a\u003db"}
+{"ok":"http://h:80/?a\u003db"}
+{"ok":"http://h:80/?a\u003db"}
+{"ok":"http://h:80/?a\u003db"}
+{"err":"The port contains a URI variable but has not been expanded yet: {p}"}
+{"ok":"http://h:{p}/?q\u003d{v}"}
+{"ok":"http://h:80/?q\u003dV"}
+{"ok":"http://h:80/?q\u003dV"}
+{"ok":"http://h:80/?q\u003dV"}
+{"ok":"http://h:80/?q\u003dV"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"The port must be an integer: "}
+{"ok":"http://h.com/x"}
+{"ok":"http://h.com/x"}
+{"ok":"http://h.com/x"}
+{"ok":"http://h.com/x"}
+{"ok":"http://h.com/x"}
+{"err":"The port must be an integer: "}
+{"ok":"http://h.com/x?a\u003db"}
+{"ok":"http://h.com/x?a\u003db"}
+{"ok":"http://h.com/x?a\u003db"}
+{"ok":"http://h.com/x?a\u003db"}
+{"ok":"http://h.com/x?a\u003db"}
+{"err":"The port must be an integer: "}
+{"ok":"http://h.com/x?q\u003d{v}"}
+{"ok":"http://h.com/x?q\u003dV"}
+{"ok":"http://h.com/x?q\u003dV"}
+{"ok":"http://h.com/x?q\u003dV"}
+{"ok":"http://h.com/x?q\u003dV"}
+{"err":"Could not create URI object: Illegal character in hostname at index 8: http://h%41.com/"}
+{"ok":"http://h%41.com/"}
+{"ok":"http://h%2541.com/"}
+{"ok":"http://h%2541.com/"}
+{"ok":"http://h%41.com/"}
+{"ok":"http://h%41.com/"}
+{"err":"Could not create URI object: Illegal character in hostname at index 8: http://h%41.com/?a\u003db"}
+{"ok":"http://h%41.com/?a\u003db"}
+{"ok":"http://h%2541.com/?a\u003db"}
+{"ok":"http://h%2541.com/?a\u003db"}
+{"ok":"http://h%41.com/?a\u003db"}
+{"ok":"http://h%41.com/?a\u003db"}
+{"err":"Could not create URI object: Illegal character in hostname at index 8: http://h%41.com/?q\u003d%7Bv%7D"}
+{"ok":"http://h%41.com/?q\u003d{v}"}
+{"ok":"http://h%2541.com/?q\u003dV"}
+{"ok":"http://h%2541.com/?q\u003dV"}
+{"ok":"http://h%41.com/?q\u003dV"}
+{"ok":"http://h%41.com/?q\u003dV"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?a\u003db"}
+{"ok":"http://[::1]:8080/x?q\u003d%7Bv%7D"}
+{"ok":"http://[::1]:8080/x?q\u003d{v}"}
+{"ok":"http://[::1]:8080/x?q\u003dV"}
+{"ok":"http://[::1]:8080/x?q\u003dV"}
+{"ok":"http://[::1]:8080/x?q\u003dV"}
+{"ok":"http://[::1]:8080/x?q\u003dV"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?q\u003d%7Bv%7D"}
+{"ok":"http://[::1]/x?q\u003d{v}"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?a\u003db"}
+{"ok":"http://[::1]/x?q\u003d%7Bv%7D"}
+{"ok":"http://[::1]/x?q\u003d{v}"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]/x?q\u003dV"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?a\u003db"}
+{"ok":"http://[::1]?q\u003d%7Bv%7D"}
+{"ok":"http://[::1]?q\u003d{v}"}
+{"ok":"http://[::1]?q\u003dV"}
+{"ok":"http://[::1]?q\u003dV"}
+{"ok":"http://[::1]?q\u003dV"}
+{"ok":"http://[::1]?q\u003dV"}
+{"err":"Could not create URI object: Expected authority at index 7: http://"}
+{"ok":"http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?q\u003d%7Bv%7D"}
+{"ok":"http://?q\u003d{v}"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x}/"}
+{"ok":"http://h{x}/"}
+{"ok":"http://hX/"}
+{"ok":"http://hX/"}
+{"ok":"http://hX/"}
+{"ok":"http://hX/"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x}/?a\u003db"}
+{"ok":"http://h{x}/?a\u003db"}
+{"ok":"http://hX/?a\u003db"}
+{"ok":"http://hX/?a\u003db"}
+{"ok":"http://hX/?a\u003db"}
+{"ok":"http://hX/?a\u003db"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x}/?q\u003d%7Bv%7D"}
+{"ok":"http://h{x}/?q\u003d{v}"}
+{"ok":"http://hX/?q\u003dV"}
+{"ok":"http://hX/?q\u003dV"}
+{"ok":"http://hX/?q\u003dV"}
+{"ok":"http://hX/?q\u003dV"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x/"}
+{"ok":"http://h{x/"}
+{"ok":"http://h%7Bx/"}
+{"ok":"http://h%7Bx/"}
+{"err":"Illegal character in authority at index 8: http://h{x/"}
+{"err":"Illegal character in authority at index 8: http://h{x/"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x/?a\u003db"}
+{"ok":"http://h{x/?a\u003db"}
+{"ok":"http://h%7Bx/?a\u003db"}
+{"ok":"http://h%7Bx/?a\u003db"}
+{"err":"Illegal character in authority at index 8: http://h{x/?a\u003db"}
+{"err":"Illegal character in authority at index 8: http://h{x/?a\u003db"}
+{"err":"Could not create URI object: Illegal character in authority at index 8: http://h{x/?q\u003d%7Bv%7D"}
+{"ok":"http://h{x/?q\u003d{v}"}
+{"ok":"http://h%7Bx/?q\u003dV"}
+{"ok":"http://h%7Bx/?q\u003dV"}
+{"err":"Illegal character in authority at index 8: http://h{x/?q\u003dV"}
+{"err":"Illegal character in authority at index 8: http://h{x/?q\u003dV"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Bad authority"}
+{"err":"Could not create URI object: Illegal character in authority at index 7: http://{h}.com/x"}
+{"ok":"http://{h}.com/x"}
+{"ok":"http://H.com/x"}
+{"ok":"http://H.com/x"}
+{"ok":"http://H.com/x"}
+{"ok":"http://H.com/x"}
+{"err":"Could not create URI object: Illegal character in authority at index 7: http://{h}.com/x?a\u003db"}
+{"ok":"http://{h}.com/x?a\u003db"}
+{"ok":"http://H.com/x?a\u003db"}
+{"ok":"http://H.com/x?a\u003db"}
+{"ok":"http://H.com/x?a\u003db"}
+{"ok":"http://H.com/x?a\u003db"}
+{"err":"Could not create URI object: Illegal character in authority at index 7: http://{h}.com/x?q\u003d%7Bv%7D"}
+{"ok":"http://{h}.com/x?q\u003d{v}"}
+{"ok":"http://H.com/x?q\u003dV"}
+{"ok":"http://H.com/x?q\u003dV"}
+{"ok":"http://H.com/x?q\u003dV"}
+{"ok":"http://H.com/x?q\u003dV"}
+{"ok":"http://h.com/%25u00e9"}
+{"ok":"http://h.com/%u00e9"}
+{"ok":"http://h.com/%25u00e9"}
+{"ok":"http://h.com/%25u00e9"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9"}
+{"ok":"http://h.com/%25u00e9?a\u003db"}
+{"ok":"http://h.com/%u00e9?a\u003db"}
+{"ok":"http://h.com/%25u00e9?a\u003db"}
+{"ok":"http://h.com/%25u00e9?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9?a\u003db"}
+{"ok":"http://h.com/%25u00e9?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/%u00e9?q\u003d{v}"}
+{"ok":"http://h.com/%25u00e9?q\u003dV"}
+{"ok":"http://h.com/%25u00e9?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u00e9?q\u003dV"}
+{"ok":"http://h.com/%25u12"}
+{"ok":"http://h.com/%u12"}
+{"ok":"http://h.com/%25u12"}
+{"ok":"http://h.com/%25u12"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12"}
+{"ok":"http://h.com/%25u12?a\u003db"}
+{"ok":"http://h.com/%u12?a\u003db"}
+{"ok":"http://h.com/%25u12?a\u003db"}
+{"ok":"http://h.com/%25u12?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12?a\u003db"}
+{"ok":"http://h.com/%25u12?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/%u12?q\u003d{v}"}
+{"ok":"http://h.com/%25u12?q\u003dV"}
+{"ok":"http://h.com/%25u12?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%u12?q\u003dV"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"err":"Bad path"}
+{"ok":"http://h.com/%25"}
+{"ok":"http://h.com/%"}
+{"ok":"http://h.com/%25"}
+{"ok":"http://h.com/%25"}
+{"err":"Malformed escape pair at index 13: http://h.com/%"}
+{"err":"Malformed escape pair at index 13: http://h.com/%"}
+{"ok":"http://h.com/%25?a\u003db"}
+{"ok":"http://h.com/%?a\u003db"}
+{"ok":"http://h.com/%25?a\u003db"}
+{"ok":"http://h.com/%25?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%?a\u003db"}
+{"err":"Malformed escape pair at index 13: http://h.com/%?a\u003db"}
+{"ok":"http://h.com/%25?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/%?q\u003d{v}"}
+{"ok":"http://h.com/%25?q\u003dV"}
+{"ok":"http://h.com/%25?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%?q\u003dV"}
+{"err":"Malformed escape pair at index 13: http://h.com/%?q\u003dV"}
+{"ok":"http://h.com/a%25"}
+{"ok":"http://h.com/a%"}
+{"ok":"http://h.com/a%25"}
+{"ok":"http://h.com/a%25"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%"}
+{"ok":"http://h.com/a%25?a\u003db"}
+{"ok":"http://h.com/a%?a\u003db"}
+{"ok":"http://h.com/a%25?a\u003db"}
+{"ok":"http://h.com/a%25?a\u003db"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%?a\u003db"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%?a\u003db"}
+{"ok":"http://h.com/a%25?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/a%?q\u003d{v}"}
+{"ok":"http://h.com/a%25?q\u003dV"}
+{"ok":"http://h.com/a%25?q\u003dV"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%?q\u003dV"}
+{"err":"Malformed escape pair at index 14: http://h.com/a%?q\u003dV"}
+{"ok":"mailto:a@b"}
+{"ok":"mailto:a@b"}
+{"ok":"mailto:a@b"}
+{"err":"Expected scheme-specific part at index 7: mailto:"}
+{"ok":"mailto:a@b"}
+{"ok":"mailto:a@b"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?q\u003d%7Bv%7D"}
+{"ok":"mailto:?q\u003d{v}"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:a@b?subject\u003dx"}
+{"ok":"mailto:a@b?subject\u003dx"}
+{"ok":"mailto:a@b?subject\u003dx"}
+{"err":"Expected scheme-specific part at index 7: mailto:"}
+{"ok":"mailto:a@b?subject\u003dx"}
+{"ok":"mailto:a@b?subject\u003dx"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?a\u003db"}
+{"ok":"mailto:?q\u003d%7Bv%7D"}
+{"ok":"mailto:?q\u003d{v}"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"mailto:?q\u003dV"}
+{"ok":"urn:a:b"}
+{"ok":"urn:a:b"}
+{"ok":"urn:a:b"}
+{"err":"Expected scheme-specific part at index 4: urn:"}
+{"ok":"urn:a:b"}
+{"ok":"urn:a:b"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?a\u003db"}
+{"ok":"urn:?q\u003d%7Bv%7D"}
+{"ok":"urn:?q\u003d{v}"}
+{"ok":"urn:?q\u003dV"}
+{"ok":"urn:?q\u003dV"}
+{"ok":"urn:?q\u003dV"}
+{"ok":"urn:?q\u003dV"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?a\u003db"}
+{"ok":"foo:/bar/baz?q\u003d%7Bv%7D"}
+{"ok":"foo:/bar/baz?q\u003d{v}"}
+{"ok":"foo:/bar/baz?q\u003dV"}
+{"ok":"foo:/bar/baz?q\u003dV"}
+{"ok":"foo:/bar/baz?q\u003dV"}
+{"ok":"foo:/bar/baz?q\u003dV"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?a\u003db"}
+{"ok":"ftp:/x?q\u003d%7Bv%7D"}
+{"ok":"ftp:/x?q\u003d{v}"}
+{"ok":"ftp:/x?q\u003dV"}
+{"ok":"ftp:/x?q\u003dV"}
+{"ok":"ftp:/x?q\u003dV"}
+{"ok":"ftp:/x?q\u003dV"}
+{"ok":"file:/x"}
+{"ok":"file:/x"}
+{"ok":"file:/x"}
+{"ok":"file:/x"}
+{"ok":"file:/x"}
+{"ok":"file:/x"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?a\u003db"}
+{"ok":"file:/x?q\u003d%7Bv%7D"}
+{"ok":"file:/x?q\u003d{v}"}
+{"ok":"file:/x?q\u003dV"}
+{"ok":"file:/x?q\u003dV"}
+{"ok":"file:/x?q\u003dV"}
+{"ok":"file:/x?q\u003dV"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?a\u003db"}
+{"ok":"http://h.com/a/b/?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/a/b/?q\u003d{v}"}
+{"ok":"http://h.com/a/b/?q\u003dV"}
+{"ok":"http://h.com/a/b/?q\u003dV"}
+{"ok":"http://h.com/a/b/?q\u003dV"}
+{"ok":"http://h.com/a/b/?q\u003dV"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?a\u003db"}
+{"ok":"http://h.com/?q\u003d%7Bv%7D"}
+{"ok":"http://h.com/?q\u003d{v}"}
+{"ok":"http://h.com/?q\u003dV"}
+{"ok":"http://h.com/?q\u003dV"}
+{"ok":"http://h.com/?q\u003dV"}
+{"ok":"http://h.com/?q\u003dV"}
+{"ok":"http://h.com/%7Ba%7D/%7Bb%7D?x\u003d%7Bc%7D#%7Bd%7D"}
+{"ok":"http://h.com/{a}/{b}?x\u003d{c}#{d}"}
+{"ok":"http://h.com/1/2?x\u003d3#4"}
+{"ok":"http://h.com/1/2?x\u003d3#4"}
+{"ok":"http://h.com/1/2?x\u003d3#4"}
+{"ok":"http://h.com/1/2?x\u003d3#4"}
+{"ok":"http://h.com/%7Ba%7D/%7Bb%7D?x\u003d%7Bc%7D\u0026a\u003db#%7Bd%7D"}
+{"ok":"http://h.com/{a}/{b}?x\u003d{c}\u0026a\u003db#{d}"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026a\u003db#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026a\u003db#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026a\u003db#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026a\u003db#4"}
+{"ok":"http://h.com/%7Ba%7D/%7Bb%7D?x\u003d%7Bc%7D\u0026q\u003d%7Bv%7D#%7Bd%7D"}
+{"ok":"http://h.com/{a}/{b}?x\u003d{c}\u0026q\u003d{v}#{d}"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026q\u003dV#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026q\u003dV#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026q\u003dV#4"}
+{"ok":"http://h.com/1/2?x\u003d3\u0026q\u003dV#4"}
+{"ok":"http://u%7Bx%7D@h.com/"}
+{"ok":"http://u{x}@h.com/"}
+{"ok":"http://uX@h.com/"}
+{"ok":"http://uX@h.com/"}
+{"ok":"http://uX@h.com/"}
+{"ok":"http://uX@h.com/"}
+{"ok":"http://u%7Bx%7D@h.com/?a\u003db"}
+{"ok":"http://u{x}@h.com/?a\u003db"}
+{"ok":"http://uX@h.com/?a\u003db"}
+{"ok":"http://uX@h.com/?a\u003db"}
+{"ok":"http://uX@h.com/?a\u003db"}
+{"ok":"http://uX@h.com/?a\u003db"}
+{"ok":"http://u%7Bx%7D@h.com/?q\u003d%7Bv%7D"}
+{"ok":"http://u{x}@h.com/?q\u003d{v}"}
+{"ok":"http://uX@h.com/?q\u003dV"}
+{"ok":"http://uX@h.com/?q\u003dV"}
+{"ok":"http://uX@h.com/?q\u003dV"}
+{"ok":"http://uX@h.com/?q\u003dV"}
+{"ok":"http://h.com:80/%7Ba:%5Cd+%7D"}
+{"ok":"http://h.com:80/{a:\\d+}"}
+{"ok":"http://h.com:80/1"}
+{"ok":"http://h.com:80/1"}
+{"ok":"http://h.com:80/1"}
+{"ok":"http://h.com:80/1"}
+{"ok":"http://h.com:80/%7Ba:%5Cd+%7D?a\u003db"}
+{"ok":"http://h.com:80/{a:\\d+}?a\u003db"}
+{"ok":"http://h.com:80/1?a\u003db"}
+{"ok":"http://h.com:80/1?a\u003db"}
+{"ok":"http://h.com:80/1?a\u003db"}
+{"ok":"http://h.com:80/1?a\u003db"}
+{"ok":"http://h.com:80/%7Ba:%5Cd+%7D?q\u003d%7Bv%7D"}
+{"ok":"http://h.com:80/{a:\\d+}?q\u003d{v}"}
+{"ok":"http://h.com:80/1?q\u003dV"}
+{"ok":"http://h.com:80/1?q\u003dV"}
+{"ok":"http://h.com:80/1?q\u003dV"}
+{"ok":"http://h.com:80/1?q\u003dV"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?q\u003d%7Bv%7D"}
+{"ok":"http:/x?q\u003d{v}"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?a\u003db"}
+{"ok":"http:/x?q\u003d%7Bv%7D"}
+{"ok":"http:/x?q\u003d{v}"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"http:/x?q\u003dV"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?a\u003db"}
+{"ok":"//h.com/x?q\u003d%7Bv%7D"}
+{"ok":"//h.com/x?q\u003d{v}"}
+{"ok":"//h.com/x?q\u003dV"}
+{"ok":"//h.com/x?q\u003dV"}
+{"ok":"//h.com/x?q\u003dV"}
+{"ok":"//h.com/x?q\u003dV"}
+{"ok":"///x"}
+{"ok":"///x"}
+{"ok":"///x"}
+{"ok":"///x"}
+{"ok":"///x"}
+{"ok":"///x"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?a\u003db"}
+{"ok":"///x?q\u003d%7Bv%7D"}
+{"ok":"///x?q\u003d{v}"}
+{"ok":"///x?q\u003dV"}
+{"ok":"///x?q\u003dV"}
+{"ok":"///x?q\u003dV"}
+{"ok":"///x?q\u003dV"}
+{"err":"Could not create URI object: Expected authority at index 7: http://"}
+{"ok":"http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"err":"Expected authority at index 7: http://"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?a\u003db"}
+{"ok":"http://?q\u003d%7Bv%7D"}
+{"ok":"http://?q\u003d{v}"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}
+{"ok":"http://?q\u003dV"}

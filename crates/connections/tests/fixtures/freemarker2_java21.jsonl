@@ -1,0 +1,107 @@
+{"ok":"a\nb\t\"q\" <>& A☺ z"}
+{"ok":"raw\\n${x}"}
+{"ok":"singled"}
+{"ok":"3"}
+{"ok":"pq"}
+{"err":"ParseException"}
+{"ok":"btbne"}
+{"ok":"emptyeqeq2"}
+{"ok":"1234567 2.5 true \"Ann\""}
+{"err":"UnexpectedTypeException"}
+{"ok":"2.5 Ann "}
+{"ok":"true"}
+{"ok":"2 0"}
+{"err":"UnexpectedTypeException"}
+{"ok":"true true true true true"}
+{"ok":"-A-n-n-"}
+{"ok":"ANN"}
+{"ok":"true false   Hi|hi|   |"}
+{"ok":"0true 1false "}
+{"ok":"a, !b!"}
+{"ok":"falsetrueodd truefalseeven "}
+{"ok":"empty"}
+{"ok":"ab"}
+{"ok":"12;3;"}
+{"ok":"1 nil z "}
+{"ok":"nil z a"}
+{"err":"InvalidReferenceException"}
+{"err":"UnexpectedTypeException"}
+{"err":"NonHashException"}
+{"ok":"d dd"}
+{"err":"ParseException"}
+{"ok":"2,469,135.25 1 -1 1"}
+{"err":"_MiscTemplateException"}
+{"err":"_MiscTemplateException"}
+{"ok":"0.333 2"}
+{"ok":"1,234,567,000,000,000,000,000,000,000,000"}
+{"ok":"-0 10.00 0.00 0.004 0.12 0.38 2 4"}
+{"ok":"1,234.50 INR 50% 012 1,234,567 5 0.5"}
+{"ok":"2.34 2.34"}
+{"ok":"1"}
+{"ok":"3 -2 -3 -2 2.5 -2"}
+{"err":"NonNumericalException"}
+{"ok":"1"}
+{"err":"NonBooleanException"}
+{"err":"ParseException"}
+{"err":"NonNumericalException"}
+{"ok":"1,000 -0.5 2 0.5"}
+{"ok":"∞ NaN"}
+{"err":"NonStringOrTemplateOutputException"}
+{"ok":"abc"}
+{"err":"_MiscTemplateException"}
+{"err":"NonStringOrTemplateOutputException"}
+{"err":"NonNumericalException"}
+{"ok":"1,234,567"}
+{"err":"NonBooleanException"}
+{"err":"InvalidReferenceException"}
+{"ok":"nn"}
+{"ok":"cmp"}
+{"ok":"w"}
+{"ok":"numeqheqzeromixed"}
+{"err":"_MiscTemplateException"}
+{"err":"_MiscTemplateException"}
+{"ok":"a  b"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"NonStringOrTemplateOutputException"}
+{"err":"InvalidReferenceException"}
+{"ok":"1234567"}
+{"err":"InvalidReferenceException"}
+{"ok":"Ann"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"err":"ParseException"}
+{"ok":"sp"}
+{"ok":"x\r\ny\rz\r\n"}
+{"ok":""}
+{"ok":""}
+{"err":"InvalidReferenceException"}
+{"err":"NonHashException"}
+{"err":"NonHashException"}
+{"ok":"d"}
+{"ok":"1 9"}
+{"err":"_MiscTemplateException"}
+{"ok":"1234567"}
+{"err":"NonStringException"}
+{"err":"_TemplateModelException"}
+{"err":"_TemplateModelException"}
+{"ok":"true"}
+{"err":"NonSequenceOrCollectionException"}
+{"err":"NonSequenceOrCollectionException"}
+{"err":"InvalidReferenceException"}
+{"err":"ParseException"}
+{"ok":"0 0 1,000,000 0.001 0 123,456.789 10 9.999"}

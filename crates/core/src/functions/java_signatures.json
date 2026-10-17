@@ -1,0 +1,5020 @@
+{
+ "CoreServices.AI.Chat": {
+  "namespace": "CoreServices.AI",
+  "name": "Chat",
+  "parameters": {
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "prompt": {
+    "schema": {
+     "namespace": "_",
+     "name": "prompt",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "prompt",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "response": {
+      "namespace": "_",
+      "name": "response",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "error": {
+      "namespace": "_",
+      "name": "error",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Email.SendEmail": {
+  "namespace": "CoreServices.Email",
+  "name": "SendEmail",
+  "parameters": {
+   "templateData": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateData",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "templateData",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "address": {
+    "schema": {
+     "namespace": "_",
+     "name": "address",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "address",
+    "variableArgument": true,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "templateName": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "templateName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "sent": {
+      "namespace": "_",
+      "name": "sent",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Event.CancelScheduledEvent": {
+  "namespace": "CoreServices.Event",
+  "name": "CancelScheduledEvent",
+  "parameters": {
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "key": {
+    "schema": {
+     "namespace": "_",
+     "name": "key",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "key",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "cancelled": {
+      "namespace": "_",
+      "name": "cancelled",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Event.CreateEvent": {
+  "namespace": "CoreServices.Event",
+  "name": "CreateEvent",
+  "parameters": {
+   "eventName": {
+    "schema": {
+     "namespace": "_",
+     "name": "eventName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "eventName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "eventData": {
+    "schema": {
+     "namespace": "_",
+     "name": "eventData",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "eventData",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "created": {
+      "namespace": "_",
+      "name": "created",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Event.ScheduleEvent": {
+  "namespace": "CoreServices.Event",
+  "name": "ScheduleEvent",
+  "parameters": {
+   "eventName": {
+    "schema": {
+     "namespace": "_",
+     "name": "eventName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "eventName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "runAt": {
+    "schema": {
+     "namespace": "_",
+     "name": "runAt",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "runAt",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "data": {
+    "schema": {
+     "namespace": "_",
+     "name": "data",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "data",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "key": {
+    "schema": {
+     "namespace": "_",
+     "name": "key",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "key",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "scheduled": {
+      "namespace": "_",
+      "name": "scheduled",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "key": {
+      "namespace": "_",
+      "name": "key",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Event.SetScheduleEnabled": {
+  "namespace": "CoreServices.Event",
+  "name": "SetScheduleEnabled",
+  "parameters": {
+   "enabled": {
+    "schema": {
+     "namespace": "_",
+     "name": "enabled",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": true
+    },
+    "parameterName": "enabled",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "eventName": {
+    "schema": {
+     "namespace": "_",
+     "name": "eventName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "eventName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "changed": {
+      "namespace": "_",
+      "name": "changed",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.File.FileToBase64": {
+  "namespace": "CoreServices.File",
+  "name": "FileToBase64",
+  "parameters": {
+   "metadataRequired": {
+    "schema": {
+     "namespace": "_",
+     "name": "metadataRequired",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "metadataRequired",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileType",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "filePath": {
+    "schema": {
+     "namespace": "_",
+     "name": "filePath",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "filePath",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.File.TemplateToPdf": {
+  "namespace": "CoreServices.File",
+  "name": "TemplateToPdf",
+  "parameters": {
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "templateName": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "templateName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "templateData": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateData",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "templateData",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "secured",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "fileData": {
+      "namespace": "_",
+      "name": "fileData",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.GetWhatsappPairingCode": {
+  "namespace": "CoreServices.Message",
+  "name": "GetWhatsappPairingCode",
+  "parameters": {
+   "sessionCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "sessionCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "sessionCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "pairing": {
+      "namespace": "_",
+      "name": "pairing",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.LinkWhatsappNumber": {
+  "namespace": "CoreServices.Message",
+  "name": "LinkWhatsappNumber",
+  "parameters": {
+   "phoneNumber": {
+    "schema": {
+     "namespace": "_",
+     "name": "phoneNumber",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "phoneNumber",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "productId": {
+    "schema": {
+     "namespace": "_",
+     "name": "productId",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "productId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "session": {
+      "namespace": "_",
+      "name": "session",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.ListWhatsappNumbers": {
+  "namespace": "CoreServices.Message",
+  "name": "ListWhatsappNumbers",
+  "parameters": {
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "numbers": {
+      "namespace": "_",
+      "name": "numbers",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "number",
+       "version": 1,
+       "type": "OBJECT"
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.MakeCall": {
+  "namespace": "CoreServices.Message",
+  "name": "MakeCall",
+  "parameters": {
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "callerId": {
+    "schema": {
+     "namespace": "_",
+     "name": "callerId",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "callerId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "toNumber": {
+    "schema": {
+     "namespace": "_",
+     "name": "toNumber",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "toNumber",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "toCountryCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "toCountryCode",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "toCountryCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "callerIdCountryCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "callerIdCountryCode",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "callerIdCountryCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "call": {
+      "namespace": "_",
+      "name": "call",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.RemoveWhatsappNumber": {
+  "namespace": "CoreServices.Message",
+  "name": "RemoveWhatsappNumber",
+  "parameters": {
+   "sessionCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "sessionCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "sessionCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "removed": {
+      "namespace": "_",
+      "name": "removed",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.SendWhatsapp": {
+  "namespace": "CoreServices.Message",
+  "name": "SendWhatsapp",
+  "parameters": {
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileName",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "sessionCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "sessionCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "sessionCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "voiceNote": {
+    "schema": {
+     "namespace": "_",
+     "name": "voiceNote",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "voiceNote",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "kind": {
+    "schema": {
+     "namespace": "_",
+     "name": "kind",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "kind",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "filePath": {
+    "schema": {
+     "namespace": "_",
+     "name": "filePath",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "filePath",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "to": {
+    "schema": {
+     "namespace": "_",
+     "name": "to",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "to",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "mimeType": {
+    "schema": {
+     "namespace": "_",
+     "name": "mimeType",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "mimeType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "text": {
+    "schema": {
+     "namespace": "_",
+     "name": "text",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "text",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "resourceType": {
+    "schema": {
+     "namespace": "_",
+     "name": "resourceType",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "resourceType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "OBJECT"
+     },
+     "sessionCode": {
+      "namespace": "_",
+      "name": "sessionCode",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Message.SetDefaultWhatsappNumber": {
+  "namespace": "CoreServices.Message",
+  "name": "SetDefaultWhatsappNumber",
+  "parameters": {
+   "sessionCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "sessionCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "sessionCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "marked": {
+      "namespace": "_",
+      "name": "marked",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Notification.SendNotification": {
+  "namespace": "CoreServices.Notification",
+  "name": "SendNotification",
+  "parameters": {
+   "targetId": {
+    "schema": {
+     "namespace": "_",
+     "name": "targetId",
+     "version": 1,
+     "type": [
+      "FLOAT",
+      "DOUBLE",
+      "LONG",
+      "INTEGER"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "targetId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "payload": {
+    "schema": {
+     "namespace": "_",
+     "name": "payload",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "payload",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "targetCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "targetCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "targetCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "notificationCategory": {
+    "schema": {
+     "namespace": "_",
+     "name": "notificationCategory",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "Default"
+    },
+    "parameterName": "notificationCategory",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "filterAuthorization": {
+    "schema": {
+     "namespace": "_",
+     "name": "filterAuthorization",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "filterAuthorization",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "targetType": {
+    "schema": {
+     "namespace": "_",
+     "name": "targetType",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "User Id",
+     "enums": [
+      "User Id",
+      "Client Id",
+      "Client Code"
+     ]
+    },
+    "parameterName": "targetType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "notificationName": {
+    "schema": {
+     "namespace": "_",
+     "name": "notificationName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "notificationName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "sent": {
+      "namespace": "_",
+      "name": "sent",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.CallRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "CallRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "methodName": {
+    "schema": {
+     "namespace": "_",
+     "name": "methodName",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "GET",
+     "enums": [
+      "GET",
+      "PUT",
+      "POST",
+      "PATCH",
+      "DELETE"
+     ]
+    },
+    "parameterName": "methodName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "payload": {
+    "schema": {
+     "namespace": "_",
+     "name": "payload",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "payload",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.DeleteRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "DeleteRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.GetRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "GetRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.PatchRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "PatchRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "payload": {
+    "schema": {
+     "namespace": "_",
+     "name": "payload",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "payload",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.PostRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "PostRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "payload": {
+    "schema": {
+     "namespace": "_",
+     "name": "payload",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "payload",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.REST.PutRequest": {
+  "namespace": "CoreServices.REST",
+  "name": "PutRequest",
+  "parameters": {
+   "headers": {
+    "schema": {
+     "namespace": "_",
+     "name": "headers",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "headers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ignoreConnectionHeaders": {
+    "schema": {
+     "namespace": "_",
+     "name": "ignoreConnectionHeaders",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "ignoreConnectionHeaders",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "pathParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "pathParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "pathParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "queryParams": {
+    "schema": {
+     "namespace": "_",
+     "name": "queryParams",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {},
+     "additionalProperties": {
+      "namespace": "_",
+      "name": "stringValue",
+      "version": 1,
+      "type": "STRING"
+     }
+    },
+    "parameterName": "queryParams",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "timeout": {
+    "schema": {
+     "namespace": "_",
+     "name": "timeout",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "timeout",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "url": {
+    "schema": {
+     "namespace": "_",
+     "name": "url",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "url",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "payload": {
+    "schema": {
+     "namespace": "_",
+     "name": "payload",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "payload",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "downloadAsAFile": {
+    "schema": {
+     "namespace": "_",
+     "name": "downloadAsAFile",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "downloadAsAFile",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "connectionName": {
+    "schema": {
+     "namespace": "_",
+     "name": "connectionName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "connectionName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "static",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   },
+   "error": {
+    "name": "error",
+    "parameters": {
+     "headers": {
+      "namespace": "_",
+      "name": "headers",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "data": {
+      "namespace": "_",
+      "name": "data",
+      "version": 1,
+      "type": [
+       "NULL",
+       "BOOLEAN",
+       "INTEGER",
+       "LONG",
+       "DOUBLE",
+       "OBJECT",
+       "ARRAY",
+       "STRING",
+       "FLOAT"
+      ]
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": [
+       "FLOAT",
+       "DOUBLE",
+       "LONG",
+       "INTEGER"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.AddClientManager": {
+  "namespace": "CoreServices.Security",
+  "name": "AddClientManager",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.AssignProfile": {
+  "namespace": "CoreServices.Security",
+  "name": "AssignProfile",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "profileId": {
+    "schema": {
+     "namespace": "_",
+     "name": "profileId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "profileId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.CreateUser": {
+  "namespace": "CoreServices.Security",
+  "name": "CreateUser",
+  "parameters": {
+   "user": {
+    "schema": {
+     "namespace": "_",
+     "name": "user",
+     "version": 1,
+     "type": "OBJECT"
+    },
+    "parameterName": "user",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "user": {
+      "namespace": "_",
+      "name": "user",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.DeleteClient": {
+  "namespace": "CoreServices.Security",
+  "name": "DeleteClient",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "deleted": {
+      "namespace": "_",
+      "name": "deleted",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.DeleteUser": {
+  "namespace": "CoreServices.Security",
+  "name": "DeleteUser",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "deleted": {
+      "namespace": "_",
+      "name": "deleted",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetAppProfiles": {
+  "namespace": "CoreServices.Security",
+  "name": "GetAppProfiles",
+  "parameters": {
+   "sort": {
+    "schema": {
+     "namespace": "_",
+     "name": "sort",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "sort",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "size": {
+    "schema": {
+     "namespace": "_",
+     "name": "size",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": -1
+    },
+    "parameterName": "size",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appId": {
+    "schema": {
+     "namespace": "_",
+     "name": "appId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "appId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "page": {
+    "schema": {
+     "namespace": "_",
+     "name": "page",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": -1
+    },
+    "parameterName": "page",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "page": {
+      "namespace": "_",
+      "name": "page",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetClient": {
+  "namespace": "CoreServices.Security",
+  "name": "GetClient",
+  "parameters": {
+   "idOrCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "idOrCode",
+     "version": 1,
+     "type": [
+      "STRING",
+      "LONG"
+     ]
+    },
+    "parameterName": "idOrCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "client": {
+      "namespace": "_",
+      "name": "client",
+      "version": 1,
+      "type": "OBJECT",
+      "properties": {
+       "id": {
+        "namespace": "_",
+        "name": "id",
+        "version": 1,
+        "type": "LONG"
+       },
+       "updatedBy": {
+        "namespace": "_",
+        "name": "updatedBy",
+        "version": 1,
+        "type": "LONG"
+       },
+       "typeCode": {
+        "namespace": "_",
+        "name": "typeCode",
+        "version": 1,
+        "type": "STRING"
+       },
+       "tokenValidityMinutes": {
+        "namespace": "_",
+        "name": "tokenValidityMinutes",
+        "version": 1,
+        "type": "INTEGER"
+       },
+       "businessType": {
+        "namespace": "_",
+        "name": "businessType",
+        "version": 1,
+        "type": "STRING"
+       },
+       "businessSize": {
+        "namespace": "_",
+        "name": "businessSize",
+        "version": 1,
+        "type": "STRING"
+       },
+       "localeCode": {
+        "namespace": "_",
+        "name": "localeCode",
+        "version": 1,
+        "type": "STRING"
+       },
+       "createdBy": {
+        "namespace": "_",
+        "name": "createdBy",
+        "version": 1,
+        "type": "LONG"
+       },
+       "name": {
+        "namespace": "_",
+        "name": "name",
+        "version": 1,
+        "type": "STRING"
+       },
+       "statusCode": {
+        "namespace": "_",
+        "name": "statusCode",
+        "version": 1,
+        "type": "STRING"
+       },
+       "industry": {
+        "namespace": "_",
+        "name": "industry",
+        "version": 1,
+        "type": "STRING"
+       },
+       "code": {
+        "namespace": "_",
+        "name": "code",
+        "version": 1,
+        "type": "STRING"
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetClientUsersPage": {
+  "namespace": "CoreServices.Security",
+  "name": "GetClientUsersPage",
+  "parameters": {
+   "sort": {
+    "schema": {
+     "namespace": "_",
+     "name": "sort",
+     "version": 1,
+     "type": [
+      "NULL",
+      "BOOLEAN",
+      "INTEGER",
+      "LONG",
+      "DOUBLE",
+      "OBJECT",
+      "ARRAY",
+      "STRING",
+      "FLOAT"
+     ]
+    },
+    "parameterName": "sort",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "size": {
+    "schema": {
+     "namespace": "_",
+     "name": "size",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 10
+    },
+    "parameterName": "size",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "page": {
+    "schema": {
+     "namespace": "_",
+     "name": "page",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "page",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "condition": {
+    "schema": {
+     "namespace": "_",
+     "name": "condition",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "condition",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "size": {
+      "namespace": "_",
+      "name": "size",
+      "version": 1,
+      "type": "INTEGER"
+     },
+     "number": {
+      "namespace": "_",
+      "name": "number",
+      "version": 1,
+      "type": "INTEGER"
+     },
+     "totalPages": {
+      "namespace": "_",
+      "name": "totalPages",
+      "version": 1,
+      "type": "INTEGER"
+     },
+     "users": {
+      "namespace": "_",
+      "name": "users",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "user",
+       "version": 1,
+       "type": "OBJECT"
+      }
+     },
+     "totalElements": {
+      "namespace": "_",
+      "name": "totalElements",
+      "version": 1,
+      "type": "LONG"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetClientsByIds": {
+  "namespace": "CoreServices.Security",
+  "name": "GetClientsByIds",
+  "parameters": {
+   "fetchClientManagers": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchClientManagers",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchClientManagers",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "withCounts": {
+    "schema": {
+     "namespace": "_",
+     "name": "withCounts",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "withCounts",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchManagingClient": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchManagingClient",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchManagingClient",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchOwners": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchOwners",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchOwners",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "ids": {
+    "schema": {
+     "namespace": "_",
+     "name": "ids",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "idsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "ids",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "clients": {
+      "namespace": "_",
+      "name": "clients",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetClientsDenorm": {
+  "namespace": "CoreServices.Security",
+  "name": "GetClientsDenorm",
+  "parameters": {
+   "ids": {
+    "schema": {
+     "namespace": "_",
+     "name": "ids",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "idsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "ids",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "denorm": {
+      "namespace": "_",
+      "name": "denorm",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetManagedClientIds": {
+  "namespace": "CoreServices.Security",
+  "name": "GetManagedClientIds",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "clientIds": {
+      "namespace": "_",
+      "name": "clientIds",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "clientId",
+       "version": 1,
+       "type": "LONG"
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetOwnersEmails": {
+  "namespace": "CoreServices.Security",
+  "name": "GetOwnersEmails",
+  "parameters": {
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "ownerEmails": {
+      "namespace": "_",
+      "name": "ownerEmails",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUser": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUser",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "user": {
+      "namespace": "_",
+      "name": "user",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUserAdminEmails": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUserAdminEmails",
+  "parameters": {
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "adminEmails": {
+      "namespace": "_",
+      "name": "adminEmails",
+      "version": 1,
+      "type": "STRING"
+     },
+     "addApp": {
+      "namespace": "_",
+      "name": "addApp",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUserSubOrg": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUserSubOrg",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "userIds": {
+      "namespace": "_",
+      "name": "userIds",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "userId",
+       "version": 1,
+       "type": "LONG"
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUsersByIds": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUsersByIds",
+  "parameters": {
+   "ids": {
+    "schema": {
+     "namespace": "_",
+     "name": "ids",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "idsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "ids",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "users": {
+      "namespace": "_",
+      "name": "users",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUsersForDistribution": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUsersForDistribution",
+  "parameters": {
+   "designationIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "designationIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "designationIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "designationIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "profileIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "profileIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "profileIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "profileIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "userIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "userIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "userIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "userIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "departmentIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "departmentIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "departmentIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "departmentIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "roleIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "roleIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "roleIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "roleIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "userIds": {
+      "namespace": "_",
+      "name": "userIds",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "userId",
+       "version": 1,
+       "type": "LONG"
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.IsBeingManagedByCode": {
+  "namespace": "CoreServices.Security",
+  "name": "IsBeingManagedByCode",
+  "parameters": {
+   "managingClientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "managingClientCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "managingClientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.IsBeingManagedById": {
+  "namespace": "CoreServices.Security",
+  "name": "IsBeingManagedById",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": "LONG"
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "managingClientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "managingClientId",
+     "version": 1,
+     "type": "LONG"
+    },
+    "parameterName": "managingClientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.LogClientActivity": {
+  "namespace": "CoreServices.Security",
+  "name": "LogClientActivity",
+  "parameters": {
+   "activity": {
+    "schema": {
+     "namespace": "_",
+     "name": "activity",
+     "version": 1,
+     "type": "OBJECT"
+    },
+    "parameterName": "activity",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "activity": {
+      "namespace": "_",
+      "name": "activity",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.MigrateClientManagers": {
+  "namespace": "CoreServices.Security",
+  "name": "MigrateClientManagers",
+  "parameters": {
+   "toUserId": {
+    "schema": {
+     "namespace": "_",
+     "name": "toUserId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "toUserId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "removeManager": {
+    "schema": {
+     "namespace": "_",
+     "name": "removeManager",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": true
+    },
+    "parameterName": "removeManager",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fromUserId": {
+    "schema": {
+     "namespace": "_",
+     "name": "fromUserId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "fromUserId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "count": {
+      "namespace": "_",
+      "name": "count",
+      "version": 1,
+      "type": "INTEGER"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.QueryClientActivities": {
+  "namespace": "CoreServices.Security",
+  "name": "QueryClientActivities",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "query": {
+    "schema": {
+     "namespace": "_",
+     "name": "query",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "query",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "page": {
+      "namespace": "_",
+      "name": "page",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.QueryUsers": {
+  "namespace": "CoreServices.Security",
+  "name": "QueryUsers",
+  "parameters": {
+   "fetchClients": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchClients",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchClients",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchManagingClients": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchManagingClients",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchManagingClients",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchDesignation": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchDesignation",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchDesignation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "query": {
+    "schema": {
+     "namespace": "_",
+     "name": "query",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "query",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appId": {
+    "schema": {
+     "namespace": "_",
+     "name": "appId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "appId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchCreatedBy": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchCreatedBy",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchCreatedBy",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchProfiles": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchProfiles",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchProfiles",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fetchReportingTo": {
+    "schema": {
+     "namespace": "_",
+     "name": "fetchReportingTo",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fetchReportingTo",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "page": {
+      "namespace": "_",
+      "name": "page",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.RemoveClientManager": {
+  "namespace": "CoreServices.Security",
+  "name": "RemoveClientManager",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.RemoveProfile": {
+  "namespace": "CoreServices.Security",
+  "name": "RemoveProfile",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "profileId": {
+    "schema": {
+     "namespace": "_",
+     "name": "profileId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "profileId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.ReplaceClientManager": {
+  "namespace": "CoreServices.Security",
+  "name": "ReplaceClientManager",
+  "parameters": {
+   "newManagerId": {
+    "schema": {
+     "namespace": "_",
+     "name": "newManagerId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "newManagerId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "oldManagerId": {
+    "schema": {
+     "namespace": "_",
+     "name": "oldManagerId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "oldManagerId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.SetClientManagers": {
+  "namespace": "CoreServices.Security",
+  "name": "SetClientManagers",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "managerIds": {
+    "schema": {
+     "namespace": "_",
+     "name": "managerIds",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "managerIdsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "managerIds",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.SetClientStatus": {
+  "namespace": "CoreServices.Security",
+  "name": "SetClientStatus",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "status": {
+    "schema": {
+     "namespace": "_",
+     "name": "status",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "status",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.SetUserStatus": {
+  "namespace": "CoreServices.Security",
+  "name": "SetUserStatus",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "status": {
+    "schema": {
+     "namespace": "_",
+     "name": "status",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "status",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "result": {
+      "namespace": "_",
+      "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.UpdateClient": {
+  "namespace": "CoreServices.Security",
+  "name": "UpdateClient",
+  "parameters": {
+   "clientId": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "clientId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "partial": {
+    "schema": {
+     "namespace": "_",
+     "name": "partial",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": true
+    },
+    "parameterName": "partial",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "client": {
+    "schema": {
+     "namespace": "_",
+     "name": "client",
+     "version": 1,
+     "type": "OBJECT"
+    },
+    "parameterName": "client",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "client": {
+      "namespace": "_",
+      "name": "client",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.UpdateUser": {
+  "namespace": "CoreServices.Security",
+  "name": "UpdateUser",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "user": {
+    "schema": {
+     "namespace": "_",
+     "name": "user",
+     "version": 1,
+     "type": "OBJECT"
+    },
+    "parameterName": "user",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "partial": {
+    "schema": {
+     "namespace": "_",
+     "name": "partial",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": true
+    },
+    "parameterName": "partial",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "user": {
+      "namespace": "_",
+      "name": "user",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ }
+}
