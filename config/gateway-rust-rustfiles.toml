@@ -23,6 +23,36 @@ upstream = "eureka:SECURITY"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
+# Resilience, per pool. Every pool has these defaults; a pool overrides any of them in its own
+# sub-table (for example [pools.core-exec.breaker] with open_ms = 10000 under it).
+#
+# [pools.NAME]
+# discovery_refresh_ms = 2000     # how often an eureka: pool reads the registry
+#
+# [pools.NAME.outlier]
+# consecutive_5xx = 5             # 502/503/504, broken connections or timeouts in a row; 0 = off
+# base_ejection_ms = 10000        # ejected for this times the number of ejections so far...
+# max_ejection_ms = 120000        # ...at most this, then back at its next passing health check
+# max_ejection_percent = 50       # never more of the pool than this at once
+#
+# [pools.NAME.retry]
+# on_5xx = true                   # one retry elsewhere for a GET/HEAD/OPTIONS/PUT/DELETE without
+#                                 # a body answered 502/503/504 (connect failures always retry)
+# jitter_min_ms = 25
+# jitter_max_ms = 50
+# budget_percent = 20             # 5xx retries stay within 20% of the pool's requests...
+# budget_window_seconds = 10      # ...over 10 s...
+# budget_min_per_second = 3       # ...or 3 a second, whichever allows more
+#
+# [pools.NAME.breaker]
+# enabled = true
+# window_seconds = 10             # measured in 1 s buckets
+# min_requests = 20               # opens at 20 or more requests in the window...
+# failure_percent = 50            # ...with 50% or more failed; then 503 at once
+# open_ms = 5000                  # for 5 s, then half_open_trials requests go through:
+# half_open_trials = 3            # all pass and it closes, one fails and it opens again
+# max_open_ms = 60000             # for twice as long, up to this
+
 [pools.security]
 upstreams = "eureka:SECURITY"
 health_path = "/actuator/health"

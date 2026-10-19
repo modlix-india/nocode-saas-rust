@@ -1,7 +1,7 @@
 //! The binary's start-up path (`security::run`) on the local stack: configuration, pool,
 //! Redis eviction listener, router, then a sign-in, a context, a revoke over HTTP.
 //!
-//! Gated: `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced (database password, Redis URL,
+//! Gated: `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"` (database password, Redis URL,
 //! `MODLIX__JWT__KEY`). Signs in as the SYSTEM user 142 with the local password and revokes the
 //! token it got.
 

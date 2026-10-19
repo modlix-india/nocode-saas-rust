@@ -5,7 +5,7 @@
 //! `BundlePurchaseServiceIntegrationTest`, `RazorpayWebhookIntegrationTest` and
 //! `InvoiceServiceIntegrationTest`.
 //!
-//! Gated: `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced. Every write runs inside one
+//! Gated: `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"`. Every write runs inside one
 //! transaction that is rolled back at the end (the scratch client `ZZPAR11` configures the scratch
 //! app `coreedparity`), so no config, bundle, invoice, payment or wallet survives; Razorpay and
 //! files are answered in process. The routes are only read through.

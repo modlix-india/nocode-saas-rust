@@ -1,0 +1,27 @@
+# security-internal: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8112
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "prod"
+
+[database]
+host = "db.fixture.test"
+port = 3306
+database = "core"
+username = "core_prod"
+
+[jwt]
+token_default_expiry_minutes = 30
+token_rememberme_expiry_minutes = 604800
+token_default_refresh_minutes = 8
+
+[security]
+app_code_suffix = ""
+subdomain_endings = ".fixture.test"
+upstream = ["http://security-admin:8113"]
+auth_upstream = ["http://security-auth:8101"]
+internal_upstream = ["http://security-internal:8112"]

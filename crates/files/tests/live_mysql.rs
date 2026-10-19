@@ -5,7 +5,7 @@
 //! Gated: `#[ignore]`, and runs only with `FILES_TEST_MYSQL=1` and `MODLIX__DATABASE__PASSWORD`:
 //!
 //! ```text
-//! set -a; source config/local.env; set +a
+//! eval "$(tools/local-env.py)"
 //! FILES_TEST_MYSQL=1 cargo test -p files --test live_mysql -- --ignored
 //! ```
 

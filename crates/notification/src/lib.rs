@@ -102,12 +102,11 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
 /// Loads configuration, connects everything, starts the queue consumer and the heartbeat, and
 /// serves until shut down.
 pub async fn run() -> Result<()> {
-    let cfg: NotificationConfig = platform::config::load(NAME)?;
+    let loaded = platform::config::load_async::<NotificationConfig>(NAME).await?;
     catalogue::register();
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     let built = build(&cfg).await?;
     built.hub.spawn_heartbeat(Duration::from_secs(cfg.sse.heartbeat_seconds.max(1)));
 
@@ -126,6 +125,7 @@ pub async fn run() -> Result<()> {
         match cfg.mq.amqp_uri() {
             Some(uri) => {
                 let state = queue::ConsumerState::default();
+                queue::describe_metrics();
                 tokio::spawn(queue::consume_forever(built.send.clone(), uri, cfg.notifications.clone(), state.clone()));
                 health.check("rabbitmq", move || {
                     let state = state.clone();

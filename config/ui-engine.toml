@@ -1,5 +1,5 @@
 # ui-engine on the local stack. Secrets (MODLIX__MONGO__URI, MODLIX__REDIS__URL) come from
-# config/local.env.
+# config/local.toml.
 
 [server]
 port = 8102
@@ -22,9 +22,6 @@ auth_upstream = "http://localhost:8101"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [mongo]
 max_pool_size = 32
 
@@ -32,3 +29,9 @@ max_pool_size = 32
 resource_cache_age = 604800
 # The Java ui's JVM runs in the developer machine's zone (IST) locally; +00:00 in containers.
 java_zone_offset = "+05:30"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "UI-ENGINE"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

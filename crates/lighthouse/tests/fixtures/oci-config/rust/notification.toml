@@ -1,0 +1,29 @@
+# notification: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8114
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[database]
+host = "<db.host:notification>"
+port = "<db.port:notification>"
+database = "<db.name:notification>"
+username = "<db.user:notification>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+
+[core]
+upstream = "<urls:core-exec>"
+
+[multi]
+upstream = "<urls:multi>"
+
+[notify]
+from = "fixture@\"quoted\".test"

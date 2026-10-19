@@ -6,7 +6,7 @@ dev / stage / prod. It only writes files: nothing is applied anywhere.
        POST /api/core/transports/makeTransport
             {appCode: platform, clientCode: SYSTEM, objectList: {Function: [...11],
              EventDefinition: [...11], EventAction: [...11]}}
-  2. checks the zip holds those 33 objects and nothing else, each matching
+  2. checks the zip holds exactly those objects (3 per job) and nothing else, each matching
      tools/platform_seed/definitions.json (fields core manages aside);
   3. sets each EventDefinition's schedule to the seed's (on), since local keeps them off
      (see seed_platform_app.py), and records that in the manifest;
@@ -135,7 +135,9 @@ def main() -> None:
     if st != 200 or not isinstance(meta, dict) or meta.get("appCode") != app["appCode"]:
         die(f"app {app['appCode']} is not on local (HTTP {st}); run tools/seed_platform_app.py first")
 
-    info(f"exporting {sum(len(v) for v in object_list(seed).values())} objects of {app['appCode']} from {api.base}")
+    count = sum(len(v) for v in object_list(seed).values())
+    jobs = len(seed["jobs"])
+    info(f"exporting {count} objects of {app['appCode']} from {api.base}")
     with zipfile.ZipFile(io.BytesIO(export(api, seed))) as zf:
         files = entries(zf)
     transport = json.loads(files["transport.json"])
@@ -157,13 +159,14 @@ def main() -> None:
         "changedFromLocal": changed,
         "apply": [
             "Per environment, with approval; nothing here has been applied.",
-            "1. Cut over first or keep the schedules from double-running: stop the Java worker, set "
-            "core.scheduler.enabled=false on Java core, run core-scheduler and core-events (CORE_SCHEDULER.md).",
+            "1. Only after the switch: the Java services (worker and core included) stopped, core-scheduler and "
+            "core-events running (the runbook, oci-config rust/RUNBOOK.md). Java core has no CoreServices.Platform.* and the worker "
+            "would run every job a second time.",
             f"2. If the app is missing there: POST <env>/api/security/applications {json.dumps(create_app)} "
             "(security is not transported).",
             f"3. POST <env>/api/core/transports/createAndApply?isForBaseApp=true&applicationCode={app['appCode']} "
-            f"multipart file=@{out.name} (as app-transport.sh applies a core chunk; 33 objects, one request).",
-            "4. Verify: GET <env>/api/core/eventDefinitions?appCode=platform&clientCode=SYSTEM lists the 11 jobs "
+            f"multipart file=@{out.name} (as app-transport.sh applies a core chunk; {count} objects, one request).",
+            f"4. Verify: GET <env>/api/core/eventDefinitions?appCode=platform&clientCode=SYSTEM lists the {jobs} jobs "
             "with their schedules; the first ticks show in the event run log.",
         ],
     }

@@ -83,8 +83,6 @@ multi_transport_error=Error while creating/updating application";
         assert_eq!(r.message, "A service this needs is not answering right now. Try again in a few seconds.");
         let r = c.render("MULTI.DEFINITION_URL_FAILED", &p(&[("status", "404")]), &en, "E");
         assert_eq!(r.message, "We couldn't download the app definition from its address: the address answered with status 404.");
-        let r = c.render("MULTI.HEADER_MISSING", &p(&[("header", "X-Forwarded-Port")]), &en, "E");
-        assert_eq!(r.message, "The request is missing the X-Forwarded-Port header.");
         for code in c.codes().into_iter().filter(|c| c.starts_with("MULTI.")) {
             let r = c.render(code, &[], &en, "E");
             assert!(!r.message.contains('{') && !r.message.contains("  ") && !r.message.is_empty(), "{code}: {}", r.message);

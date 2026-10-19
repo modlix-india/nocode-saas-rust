@@ -3,13 +3,15 @@
 the APIs, from tools/platform_seed/definitions.json:
 
   1. the security app `platform`       POST /api/security/applications   (when missing)
-  2. 11 job functions Platform.Jobs.*  /api/core/functions
-  3. 11 EventDefinitions (schedules)   /api/core/eventDefinitions
-  4. 11 EventActions                   /api/core/eventActions
+  2. a job function per job            /api/core/functions   (Platform.Jobs.<job>)
+  3. an EventDefinition per job        /api/core/eventDefinitions   (the schedule)
+  4. an EventAction per job            /api/core/eventActions
 
 Idempotent: an object is created when missing, updated (PUT of the stored document with the
 seed's fields) when it differs, and left alone when it already holds what the seed says.
-Nothing is ever deleted.
+Nothing is deleted unless --prune is given: then the functions, EventDefinitions and
+EventActions the platform app holds for SYSTEM that the seed no longer lists are deleted
+through the API (definitions first, so no tick raises an event whose action is gone).
 
 Schedules are written OFF on local unless --enable-schedules is given. On local the jobs would
 otherwise run for real as soon as a Rust core-events is up (TOKEN_CLEANUP calls security's
@@ -20,6 +22,8 @@ whatever local holds.
     python3 tools/seed_platform_app.py --dry-run            # what it would do (reads only)
     python3 tools/seed_platform_app.py                      # create / update, schedules off
     python3 tools/seed_platform_app.py --enable-schedules   # the same, schedules on
+    python3 tools/seed_platform_app.py --prune --dry-run    # what a prune would delete
+    python3 tools/seed_platform_app.py --prune              # create / update, then delete the rest
 
 LOCAL only: a base URL whose host is not loopback is refused (see platform_common.py).
 """
@@ -129,7 +133,32 @@ def upsert_kind(api: Api, route: str, docs: list[dict[str, Any]], dry: bool, app
     return written
 
 
-def verify(api: Api, docs: dict[str, list[dict[str, Any]]]) -> None:
+def prune(api: Api, docs: dict[str, list[dict[str, Any]]], dry: bool, app_exists: bool) -> int:
+    """Deletes what the app holds for its client that the seed does not list; answers how many
+    objects were (or would be) deleted. Definitions, then actions, then functions."""
+    if api.token is None or not app_exists:
+        info("prune: nothing to compare (no token or no app)")
+        return 0
+    removed = 0
+    by_route = {route: (route, folder, key) for route, folder, key in KINDS}
+    for route, _, key in (by_route[r] for r in ("eventDefinitions", "eventActions", "functions")):
+        app, client = docs[key][0]["appCode"], docs[key][0]["clientCode"]
+        wanted = {d["name"] for d in docs[key]}
+        for name, row in sorted(stored(api, route, app, client).items()):
+            if name in wanted:
+                continue
+            removed += 1
+            if dry:
+                info(f"{route} {name}: would delete (id {row['id']}, not in the seed)")
+                continue
+            st, body = api.call("DELETE", f"/api/core/{route}/{row['id']}")
+            if st not in (200, 204):
+                die(f"deleting {route} {name} failed (HTTP {st}): {json.dumps(body)[:300]}")
+            info(f"{route} {name}: deleted (not in the seed)")
+    return removed
+
+
+def verify(api: Api, docs: dict[str, list[dict[str, Any]]], pruned: bool = False) -> None:
     bad = []
     for route, _, key in KINDS:
         current = stored(api, route, docs[key][0]["appCode"], docs[key][0]["clientCode"])
@@ -141,9 +170,12 @@ def verify(api: Api, docs: dict[str, list[dict[str, Any]]]) -> None:
             diff = differences(comparable(d), full(api, route, row))
             if diff:
                 bad.append(f"{route} {d['name']}: {'; '.join(diff)[:300]}")
+        if pruned:
+            extra = sorted(set(current) - {d["name"] for d in docs[key]})
+            bad.extend(f"{route} {name}: still there after the prune" for name in extra)
     if bad:
         die("after the writes, local does not hold the seed:\n  " + "\n  ".join(bad))
-    info("verified: local holds every object of the seed")
+    info("verified: local holds every object of the seed" + (" and nothing else" if pruned else ""))
 
 
 def main() -> None:
@@ -152,6 +184,9 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="print what would be done; only reads")
     ap.add_argument("--enable-schedules", action="store_true",
                     help="write the schedules on (as definitions.json has them); off by default on local")
+    ap.add_argument("--prune", action="store_true",
+                    help="also delete the platform app's functions, EventDefinitions and EventActions (SYSTEM) "
+                         "that the seed no longer lists")
     args = ap.parse_args()
 
     seed = load_seed()
@@ -168,12 +203,13 @@ def main() -> None:
     # Functions first: an action names its function, a definition is raised to its action.
     for route, _, key in KINDS:
         total += len(upsert_kind(api, route, docs[key], args.dry_run, app_exists))
+    removed = prune(api, docs, args.dry_run, app_exists) if args.prune else 0
     if args.dry_run:
-        info(f"dry run: {total} object(s) would be created or updated")
+        info(f"dry run: {total} object(s) would be created or updated, {removed} deleted")
         return
     if api.token is not None:
-        verify(api, docs)
-    info(f"done: {total} object(s) created or updated")
+        verify(api, docs, pruned=args.prune)
+    info(f"done: {total} object(s) created or updated, {removed} deleted")
 
 
 if __name__ == "__main__":

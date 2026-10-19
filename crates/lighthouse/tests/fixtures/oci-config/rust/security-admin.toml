@@ -1,0 +1,27 @@
+# security-admin: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8113
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[database]
+host = "<db.host:security>"
+port = "<db.port:security>"
+database = "<db.name:security>"
+username = "<db.user:security>"
+
+[jwt]
+token_default_expiry_minutes = "<jwt.token.default.expiry>"
+token_rememberme_expiry_minutes = "<jwt.token.rememberme.expiry>"
+token_default_refresh_minutes = "<jwt.token.default.refresh>"
+
+[security]
+app_code_suffix = "<security.appCodeSuffix>"
+subdomain_endings = "<security.subdomain.endings>"
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"

@@ -1,0 +1,95 @@
+# Lighthouse against the real py_eureka_client 0.11.10 (what the ai service registers with):
+# build the lighthouse binary, start it, run tools/compat_py_eureka.py, stop it. Nothing is
+# deployed or pushed.
+
+name: lighthouse-py-compat
+
+on:
+  push:
+    paths:
+      - 'crates/lighthouse/**'
+      - 'crates/lighthouse-client/**'
+      - 'crates/platform/**'
+      - 'tools/compat_py_eureka.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/lighthouse-py-compat.yml'
+  pull_request:
+    paths:
+      - 'crates/lighthouse/**'
+      - 'crates/lighthouse-client/**'
+      - 'crates/platform/**'
+      - 'tools/compat_py_eureka.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/lighthouse-py-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lighthouse-py-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_IMAGE: rust:1.94-bookworm
+
+jobs:
+  py-eureka-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore the cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci/cargo/registry/index
+            .ci/cargo/registry/cache
+            .ci/cargo/git/db
+            target
+          key: cargo-debug-lighthouse-rust1.94-bookworm-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-debug-lighthouse-rust1.94-bookworm-
+
+      # The same toolchain image as the release build (rust-build-deploy.yml).
+      - name: Build lighthouse
+        run: |
+          mkdir -p .ci/cargo/registry .ci/cargo/git target
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e CARGO_TERM_COLOR=always \
+            -v "$PWD:/src" -w /src \
+            -v "$PWD/.ci/cargo/registry:/usr/local/cargo/registry" \
+            -v "$PWD/.ci/cargo/git:/usr/local/cargo/git" \
+            "$RUST_IMAGE" \
+            cargo build --locked -p lighthouse --bin lighthouse
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install py_eureka_client 0.11.10
+        run: pip install py_eureka_client==0.11.10
+
+      - name: Run the compatibility check
+        run: |
+          MODLIX__SERVER__PORT=8761 MODLIX__SERVER__SHUTDOWN_GRACE_SECONDS=0 \
+          MODLIX__TELEMETRY__LOG_FORMAT=pretty \
+            ./target/debug/lighthouse > lighthouse.log 2>&1 &
+          echo $! > lighthouse.pid
+          for i in $(seq 1 100); do
+            curl -sf -o /dev/null http://127.0.0.1:8761/readyz && break
+            sleep 0.2
+          done
+          python tools/compat_py_eureka.py http://127.0.0.1:8761/eureka/
+
+      - name: Stop lighthouse and show its log
+        if: always()
+        run: |
+          if [ -f lighthouse.pid ]; then kill "$(cat lighthouse.pid)" || true; fi
+          sleep 1
+          cat lighthouse.log || true

@@ -82,15 +82,6 @@ java_text = "Please try again. A server error - $"
 when = "Security, core or ui answered an error without a readable body (its status is passed on). An empty 401 reads COMMON.SIGNED_OUT and an empty 403 COMMON.FORBIDDEN instead."
 audience = "anyone"
 
-[MULTI.HEADER_MISSING]
-status = 400
-params = ["header"]
-text = "[The request is missing the {header} header.|The request is missing a required header.]"
-action = "Call this address through the gateway, which adds it, or send [the {header} header|the missing header] yourself."
-java_text = "Please try again. A server error - $"
-when = "A call without X-Forwarded-Host, X-Forwarded-Port, clientCode or appCode. The gateway always sends them, so only a direct call misses one."
-audience = "developers"
-
 # ---- The Java bundle's other keys (the commons ones every bundle carries) ----
 
 [MULTI.FORBIDDEN_CREATE]

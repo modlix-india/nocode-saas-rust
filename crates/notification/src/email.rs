@@ -134,14 +134,13 @@ impl EmailService {
             "subject": subject,
             "content": [{"type": "text/html", "value": body}],
         });
-        let resp = self
+        let rb = self
             .http
             .post(&self.sendgrid_url)
             .header("Authorization", format!("Bearer {api_key}"))
             .header("Content-Type", "application/json")
-            .body(payload.to_string())
-            .send()
-            .await?;
+            .body(payload.to_string());
+        let resp = platform::meter::send("sendgrid", rb).await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         // RestClient's retrieve(): a 4xx or 5xx is an exception.

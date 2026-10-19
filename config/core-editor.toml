@@ -1,5 +1,5 @@
 # core-editor on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
-# from config/local.env; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
+# from config/local.toml; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
 # It runs core-exec's state as well (a storage's definition triggers are core functions), so it
 # needs the same databases and services; RabbitMQ is left unconfigured (publishing off).
 
@@ -34,12 +34,22 @@ auth_upstream = "http://localhost:8101"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[entity_processor]
-upstream = "eureka:ENTITY-PROCESSOR"
-
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [core]
+# Core's own internal routes for the platform jobs (core-editor).
+upstream = "http://localhost:8111"
 function_timeout_seconds = 300
 java_zone_offset = "+05:30"
+
+[files]
+# files-manage (the files internal routes).
+upstream = "http://localhost:8104"
+
+[ui]
+# ui-editor (the transport cleanup the platform jobs call).
+upstream = "http://localhost:8107"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "CORE-EDITOR"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

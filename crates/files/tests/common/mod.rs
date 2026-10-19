@@ -385,7 +385,7 @@ pub async fn dead_pool() -> MySqlPool {
 /// The gate of the tests that need the local MySQL.
 pub const GATE: &str = "FILES_TEST_MYSQL";
 
-/// The local MySQL as the files units reach it (`MODLIX__DATABASE__*`, from `config/local.env`),
+/// The local MySQL as the files units reach it (`MODLIX__DATABASE__*`, from `config/local.toml`),
 /// when the gate is set.
 pub fn mysql_options() -> Option<MySqlConnectOptions> {
     std::env::var(GATE).ok().filter(|v| !v.is_empty())?;
@@ -500,12 +500,12 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     if mysql_options().is_none() {
-        eprintln!("skipped: set {GATE}=1 and MODLIX__DATABASE__PASSWORD (source config/local.env)");
+        eprintln!("skipped: set {GATE}=1 and MODLIX__DATABASE__PASSWORD (eval \"$(tools/local-env.py)\")");
         return;
     }
     let _permit = ScratchPermit::acquire().await;
     let Some(db) = Scratch::create().await else {
-        eprintln!("skipped: set {GATE}=1 and MODLIX__DATABASE__PASSWORD (source config/local.env)");
+        eprintln!("skipped: set {GATE}=1 and MODLIX__DATABASE__PASSWORD (eval \"$(tools/local-env.py)\")");
         return;
     };
     let outcome = tokio::spawn(checks(db.pool.clone())).await;

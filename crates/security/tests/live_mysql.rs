@@ -3,7 +3,7 @@
 //! test containers in Java).
 //!
 //! Gated: runs only with `SECURITY_AUTH_LIVE=1` and `MODLIX__DATABASE__PASSWORD` (source
-//! `config/local.env`). Local stack only. It never creates users and never changes a real user:
+//! `config/local.toml`). Local stack only. It never creates users and never changes a real user:
 //! rows it writes are dummy tokens, OTPs and one-time tokens for user 142, deleted again; the
 //! counter, lock and cleanup statements run against a user id that does not exist or a cut-off
 //! in the past, so they execute and touch nothing.

@@ -1,5 +1,5 @@
 //! What this piece's in-crate live tests share: the unit over the local `security` schema (gated:
-//! `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced), a caller's context as the routes
+//! `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"`), a caller's context as the routes
 //! build it (Basic credentials of the local users, the local password), and scratch apps made
 //! and removed through the services.
 

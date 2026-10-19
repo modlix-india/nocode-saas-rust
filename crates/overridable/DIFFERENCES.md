@@ -15,7 +15,7 @@ the platform's (`COMMON.*`). The status codes are Java's, unchanged; so is the 4
 | `debugMessage` | the same text | Java's text under its key, `[object_not_found] Page with id x not found`; Spring's text for Spring's 400s; the cause for a 500 |
 | added fields | none | `code`, `action`, `params` (the values, as words), `locale` |
 | an anonymous caller refused a change, a draft, a list or a publish | the refusal naming the type or app (`Permission/Role Page is required...`) | `DEF.SIGN_IN_REQUIRED`, "Please sign in to continue." (same status) |
-| Spring's 400s | "Please try again. A server error - <id>" | `COMMON.PARAM_MISSING`, `PARAM_INVALID`, `BODY_MISSING`, `BODY_UNREADABLE`, `FIELD_MISSING` or `DEF.HEADER_MISSING`, naming the parameter or header when known; still 400 |
+| Spring's 400s | "Please try again. A server error - <id>" | `COMMON.PARAM_MISSING`, `PARAM_INVALID`, `BODY_MISSING`, `BODY_UNREADABLE`, `FIELD_MISSING` or `COMMON.HEADER_MISSING`, naming the parameter or header when known; still 400 |
 | 500s | "Please try again. A server error - <id>" | `COMMON.INTERNAL_ERROR`, "Something went wrong on our side. Error id <id>: give it to support." |
 | a credential security refuses without a message | empty 401 or 403 | `COMMON.SIGNED_OUT`, same status |
 | security's refusal with a body | its message | its coded error as it came (Rust security), else its message |

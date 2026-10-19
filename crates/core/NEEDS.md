@@ -128,12 +128,14 @@ is started once by `run_exec`.
 
 ## The platform app (`tools/`)
 
-1. **Seed on local**: `tools/seed_platform_app.py [--dry-run] [--enable-schedules]` creates the
-   security app `platform` (SYSTEM) and its 11 job functions, EventDefinitions and EventActions
-   from `tools/platform_seed/definitions.json` through the APIs, idempotently, LOCAL only.
+1. **Seed on local**: `tools/seed_platform_app.py [--dry-run] [--enable-schedules] [--prune]`
+   creates the security app `platform` (SYSTEM) and its 10 job functions, EventDefinitions and
+   EventActions from `tools/platform_seed/definitions.json` through the APIs, idempotently, LOCAL
+   only; `--prune` deletes, through the APIs, what the app holds that the seed no longer lists
+   (ENTITY_PROCESSOR_METERING went that way on 2026-10-18, when entity-processor retired).
    Schedules are written off on local unless `--enable-schedules` (TOKEN_CLEANUP must not run
    against the local security).
-2. **Transport**: `tools/make_platform_transport.py [--out FILE]` exports the 33 objects from
+2. **Transport**: `tools/make_platform_transport.py [--out FILE]` exports the 30 objects from
    local into a core transport file (schedules set on, from the seed), checks it against the seed
    and writes a manifest with the steps to apply it. Security is not transported: the manifest
    carries the app's fields for `POST /api/security/applications` on the target.

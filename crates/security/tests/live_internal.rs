@@ -6,7 +6,7 @@
 //! `AppDAOIntegrationTest`, `UserDAOIntegrationTest`, `ClientUserFilterIntegrationTest`,
 //! `MultiTenantVisibilityIntegrationTest`), with the expected values read from the same schema.
 //!
-//! Gated: `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced. Read-only: the billing routes
+//! Gated: `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"`. Read-only: the billing routes
 //! that charge are left out, and the one wallet read uses a client that has the wallet already.
 //! Signed-in callers use Basic `<id>:Pass@1234` for users whose stored password is that text.
 

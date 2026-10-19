@@ -1,5 +1,5 @@
 //! In-crate live tests of this piece's services, called directly (gated like the route tests:
-//! `SECURITY_AUTH_LIVE=1` with `config/local.env`). They reach what a SYSTEM caller through the
+//! `SECURITY_AUTH_LIVE=1` with `config/local.toml`). They reach what a SYSTEM caller through the
 //! routes does not: an Owner of FIN acting on apps, access, properties and dependencies, explicit
 //! apps, generated app codes, refused event publishes, the social sign-up round trip with a fake
 //! provider. Every write is on scratch apps (`zzrust...`) made and removed here.

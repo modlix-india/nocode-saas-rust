@@ -1,5 +1,5 @@
 //! The gated live fixture this piece's in-crate tests share (`SECURITY_AUTH_LIVE=1` with
-//! `config/local.env` sourced; without them every test using it returns at once).
+//! `config/local.toml` sourced; without them every test using it returns at once).
 //!
 //! Writes go only to the scratch clients `ZZRUL` (BUS, under SYSTEM), `ZZRUM` (BUS) and `ZZRUI`
 //! (an individual's) under it (the first two are the ones `tests/live_admin_users.rs` uses), and

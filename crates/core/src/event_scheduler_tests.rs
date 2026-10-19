@@ -289,12 +289,12 @@ async fn complete(i: &Instance, q: &EventMessage, ok: bool) {
     i.completion.track(q, async { Ok::<_, CoreError>(Some(ok)) }).await.unwrap();
 }
 
-const GATE: &str = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env";
+const GATE: &str = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml";
 
 // ---------------------------------------------------------------- EventSchedulerTest
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn two_instances_racing_raise_each_tick_exactly_once() {
     let _ = GATE;
     on_scratch(|h| async move {
@@ -329,7 +329,7 @@ async fn two_instances_racing_raise_each_tick_exactly_once() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn instances_with_skewed_clocks_agree_on_the_tick() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN"], &["FIN"]).await;
@@ -347,7 +347,7 @@ async fn instances_with_skewed_clocks_agree_on_the_tick() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn each_client_runs_on_its_own_effective_schedule() {
     on_scratch(|h| async move {
         let report = "dailyReport";
@@ -382,7 +382,7 @@ async fn each_client_runs_on_its_own_effective_schedule() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_client_without_write_access_gets_no_run() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN", "FIN2"], &["FIN", "FIN2", "OUTSIDER"]).await;
@@ -396,7 +396,7 @@ async fn a_client_without_write_access_gets_no_run() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_single_run_schedule_runs_only_for_the_client_holding_it() {
     on_scratch(|h| async move {
         let cleanup = "nightlyCleanup";
@@ -413,7 +413,7 @@ async fn a_single_run_schedule_runs_only_for_the_client_holding_it() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn the_raised_event_carries_its_run_and_completion_closes_it() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN"], &["FIN"]).await;
@@ -466,7 +466,7 @@ async fn the_raised_event_carries_its_run_and_completion_closes_it() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_tick_whose_predecessor_is_still_running_is_skipped_until_the_lease_runs_out() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN"], &["FIN"]).await;
@@ -492,7 +492,7 @@ async fn a_tick_whose_predecessor_is_still_running_is_skipped_until_the_lease_ru
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn an_outage_catches_up_only_the_latest_missed_tick() {
     on_scratch(|h| async move {
         let sync = "campaignSync";
@@ -513,7 +513,7 @@ async fn an_outage_catches_up_only_the_latest_missed_tick() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_new_schedule_does_not_fire_for_a_tick_it_never_had() {
     on_scratch(|h| async move {
         let report = "dailyReport";
@@ -532,7 +532,7 @@ async fn a_new_schedule_does_not_fire_for_a_tick_it_never_had() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_failed_raise_is_recorded_as_failed() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN"], &["FIN"]).await;
@@ -549,7 +549,7 @@ async fn a_failed_raise_is_recorded_as_failed() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_schedule_it_cannot_read_is_skipped_and_the_others_still_run() {
     on_scratch(|h| async move {
         let bad = EventSchedule { cron: Some("not a cron".into()), ..Default::default() };
@@ -583,7 +583,7 @@ async fn a_schedule_it_cannot_read_is_skipped_and_the_others_still_run() {
 // ---------------------------------------------------------------- ScheduledEventTest
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_due_one_off_is_raised_with_its_data_and_closed_on_success() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -607,7 +607,7 @@ async fn a_due_one_off_is_raised_with_its_data_and_closed_on_success() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_failure_retries_with_doubling_backoff_then_fails() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -643,7 +643,7 @@ async fn a_failure_retries_with_doubling_backoff_then_fails() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_claim_whose_instance_died_is_reclaimed_after_its_lease() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -673,7 +673,7 @@ async fn a_claim_whose_instance_died_is_reclaimed_after_its_lease() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn cancel_stops_a_pending_one_off() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -694,7 +694,7 @@ async fn cancel_stops_a_pending_one_off() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn rescheduling_a_key_replaces_the_pending_one() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -713,7 +713,7 @@ async fn rescheduling_a_key_replaces_the_pending_one() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_key_that_is_running_is_not_replaced_under_it() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -731,7 +731,7 @@ async fn a_key_that_is_running_is_not_replaced_under_it() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_blank_key_gets_one_that_can_cancel_it() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -743,7 +743,7 @@ async fn a_blank_key_gets_one_that_can_cancel_it() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn two_instances_claim_each_one_off_exactly_once() {
     on_scratch(|h| async move {
         let (a, b) = (h.instance(), h.instance());
@@ -766,7 +766,7 @@ async fn two_instances_claim_each_one_off_exactly_once() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_draft_one_off_is_raised_onto_the_draft_surface_under_its_own_keys() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -783,7 +783,7 @@ async fn a_draft_one_off_is_raised_onto_the_draft_surface_under_its_own_keys() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_one_off_whose_raise_fails_goes_back_with_backoff_and_a_lease_spent_on_the_last_attempt_gives_up() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -813,7 +813,7 @@ async fn a_one_off_whose_raise_fails_goes_back_with_backoff_and_a_lease_spent_on
 // ---------------------------------------------------------------- EventSchedulerInactiveClientTest
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn an_inactive_client_holding_a_single_run_schedule_runs_nothing() {
     on_scratch(|h| async move {
         let s = every_minute(false);
@@ -831,7 +831,7 @@ async fn an_inactive_client_holding_a_single_run_schedule_runs_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_per_client_schedule_skips_a_writer_that_is_not_active() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN", "LOCKED"], &["FIN", "LOCKED"]).await;
@@ -844,7 +844,7 @@ async fn a_per_client_schedule_skips_a_writer_that_is_not_active() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn status_is_asked_once_per_refresh_and_a_reactivated_client_runs_again() {
     on_scratch(|h| async move {
         let s = every_minute(false);
@@ -867,7 +867,7 @@ async fn status_is_asked_once_per_refresh_and_a_reactivated_client_runs_again() 
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn when_security_has_never_answered_the_schedule_runs_as_before() {
     on_scratch(|h| async move {
         let s = every_minute(false);
@@ -882,7 +882,7 @@ async fn when_security_has_never_answered_the_schedule_runs_as_before() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn when_security_goes_down_the_last_answer_keeps_serving() {
     on_scratch(|h| async move {
         let s = every_minute(false);
@@ -900,7 +900,7 @@ async fn when_security_goes_down_the_last_answer_keeps_serving() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_one_off_for_an_inactive_client_is_closed_with_the_reason_and_not_raised() {
     on_scratch(|h| async move {
         let a = h.instance();
@@ -950,7 +950,7 @@ async fn a_scheduler_that_is_off_does_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_spread_schedule_runs_on_its_shifted_grid_and_write_access_survives_an_outage() {
     on_scratch(|h| async move {
         let spread = EventSchedule { cron: Some("*/10 * * * *".into()), per_client: Some(true), spread: Some(true), ..Default::default() };
@@ -1012,4 +1012,24 @@ async fn the_seams_reach_the_real_services() {
     assert_eq!(bson_to_json(&mongodb::bson::Bson::Symbol("s".into())), json!("s"));
     let oid = mongodb::bson::oid::ObjectId::new();
     assert_eq!(bson_to_json(&mongodb::bson::Bson::ObjectId(oid))["timestamp"], json!(oid.timestamp().timestamp_millis() / 1000));
+}
+
+#[test]
+fn a_pass_is_counted_by_kind() {
+    let r = PassReport { raised: 2, skipped: 1, lost: 3, failed: 1, one_offs_raised: 4, one_offs_failed: 1, busy: 0 };
+    let ((), text) = platform::meter::capture(|| {
+        r.record(true);
+        PassReport::default().record(false);
+        describe_metrics();
+    });
+    let n = |name: &str, labels: &[(&str, &str)]| platform::meter::sample(&text, name, labels);
+    assert_eq!((n(PASSES, &[("result", "ok")]), n(PASSES, &[("result", "failed")])), (Some(1.0), Some(1.0)));
+    assert_eq!(n(CLAIMED, &[("kind", "cron")]), Some(4.0), "raised, skipped and failed were all claimed here");
+    assert_eq!(n(CLAIMED, &[("kind", "once")]), Some(5.0));
+    assert_eq!(n(PUBLISHED, &[("kind", "cron")]), Some(2.0));
+    assert_eq!(n(PUBLISHED, &[("kind", "once")]), Some(4.0));
+    assert_eq!(n(SKIPPED, &[("kind", "cron")]), Some(1.0));
+    assert_eq!(n(FAILED, &[("kind", "once")]), Some(1.0));
+    assert_eq!(n(LOST, &[("kind", "cron")]), Some(3.0));
+    assert!(text.contains(&format!("# HELP {CLAIMED}")));
 }

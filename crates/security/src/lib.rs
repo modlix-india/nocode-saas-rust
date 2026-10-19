@@ -84,13 +84,6 @@ pub fn build(cfg: &AuthConfig, pool: sqlx::MySqlPool, cache: CacheService) -> Ar
     })
 }
 
-/// Logs which configuration file a unit read, if any.
-pub(crate) fn log_config_file(name: &str) {
-    if let Some(file) = platform::config::config_file(name) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
-}
-
 /// The error catalogue every unit answers with, and `[messages]`' override files.
 pub(crate) fn configure_messages(cfg: &AuthConfig) -> Result<()> {
     catalogue::register();
@@ -117,9 +110,10 @@ pub(crate) fn eureka_for(cfg: &AuthConfig) -> Result<Option<Eureka>> {
 
 /// Loads configuration, connects, and serves until shut down.
 pub async fn run() -> Result<()> {
-    let cfg: AuthConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    crate::log_config_file(NAME);
+    let loaded = platform::config::load_async::<AuthConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     crate::check_jwt_key(&cfg)?;
     crate::configure_messages(&cfg)?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
@@ -158,8 +152,6 @@ mod startup_tests {
         assert!(eureka_for(&cfg).unwrap().is_none());
         cfg.eureka.zones = vec!["http://127.0.0.1:9/eureka".into()];
         assert!(eureka_for(&cfg).unwrap().is_some());
-        // A unit with no configuration file logs nothing.
-        log_config_file("no-such-unit");
     }
 
     /// Every unit wired with events on, an MQ address and a files upstream (nothing connects

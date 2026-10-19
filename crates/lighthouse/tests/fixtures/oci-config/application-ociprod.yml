@@ -1,0 +1,40 @@
+# Synthetic fixture: prod.
+security:
+  appCodeSuffix:
+  subdomain:
+    endings: .fixture.test
+  db:
+    url: r2dbc:mysql://db.fixture.test:3306/security
+    username: sec_prod
+    password: fixture-sec-prod
+spring:
+  r2dbc:
+    url: r2dbc:mysql://db.fixture.test:3306/core
+    username: core_prod
+    password: fixture-core-prod
+  datasource:
+    url: jdbc:mariadb://db.fixture.test/files
+    username: files_prod
+    password: fixture-files-prod
+  data:
+    mongodb:
+      uri: mongodb+srv://fixture-cluster.test/core?retryWrites=true
+  rabbitmq:
+    host: mq.fixture.test
+    username: mq_prod
+    password: fixture-mq-prod
+files:
+  resources:
+    accessKeyId: PRODACCESS
+    secretAccessKey: fixture-prod-secret
+ui:
+  cdnHostName: cdn.fixture.test
+  analytics:
+    ingestionHost: ingest.fixture.test
+ai:
+  gateway:
+    url: http://gateway-server:8080
+  secrets:
+    minimaxAPIKey: fixture-minimax
+gateway:
+  url: http://gateway-server:8080

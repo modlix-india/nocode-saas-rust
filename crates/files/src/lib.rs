@@ -70,12 +70,11 @@ impl Unit {
 /// Loads configuration, connects everything, and serves until shut down.
 pub async fn run(unit: Unit) -> Result<()> {
     let name = unit.name();
-    let cfg: FilesConfig = platform::config::load(name)?;
+    let loaded = platform::config::load_async::<FilesConfig>(name).await?;
     errors::register();
-    let telemetry = platform::telemetry::init(name, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(name) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let telemetry = platform::telemetry::init(name, &loaded.config.telemetry)?;
+    loaded.log_source(name);
+    let cfg = loaded.config;
 
     let pool = platform::db::mysql_pool(&cfg.database).await?;
     let s3 = s3_client(&cfg.storage.endpoint, &cfg.storage.access_key_id, &cfg.storage.secret_access_key);

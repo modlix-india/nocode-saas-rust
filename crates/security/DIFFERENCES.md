@@ -24,9 +24,9 @@ reading it, from the catalogue in `messages/en.toml` (codes `SEC.*`) and the pla
 | 500s | "Please try again. A server error - <id>" | `COMMON.INTERNAL_ERROR`: "Something went wrong on our side. Error id <id>: give it to support." |
 
 - Java callers and the pages read `message` as before; it is now the plain text. Rust units that
-  relay a security refusal (ui's `SecurityRefusal`, core's `feign_error`) pass the new text on, so
-  their own parity scripts see the new text for relayed security errors until they compare by
-  code too (phase 2).
+  relay a security refusal pass its code, params, message and action on as they came
+  (`platform::security::refusal_error`, error messages phase 2), and their parity scripts compare
+  those by code.
 - Java values printed as `null` are left out of the message (`We couldn't find the client
   address.`); the Java text in `debugMessage` keeps them.
 - No leaks: the 404-vs-403 behaviour is Java's, and a "not found" says only that the object was
@@ -376,3 +376,17 @@ piece 1's user side of it (`admin/users/registration.rs`). Kept as Java has them
   the local schema, in its own scratch clients `ZZRUL` and `ZZRUM` (brought back each run and swept of
   anything a failed run left).
 
+
+## App create and delete evict everything cached against the app code (2026-10-19)
+
+Java `AppService.create`, `delete` and `deleteEverything` evicted only `appInheritance`, `uri`,
+`byAppCode`, `byAppId` (and a few URL caches on delete). They left `appReadAccess`,
+`appWriteAccess`, `byAppCodeExplicit`, `appDependencies`, `appDepList` and `inheritanceOrder`, and
+several of those cache negative or empty answers (a `false` access answer for an app that does not
+exist yet, an empty inheritance order, an empty dependency list). An app deleted and created again
+under the same code was then served its predecessor's answers: reads of the new app's documents
+came back "X with id ... not found" (a refused access check is reported as not found), and reads
+by name found nothing. Seen repeatedly in the AppBuilder eval runs, which delete and recreate their
+apps every run. The Rust routes now also evict all of those (`apps::evict_app_code`): whole caches
+for the ones keyed `app:client` / `app:url:client` and for the dependency caches, by code for the
+rest. Evictions are published, so they reach every Rust process and any Java one still listening.

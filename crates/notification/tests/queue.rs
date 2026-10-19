@@ -79,6 +79,29 @@ async fn deliveries_are_settled_as_spring_settles_them() {
     assert_eq!(handle(&s, Some("application/json"), BODY).await, Settle::Ack(Some(Outcome::NoConnection)));
 }
 
+#[test]
+fn deliveries_are_counted() {
+    use notification::queue::{CONSUMED, FAILED, SENT};
+    let ((), text) = platform::meter::capture_async(async {
+        let (s, fake, _) = service().await;
+        handle(&s, Some("application/json"), BODY).await;
+        handle(&s, Some("application/json"), b"not json").await;
+        handle(&s, Some("text/plain"), BODY).await;
+        fake.answer("GET", CONN_PATH, Answer::error(500, "core down"));
+        handle(&s, Some("application/json"), BODY).await;
+        fake.answer("GET", CONN_PATH, Answer::empty());
+        handle(&s, Some("application/json"), BODY).await;
+    });
+    let n = |name: &str, labels: &[(&str, &str)]| platform::meter::sample(&text, name, labels);
+    assert_eq!(n(CONSUMED, &[]), Some(5.0));
+    assert_eq!(n(SENT, &[("channel", "in_app")]), Some(1.0));
+    assert_eq!(n(FAILED, &[("reason", "unreadable")]), Some(2.0));
+    assert_eq!(n(FAILED, &[("reason", "error")]), Some(1.0));
+    assert_eq!(n(FAILED, &[("reason", "no_connection")]), Some(1.0));
+    // The calls to core and security are timed by the service their paths name.
+    assert!(n("http_client_request_duration_seconds_count", &[("target", "core"), ("status", "200")]).is_some(), "{text}");
+}
+
 async fn message_count(ch: &lapin::Channel, q: &str) -> u32 {
     ch.queue_declare(ShortString::from(q), QueueDeclareOptions { passive: true, ..Default::default() }, FieldTable::default())
         .await

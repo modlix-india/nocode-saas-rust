@@ -29,7 +29,7 @@ Java's, unchanged; so is the 404-vs-403 split. HTML error pages ui-shell serves 
 | a page's permission not held | `Permission/Role <expression> is required...` | `UI.PAGE_PERMISSION_REQUIRED`, naming the permission in words when the expression is a plain one (`A` or `A or B`) |
 | a URI path route's permission not held | `Authorization <expression> is required` | `UI.FORBIDDEN_EXECUTION`; an anonymous caller gets `UI.SIGN_IN_REQUIRED` ("Please sign in to continue.") |
 | ui-editor `@PreAuthorize` | empty 401 (anonymous), 403 `text/plain` "Access Denied" | `COMMON.SIGN_IN_REQUIRED` / `COMMON.SIGNED_OUT` (401), `COMMON.PERMISSION_REQUIRED` naming the permission (403) |
-| Spring's 400s, 415, the `ControllerAdvice` 500s | "Please try again. A server error - <id>" | `COMMON.PARAM_MISSING`, `PARAM_INVALID`, `BODY_MISSING`, `BODY_UNREADABLE`, `BODY_NOT_JSON`, `DEF.HEADER_MISSING`; `COMMON.INTERNAL_ERROR` ("Something went wrong on our side. Error id <id>: give it to support.") |
+| Spring's 400s, 415, the `ControllerAdvice` 500s | "Please try again. A server error - <id>" | `COMMON.PARAM_MISSING`, `PARAM_INVALID`, `BODY_MISSING`, `BODY_UNREADABLE`, `BODY_NOT_JSON`, `COMMON.HEADER_MISSING`; `COMMON.INTERNAL_ERROR` ("Something went wrong on our side. Error id <id>: give it to support.") |
 | security refusing a credential without a message | empty 401 or 403 | `COMMON.SIGNED_OUT`, same status |
 
 - Relayed errors pass on as they come, with their status: a security refusal (its coded error

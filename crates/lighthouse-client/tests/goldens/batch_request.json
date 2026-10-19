@@ -1,0 +1,1 @@
+{"replicationList":[{"appName":"FILES","id":"h1:files:8104","lastDirtyTimestamp":1792395662982,"overriddenStatus":"UNKNOWN","status":"UP","action":"Heartbeat"},{"appName":"FILES","id":"nope","lastDirtyTimestamp":1792395662982,"status":"UP","action":"Heartbeat"},{"appName":"FILES","id":"h1:files:8104","lastDirtyTimestamp":1792395562982,"status":"UP","action":"Heartbeat"}]}

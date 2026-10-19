@@ -11,12 +11,22 @@
 //!
 //! Bodies stream both ways with no buffering, so uploads, downloads and server-sent events pass
 //! through at the pace the two ends set.
+//!
+//! A unit calling another unit's internal path through the gateway (`resolve::is_internal_call`)
+//! gets none of the above but the `Host`: its codes, `x-draft` and forwarded headers arrive as
+//! the caller sent them, as if it had called the unit directly.
+//!
+//! Each request goes through its pool's circuit breaker and is retried at most once, on another
+//! instance: after a connection that could not be opened (nothing was sent, so any request
+//! without a body), or after a 502/503/504 answer to a GET, HEAD, OPTIONS, PUT or DELETE
+//! without a body, within the pool's retry budget. A timeout is never retried, nor is anything
+//! that was sent with a body.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -25,9 +35,10 @@ use hyper_util::client::legacy::Client;
 use platform::error::{AppError, Coded};
 use platform::http::with_route;
 
-use crate::path::split;
-use crate::pool::Member;
-use crate::resolve::{codes_match, Resolver};
+use crate::config::RetryConfig;
+use crate::path::{split, SplitPath};
+use crate::pool::{Member, Pool};
+use crate::resolve::{codes_match, is_internal_call, Resolver};
 use crate::routes::{Route, Routes};
 
 pub type HttpClient = Client<HttpConnector, Body>;
@@ -172,6 +183,12 @@ pub async fn handle(
 ) -> Response {
     let (parts, body) = req.into_parts();
 
+    // Lighthouse's Eureka API is never served from outside (Kiran, 2026-10-19). No pool may point
+    // at Lighthouse either (`pool::is_lighthouse`), so its other paths fall through to the ui.
+    if parts.uri.path() == "/eureka" || parts.uri.path().starts_with("/eureka/") {
+        return error("COMMON.NOT_FOUND", "the registry's API is not served through the gateway".into(), "registry-blocked");
+    }
+
     // The Spring gateway has no CORS configuration, so it refuses every preflight itself (an
     // empty 403) before any service sees it, even same-origin ones: behind nginx the scheme of
     // the request never matches the https Origin. Kept: passing preflights through would let
@@ -197,42 +214,10 @@ pub async fn handle(
         return error("GW.NO_ROUTE", format!("No route for {} {path}", parts.method), "unmatched");
     };
 
-    let (scheme, host, port) = scheme_host_port(&parts.headers);
-    let supplied_client = header_str(&parts.headers, "clientcode").map(str::to_string);
-    let supplied_app = header_str(&parts.headers, "appcode").map(str::to_string);
-    let resolved = match gw
-        .resolver
-        .resolve(&scheme, &host, &port, split.codes_part, supplied_client.as_deref(), supplied_app.as_deref())
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(host, error = %e, "host resolution failed");
-            return error("GW.HOST_UNRESOLVED", format!("Unable to resolve the application for the host {host}: {e}"), route.id);
-        }
+    let headers = match upstream_headers(&gw, &parts.headers, &split, client, route).await {
+        Ok(h) => h,
+        Err(resp) => return resp,
     };
-
-    let mut headers = parts.headers.clone();
-    let blank = |v: &Option<String>| v.as_deref().map(str::trim).unwrap_or("").is_empty();
-    if blank(&supplied_app) {
-        if let Ok(v) = HeaderValue::from_str(&resolved.app_code) {
-            headers.insert("appcode", v);
-        }
-    }
-    if blank(&supplied_client) {
-        if let Ok(v) = HeaderValue::from_str(&resolved.client_code) {
-            headers.insert("clientcode", v);
-        }
-    }
-    headers.remove("x-draft");
-    if resolved.draft
-        && codes_match(supplied_app.as_deref(), &resolved.app_code, supplied_client.as_deref(), &resolved.client_code)
-    {
-        headers.insert("x-draft", HeaderValue::from_static("true"));
-    }
-    strip_hop_by_hop(&mut headers);
-    add_forwarding_headers(&mut headers, client);
-    platform::telemetry::inject_trace_headers(&mut headers);
 
     let sse = wants_event_stream(&split.forward, &parts.headers);
     let timeout = route.timeout.unwrap_or(gw.default_timeout);
@@ -240,45 +225,193 @@ pub async fn handle(
         Some(q) => format!("{}?{q}", split.forward),
         None => split.forward.clone(),
     };
+    // Only a request without a body can be sent a second time: a body is streamed to the first
+    // instance as it arrives and is gone once handed over. The body itself says whether it has
+    // anything (HTTP/2 needs no Content-Length).
+    let bodiless = body.is_end_stream() || body.size_hint().exact() == Some(0);
 
-    // A request without a body can go to a second instance if the first refuses the
-    // connection; one with a body has already been handed over and cannot.
-    let replayable = matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS | Method::DELETE)
-        && header_str(&parts.headers, "content-length").is_none_or(|l| l == "0")
-        && !parts.headers.contains_key(header::TRANSFER_ENCODING);
+    let req = Outgoing { method: &parts.method, headers: &headers, path_and_query: &path_and_query, timeout, sse, bodiless };
+    forward(&gw, route, &req, body).await
+}
 
+/// What reaches the instance: the caller's headers with the codes, `x-draft` and forwarded
+/// headers settled as the module notes say, or the answer to give when the host cannot be
+/// resolved.
+async fn upstream_headers(
+    gw: &Gateway,
+    incoming: &HeaderMap,
+    split: &SplitPath<'_>,
+    client: SocketAddr,
+    route: &Route,
+) -> Result<HeaderMap, Response> {
+    let supplied_client = header_str(incoming, "clientcode");
+    let supplied_app = header_str(incoming, "appcode");
+    let mut headers = incoming.clone();
+    if is_internal_call(&split.forward, supplied_client, supplied_app) {
+        strip_hop_by_hop(&mut headers);
+        platform::telemetry::inject_trace_headers(&mut headers);
+        return Ok(headers);
+    }
+
+    let (scheme, host, port) = scheme_host_port(incoming);
+    let resolved = match gw.resolver.resolve(&scheme, &host, &port, split.codes_part, supplied_client, supplied_app).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(host, error = %e, "host resolution failed");
+            return Err(error(
+                "GW.HOST_UNRESOLVED",
+                format!("Unable to resolve the application for the host {host}: {e}"),
+                route.id,
+            ));
+        }
+    };
+
+    let blank = |v: Option<&str>| v.map(str::trim).unwrap_or("").is_empty();
+    if blank(supplied_app) {
+        if let Ok(v) = HeaderValue::from_str(&resolved.app_code) {
+            headers.insert("appcode", v);
+        }
+    }
+    if blank(supplied_client) {
+        if let Ok(v) = HeaderValue::from_str(&resolved.client_code) {
+            headers.insert("clientcode", v);
+        }
+    }
+    headers.remove("x-draft");
+    if resolved.draft && codes_match(supplied_app, &resolved.app_code, supplied_client, &resolved.client_code) {
+        headers.insert("x-draft", HeaderValue::from_static("true"));
+    }
+    strip_hop_by_hop(&mut headers);
+    add_forwarding_headers(&mut headers, client);
+    platform::telemetry::inject_trace_headers(&mut headers);
+    Ok(headers)
+}
+
+/// The request as it goes to an instance.
+struct Outgoing<'a> {
+    method: &'a Method,
+    headers: &'a HeaderMap,
+    path_and_query: &'a str,
+    timeout: Duration,
+    sse: bool,
+    bodiless: bool,
+}
+
+/// 502, 503 and 504: the instance, or something in front of it, could not serve the request.
+fn is_gateway_failure(status: StatusCode) -> bool {
+    matches!(status, StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT)
+}
+
+/// Another instance than `member` to retry on, if the pool has one.
+fn other_member(pool: &Pool, member: &Member) -> Option<Arc<Member>> {
+    pool.pick(Some(&member.base)).filter(|next| next.base != member.base)
+}
+
+fn jitter(cfg: &RetryConfig) -> Duration {
+    use rand::Rng;
+    let (lo, hi) = (cfg.jitter_min_ms.min(cfg.jitter_max_ms), cfg.jitter_max_ms.max(cfg.jitter_min_ms));
+    Duration::from_millis(rand::thread_rng().gen_range(lo..=hi))
+}
+
+fn count_retry(pool: &Pool, reason: &'static str) {
+    metrics::counter!("gateway_retries_total", "pool" => pool.name.clone(), "reason" => reason).increment(1);
+}
+
+/// Sends the request to the route's pool through its circuit breaker, retrying at most once on
+/// another instance (see the module notes for when).
+async fn forward(gw: &Gateway, route: &Route, req: &Outgoing<'_>, body: Body) -> Response {
     let pool = &route.pool;
     let Some(first) = pool.pick(None) else {
         return error("GW.SERVICE_STARTING", format!("No instance of {} is available", pool.name), route.id);
     };
+    let permit = match pool.breaker.admit() {
+        Ok(p) => p,
+        Err(wait) => {
+            metrics::counter!("gateway_pool_breaker_rejections_total", "pool" => pool.name.clone()).increment(1);
+            let when = if wait.is_zero() {
+                "its trial requests are under way".to_string()
+            } else {
+                format!("trial requests start in {} ms", wait.as_millis())
+            };
+            // Quiet: one line per rejected request would flood the log during an outage; the
+            // breaker logs when it opens and closes.
+            let coded = Coded::new("GW.SERVICE_UNAVAILABLE")
+                .debug(format!("{} is failing: its circuit breaker is open, {when}", pool.name));
+            return with_route(platform::error::coded_response_quiet(&coded), route.id);
+        }
+    };
+    pool.budget.record_request();
 
+    let retry_on_5xx = pool.config().retry.on_5xx
+        && req.bodiless
+        && matches!(*req.method, Method::GET | Method::HEAD | Method::OPTIONS | Method::PUT | Method::DELETE);
     let mut body = Some(body);
     let mut member = first;
-    let mut attempt = 0;
+    let mut retried = false;
+    // A 5xx answer kept while its retry runs: the caller gets it if the retry gets nothing.
+    let mut held: Option<hyper::Response<hyper::body::Incoming>> = None;
     loop {
-        attempt += 1;
-        let this_body = if replayable { Body::empty() } else { body.take().unwrap_or_else(Body::empty) };
-        let result = send(&gw.client, &parts.method, &headers, &member, &path_and_query, this_body, timeout).await;
-        match result {
-            Ok(resp) => return finish(resp, sse, route),
-            Err(SendError::Connect(e)) => {
-                pool.eject(&member);
-                tracing::warn!(pool = pool.name, upstream = member.base, error = %e, attempt, "upstream connect failed");
-                if replayable && attempt < 2 {
-                    if let Some(next) = pool.pick(Some(&member.base)) {
-                        if next.base != member.base {
-                            member = next;
-                            continue;
+        let this_body = if req.bodiless { Body::empty() } else { body.take().unwrap_or_else(Body::empty) };
+        match send(&gw.client, req.method, req.headers, &member, req.path_and_query, this_body, req.timeout).await {
+            Ok(resp) => {
+                let failed = is_gateway_failure(resp.status());
+                if !failed {
+                    pool.passed(&member);
+                } else {
+                    pool.failed(&member);
+                    if retry_on_5xx && !retried {
+                        if let Some(next) = other_member(pool, &member) {
+                            if pool.budget.try_retry() {
+                                tracing::debug!(pool = pool.name, upstream = member.base, status = resp.status().as_u16(), "retrying on another instance");
+                                count_retry(pool, "5xx");
+                                retried = true;
+                                held = Some(resp);
+                                member = next;
+                                tokio::time::sleep(jitter(&pool.config().retry)).await;
+                                continue;
+                            }
                         }
                     }
+                }
+                pool.breaker.record(permit, !failed);
+                return finish(resp, req.sse, route);
+            }
+            Err(SendError::Connect(e)) => {
+                pool.eject(&member);
+                tracing::warn!(pool = pool.name, upstream = member.base, error = %e, "upstream connect failed");
+                if req.bodiless && !retried {
+                    if let Some(next) = other_member(pool, &member) {
+                        count_retry(pool, "connect");
+                        retried = true;
+                        member = next;
+                        continue;
+                    }
+                }
+                pool.breaker.record(permit, false);
+                if let Some(resp) = held {
+                    return finish(resp, req.sse, route);
                 }
                 return error("GW.SERVICE_UNAVAILABLE", format!("{} is unavailable: {e}", pool.name), route.id);
             }
             Err(SendError::Timeout) => {
-                return error("GW.SERVICE_TIMEOUT", format!("{} did not answer in {}s", pool.name, timeout.as_secs()), route.id);
+                pool.failed(&member);
+                pool.breaker.record(permit, false);
+                if let Some(resp) = held {
+                    return finish(resp, req.sse, route);
+                }
+                return error(
+                    "GW.SERVICE_TIMEOUT",
+                    format!("{} did not answer in {}s", pool.name, req.timeout.as_secs()),
+                    route.id,
+                );
             }
             Err(SendError::Other(e)) => {
+                pool.failed(&member);
                 tracing::warn!(pool = pool.name, upstream = member.base, error = %e, "upstream request failed");
+                pool.breaker.record(permit, false);
+                if let Some(resp) = held {
+                    return finish(resp, req.sse, route);
+                }
                 return error("GW.SERVICE_FAILED", format!("{} failed to answer: {e}", pool.name), route.id);
             }
         }

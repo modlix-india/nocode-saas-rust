@@ -233,15 +233,6 @@ audience = "signed-in"
 
 # ---- Requests ----
 
-[DEF.HEADER_MISSING]
-status = 400
-params = ["header"]
-text = "[The request is missing the {header} header.|The request is missing a required header.]"
-action = "Send the request through the app, which adds it, or add [{header}|the header] and try again."
-java_text = "Please try again. A server error - $"
-when = "A route that needs the forwarded host and port, clientCode or appCode headers gets a request without them."
-audience = "anyone"
-
 [DEF.CONDITION_INVALID]
 status = 400
 text = "A filter condition names no field."

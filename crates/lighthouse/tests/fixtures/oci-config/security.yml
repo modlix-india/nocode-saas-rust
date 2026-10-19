@@ -1,0 +1,19 @@
+# Synthetic fixture: security.
+server:
+  port: 8001
+spring:
+  r2dbc:
+    url: ${security.db.url}
+    username: ${security.db.username}
+    password: ${security.db.password}
+security:
+  appCodeSuffix: ""
+sms:
+  provider:
+    2factor:
+      api:
+        key: ${security.sms.provider.2factor.api.key:}
+jwt:
+  token:
+    rememberme:
+      expiry: 604800

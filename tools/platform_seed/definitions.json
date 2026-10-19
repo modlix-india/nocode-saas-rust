@@ -1,13 +1,15 @@
 {
   "_comment": [
     "The retired Java worker's platform jobs (worker V3, V9, V10, V11, V13 as left by V14) as the platform app's",
-    "EventDefinitions, EventActions and job functions. Read by tools/seed_platform_app.py (which creates them on",
-    "LOCAL through the APIs), tools/make_platform_transport.py (which exports them from LOCAL into a core transport",
-    "file) and crates/core/src/functions/platform_tests.rs (which runs every job function against fakes).",
+    "EventDefinitions, EventActions and job functions, less entity-processor's: that service retired with the switch",
+    "to Rust (2026-10-18), so ENTITY_PROCESSOR_METERING is gone and BILLING_RECONCILE names the three services it",
+    "reconciles (security, core, files). Read by tools/seed_platform_app.py (which creates them on LOCAL through the",
+    "APIs), tools/make_platform_transport.py (which exports them from LOCAL into a core transport file) and",
+    "crates/core/src/functions/platform_tests.rs (which runs every job function against fakes).",
     "Each job: a schedule on its EventDefinition (the worker's Quartz cron as five Unix fields, UTC, one run for",
     "SYSTEM), an EventAction with one CALL_CORE_FUNCTION task calling Platform.Jobs.<job>, and that stored function,",
-    "which calls CoreServices.Platform.<function> with the worker's job data as literal arguments (the task passes",
-    "no arguments: a scheduled tick's event data carries only its _schedule marker)."
+    "which calls CoreServices.Platform.<function> with the job's literal arguments (the worker's job data; the task",
+    "passes no arguments: a scheduled tick's event data carries only its _schedule marker)."
   ],
   "app": {
     "appCode": "platform",
@@ -74,19 +76,6 @@
       }
     },
     {
-      "name": "ENTITY_PROCESSOR_METERING",
-      "workerTask": "entity-processor-metering",
-      "workerJobType": "ENTITY_PROCESSOR_METERING",
-      "workerSchedule": "0 0/15 * * * ?",
-      "workerJobData": {},
-      "description": "Charge entity-processor deals token rent for the current 15-minute window",
-      "cron": "*/15 * * * *",
-      "function": "CoreServices.Platform.Meter",
-      "arguments": {
-        "service": "entity-processor"
-      }
-    },
-    {
       "name": "FILES_METERING",
       "workerTask": "files-metering",
       "workerJobType": "FILES_METERING",
@@ -108,7 +97,13 @@
       "description": "Back-charge any 15-minute window of the previous day missed to downtime",
       "cron": "45 0 * * *",
       "function": "CoreServices.Platform.ReconcileBilling",
-      "arguments": {}
+      "arguments": {
+        "services": [
+          "security",
+          "core",
+          "files"
+        ]
+      }
     },
     {
       "name": "FILES_TTL_CLEANUP",
@@ -471,77 +466,6 @@
       }
     },
     {
-      "name": "Platform.Jobs.ENTITY_PROCESSOR_METERING",
-      "appCode": "platform",
-      "clientCode": "SYSTEM",
-      "executeAuth": "Authorities._Event_Runner",
-      "message": "platform job ENTITY_PROCESSOR_METERING (worker entity-processor-metering): Charge entity-processor deals token rent for the current 15-minute window",
-      "definition": {
-        "name": "ENTITY_PROCESSOR_METERING",
-        "namespace": "Platform.Jobs",
-        "parameters": {},
-        "events": {
-          "output": {
-            "name": "output",
-            "parameters": {
-              "result": {
-                "name": "result",
-                "type": [
-                  "BOOLEAN"
-                ]
-              }
-            }
-          }
-        },
-        "steps": {
-          "run": {
-            "statementName": "run",
-            "namespace": "CoreServices.Platform",
-            "name": "Meter",
-            "parameterMap": {
-              "service": {
-                "one": {
-                  "key": "one",
-                  "type": "VALUE",
-                  "value": "entity-processor",
-                  "order": 1
-                }
-              }
-            }
-          },
-          "output": {
-            "statementName": "output",
-            "namespace": "System",
-            "name": "GenerateEvent",
-            "parameterMap": {
-              "eventName": {
-                "one": {
-                  "key": "one",
-                  "type": "VALUE",
-                  "value": "output",
-                  "order": 1
-                }
-              },
-              "results": {
-                "one": {
-                  "key": "one",
-                  "type": "VALUE",
-                  "order": 1,
-                  "value": {
-                    "name": "result",
-                    "value": {
-                      "isExpression": true,
-                      "value": "Steps.run.output.result"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
       "name": "Platform.Jobs.FILES_METERING",
       "appCode": "platform",
       "clientCode": "SYSTEM",
@@ -617,7 +541,7 @@
       "appCode": "platform",
       "clientCode": "SYSTEM",
       "executeAuth": "Authorities._Event_Runner",
-      "message": "platform job BILLING_RECONCILE (worker billing-reconcile): Back-charge any 15-minute window of the previous day missed to downtime",
+      "message": "platform job BILLING_RECONCILE (worker billing-reconcile, less entity-processor): Back-charge any 15-minute window of the previous day missed to downtime",
       "definition": {
         "name": "BILLING_RECONCILE",
         "namespace": "Platform.Jobs",
@@ -640,7 +564,20 @@
             "statementName": "run",
             "namespace": "CoreServices.Platform",
             "name": "ReconcileBilling",
-            "parameterMap": {}
+            "parameterMap": {
+              "services": {
+                "one": {
+                  "key": "one",
+                  "type": "VALUE",
+                  "value": [
+                    "security",
+                    "core",
+                    "files"
+                  ],
+                  "order": 1
+                }
+              }
+            }
           },
           "output": {
             "statementName": "output",
@@ -1081,22 +1018,6 @@
       }
     },
     {
-      "name": "ENTITY_PROCESSOR_METERING",
-      "appCode": "platform",
-      "clientCode": "SYSTEM",
-      "message": "platform job ENTITY_PROCESSOR_METERING (worker entity-processor-metering, 0 0/15 * * * ?): Charge entity-processor deals token rent for the current 15-minute window",
-      "schema": {
-        "type": "OBJECT",
-        "properties": {}
-      },
-      "schedule": {
-        "cron": "*/15 * * * *",
-        "timezone": "UTC",
-        "enabled": true,
-        "perClient": false
-      }
-    },
-    {
       "name": "FILES_METERING",
       "appCode": "platform",
       "clientCode": "SYSTEM",
@@ -1258,23 +1179,6 @@
           "parameters": {
             "namespace": "Platform.Jobs",
             "name": "CORE_METERING"
-          }
-        }
-      }
-    },
-    {
-      "name": "ENTITY_PROCESSOR_METERING",
-      "appCode": "platform",
-      "clientCode": "SYSTEM",
-      "message": "platform job ENTITY_PROCESSOR_METERING: run Platform.Jobs.ENTITY_PROCESSOR_METERING on every tick",
-      "tasks": {
-        "key1": {
-          "key": "key1",
-          "order": 0,
-          "type": "CALL_CORE_FUNCTION",
-          "parameters": {
-            "namespace": "Platform.Jobs",
-            "name": "ENTITY_PROCESSOR_METERING"
           }
         }
       }

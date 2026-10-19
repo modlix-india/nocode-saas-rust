@@ -1,11 +1,11 @@
 //! The one deliberate local smoke run of a platform job: `CoreServices.Platform.CleanupTransports`
 //! for core, with a cut-off a hundred years back (`retentionDays = 36500`, `limit = 1`), so the
 //! real call to the Java core's `/api/core/transports/internal/cleanupOlderThan` can remove
-//! nothing. Run on purpose only: `RS_PLATFORM_SMOKE=1`, CORE_LOCAL_STACK=1, config/local.env and
+//! nothing. Run on purpose only: `RS_PLATFORM_SMOKE=1`, CORE_LOCAL_STACK=1, config/local.toml and
 //! `CONFIG_FILE=<repo>/config/core-exec.toml` (tests run in the crate directory).
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "one deliberate local smoke run: RS_PLATFORM_SMOKE=1 CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "one deliberate local smoke run: RS_PLATFORM_SMOKE=1 CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn cleanup_transports_on_the_local_stack_removes_nothing() {
     use std::sync::Arc;
 

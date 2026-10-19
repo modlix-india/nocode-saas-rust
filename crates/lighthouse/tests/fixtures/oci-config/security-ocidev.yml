@@ -1,0 +1,5 @@
+# Synthetic fixture: security in dev, the most specific source.
+jwt:
+  token:
+    default:
+      refresh: 15

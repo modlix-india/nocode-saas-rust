@@ -1113,7 +1113,7 @@ mod tests {
     }
 
     /// The whole order flow against a scratch app's URL, with the fakes above (gated like the
-    /// other live tests: `SECURITY_AUTH_LIVE=1` and `config/local.env`).
+    /// other live tests: `SECURITY_AUTH_LIVE=1` and `config/local.toml`).
     #[tokio::test]
     async fn order_flow_with_a_fake_authority() {
         let (Ok(_), Ok(password), Ok(key)) =

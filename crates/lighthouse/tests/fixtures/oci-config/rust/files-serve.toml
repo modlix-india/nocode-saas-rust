@@ -1,0 +1,27 @@
+# files-serve: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8103
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[database]
+host = "<db.host:files>"
+port = "<db.port:files>"
+database = "<db.name:files>"
+username = "<db.user:files>"
+
+[storage]
+endpoint = "<files.resources.endpoint>"
+bucket_prefix = "<files.resources.bucketPrefix>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+
+[core]
+upstream = "<urls:core-exec>"

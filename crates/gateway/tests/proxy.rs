@@ -135,6 +135,7 @@ fn pool(urls: &[&str], health: &str) -> PoolConfig {
         health_path: health.into(),
         health_interval_seconds: 3600,
         unhealthy_after: 2,
+        ..Default::default()
     }
 }
 
@@ -393,4 +394,14 @@ async fn bad_config_is_refused() {
     assert_eq!(d.server.port, 8180);
     assert_eq!(d.resolution.draft_trust_seconds, 60);
     assert_eq!(d.proxy.response_timeout_seconds, 3600);
+}
+
+#[tokio::test]
+async fn the_registry_api_is_not_served() {
+    let (app, _fake) = setup().await;
+    for path in ["/eureka", "/eureka/apps", "/eureka/apps/GATEWAY", "/eureka/peerreplication/batch"] {
+        let (s, _, b) = call(&app, req("GET", path, &[("host", "leadzump.ai")], "")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(j(&b)["code"], "COMMON.NOT_FOUND", "{path}");
+    }
 }

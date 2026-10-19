@@ -12,6 +12,7 @@ pub mod health;
 pub mod http;
 pub mod java;
 pub mod messages;
+pub mod meter;
 pub mod security;
 pub mod telemetry;
 pub mod upstream;

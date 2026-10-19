@@ -1,0 +1,10 @@
+# Synthetic fixture: ui.
+server:
+  port: 8002
+spring:
+  data:
+    mongodb:
+      uri: mongodb://fixture-ui-mongo:27017/ui
+ui:
+  apple:
+    bundleIdPrefix: com.fixture.apps

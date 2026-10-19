@@ -287,9 +287,16 @@ impl SecurityClient {
         })
     }
 
-    /// Where a request to `path` goes.
-    async fn base(&self, path: &str) -> Result<String> {
-        self.inner.upstream.base_for(path).await
+    /// Sends the request `build` makes for the base URL that serves `path`, with the context
+    /// headers; on the next member when the first refuses the connection ([`Upstream::send`]).
+    async fn send<F>(&self, path: &str, debug: Option<&str>, build: F) -> Result<reqwest::Response>
+    where
+        F: Fn(&reqwest::Client, String) -> reqwest::RequestBuilder,
+    {
+        self.inner
+            .upstream
+            .send(path, |base| Self::with_context(build(&self.inner.http, format!("{base}{path}")), debug))
+            .await
     }
 
     /// The `x-debug` tag, the current trace and the request's languages (so a refusal security
@@ -332,19 +339,17 @@ impl SecurityClient {
         }
 
         let path = "/api/security/internal/securityContextAuthentication";
-        let url = format!("{}{path}", self.base(path).await?);
-        let mut rb = self
-            .inner
-            .http
-            .get(&url)
-            .header("X-Forwarded-Host", &caller.forwarded_host)
-            .header("X-Forwarded-Port", &caller.forwarded_port)
-            .header("clientCode", caller.client_code.as_deref().unwrap_or(""))
-            .header("appCode", caller.app_code.as_deref().unwrap_or(""));
-        if !authorization.is_empty() {
-            rb = rb.header(header::AUTHORIZATION, &authorization);
-        }
-        let resp = Self::with_context(rb, caller.debug.as_deref()).send().await?;
+        let resp = self
+            .send(path, caller.debug.as_deref(), |http, url| {
+                let rb = http
+                    .get(url)
+                    .header("X-Forwarded-Host", &caller.forwarded_host)
+                    .header("X-Forwarded-Port", &caller.forwarded_port)
+                    .header("clientCode", caller.client_code.as_deref().unwrap_or(""))
+                    .header("appCode", caller.app_code.as_deref().unwrap_or(""));
+                if authorization.is_empty() { rb } else { rb.header(header::AUTHORIZATION, &authorization) }
+            })
+            .await?;
         let status = resp.status();
         if !status.is_success() {
             // The refusal's own message (and, from a Rust security unit, its code) rides along as
@@ -370,8 +375,7 @@ impl SecurityClient {
     }
 
     async fn get_json(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
-        let url = format!("{}{}", self.base(path).await?, path);
-        let resp = Self::with_context(self.inner.http.get(&url).query(query), None).send().await?;
+        let resp = self.send(path, None, |http, url| http.get(url).query(query)).await?;
         let status = resp.status();
         if !status.is_success() {
             return Err(anyhow!("{path}: {status}"));
@@ -501,14 +505,11 @@ impl SecurityClient {
     /// by the caller so the quantities keep the scale the Java service sends.
     pub async fn billing_charge(&self, body: String) -> Result<Value> {
         let path = "/api/security/internal/billing/charge";
-        let url = format!("{}{path}", self.base(path).await?);
-        let rb = self
-            .inner
-            .http
-            .post(&url)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(body);
-        let resp = Self::with_context(rb, None).send().await?;
+        let resp = self
+            .send(path, None, |http, url| {
+                http.post(url).header(header::CONTENT_TYPE, "application/json").body(body.clone())
+            })
+            .await?;
         let status = resp.status();
         if !status.is_success() {
             return Err(anyhow!("billing charge: {status}"));
@@ -535,14 +536,12 @@ impl SecurityClient {
     /// client managing it, is active (deleted, inactive and locked clients are left out).
     pub async fn active_client_codes(&self, codes: &[String]) -> Result<Vec<String>> {
         let path = "/api/security/clients/internal/activeClientCodes";
-        let url = format!("{}{path}", self.base(path).await?);
-        let rb = self
-            .inner
-            .http
-            .post(&url)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(serde_json::to_string(codes)?);
-        let resp = Self::with_context(rb, None).send().await?;
+        let body = serde_json::to_string(codes)?;
+        let resp = self
+            .send(path, None, |http, url| {
+                http.post(url).header(header::CONTENT_TYPE, "application/json").body(body.clone())
+            })
+            .await?;
         let status = resp.status();
         if !status.is_success() {
             return Err(anyhow!("activeClientCodes: {status}"));
@@ -589,8 +588,7 @@ impl SecurityClient {
     /// A plain-text answer (`appStatus` is `text/plain`); an empty body is `None`, as Feign
     /// maps it to an empty Mono.
     async fn get_text(&self, path: &str, query: &[(&str, String)]) -> Result<Option<String>> {
-        let url = format!("{}{}", self.base(path).await?, path);
-        let resp = Self::with_context(self.inner.http.get(&url).query(query), None).send().await?;
+        let resp = self.send(path, None, |http, url| http.get(url).query(query)).await?;
         let status = resp.status();
         if !status.is_success() {
             return Err(anyhow!("{path}: {status}"));
@@ -697,16 +695,11 @@ impl RawAnswer {
 
 impl SecurityClient {
     async fn get_raw(&self, path: &str, query: &[(&str, String)], headers: &[(&str, String)]) -> Result<RawAnswer> {
-        self.get_raw_at(&self.base(path).await?, path, query, headers).await
-    }
-
-    async fn get_raw_at(&self, base: &str, path: &str, query: &[(&str, String)], headers: &[(&str, String)]) -> Result<RawAnswer> {
-        let url = format!("{base}{path}");
-        let mut rb = self.inner.http.get(&url).query(query);
-        for (k, v) in headers {
-            rb = rb.header(*k, v);
-        }
-        let resp = Self::with_context(rb, None).send().await?;
+        let resp = self
+            .send(path, None, |http, url| {
+                headers.iter().fold(http.get(url).query(query), |rb, (k, v)| rb.header(*k, v))
+            })
+            .await?;
         let status = resp.status().as_u16();
         let content_type = resp
             .headers()
@@ -789,7 +782,7 @@ impl SecurityClient {
             headers.push(("appCode", a.to_string()));
         }
         let path = format!("/api/security/authenticateWithOneTimeToken/{}", path_segment(token));
-        let b = Self::ok_body(self.get_raw_at(&self.base(&path).await?, &path, &[], &headers).await?)?;
+        let b = Self::ok_body(self.get_raw(&path, &[], &headers).await?)?;
         Ok(match b {
             Some(b) => Some(serde_json::from_slice(&b)?),
             None => None,

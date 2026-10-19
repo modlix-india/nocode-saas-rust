@@ -26,6 +26,24 @@ pub fn queue_names(settings: &EventsSection) -> Vec<String> {
     settings.queues.split(',').map(str::trim).filter(|q| !q.is_empty()).map(str::to_string).collect()
 }
 
+/// Deliveries taken off the queues.
+pub const CONSUMED: &str = "core_events_consumed_total";
+/// Deliveries acked.
+pub const ACKED: &str = "core_events_acked_total";
+/// Deliveries nacked, `requeue` true (the run failed) or false (unreadable, dropped).
+pub const NACKED: &str = "core_events_nacked_total";
+/// What went wrong, by `reason`: `unreadable`, `run` (requeued), `settle` (the ack or nack
+/// itself failed).
+pub const FAILED: &str = "core_events_failed_total";
+
+/// The descriptions of the counters above, for `/metrics`.
+pub fn describe_metrics() {
+    metrics::describe_counter!(CONSUMED, metrics::Unit::Count, "Deliveries core-events took off the events queues.");
+    metrics::describe_counter!(ACKED, metrics::Unit::Count, "Deliveries core-events acked.");
+    metrics::describe_counter!(NACKED, metrics::Unit::Count, "Deliveries core-events nacked, by requeue.");
+    metrics::describe_counter!(FAILED, metrics::Unit::Count, "Deliveries core-events could not read or run, or could not settle, by reason.");
+}
+
 /// What to do with a delivery once its run is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Settle {
@@ -38,9 +56,11 @@ pub enum Settle {
 
 /// Runs one delivery's body through the listener.
 pub async fn handle(listener: &EventsListener, body: &[u8]) -> Settle {
+    metrics::counter!(CONSUMED).increment(1);
     let qob = match parse_event(body) {
         Ok(q) => q,
         Err(e) => {
+            metrics::counter!(FAILED, "reason" => "unreadable").increment(1);
             tracing::error!("Event dropped: {e}");
             return Settle::Drop;
         }
@@ -48,6 +68,7 @@ pub async fn handle(listener: &EventsListener, body: &[u8]) -> Settle {
     match listener.run(&qob).await {
         Ok(_) => Settle::Ack,
         Err(e) => {
+            metrics::counter!(FAILED, "reason" => "run").increment(1);
             tracing::warn!(
                 "Event {}.{} for {} failed and goes back on the queue: {e}",
                 qob.app_code.as_deref().unwrap_or("null"),
@@ -111,12 +132,26 @@ async fn consume(listener: Arc<EventsListener>, uri: &str, exchange: &str, setti
                 Settle::Drop => delivery.acker.nack(BasicNackOptions { requeue: false, ..Default::default() }).await,
                 Settle::Requeue => delivery.acker.nack(BasicNackOptions { requeue: true, ..Default::default() }).await,
             };
+            settled(settle, done.is_ok());
             if let Err(e) = done {
                 tracing::warn!("Could not settle a delivery: {e}");
             }
         });
     }
     Ok(())
+}
+
+/// Counts how a delivery was settled, once the broker took the ack or nack (`ok`).
+pub fn settled(settle: Settle, ok: bool) {
+    if !ok {
+        metrics::counter!(FAILED, "reason" => "settle").increment(1);
+        return;
+    }
+    match settle {
+        Settle::Ack => metrics::counter!(ACKED).increment(1),
+        Settle::Drop => metrics::counter!(NACKED, "requeue" => "false").increment(1),
+        Settle::Requeue => metrics::counter!(NACKED, "requeue" => "true").increment(1),
+    }
 }
 
 #[cfg(test)]
@@ -189,10 +224,33 @@ mod tests {
         assert_eq!(queue_names(&s), ["a", "b"]);
     }
 
+    #[test]
+    fn deliveries_are_counted() {
+        let ((), text) = platform::meter::capture_async(async {
+            let ok = listener(Ok(()), Arc::new(Seen::default()));
+            let body = br#"{"eventName":"E","appCode":"app","clientCode":"FIN","draft":false}"#;
+            settled(handle(&ok, body).await, true);
+            settled(handle(&ok, b"not json").await, true);
+            let failing = listener(Err("mongo unreachable".into()), Arc::new(Seen::default()));
+            settled(handle(&failing, body).await, true);
+            settled(Settle::Ack, false);
+            describe_metrics();
+        });
+        let n = |name: &str, labels: &[(&str, &str)]| platform::meter::sample(&text, name, labels);
+        assert_eq!(n(CONSUMED, &[]), Some(3.0));
+        assert_eq!(n(ACKED, &[]), Some(1.0));
+        assert_eq!(n(NACKED, &[("requeue", "false")]), Some(1.0));
+        assert_eq!(n(NACKED, &[("requeue", "true")]), Some(1.0));
+        for reason in ["unreadable", "run", "settle"] {
+            assert_eq!(n(FAILED, &[("reason", reason)]), Some(1.0), "{reason}");
+        }
+        assert!(text.contains(&format!("# HELP {CONSUMED}")));
+    }
+
     /// A round trip through a scratch exchange and scratch queues of the local broker, deleted
     /// afterwards: never the real `events` exchange or queues.
     #[tokio::test]
-    #[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+    #[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
     async fn events_published_to_the_queues_are_run_and_acked() {
         if !crate::testing::local_stack() {
             return;

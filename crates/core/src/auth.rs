@@ -221,7 +221,7 @@ impl AuthClient {
             rb = rb.header(header::ACCEPT_LANGUAGE, l);
         }
         let credential_sent = !caller.token.trim().is_empty();
-        let resp = rb.send().await.map_err(|e| CoreError::from(anyhow!(e)))?;
+        let resp = platform::meter::send_to_service(rb).await.map_err(|e| CoreError::from(anyhow!(e)))?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(|e| CoreError::from(anyhow!(e)))?;
         if !status.is_success() {

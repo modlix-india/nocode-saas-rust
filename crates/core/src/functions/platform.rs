@@ -10,7 +10,7 @@
 //! | `RenewCertificates(daysBeforeExpiry=30)` | SSL_RENEWAL | security `ssl/internal/renew-certificates` |
 //! | `CleanupTokens(unusedDays=90)` | TOKEN_CLEANUP | security `internal/tokens/cleanup` |
 //! | `Meter(service)` | *_METERING | the service's `internal/billing/meter` |
-//! | `ReconcileBilling()` | BILLING_RECONCILE | security, core, entity-processor, files `internal/billing/reconcile` |
+//! | `ReconcileBilling(services=[security, core, files])` | BILLING_RECONCILE | each service's `internal/billing/reconcile` |
 //! | `CleanupExpiredFiles(limit=500)` | FILES_TTL_CLEANUP | files `cleanupExpired`, `applyRetention` per bucket, core `events/internal/raise`, entity-processor `whatsapp/internal/media/stampExpired` |
 //! | `CleanupTransports(service, retentionDays=90, limit=200)` | TRANSPORT_CLEANUP | ui or core `transports/internal/cleanupOlderThan` |
 //! | `CleanupEventRuns(retentionDays=90, successRetentionDays=7, staleAfterHours=6, limit=50000)` | EVENT_RUN_CLEANUP | core `eventRuns/internal/cleanupOlderThan` |
@@ -76,6 +76,10 @@ const DEFAULT_EVENT_RUN_RETENTION_DAYS: i64 = 90;
 const DEFAULT_EVENT_RUN_SUCCESS_RETENTION_DAYS: i64 = 7;
 const DEFAULT_EVENT_RUN_STALE_AFTER_HOURS: i64 = 6;
 const DEFAULT_EVENT_RUN_LIMIT: i64 = 50_000;
+/// The services BILLING_RECONCILE reconciles when the call names none. The worker also
+/// reconciled entity-processor; that service retired with the switch to Rust (2026-10-18), so
+/// it is left out here and reconciled only when a caller names it.
+const DEFAULT_RECONCILE_SERVICES: [&str; 3] = ["security", "core", "files"];
 
 /// `FilesTtlCleanupService`: the lifetime the WhatsApp uploads stamp on their files, the
 /// stamping batch, the event raised per client and app, and the paths per event.
@@ -150,9 +154,15 @@ impl Job {
                 Schema::of_boolean("result"),
             ),
             Job::ReconcileBilling => (
-                "Reconciles yesterday's billing on security, core, entity-processor and files, in that order, \
-                 each whatever the others answered. Outputs each service's answer.",
-                vec![],
+                "Reconciles yesterday's billing on each of services, in that order, each whatever the others \
+                 answered. Outputs each service's answer.",
+                vec![Parameter::of_entry(
+                    "services",
+                    Schema::of_array("services", vec![Schema::of_string("service")])
+                        .set_default_value(json!(DEFAULT_RECONCILE_SERVICES))
+                        .set_description("The services to reconcile, in order: security, core, entity-processor or files.".into()),
+                    false,
+                )],
                 Schema::of_object("result"),
             ),
             Job::CleanupExpiredFiles => (
@@ -326,6 +336,46 @@ fn metered_service(args: &Map<Value>) -> Result<Service, CoreError> {
     }
 }
 
+/// `services` of `ReconcileBilling` (after validation, which put the default in), in the order
+/// given, each once.
+fn reconcile_services(args: &Map<Value>) -> Result<Vec<Service>, CoreError> {
+    let function = format!("{NAMESPACE}.ReconcileBilling");
+    let expected = "a list of security, core, entity-processor or files";
+    let items = match args.get("services") {
+        Some(Value::Array(items)) => items.clone(),
+        None | Some(Value::Null) => DEFAULT_RECONCILE_SERVICES.iter().map(|s| Value::String((*s).to_string())).collect(),
+        Some(other) => {
+            let e = CoreError::coded(StatusCode::BAD_REQUEST, "CORE.PLATFORM_ARGUMENT_INVALID", format!("{function} takes a list of services, not {other}"));
+            return Err(e.param("function", &function).param("argument", "services").param("expected", expected));
+        }
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let name = item.as_str().map(|s| s.trim().to_lowercase()).unwrap_or_default();
+        let service = match name.as_str() {
+            "security" => Service::Security,
+            "core" => Service::Core,
+            "entity-processor" => Service::EntityProcessor,
+            "files" => Service::Files,
+            _ => {
+                let given = item.as_str().map(str::to_string).unwrap_or_else(|| item.to_string());
+                return Err(CoreError::coded(
+                    StatusCode::BAD_REQUEST,
+                    "CORE.PLATFORM_ARGUMENT_INVALID",
+                    format!("{function} has no service '{given}'. Expected security, core, entity-processor or files."),
+                )
+                .param("function", &function)
+                .param("argument", format!("services ({given})"))
+                .param("expected", expected));
+            }
+        };
+        if !out.contains(&service) {
+            out.push(service);
+        }
+    }
+    Ok(out)
+}
+
 /// `TransportCleanupService.getServiceJobData` and its switch: no default, as guessing would
 /// sweep a collection nobody asked about.
 fn transport_service(args: &Map<Value>) -> Result<Service, CoreError> {
@@ -387,18 +437,18 @@ async fn run(job: Job, calls: &PlatformCalls, args: &Map<Value>) -> Result<Value
         Job::Meter => {
             let service = metered_service(args)?;
             let r = calls.meter(service).await?.map(Value::Bool).unwrap_or(Value::Null);
-            tracing::info!(service = service.name(), result = %r, "metering trigger complete");
+            tracing::info!(upstream = service.name(), result = %r, "metering trigger complete");
             Ok(r)
         }
-        Job::ReconcileBilling => reconcile_billing(calls).await,
+        Job::ReconcileBilling => reconcile_billing(calls, &reconcile_services(args)?).await,
         Job::CleanupExpiredFiles => cleanup_expired_files(calls, int(args, "limit", DEFAULT_FILES_LIMIT)).await,
         Job::CleanupTransports => {
             let service = transport_service(args)?;
             let retention_days = int(args, "retentionDays", DEFAULT_TRANSPORT_RETENTION_DAYS);
             let limit = int(args, "limit", DEFAULT_TRANSPORT_LIMIT);
-            tracing::info!(service = service.name(), retention_days, limit, "transport cleanup");
+            tracing::info!(upstream = service.name(), retention_days, limit, "transport cleanup");
             let r = object_or_null(calls.cleanup_transports(service, retention_days, limit).await?);
-            tracing::info!(service = service.name(), result = %r, "transport cleanup complete");
+            tracing::info!(upstream = service.name(), result = %r, "transport cleanup complete");
             Ok(r)
         }
         Job::CleanupEventRuns => {
@@ -414,15 +464,15 @@ async fn run(job: Job, calls: &PlatformCalls, args: &Map<Value>) -> Result<Value
     }
 }
 
-/// `MeteringExecutionService` BILLING_RECONCILE: the four, in order, each on its own.
-async fn reconcile_billing(calls: &PlatformCalls) -> Result<Value, CoreError> {
+/// `MeteringExecutionService` BILLING_RECONCILE: the named services, in order, each on its own.
+async fn reconcile_billing(calls: &PlatformCalls, services: &[Service]) -> Result<Value, CoreError> {
     let mut result = serde_json::Map::new();
     let mut errors = Vec::new();
-    for service in [Service::Security, Service::Core, Service::EntityProcessor, Service::Files] {
+    for &service in services {
         let answer = match calls.reconcile(service).await {
             Ok(b) => b.map(Value::Bool).unwrap_or(Value::Null),
             Err(e) => {
-                tracing::error!(service = service.name(), error = %e.text(), "billing reconcile failed");
+                tracing::error!(upstream = service.name(), error = %e.text(), "billing reconcile failed");
                 errors.push(format!("{}: {}", service.name(), describe(&e)));
                 Value::Null
             }
@@ -504,13 +554,18 @@ async fn cleanup_expired_files(calls: &PlatformCalls, limit: i64) -> Result<Valu
         b.retention_removed = Some(removed);
     }
 
-    // After the deletes, so a message is never marked before its file has gone.
-    let stamped = match calls.stamp_expired_whatsapp_media(WHATSAPP_RETENTION_DAYS, WHATSAPP_STAMP_LIMIT).await {
-        Ok(n) => json!(n.unwrap_or(0)),
-        Err(e) => {
-            tracing::error!(error = %e.text(), "marking expired WhatsApp attachments failed");
-            errors.push(format!("stampExpired: {}", describe(&e)));
-            Value::Null
+    // After the deletes, so a message is never marked before its file has gone. Skipped where
+    // entity-processor (retired 2026-10-18) has no upstream: no WhatsApp messages to mark.
+    let stamped = if !calls.has_upstream(crate::platform_calls::Service::EntityProcessor) {
+        json!(0)
+    } else {
+        match calls.stamp_expired_whatsapp_media(WHATSAPP_RETENTION_DAYS, WHATSAPP_STAMP_LIMIT).await {
+            Ok(n) => json!(n.unwrap_or(0)),
+            Err(e) => {
+                tracing::error!(error = %e.text(), "marking expired WhatsApp attachments failed");
+                errors.push(format!("stampExpired: {}", describe(&e)));
+                Value::Null
+            }
         }
     };
 

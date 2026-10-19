@@ -1152,7 +1152,7 @@ mod routes {
 /// made up for the run, started in the year 1000 so the sweep's table-wide statements can only
 /// reach them, and deletes them at the end whatever happened.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn the_mysql_table_on_the_local_stack() {
     use futures::FutureExt;
 

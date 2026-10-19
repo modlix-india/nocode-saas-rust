@@ -1,0 +1,14 @@
+# CI image: packages one binary that is already compiled, so the workspace compiles once per run
+# and each of the 15 images only copies its binary (.github/workflows/rust-build-deploy.yml).
+# The context is a directory holding just that binary, named `app`:
+#   docker build -f deploy/Dockerfile.prebuilt -t dev-gateway-rust dist/gateway-rust
+# The binary must be built against bookworm's glibc (CI compiles in rust:1.94-bookworm, the image
+# deploy/Dockerfile builds in). The runtime half matches deploy/Dockerfile; keep the two alike.
+
+# glibc + CA certificates, no shell, no package manager.
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY app /app
+USER nonroot
+# Configuration: /etc/modlix/<BIN>.toml (mount it) plus MODLIX__* environment for secrets.
+ENTRYPOINT ["/app"]
+HEALTHCHECK --interval=10s --timeout=4s --start-period=10s --retries=3 CMD ["/app", "healthcheck"]

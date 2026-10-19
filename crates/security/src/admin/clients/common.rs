@@ -273,6 +273,9 @@ pub mod cache {
     pub const APP_DEPENDENCIES: &str = "appDependencies";
     pub const APP_DEP_LIST: &str = "appDepList";
     pub const APP_STATUS: &str = "appStatus";
+    pub const APP_BY_CODE_EXPLICIT: &str = "byAppCodeExplicit";
+    /// Not security's own: the overridable layer (core, ui) keeps each read's client order under it.
+    pub const INHERITANCE_ORDER: &str = "inheritanceOrder";
     pub const INTEGRATION_PLATFORM: &str = "integrationPlatform";
 }
 

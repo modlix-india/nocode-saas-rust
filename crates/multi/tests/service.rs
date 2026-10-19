@@ -322,8 +322,8 @@ async fn anonymous_and_missing_headers() {
     let (s, _, b) = call(&app, r).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (code, message, action) = coded(&b);
-    assert_eq!((code.as_str(), message.as_str()), ("MULTI.HEADER_MISSING", "The request is missing the X-Forwarded-Host header."));
-    assert_eq!(action.as_deref(), Some("Call this address through the gateway, which adds it, or send the X-Forwarded-Host header yourself."));
+    assert_eq!((code.as_str(), message.as_str()), ("COMMON.HEADER_MISSING", "The request is missing the X-Forwarded-Host header."));
+    assert_eq!(action.as_deref(), Some("Send the request through the gateway, which adds it, or add X-Forwarded-Host and try again."));
     assert_eq!(json_of(&b)["debugMessage"], "Required header 'X-Forwarded-Host' is not present.");
 
     // Query and path values that do not read are 400s too, after the caller and the headers.

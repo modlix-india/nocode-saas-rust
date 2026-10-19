@@ -5,7 +5,7 @@
 //! `AppAccessEventServiceTest` and the lifecycle integration tests (`AppLifecycleIntegrationTest`,
 //! `ClientLifecycleIntegrationTest`), with the expected values read from the same schema.
 //!
-//! Gated: `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced. Reads are read-only; the write
+//! Gated: `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"`. Reads are read-only; the write
 //! test makes its own scratch app (`zzrustlive...`) with its draft URL, a property, an access
 //! row, a dependency, a policy, a client URL, a registration object and an integration, and
 //! removes all of them through the routes. Events are logged, not published; no Redis.

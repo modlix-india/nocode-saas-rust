@@ -34,6 +34,7 @@ pub async fn evict_all(cache: &CacheService, redis: Option<&redis::Client>, chan
     let mut conn = match client.get_multiplexed_async_connection().await {
         Ok(c) => c,
         Err(e) => {
+            platform::meter::redis_error("connect");
             tracing::warn!(error = %e, "redis unavailable for evictAllCaches");
             return Some(false);
         }
@@ -41,6 +42,7 @@ pub async fn evict_all(cache: &CacheService, redis: Option<&redis::Client>, chan
     let keys: Vec<String> = match redis::cmd("KEYS").arg(format!("{}-*", cache.prefix())).query_async(&mut conn).await {
         Ok(k) => k,
         Err(e) => {
+            platform::meter::redis_error("command");
             tracing::warn!(error = %e, "KEYS failed");
             return Some(false);
         }
@@ -52,6 +54,7 @@ pub async fn evict_all(cache: &CacheService, redis: Option<&redis::Client>, chan
         let published: redis::RedisResult<i64> = redis::cmd("PUBLISH").arg(channel).arg(format!("{k}:*")).query_async(&mut conn).await;
         let deleted: redis::RedisResult<i64> = redis::cmd("DEL").arg(&k).query_async(&mut conn).await;
         if let Err(e) = published.and(deleted) {
+            platform::meter::redis_error("command");
             tracing::warn!(cache = k, error = %e, "eviction not propagated");
         }
     }

@@ -4,7 +4,7 @@
 //! router driven in process.
 //!
 //! Gated: tests using it are `#[ignore]` and need `MODLIX__MONGO__URI` (the local stack's,
-//! from `config/local.env`); without it they return early.
+//! from `config/local.toml`); without it they return early.
 
 #![allow(dead_code)]
 

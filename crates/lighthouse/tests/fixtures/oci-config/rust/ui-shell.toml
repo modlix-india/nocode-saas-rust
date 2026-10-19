@@ -1,0 +1,20 @@
+# ui-shell: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8106
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+
+[shell]
+analytics_ingestion_host = "<ui.analytics.ingestionHost>"
+analytics_engine_url = "<ui.analytics.engine.url>"
+engine = "<urls:ui-engine>"
+files = "<urls:files-serve>"

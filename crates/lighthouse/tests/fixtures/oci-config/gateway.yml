@@ -1,0 +1,13 @@
+# Synthetic fixture: gateway.
+server:
+  port: 8080
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: security
+          uri: lb://SECURITY
+          predicates:
+            - Path=/api/security/**
+        - id: core
+          uri: lb://CORE

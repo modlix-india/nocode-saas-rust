@@ -1,8 +1,12 @@
 # One image per binary: docker build -f deploy/Dockerfile --build-arg BIN=gateway-rust -t gateway-rust .
 # BIN: gateway-rust | files-serve | files-manage | ui-engine | ... (any [[bin]] in the workspace)
+# For local use. CI compiles the workspace once and packages each binary with
+# deploy/Dockerfile.prebuilt; keep the runtime half of the two files alike.
 
 FROM rust:1.94-bookworm AS build
 ARG BIN
+# The commit /metrics reports in build_info: --build-arg GIT_SHA=$(git rev-parse HEAD).
+ARG GIT_SHA
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

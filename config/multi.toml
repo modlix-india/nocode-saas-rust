@@ -8,9 +8,6 @@ log_format = "pretty"
 log_level = "info"
 environment = "local"
 
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [security]
 # security-admin: every security route that is neither auth nor internal.
 upstream = "http://localhost:8113"
@@ -25,3 +22,9 @@ upstream = "eureka:CORE"
 [ui]
 # index, makeTransport, createAndApply and DELETE /api/ui are all editor routes: ui-editor.
 upstream = "http://localhost:8107"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "MULTI"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

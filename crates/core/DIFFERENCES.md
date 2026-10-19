@@ -282,7 +282,7 @@ parity tools do not cover them and the unit tests run every job against fake ser
   | `RenewCertificates(daysBeforeExpiry=30)` | security `/api/security/ssl/internal/renew-certificates?daysBeforeExpiry` |
   | `CleanupTokens(unusedDays=90)` | security `/api/security/internal/tokens/cleanup?unusedDays` |
   | `Meter(service)`: security, core, entity-processor, files | `/api/security/internal/billing/meter/security`, `/api/core/internal/billing/meter`, `/api/entity/processor/internal/billing/meter`, `/api/files/internal/billing/meter` |
-  | `ReconcileBilling()` | `.../internal/billing/reconcile` of security, core, entity-processor, files, in that order, no `date` |
+  | `ReconcileBilling(services=[security, core, files])` | `.../internal/billing/reconcile` of each named service (security, core, entity-processor, files), in the order given, each once, no `date`. The worker reconciled all four; entity-processor retired with the switch (2026-10-18), so the default and the seeded BILLING_RECONCILE leave it out |
   | `CleanupExpiredFiles(limit=500)` | files `/api/files/internal/{secured,static}/cleanupExpired?limit`, then `/{secured,static}/applyRetention?limit`, raising core `/api/core/events/internal/raise` (`FILES_EXPIRED`, `{resourceType, paths}`, 500 paths an event) per returned group, then entity-processor `/api/entity/processor/whatsapp/internal/media/stampExpired?retentionDays=30&limit=1000` |
   | `CleanupTransports(service, retentionDays=90, limit=200)`: ui or core | `/api/ui/transports/internal/cleanupOlderThan`, `/api/core/transports/internal/cleanupOlderThan` |
   | `CleanupEventRuns(retentionDays=90, successRetentionDays=7, staleAfterHours=6, limit=50000)` | core `/api/core/eventRuns/internal/cleanupOlderThan` |

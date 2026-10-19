@@ -1,0 +1,24 @@
+# ui-engine: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8102
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "stage"
+
+[security]
+upstream = ["http://security-admin:8113"]
+auth_upstream = ["http://security-auth:8101"]
+internal_upstream = ["http://security-internal:8112"]
+
+[cdn]
+host_name = ""
+strip_api_prefix = true
+replace_plus = "<ui.cdnReplacePlus>"
+resize_options_type = "none"
+
+[ui]
+js_url = "https://cdn.fixture.test/js/dist"
+editor = ["http://ui-editor:8107"]

@@ -209,7 +209,7 @@ impl StubSmtp {
 // ------------------------------------------------------------------------------- local stack
 
 /// The gated tests run with `NOTIFICATION_LOCAL_STACK=1` and the local MySQL password in
-/// `MODLIX__DATABASE__PASSWORD` (config/local.env).
+/// `MODLIX__DATABASE__PASSWORD` (config/local.toml).
 pub fn local_stack() -> bool {
     std::env::var("NOTIFICATION_LOCAL_STACK").is_ok_and(|v| v == "1")
 }

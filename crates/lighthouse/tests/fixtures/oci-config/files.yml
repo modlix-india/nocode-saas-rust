@@ -1,0 +1,6 @@
+# Synthetic fixture: files.
+server:
+  port: 8003
+files:
+  db:
+    url: ${spring.datasource.url}

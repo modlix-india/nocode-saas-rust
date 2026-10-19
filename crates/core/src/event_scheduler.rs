@@ -109,6 +109,31 @@ pub trait RunLog: Send + Sync {
 
 // ---------------------------------------------------------------- the pass
 
+/// Scheduler passes, by `result` (`ok`, `failed`).
+pub const PASSES: &str = "core_scheduler_passes_total";
+/// Cron ticks and one-offs this instance claimed, by `kind` (`cron`, `once`).
+pub const CLAIMED: &str = "core_scheduler_claimed_total";
+/// Claims published to the events queue, by `kind`.
+pub const PUBLISHED: &str = "core_scheduler_published_total";
+/// Cron ticks claimed and closed as SKIPPED: the previous tick's run was still going.
+pub const SKIPPED: &str = "core_scheduler_skipped_total";
+/// Claims not published, by `kind`: the raise failed, a one-off was given up on or its client
+/// is not active.
+pub const FAILED: &str = "core_scheduler_failed_total";
+/// Cron ticks another instance claimed first.
+pub const LOST: &str = "core_scheduler_lost_total";
+
+/// The descriptions of the counters above, for `/metrics`.
+pub fn describe_metrics() {
+    use metrics::{describe_counter, Unit};
+    describe_counter!(PASSES, Unit::Count, "Scheduler passes, by result (ok, failed).");
+    describe_counter!(CLAIMED, Unit::Count, "Cron ticks and one-offs this instance claimed, by kind (cron, once).");
+    describe_counter!(PUBLISHED, Unit::Count, "Claims published to the events queue, by kind.");
+    describe_counter!(SKIPPED, Unit::Count, "Cron ticks skipped because the previous run was still going.");
+    describe_counter!(FAILED, Unit::Count, "Claims that were not published, by kind.");
+    describe_counter!(LOST, Unit::Count, "Cron ticks another instance claimed first.");
+}
+
 /// What one pass did on this instance. `busy` is always 0 here: core-scheduler has no run
 /// slots, it only publishes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -125,6 +150,21 @@ pub struct PassReport {
 impl PassReport {
     fn anything(&self) -> bool {
         self.raised + self.skipped + self.failed + self.one_offs_raised > 0
+    }
+
+    /// Adds this pass to the counters above; `ok` when it ran to the end (one that failed half
+    /// way still counts what it did).
+    pub fn record(&self, ok: bool) {
+        let n = |v: i32| v.max(0) as u64;
+        metrics::counter!(PASSES, "result" => if ok { "ok" } else { "failed" }).increment(1);
+        metrics::counter!(CLAIMED, "kind" => KIND_CRON).increment(n(self.raised) + n(self.skipped) + n(self.failed));
+        metrics::counter!(CLAIMED, "kind" => KIND_ONCE).increment(n(self.one_offs_raised) + n(self.one_offs_failed));
+        metrics::counter!(PUBLISHED, "kind" => KIND_CRON).increment(n(self.raised));
+        metrics::counter!(PUBLISHED, "kind" => KIND_ONCE).increment(n(self.one_offs_raised));
+        metrics::counter!(SKIPPED, "kind" => KIND_CRON).increment(n(self.skipped));
+        metrics::counter!(FAILED, "kind" => KIND_CRON).increment(n(self.failed));
+        metrics::counter!(FAILED, "kind" => KIND_ONCE).increment(n(self.one_offs_failed));
+        metrics::counter!(LOST, "kind" => KIND_CRON).increment(n(self.lost));
     }
 }
 
@@ -310,10 +350,15 @@ impl EventScheduler {
     pub async fn pass(&self) -> Result<PassReport, CoreError> {
         let now = (self.clock)();
         let counts = Counts::default();
-        self.store.ensure_indexes().await?;
-        self.recurring(now, &counts).await?;
-        self.due_one_offs(now, &counts).await?;
-        Ok(counts.report())
+        let done = async {
+            self.store.ensure_indexes().await?;
+            self.recurring(now, &counts).await?;
+            self.due_one_offs(now, &counts).await
+        }
+        .await;
+        let report = counts.report();
+        report.record(done.is_ok());
+        done.map(|()| report)
     }
 
     // ------------------------------------------------------------ recurring

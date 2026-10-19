@@ -23,6 +23,41 @@ use crate::config::QueueSection;
 use crate::model::QueueMessage;
 use crate::send::{Outcome, SendService};
 
+/// Deliveries taken off the notification queues.
+pub const CONSUMED: &str = "notification_consumed_total";
+/// Notifications sent, by `channel` (`email`: each mail attempted, `in_app`).
+pub const SENT: &str = "notification_sent_total";
+/// Deliveries that sent nothing, by `reason`: `unreadable`, `no_connection`, `no_notification`,
+/// `no_channel`, `no_users`, `error` (the send failed) or `panic`.
+pub const FAILED: &str = "notification_failed_total";
+
+/// The descriptions of the counters above, for `/metrics`.
+pub fn describe_metrics() {
+    metrics::describe_counter!(CONSUMED, metrics::Unit::Count, "Deliveries taken off the notification queues.");
+    metrics::describe_counter!(SENT, metrics::Unit::Count, "Notifications sent, by channel (email: each mail attempted; in_app).");
+    metrics::describe_counter!(FAILED, metrics::Unit::Count, "Deliveries that sent nothing, by reason.");
+}
+
+fn failed(reason: &'static str) {
+    metrics::counter!(FAILED, "reason" => reason).increment(1);
+}
+
+/// Counts what a send did.
+fn count(outcome: &Outcome) {
+    match outcome {
+        Outcome::Sent { emails, in_app } => {
+            metrics::counter!(SENT, "channel" => "email").increment(*emails as u64);
+            if *in_app {
+                metrics::counter!(SENT, "channel" => "in_app").increment(1);
+            }
+        }
+        Outcome::NoConnection => failed("no_connection"),
+        Outcome::NoNotification => failed("no_notification"),
+        Outcome::NoChannel => failed("no_channel"),
+        Outcome::NoUsers => failed("no_users"),
+    }
+}
+
 /// What happens to a delivery once its run is over.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settle {
@@ -42,13 +77,16 @@ pub fn readable_content_type(content_type: Option<&str>) -> bool {
 
 /// One delivery through the listener.
 pub async fn handle(service: &SendService, content_type: Option<&str>, body: &[u8]) -> Settle {
+    metrics::counter!(CONSUMED).increment(1);
     if !readable_content_type(content_type) {
+        failed("unreadable");
         tracing::error!("Notification dropped: content type {} is not JSON", content_type.unwrap_or("null"));
         return Settle::Drop;
     }
     let qob = match QueueMessage::parse(body) {
         Ok(q) => q,
         Err(e) => {
+            failed("unreadable");
             tracing::error!("Notification dropped: {e}");
             return Settle::Drop;
         }
@@ -59,10 +97,12 @@ pub async fn handle(service: &SendService, content_type: Option<&str>, body: &[u
         tracing::info!("{tag} - Received notification message: {}", qob.describe());
         match service.send(&qob).await {
             Ok(outcome) => {
+                count(&outcome);
                 tracing::info!("{tag} - Sent notification message: {}", qob.describe());
                 Settle::Ack(Some(outcome))
             }
             Err(e) => {
+                failed("error");
                 tracing::error!("Failed to send notification : {} : {e:#}", qob.describe());
                 Settle::Ack(None)
             }
@@ -149,6 +189,7 @@ async fn consume(service: Arc<SendService>, uri: &str, settings: &QueueSection, 
                 let outcome = tokio::spawn(async move { handle(&s, ct.as_deref(), &body).await })
                     .await
                     .unwrap_or_else(|e| {
+                        failed("panic");
                         tracing::error!("Failed to send notification : {e}");
                         Settle::Ack(None)
                     });
@@ -191,5 +232,23 @@ mod tests {
         assert!(!s.connected());
         s.set(true);
         assert!(s.connected());
+    }
+
+    #[test]
+    fn outcomes_are_counted() {
+        let ((), text) = platform::meter::capture(|| {
+            count(&Outcome::Sent { emails: 2, in_app: false });
+            count(&Outcome::NoNotification);
+            count(&Outcome::NoChannel);
+            count(&Outcome::NoUsers);
+            describe_metrics();
+        });
+        let n = |name: &str, labels: &[(&str, &str)]| platform::meter::sample(&text, name, labels);
+        assert_eq!(n(SENT, &[("channel", "email")]), Some(2.0));
+        assert_eq!(n(SENT, &[("channel", "in_app")]), None, "nothing went in-app");
+        for reason in ["no_notification", "no_channel", "no_users"] {
+            assert_eq!(n(FAILED, &[("reason", reason)]), Some(1.0), "{reason}");
+        }
+        assert!(text.contains(&format!("# HELP {FAILED}")));
     }
 }

@@ -1,0 +1,30 @@
+# nocode-ai on the local stack: its Spring settings (ai.*, redis.*) as TOML. Lighthouse serves them
+# at /ai/default with the [ai] table of config/local.toml (the passwords and keys) merged in.
+
+[ai]
+componentCatalogUrl = "https://cdn-local.modlix.com/js/dist/component-catalog.json"
+
+[ai.security]
+url = "http://localhost:8080"
+
+[ai.files]
+url = "http://localhost:8080"
+
+[ai.gateway]
+url = "http://localhost:8080"
+
+[ai.llm]
+provider = "deepseek"
+
+[ai.db]
+url = "jdbc:mysql://localhost:3306/ai?serverTimezone=UTC"
+username = "root"
+
+[ai.db.flyway]
+url = "jdbc:mysql://localhost:3306/ai"
+
+[redis]
+codec = "object"
+
+[redis.cache]
+prefix = "cmn"

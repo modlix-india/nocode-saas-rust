@@ -41,6 +41,7 @@ chrono.workspace = true
 chrono-tz.workspace = true
 dashmap.workspace = true
 futures.workspace = true
+metrics.workspace = true
 rand.workspace = true
 lapin = "4"
 uuid = { version = "1", features = ["v4"] }

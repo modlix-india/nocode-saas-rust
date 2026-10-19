@@ -1,0 +1,3 @@
+# Synthetic fixture: a duplicate key, which Spring refuses (the compat endpoint answers 500 for app "broken").
+a: 1
+a: 2

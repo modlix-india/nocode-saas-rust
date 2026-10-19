@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lighthouse</title>
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --text: #1b2230; --muted: #626d80; --line: #e2e6ec;
+  --accent: #2b59c3; --up: #137a3f; --down: #b42318; --oos: #a15c07; --other: #4b5565;
+  --up-bg: #e7f6ec; --down-bg: #fdecea; --oos-bg: #fdf3e2; --other-bg: #eef0f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f131a; --panel: #171c25; --text: #e5e9f0; --muted: #98a2b3; --line: #273041;
+    --accent: #84adff; --up: #47cd89; --down: #f97066; --oos: #fdb022; --other: #a4adbd;
+    --up-bg: #11301f; --down-bg: #3a1714; --oos-bg: #36270c; --other-bg: #222937;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px;
+  background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; }
+header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+header .who { color: var(--muted); font-size: 13px; }
+.spacer { flex: 1; }
+nav button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+nav button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btn:hover, nav button:hover { border-color: var(--accent); }
+.btn.danger { color: var(--down); }
+.btn.small { padding: 2px 8px; font-size: 12px; }
+main { padding: 18px 20px 40px; max-width: 1400px; margin: 0 auto; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 26px 0 10px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.card .k { color: var(--muted); font-size: 12px; }
+.card .v { font-size: 17px; font-weight: 600; margin-top: 2px; word-break: break-all; }
+.card .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--bg); }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.UP { color: var(--up); background: var(--up-bg); }
+.DOWN { color: var(--down); background: var(--down-bg); }
+.OUT_OF_SERVICE { color: var(--oos); background: var(--oos-bg); }
+.STARTING, .UNKNOWN { color: var(--other); background: var(--other-bg); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.toolbar input { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; min-width: 340px;
+  background: var(--panel); color: var(--text); }
+.app { margin-bottom: 14px; }
+.app h3 { font-size: 15px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }
+.muted { color: var(--muted); }
+.note { margin-bottom: 8px; }
+.meta { font-size: 12px; color: var(--muted); }
+.meta b { color: var(--text); font-weight: 600; }
+.config { color: var(--accent); font-weight: 600; }
+pre.doc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow: auto;
+  max-height: 60vh; font-size: 12px; line-height: 1.45; margin: 8px 0 0; white-space: pre; }
+.viewer { margin-top: 14px; }
+.viewer[hidden] { display: none; }
+.banner { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; display: none; }
+.banner.show { display: block; }
+.banner.err { background: var(--down-bg); color: var(--down); }
+.banner.warn { background: var(--oos-bg); color: var(--oos); }
+.actions { white-space: nowrap; }
+.empty { padding: 18px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; }
+@media (max-width: 760px) { th.wide, td.wide { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lighthouse</h1>
+  <span class="who" id="who"></span>
+  <span id="state"></span>
+  <nav>
+    <button id="tab-registry-btn" class="on" type="button">Registry</button>
+    <button id="tab-config-btn" type="button">Config</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="who" id="refreshed"></span>
+  <button class="btn" id="pause" type="button">Pause</button>
+</header>
+<main>
+  <div class="banner err" id="error"></div>
+  <section id="tab-registry">
+    <div class="banner warn" id="warming">This instance is warming up: it is syncing from its peers, and its discovery answers 503 until it is done.</div>
+    <div class="cards" id="instance"></div>
+    <h2>Peers</h2>
+    <div id="peers"></div>
+    <h2>Applications</h2>
+    <div class="toolbar">
+      <span id="counts"></span>
+      <input id="filter" type="search" placeholder="Filter by app, instance, host, status or metadata" autocomplete="off">
+      <span class="spacer"></span>
+      <span id="manage-note" class="meta"></span>
+      <button class="btn small" id="forget" type="button" hidden>Forget token</button>
+    </div>
+    <div id="apps"></div>
+  </section>
+  <section id="tab-config" hidden>
+    <div class="banner err" id="config-error"></div>
+    <div class="toolbar">
+      <span id="config-note" class="meta"></span>
+      <span class="spacer"></span>
+      <button class="btn small" id="config-refresh" type="button" hidden>Refresh now</button>
+    </div>
+    <div class="cards" id="config-source"></div>
+    <h2>Units</h2>
+    <div class="meta note">A version is <b>restart.live</b>. An instance running another restart part is
+      <span class="pill DOWN">STALE</span> until keepup-rust.sh flips it; one that differs in the live part only applied
+      the change in place (<span class="pill OUT_OF_SERVICE">LIVE</span>).</div>
+    <div id="config-units"></div>
+    <div class="viewer" id="config-viewer" hidden>
+      <div class="toolbar"><b id="viewer-title"></b><span class="meta" id="viewer-note"></span><span class="spacer"></span>
+        <button class="btn small" id="viewer-close" type="button">Close</button></div>
+      <pre class="doc" id="viewer-text"></pre>
+    </div>
+    <h2>Env files</h2>
+    <div id="config-env"></div>
+    <h2>This Lighthouse</h2>
+    <div class="meta note">The settings this instance started with: its TOML, then the MODLIX__ variables listed.</div>
+    <div class="toolbar"><button class="btn small" id="settings-show" type="button">Show its settings</button></div>
+  </section>
+</main>
+<script>
+"use strict";
+const TOKEN_KEY = "lighthouse-admin-token";
+const state = { paused: false, timer: null, registry: null, peers: null, config: null };
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c === undefined || c === null || c === false) continue;
+    e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return e;
+}
+
+function ago(ms) {
+  if (ms === null || ms === undefined) return "never";
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + " s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+
+function duration(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  if (d) return d + "d " + h + "h";
+  if (h) return h + "h " + m + "m";
+  if (m) return m + "m " + s + "s";
+  return s + "s";
+}
+
+function when(ms) { return ms ? new Date(ms).toLocaleString() : ""; }
+function pill(status) { return el("span", { class: "pill " + status }, status.replace(/_/g, " ")); }
+
+function card(k, v, s) {
+  return el("div", { class: "card" }, el("div", { class: "k" }, k), el("div", { class: "v" }, v), s ? el("div", { class: "s" }, s) : null);
+}
+
+function renderInstance(r) {
+  const i = r.instance;
+  document.getElementById("who").textContent = i.id + "  v" + i.version;
+  const st = document.getElementById("state");
+  st.replaceChildren(i.ready ? pill("UP") : el("span", { class: "pill OUT_OF_SERVICE" }, "WARMING UP"));
+  document.getElementById("warming").classList.toggle("show", !i.ready);
+  const sp = r.selfPreservation;
+  document.getElementById("instance").replaceChildren(
+    card("Instance", i.id, i.selfUrl && i.selfUrl !== i.id ? i.selfUrl : "version " + i.version),
+    card("State", i.ready ? "Ready" : "Warming up", "registry version " + r.registryVersion),
+    card("Uptime", duration(i.uptimeSeconds), "since " + when(i.startedAt)),
+    card("Self-preservation", sp.active ? "Active: no eviction" : "Off",
+      "renewals in the last minute " + sp.renewalsLastMinute + " of threshold " + sp.threshold.toFixed(1)),
+    card("Instances", String(r.instances), "hash " + (r.appsHashcode || "(empty)")),
+    card("Tombstones", String(r.tombstones), "cancelled in the last 2 minutes"),
+  );
+}
+
+function renderPeers(p) {
+  const host = document.getElementById("peers");
+  if (!p || p.peers.length === 0) {
+    host.replaceChildren(el("div", { class: "empty" }, "No peers: this instance runs alone."));
+    return;
+  }
+  const rows = p.peers.map(x => el("tr", {},
+    el("td", {}, x.url),
+    el("td", {}, el("span", { class: "pill " + (x.reachable ? "UP" : "DOWN") }, x.reachable ? "REACHABLE" : "UNREACHABLE"),
+      el("span", { class: "meta" }, " " + x.probeMs + " ms")),
+    el("td", {}, ago(x.lastSuccessAgoMs)),
+    el("td", { class: "num" }, String(x.queued)),
+    el("td", { class: "num" }, String(x.dropped)),
+    el("td", { class: "num wide" }, String(x.failures)),
+    el("td", { class: "wide meta" }, x.lastError || ""),
+  ));
+  host.replaceChildren(el("table", {},
+    el("thead", {}, el("tr", {}, ["Peer", "Reachable", "Last replication", "Queued", "Dropped", "Failed batches", "Last error"]
+      .map((h, n) => el("th", { class: n > 4 ? "wide" : null }, h)))),
+    el("tbody", {}, rows)));
+}
+
+function matches(app, inst, q) {
+  if (!q) return true;
+  const hay = [app.name, inst.id, inst.hostName, inst.ipAddr, String(inst.port), inst.status, inst.overriddenStatus,
+    ...Object.entries(inst.metadata || {}).map(([k, v]) => k + "=" + v)].join(" ").toLowerCase();
+  return q.split(/\s+/).every(t => hay.includes(t));
+}
+
+function token() {
+  let t = sessionStorage.getItem(TOKEN_KEY);
+  if (!t) {
+    t = prompt("Admin token (kept for this browser tab only):");
+    if (!t) return null;
+    sessionStorage.setItem(TOKEN_KEY, t);
+  }
+  return t;
+}
+
+async function manage(method, path, question) {
+  if (!confirm(question)) return;
+  const t = token();
+  if (!t) return;
+  try {
+    const r = await fetch(path, { method, headers: { Authorization: "Bearer " + t } });
+    if (r.status === 401) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      alert("The admin token was refused.");
+    } else if (!r.ok) {
+      alert("Failed: " + r.status + " " + (await r.text()));
+    }
+  } catch (e) {
+    alert("Failed: " + e);
+  }
+  showToken();
+  load();
+}
+
+function actions(app, inst) {
+  const base = "v1/admin/apps/" + encodeURIComponent(app.name) + "/" + encodeURIComponent(inst.id);
+  const name = app.name + " " + inst.id;
+  const out = [];
+  if (inst.overriddenStatus === "OUT_OF_SERVICE" || inst.status === "OUT_OF_SERVICE") {
+    out.push(el("button", { class: "btn small", type: "button",
+      onclick: () => manage("DELETE", base + "/status",
+        "Put " + name + " back in service? Its next heartbeat registers it again with its own status.") }, "Put back"));
+  } else {
+    out.push(el("button", { class: "btn small", type: "button",
+      onclick: () => manage("PUT", base + "/status?value=OUT_OF_SERVICE",
+        "Take " + name + " out of service? Callers stop sending it traffic.") }, "Out of service"));
+  }
+  out.push(" ", el("button", { class: "btn small danger", type: "button",
+    onclick: () => manage("DELETE", base,
+      "Remove " + name + " from the registry? A running instance registers again with its next heartbeat.") }, "Remove"));
+  return out;
+}
+
+function renderApps(r) {
+  const q = document.getElementById("filter").value.trim().toLowerCase();
+  const counts = Object.entries(r.counts || {});
+  document.getElementById("counts").replaceChildren(
+    ...counts.map(([s, n]) => el("span", {}, pill(s), " " + n + "  ")),
+    el("span", { class: "meta" }, r.instances + " in all"));
+  const blocks = [];
+  for (const app of r.apps) {
+    const shown = app.instances.filter(i => matches(app, i, q));
+    if (shown.length === 0) continue;
+    const head = ["Status", "Instance", "Address", "Registered", "Last renewal", "Lease", "Metadata"];
+    if (r.manageable) head.push("");
+    const rows = shown.map(i => {
+      const meta = Object.entries(i.metadata || {});
+      const cv = (i.metadata || {}).configVersion;
+      return el("tr", {},
+        el("td", {}, pill(i.status), i.overriddenStatus && i.overriddenStatus !== "UNKNOWN"
+          ? el("div", { class: "meta" }, "override " + i.overriddenStatus) : null),
+        el("td", {}, i.id, cv ? el("div", { class: "meta" }, "config ", el("span", { class: "config" }, cv)) : null),
+        el("td", {}, i.ipAddr + ":" + i.port, i.hostName && i.hostName !== i.ipAddr ? el("div", { class: "meta" }, i.hostName) : null,
+          i.healthCheckUrl ? el("div", { class: "meta" }, i.healthCheckUrl) : null),
+        el("td", { class: "wide" }, when(i.registeredAt)),
+        el("td", {}, ago(i.lastRenewalAgoMs)),
+        el("td", { class: "num wide" }, i.renewalSeconds + "s / " + i.leaseSeconds + "s"),
+        el("td", { class: "meta wide" }, meta.map(([k, v]) => el("div", {}, el("b", {}, k), " " + v))),
+        r.manageable ? el("td", { class: "actions" }, actions(app, i)) : null);
+    });
+    blocks.push(el("div", { class: "app" },
+      el("h3", {}, app.name, el("span", { class: "meta" }, shown.length + " of " + app.instances.length)),
+      el("table", {}, el("thead", {}, el("tr", {}, head.map((h, n) => el("th", { class: [3, 5, 6].includes(n) ? "wide" : null }, h)))),
+        el("tbody", {}, rows))));
+  }
+  document.getElementById("apps").replaceChildren(...(blocks.length ? blocks
+    : [el("div", { class: "empty" }, r.apps.length ? "Nothing matches the filter." : "Nothing is registered.")]));
+}
+
+function showToken() {
+  const r = state.registry;
+  const has = !!sessionStorage.getItem(TOKEN_KEY);
+  document.getElementById("manage-note").textContent = !r ? "" : !r.manageable
+    ? "Read-only: no admin token is configured on this server."
+    : has ? "Managing with the token of this tab." : "Managing asks for the admin token.";
+  document.getElementById("forget").hidden = !(r && r.manageable && has);
+}
+
+const INSTANCE_STATE = { current: ["UP", "CURRENT"], live: ["OUT_OF_SERVICE", "LIVE"], stale: ["DOWN", "STALE"],
+  unmanaged: ["UNKNOWN", "NOT FROM LIGHTHOUSE"], unknown: ["UNKNOWN", "UNKNOWN"] };
+
+function renderConfig() {
+  const c = state.config;
+  const err = document.getElementById("config-error");
+  const note = document.getElementById("config-note");
+  const host = document.getElementById("config-source");
+  if (!c) return;
+  if (!c.enabled) {
+    note.textContent = "";
+    err.classList.remove("show");
+    host.replaceChildren(el("div", { class: "empty" }, "This instance runs no config server: [config] source is empty."));
+    document.getElementById("config-units").replaceChildren();
+    document.getElementById("config-env").replaceChildren();
+    document.getElementById("config-refresh").hidden = true;
+    return;
+  }
+  const problems = [c.lastError, c.renderError].filter(Boolean);
+  err.textContent = problems.join(" / ");
+  err.classList.toggle("show", problems.length > 0);
+  const s = c.snapshot;
+  note.textContent = "Environment " + c.env + ", Spring profiles " + c.profiles.join(", ");
+  host.replaceChildren(
+    card("Source", c.source.kind + ": " + c.source.where, "label " + c.source.label + ", every " + c.source.pollSeconds + " s"),
+    card("Commit", s ? s.short : "none yet", s ? "from " + s.from + ", " + s.files + " files" : "nothing loaded"),
+    card("Last poll", c.lastPollMs ? ago(Date.now() - c.lastPollMs) : "never", c.polls + " polls, " + c.failures + " failed"),
+    card("Last change", c.lastChangeMs ? ago(Date.now() - c.lastChangeMs) : "never", s ? when(s.fetchedMs) : ""),
+    card("Last error", c.lastError ? ago(Date.now() - c.lastErrorMs) : "none", c.lastError || ""),
+  );
+  document.getElementById("config-refresh").hidden = !c.manageable;
+  const rows = c.units.map(u => {
+    const insts = u.instances.length ? u.instances.map(i => {
+      const [cls, label] = INSTANCE_STATE[i.state] || ["UNKNOWN", i.state];
+      return el("div", {}, el("span", { class: "pill " + cls }, label), " " + i.id,
+        i.configVersion ? el("span", { class: "meta" }, " runs " + i.configVersion) : null);
+    }) : [el("span", { class: "muted" }, "no instance registered")];
+    return el("tr", {},
+      el("td", {}, u.unit, el("div", { class: "meta" }, u.registry)),
+      el("td", {}, u.version ? el("span", { class: "config" }, u.version) : el("span", { class: "pill DOWN" }, "NONE")),
+      el("td", {}, insts),
+      el("td", { class: "meta wide" }, u.problem || ""),
+      el("td", { class: "actions" }, u.version ? el("button", { class: "btn small", type: "button",
+        onclick: () => showUnit(u) }, "Show") : null));
+  });
+  document.getElementById("config-units").replaceChildren(rows.length ? el("table", {},
+    el("thead", {}, el("tr", {}, ["Unit", "Current version", "Instances", "Problem", ""].map((h, n) => el("th", { class: n === 3 ? "wide" : null }, h)))),
+    el("tbody", {}, rows)) : el("div", { class: "empty" }, "No unit is rendered from this snapshot."));
+  const envs = c.envFiles.map(f => el("tr", {}, el("td", {}, f.name + ".env"), el("td", {}, el("span", { class: "config" }, f.version)),
+    el("td", { class: "meta" }, f.problem || "")));
+  document.getElementById("config-env").replaceChildren(envs.length ? el("table", {},
+    el("thead", {}, el("tr", {}, ["File", "Version", "Problem"].map(h => el("th", {}, h)))), el("tbody", {}, envs))
+    : el("div", { class: "empty" }, "No env file is rendered from this snapshot."));
+}
+
+// Shows text in the config tab's viewer; the reads need the admin token (they carry configuration).
+async function view(title, path, describe) {
+  const t = token();
+  if (!t) return;
+  try {
+    const r = await fetch(path, { headers: { Authorization: "Bearer " + t } });
+    if (r.status === 401 || r.status === 403) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      alert("The admin token was refused.");
+      showToken();
+      return;
+    }
+    if (!r.ok) { alert("Failed: " + r.status + " " + (await r.text())); return; }
+    const [note, text] = await describe(r);
+    document.getElementById("viewer-title").textContent = title;
+    document.getElementById("viewer-note").textContent = note;
+    document.getElementById("viewer-text").textContent = text;
+    const v = document.getElementById("config-viewer");
+    v.hidden = false;
+    v.scrollIntoView({ block: "nearest" });
+  } catch (e) {
+    alert("Failed: " + e);
+  }
+  showToken();
+}
+
+function showUnit(u) {
+  const running = [...new Set(u.instances.map(i => i.configVersion).filter(Boolean))];
+  const differs = running.filter(v => v !== u.version);
+  view(u.unit, "v1/units/" + encodeURIComponent(u.unit) + "/config.toml?redact=false", async r => [
+    " version " + u.version + (differs.length ? "; some instances still run " + differs.join(", ") : ""),
+    await r.text()]);
+}
+
+function showSettings() {
+  view("This Lighthouse", "v1/admin/settings", async r => {
+    const b = await r.json();
+    return [" read " + (b.file || "no file") + (b.env.length ? "; set by " + b.env.join(", ") : ""), b.settings];
+  });
+}
+
+async function refreshConfig() {
+  const t = token();
+  if (!t) return;
+  try {
+    const r = await fetch("v1/admin/refresh", { method: "POST", headers: { Authorization: "Bearer " + t } });
+    if (r.status === 401 || r.status === 403) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      alert("The admin token was refused.");
+    } else if (!r.ok) {
+      alert("Failed: " + r.status + " " + (await r.text()));
+    } else {
+      const b = await r.json();
+      alert(b.changed ? "A new snapshot is served." : (b.error ? "Not refreshed: " + b.error : "Nothing changed."));
+    }
+  } catch (e) {
+    alert("Failed: " + e);
+  }
+  showToken();
+  load();
+}
+
+function render() {
+  renderConfig();
+  if (!state.registry) return;
+  renderInstance(state.registry);
+  renderPeers(state.peers);
+  renderApps(state.registry);
+  showToken();
+}
+
+async function load() {
+  const err = document.getElementById("error");
+  try {
+    const [r, p, c] = await Promise.all([fetch("v1/registry"), fetch("v1/peers"), fetch("v1/config")]);
+    if (!r.ok || !p.ok || !c.ok) throw new Error("the server answered " + r.status + " / " + p.status + " / " + c.status);
+    state.registry = await r.json();
+    state.peers = await p.json();
+    state.config = await c.json();
+    err.classList.remove("show");
+    document.getElementById("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
+    render();
+  } catch (e) {
+    err.textContent = "Could not refresh: " + e.message + ". Showing the last data.";
+    err.classList.add("show");
+  }
+}
+
+function schedule() {
+  clearTimeout(state.timer);
+  if (!state.paused) state.timer = setTimeout(async () => { await load(); schedule(); }, 5000);
+}
+
+function tab(name) {
+  for (const t of ["registry", "config"]) {
+    document.getElementById("tab-" + t).hidden = t !== name;
+    document.getElementById("tab-" + t + "-btn").classList.toggle("on", t === name);
+  }
+}
+
+document.getElementById("pause").addEventListener("click", e => {
+  state.paused = !state.paused;
+  e.target.textContent = state.paused ? "Resume" : "Pause";
+  if (!state.paused) load();
+  schedule();
+});
+document.getElementById("filter").addEventListener("input", () => state.registry && renderApps(state.registry));
+document.getElementById("viewer-close").addEventListener("click", () => { document.getElementById("config-viewer").hidden = true; });
+document.getElementById("settings-show").addEventListener("click", showSettings);
+document.getElementById("forget").addEventListener("click", () => { sessionStorage.removeItem(TOKEN_KEY); showToken(); });
+document.getElementById("tab-registry-btn").addEventListener("click", () => tab("registry"));
+document.getElementById("tab-config-btn").addEventListener("click", () => tab("config"));
+document.getElementById("config-refresh").addEventListener("click", refreshConfig);
+load().then(schedule);
+</script>
+</body>
+</html>

@@ -31,7 +31,7 @@ status = 503
 text = "The service is not answering right now. Try again in a few seconds."
 action = "If it keeps happening, give support the error id {errorId}."
 java_text = "Spring Cloud Gateway's own error body: \"status\": 503, \"error\": \"Service Unavailable\""
-when = "Every instance tried refused the connection."
+when = "Every instance tried refused the connection, or the pool's circuit breaker is open after too many failures (debugMessage says which)."
 audience = "anyone"
 
 [GW.SERVICE_TIMEOUT]

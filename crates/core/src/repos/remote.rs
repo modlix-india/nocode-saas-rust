@@ -63,9 +63,11 @@ impl RemoteRepositories {
             .unwrap_or_default())
     }
 
-    /// `getRemoteRepositories(appCode, clientCode)`.
+    /// `getRemoteRepositories(appCode, clientCode)`. With entity-processor unconfigured (retired
+    /// 2026-10-18) an app's `PROCESSOR` rows are ignored: its functions and schemas are the
+    /// local ones, and a missing one is "not found" rather than a failed remote call.
     pub async fn repositories(&self, app_code: &str, client_code: &str) -> Result<Option<Remote>, CoreError> {
-        if self.names(app_code).await?.is_empty() {
+        if !self.ep.configured() || self.names(app_code).await?.is_empty() {
             return Ok(None);
         }
         Ok(Some(Remote {
@@ -223,6 +225,16 @@ mod tests {
 
     fn fep() -> FunctionExecutionParameters {
         FunctionExecutionParameters::new(Arc::new(KIRunFunctionRepository::new()), Arc::new(KIRunSchemaRepository::new()))
+    }
+
+    #[tokio::test]
+    async fn a_retired_entity_processor_is_no_remote_repository() {
+        // No database is reached: the check comes first.
+        let pool = sqlx::mysql::MySqlPoolOptions::new().connect_lazy("mysql://root@127.0.0.1:1/core").unwrap();
+        let cache = platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap();
+        let ep = Arc::new(EntityProcessor::new(Upstream::fixed(&[])).unwrap());
+        let remote = RemoteRepositories::new(pool, cache.family(), ep);
+        assert!(remote.repositories("leadzump", "SYSTEM").await.unwrap().is_none());
     }
 
     #[tokio::test]

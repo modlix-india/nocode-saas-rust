@@ -1,4 +1,5 @@
-//! files-serve / files-manage configuration. See `deploy/config/files-*.example.toml`.
+//! files-serve / files-manage configuration. Local: `config/files-*.toml`; the deployed templates are
+//! `rust/files-*.toml` in the private oci-config repo.
 
 use platform::config::{EurekaConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
 use serde::{Deserialize, Serialize};

@@ -1,0 +1,44 @@
+# gateway-rust: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8080
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "stage"
+
+[security]
+upstream = ["http://security-admin:8113"]
+auth_upstream = ["http://security-auth:8101"]
+internal_upstream = ["http://security-internal:8112"]
+
+[resolution]
+app_code_suffix = ""
+subdomain_endings = ".stage.fixture.test"
+
+[pools.security-auth]
+upstreams = ["http://security-auth:8101"]
+health_path = "/readyz"
+
+[pools.core-exec]
+upstreams = ["http://core-exec:8105"]
+health_path = "/readyz"
+
+[pools.ui-engine]
+upstreams = ["http://ui-engine:8102"]
+
+[pools.ai]
+upstreams = ["http://ai:5001"]
+health_path = "/health"
+
+[[routes]]
+id = "security"
+prefix = "/api/security"
+pool = "security-auth"
+
+[[routes]]
+id = "ui"
+prefix = "/api/ui"
+pool = "ui-engine"
+timeout_seconds = 30

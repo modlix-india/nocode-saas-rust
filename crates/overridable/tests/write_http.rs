@@ -289,7 +289,7 @@ async fn transport_routes() {
     let applied = a.send("GET", &format!("/api/ui/transports/applyTransport/{id}"), None, &h, Body::empty()).await;
     assert_eq!(applied.json(), JValue::Bool(true));
     let no_headers = a.call("GET", &format!("/api/ui/transports/applyTransport/{id}"), s, "").await;
-    assert_eq!((no_headers.status, no_headers.field("code")), (StatusCode::BAD_REQUEST, "DEF.HEADER_MISSING".into()));
+    assert_eq!((no_headers.status, no_headers.field("code")), (StatusCode::BAD_REQUEST, "COMMON.HEADER_MISSING".into()));
     assert_eq!(no_headers.field("debugMessage"), "400 BAD_REQUEST \"Required header is not present\"");
     let by_code = a.send("GET", "/api/ui/transports/applyTransportCode/T1", None, &h, Body::empty()).await;
     assert_eq!(by_code.json(), JValue::Bool(true));

@@ -1,0 +1,34 @@
+# ssr on the local stack: its Spring settings (ssr.*, ui.*, security.appCodeSuffix) as TOML.
+# Lighthouse serves them at /ssr/default with the [ssr] table of config/local.toml merged in.
+
+[security]
+appCodeSuffix = ".local"
+
+[ui]
+cdnHostName = "cdn-local.modlix.com"
+cdnReplacePlus = true
+jsURL = "https://cdn-local.modlix.com/js/dist/"
+
+[ui.apple]
+apiKeyId = "${APPLE_API_KEY_ID:}"
+apiIssuerId = "${APPLE_API_ISSUER_ID:}"
+apiKeyContent = "${APPLE_API_KEY_CONTENT:}"
+bundleIdPrefix = "com.modlix.apps"
+teamId = "${APPLE_TEAM_ID:}"
+certificateId = "${APPLE_CERTIFICATE_ID:}"
+
+[ui.analytics]
+ingestionHost = "https://engine.local.modlix.com"
+queryCacheTtlSeconds = 60
+
+[ui.analytics.engine]
+url = "http://localhost:8096"
+
+[ssr.gateway]
+url = "http://localhost:8080"
+
+[ssr.cache]
+ttlSeconds = 1800
+
+[ssr.cdn]
+hostName = "cdn-local.modlix.com"

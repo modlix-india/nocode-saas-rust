@@ -6,7 +6,7 @@
 //! (`POST /api/core/storages`, `/api/core/functions` on 8005), and everything is deleted through
 //! that API at the end, whatever happened in between.
 //!
-//! Run: `set -a; source config/local.env; set +a; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
+//! Run: `eval "$(tools/local-env.py)"; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -238,7 +238,7 @@ async fn scenario(h: &Http, rust: &str, exec: &crate::Exec, created: &mut Create
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn storage_on_the_local_stack() {
     if !local_stack() {
         return;

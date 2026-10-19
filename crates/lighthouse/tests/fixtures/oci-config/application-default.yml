@@ -1,0 +1,8 @@
+# Synthetic fixture: the default profile only.
+adzump:
+  scrapeCreatorsAPIKey: fixture-scrape-default
+redis:
+  url: redis://localhost:6379
+ai:
+  llm:
+    provider: local

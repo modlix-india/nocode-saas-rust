@@ -1,0 +1,38 @@
+<application>
+  <name>FILES</name>
+  <instance>
+    <instanceId>h1:files:8104</instanceId>
+    <hostName>10.1.1.1</hostName>
+    <app>FILES</app>
+    <ipAddr>10.1.1.1</ipAddr>
+    <status>UP</status>
+    <overriddenstatus>UNKNOWN</overriddenstatus>
+    <port enabled="true">8104</port>
+    <securePort enabled="false">443</securePort>
+    <countryId>1</countryId>
+    <dataCenterInfo class="com.netflix.appinfo.InstanceInfo$DefaultDataCenterInfo">
+      <name>MyOwn</name>
+    </dataCenterInfo>
+    <leaseInfo>
+      <renewalIntervalInSecs>30</renewalIntervalInSecs>
+      <durationInSecs>90</durationInSecs>
+      <registrationTimestamp>1792395663055</registrationTimestamp>
+      <lastRenewalTimestamp>1792395663055</lastRenewalTimestamp>
+      <evictionTimestamp>0</evictionTimestamp>
+      <serviceUpTimestamp>1792395663055</serviceUpTimestamp>
+    </leaseInfo>
+    <metadata>
+      <runtime>rust</runtime>
+      <management.port>8104</management.port>
+    </metadata>
+    <homePageUrl>http://10.1.1.1:8104/</homePageUrl>
+    <statusPageUrl>http://10.1.1.1:8104/healthz</statusPageUrl>
+    <healthCheckUrl>http://10.1.1.1:8104/readyz</healthCheckUrl>
+    <vipAddress>files</vipAddress>
+    <secureVipAddress>files</secureVipAddress>
+    <isCoordinatingDiscoveryServer>false</isCoordinatingDiscoveryServer>
+    <lastUpdatedTimestamp>1792395663055</lastUpdatedTimestamp>
+    <lastDirtyTimestamp>1792395662982</lastDirtyTimestamp>
+    <actionType>ADDED</actionType>
+  </instance>
+</application>

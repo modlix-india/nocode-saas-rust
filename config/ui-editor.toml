@@ -1,6 +1,6 @@
 # ui-editor on the local stack. Secrets (MODLIX__MONGO__URI, MODLIX__REDIS__URL, and the App Store
 # Connect key MODLIX__EDITOR__APPLE_API_KEY_CONTENT when iOS builds are wanted) come from
-# config/local.env.
+# config/local.toml.
 
 [server]
 port = 8107
@@ -23,9 +23,6 @@ auth_upstream = "http://localhost:8101"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [mongo]
 max_pool_size = 32
 
@@ -40,3 +37,9 @@ java_zone_offset = "+05:30"
 app_code_suffix = ".local"
 ssr_channel = "ssr:cache:invalidation"
 apple_bundle_id_prefix = "com.modlix.apps"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "UI-EDITOR"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

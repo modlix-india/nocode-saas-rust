@@ -1,0 +1,27 @@
+# core-scheduler: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8108
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "dev"
+
+[database]
+host = "db-dev.fixture.test"
+port = 3306
+database = "core"
+username = "core_user"
+
+[security]
+upstream = ["http://security-admin:8113"]
+auth_upstream = ["http://security-auth:8101"]
+internal_upstream = ["http://security-internal:8112"]
+app_code_suffix = "-dev"
+
+[files]
+upstream = ["http://files-manage:8104"]
+
+[core]
+editor = ["http://core-editor:8111"]

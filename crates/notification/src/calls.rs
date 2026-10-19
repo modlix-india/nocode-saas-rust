@@ -136,7 +136,7 @@ impl Feign {
             Some(b) => rb.header("content-type", "application/json").body(b.to_string()),
             None => rb,
         };
-        let resp = rb.send().await.with_context(|| format!("{method} {url}"))?;
+        let resp = platform::meter::send_to_service(rb).await.with_context(|| format!("{method} {url}"))?;
         let status = resp.status().as_u16();
         let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_string);
         let bytes = resp.bytes().await?;

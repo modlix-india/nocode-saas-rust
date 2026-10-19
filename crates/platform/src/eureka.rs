@@ -101,6 +101,12 @@ impl Eureka {
     fn instance_body(me: &InstanceInfo) -> Value {
         let base = format!("http://{}:{}/", me.ip, me.port);
         let now = now_millis().to_string();
+        let mut metadata = json!({"management.port": me.port.to_string(), "runtime": "rust", "metrics.path": "/metrics"});
+        // The configuration version from Lighthouse this process runs: keepup-rust.sh and the
+        // dashboard compare it with the current one.
+        if let Some(v) = lighthouse_client::config::running_version() {
+            metadata["configVersion"] = json!(v);
+        }
         json!({
             "instance": {
                 "instanceId": me.instance_id,
@@ -117,7 +123,8 @@ impl Eureka {
                     "name": "MyOwn"
                 },
                 "leaseInfo": {"renewalIntervalInSecs": 30, "durationInSecs": 90},
-                "metadata": {"management.port": me.port.to_string(), "runtime": "rust"},
+                // `metrics.path`: where a scraper that discovers instances here finds the metrics.
+                "metadata": metadata,
                 "homePageUrl": base,
                 "statusPageUrl": format!("{base}healthz"),
                 "healthCheckUrl": format!("{base}readyz"),
@@ -396,6 +403,9 @@ mod tests {
         assert!(me.instance_id.ends_with(":files:8104"));
         let body = Eureka::instance_body(me);
         assert_eq!(body["instance"]["healthCheckUrl"], "http://10.1.1.1:8104/readyz");
+        assert_eq!(body["instance"]["metadata"]["metrics.path"], "/metrics");
+        lighthouse_client::config::set_running_version("0123456789abcdef.01234567");
+        assert_eq!(Eureka::instance_body(me)["instance"]["metadata"]["configVersion"], "0123456789abcdef.01234567");
 
         e.register().await.unwrap();
         e.heartbeat().await.unwrap();

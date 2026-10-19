@@ -207,6 +207,16 @@ impl Resolver {
     }
 }
 
+/// A unit calling another unit through the gateway: an internal path (nginx refuses every path
+/// containing `/internal` from outside, so no browser request is one) that already names its
+/// client and app. Such a call skips host resolution and passes through as if it went straight
+/// to the unit, the way Feign calls do today: its `x-draft` and forwarded headers are the
+/// caller's own and stay untouched.
+pub fn is_internal_call(path: &str, client_code: Option<&str>, app_code: Option<&str>) -> bool {
+    let named = |v: Option<&str>| v.is_some_and(|v| !v.trim().is_empty());
+    path.contains("/internal") && named(client_code) && named(app_code)
+}
+
 /// `codesMatchResolved`: a blank supplied code is not a mismatch; comparison ignores case.
 pub fn codes_match(supplied_app: Option<&str>, app: &str, supplied_client: Option<&str>, client: &str) -> bool {
     let m = |s: Option<&str>, r: &str| s.map(str::trim).filter(|s| !s.is_empty()).is_none_or(|s| s.eq_ignore_ascii_case(r));
@@ -216,6 +226,18 @@ pub fn codes_match(supplied_app: Option<&str>, app: &str, supplied_client: Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_calls() {
+        let yes = |p: &str| is_internal_call(p, Some("SYSTEM"), Some("appbuilder"));
+        assert!(yes("/api/security/clients/internal/getClientByCode"));
+        assert!(yes("/api/core/internal/data"));
+        assert!(yes("/api/files/internal/store"));
+        assert!(!yes("/api/core/function/execute/x"));
+        assert!(!is_internal_call("/api/core/internal/data", Some("SYSTEM"), None));
+        assert!(!is_internal_call("/api/core/internal/data", Some(" "), Some("appbuilder")));
+        assert!(!is_internal_call("/api/core/internal/data", None, Some("appbuilder")));
+    }
 
     #[test]
     fn matching_rules() {

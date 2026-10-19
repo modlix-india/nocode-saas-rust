@@ -448,19 +448,18 @@ async fn a_definition_owned_by_another_app_is_refused_during_a_platform_action()
 // ------------------------------------------------------------------ the jobs, as core-events runs them
 
 /// The worker's requests for each job of the seed, in order (its execution services with the
-/// job data of V3, V9, V10, V11 and V13).
+/// job data of V3, V9, V10, V11 and V13), less entity-processor's metering and reconcile: that
+/// service retired with the switch (2026-10-18).
 fn worker_calls(job: &str) -> Vec<&'static str> {
     match job {
         "SSL_RENEWAL" => vec!["security /api/security/ssl/internal/renew-certificates?daysBeforeExpiry=3"],
         "TOKEN_CLEANUP" => vec!["security /api/security/internal/tokens/cleanup?unusedDays=90"],
         "SECURITY_METERING" => vec!["security /api/security/internal/billing/meter/security"],
         "CORE_METERING" => vec!["core /api/core/internal/billing/meter"],
-        "ENTITY_PROCESSOR_METERING" => vec!["entity-processor /api/entity/processor/internal/billing/meter"],
         "FILES_METERING" => vec!["files /api/files/internal/billing/meter"],
         "BILLING_RECONCILE" => vec![
             "security /api/security/internal/billing/reconcile",
             "core /api/core/internal/billing/reconcile",
-            "entity-processor /api/entity/processor/internal/billing/reconcile",
             "files /api/files/internal/billing/reconcile",
         ],
         "FILES_TTL_CLEANUP" => vec![
@@ -483,7 +482,7 @@ fn worker_calls(job: &str) -> Vec<&'static str> {
 async fn every_seeded_job_makes_the_workers_requests() {
     let seed = seed();
     let jobs = seed["jobs"].as_array().unwrap();
-    assert_eq!(jobs.len(), 11);
+    assert_eq!(jobs.len(), 10);
     for job in jobs {
         let name = job["name"].as_str().unwrap();
         let s = setup("[]").await;
@@ -500,7 +499,7 @@ async fn every_seeded_job_makes_the_workers_requests() {
         let expected = match name {
             "SSL_RENEWAL" => json!({"renewedCount": 2, "failedCount": 1, "errors": ["x.example: dns"]}),
             "TOKEN_CLEANUP" => json!({"expiredTokensRemoved": 4, "unusedTokensRemoved": 5, "expiredDraftTokensRemoved": 6}),
-            "BILLING_RECONCILE" => json!({"security": true, "core": true, "entity-processor": true, "files": true}),
+            "BILLING_RECONCILE" => json!({"security": true, "core": true, "files": true}),
             "FILES_TTL_CLEANUP" => json!({
                 "secured": {"expiredRemoved": 3, "retentionRemoved": 0, "eventsRaised": 0, "eventsFailed": 0},
                 "static": {"expiredRemoved": 1, "retentionRemoved": 0, "eventsRaised": 0, "eventsFailed": 0},
@@ -615,9 +614,33 @@ async fn reconcile_asks_every_service_and_then_names_the_failures() {
     assert_eq!(e.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(
         e.text(),
-        r#"CoreServices.Platform.ReconcileBilling: core: 500 db down (result: {"security":true,"core":null,"entity-processor":true,"files":false})"#
+        r#"CoreServices.Platform.ReconcileBilling: core: 500 db down (result: {"security":true,"core":null,"files":false})"#
     );
     assert_eq!(t.lines(), worker_calls("BILLING_RECONCILE"));
+}
+
+#[tokio::test]
+async fn reconcile_takes_the_services_it_is_given() {
+    let (t, fs) = functions().await;
+    // In the order given, each once, names read as the meter reads them.
+    let r = platform_call(&fs, "ReconcileBilling", json!({"services": ["files", " Entity-Processor ", "files"]})).await.unwrap();
+    assert_eq!(r["result"], json!({"files": true, "entity-processor": true}));
+    assert_eq!(
+        t.lines(),
+        ["files /api/files/internal/billing/reconcile", "entity-processor /api/entity/processor/internal/billing/reconcile"]
+    );
+    // null is the default; an empty list reconciles nothing.
+    platform_call(&fs, "ReconcileBilling", json!({"services": null})).await.unwrap();
+    assert_eq!(t.lines().len(), 2 + 3);
+    let r = platform_call(&fs, "ReconcileBilling", json!({"services": []})).await.unwrap();
+    assert_eq!((r["result"].clone(), t.lines().len()), (json!({}), 5));
+    // A service it does not know, or ui (which has no billing), is refused before any call.
+    for bad in ["ui", "nope"] {
+        let e = platform_call(&fs, "ReconcileBilling", json!({"services": ["core", bad]})).await.unwrap_err();
+        assert_eq!((e.status(), e.code().map(|c| c.code.to_string())), (StatusCode::BAD_REQUEST, Some("CORE.PLATFORM_ARGUMENT_INVALID".into())), "{bad}");
+        assert!(e.text().contains(&format!("has no service '{bad}'")), "{}", e.text());
+    }
+    assert_eq!(t.lines().len(), 5);
 }
 
 fn paths(app: &str, n: usize) -> Vec<String> {
@@ -717,6 +740,14 @@ async fn files_cleanup_runs_every_step_and_then_fails_on_a_files_error() {
     let out = platform_call(&fs2, "CleanupExpiredFiles", json!({})).await.unwrap();
     assert_eq!(out["result"]["messagesMarkedExpired"], Value::Null);
     assert_eq!(out["result"]["errors"], json!(["stampExpired: 500 ep down"]));
+    // Without an entity-processor upstream (retired 2026-10-18) the stamping is skipped quietly.
+    let t3 = Arc::new(Targets::default());
+    let (mut ups, _) = t3.serve().await;
+    ups.entity_processor = Err("not configured".into());
+    let fs3 = all(&Arc::new(crate::platform_calls::PlatformCalls::new(ups).unwrap()));
+    let out = platform_call(&fs3, "CleanupExpiredFiles", json!({})).await.unwrap();
+    assert_eq!((out["result"]["messagesMarkedExpired"].clone(), out["result"]["errors"].clone()), (json!(0), json!([])));
+    assert!(!t3.lines().iter().any(|l| l.starts_with("entity-processor")), "{:?}", t3.lines());
 }
 
 // ------------------------------------------------------------------ signatures and listing
@@ -742,7 +773,7 @@ async fn signatures() {
     );
     assert_eq!(param("Meter", "service"), Value::Null);
     assert_eq!(param("CleanupTransports", "service"), Value::Null);
-    assert!(find(&fs, "ReconcileBilling").get_signature().get_parameters().is_empty());
+    assert_eq!(param("ReconcileBilling", "services"), json!(["security", "core", "files"]));
     for f in &fs {
         let sig = f.get_signature();
         assert!(sig.get_events().get("output").unwrap().get_parameters().contains_key("result"));
@@ -797,14 +828,14 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
 
 // ------------------------------------------------------------------ the seed
 
-/// The worker's rows (V3, V9, V10, V11, V13; V14 removed only entity-processor jobs):
+/// The worker's rows (V3, V9, V10, V11, V13; V14 removed only entity-processor jobs), less
+/// entity-processor-metering (that service retired with the switch, 2026-10-18):
 /// task name, job type, Quartz schedule, job data.
 const WORKER_TASKS: &[(&str, &str, &str, &str)] = &[
     ("ssl-certificate-renewal", "SSL_RENEWAL", "0 0 2 * * ?", r#"{"daysBeforeExpiry": 3}"#),
     ("expired-token-cleanup", "TOKEN_CLEANUP", "0 0 3 * * ?", r#"{"unusedDays": 90}"#),
     ("security-metering", "SECURITY_METERING", "0 0/15 * * * ?", "{}"),
     ("core-metering", "CORE_METERING", "0 0/15 * * * ?", "{}"),
-    ("entity-processor-metering", "ENTITY_PROCESSOR_METERING", "0 0/15 * * * ?", "{}"),
     ("files-metering", "FILES_METERING", "0 0/15 * * * ?", "{}"),
     ("billing-reconcile", "BILLING_RECONCILE", "0 45 0 * * ?", "{}"),
     ("files-ttl-cleanup", "FILES_TTL_CLEANUP", "0 20 * * * ?", r#"{"limit": 500}"#),
@@ -859,8 +890,10 @@ fn the_seed_carries_the_workers_jobs_with_the_same_instants() {
         let data: Value = serde_json::from_str(data).unwrap();
         assert_eq!(job["workerJobData"], data, "{name}");
         // A metering row's job type picked the service; the function takes it as an argument.
+        // BILLING_RECONCILE names the services it reconciles (the worker's four less entity-processor).
         let data = match jtype.strip_suffix("_METERING") {
             Some(service) => json!({"service": service.to_lowercase().replace('_', "-")}),
+            None if *jtype == "BILLING_RECONCILE" => json!({"services": ["security", "core", "files"]}),
             None => data,
         };
         assert_eq!(job["arguments"], data, "{name}");
@@ -903,9 +936,9 @@ fn the_seed_carries_the_workers_jobs_with_the_same_instants() {
             step["parameterMap"].as_object().unwrap().iter().map(|(k, v)| (k.clone(), v["one"]["value"].clone())).collect();
         assert_eq!(Value::Object(args), data, "{name}");
     }
-    assert_eq!(seed["functions"].as_array().unwrap().len(), 11);
-    assert_eq!(seed["eventDefinitions"].as_array().unwrap().len(), 11);
-    assert_eq!(seed["eventActions"].as_array().unwrap().len(), 11);
+    assert_eq!(seed["functions"].as_array().unwrap().len(), 10);
+    assert_eq!(seed["eventDefinitions"].as_array().unwrap().len(), 10);
+    assert_eq!(seed["eventActions"].as_array().unwrap().len(), 10);
     // The cron dialect: Quartz's 0/15 is every quarter hour, as */15.
     assert_eq!(expand("0/15", 0, 59), expand("*/15", 0, 59));
     assert_eq!(expand("0/15", 0, 59), BTreeSet::from([0, 15, 30, 45]));

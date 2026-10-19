@@ -1,0 +1,564 @@
+# What the Rust units' configuration is made of, for Lighthouse: its config server
+# (GET /v1/units/<unit>/config, GET /v1/env/ai and /v1/env/ssr) and `lighthouse render`, which
+# replaces tools/render_config.py and writes byte for byte what the script wrote.
+#
+# Data only, no secrets. The values come from the Spring settings in this repository
+# (`<service>.yml`, `application.yml`, `application-oci<env>.yml`, `<service>-oci<env>.yml`), the
+# templates are `rust/<unit>.toml`. Order matters where a file is written: `[[secrets]]` is the
+# line order of rust-units.env, `[[ai.env]]` of ai.env, `[[ssr.env]]` of ssr.env.
+
+# Keys every unit applies in place when they change (prefixes of the unit's document), without a
+# restart. Any other change reaches a unit through a rolling restart: keepup-rust.sh health
+# compares each unit's running config version with Lighthouse's and flips its colour.
+live = ["telemetry.log_level", "features"]
+
+# ai and ssr reach the gateway under this name (their GATEWAY_URL, and ai's security and files
+# URLs).
+gateway_url = "http://gateway:8080"
+
+# How every unit but gateway-rust reaches the others when an environment's discovery is
+# "lighthouse": through the gateway pair.
+gateway_pair = ["http://gateway-1:8080", "http://gateway-2:8080"]
+
+# How `<urls:unit>` renders, per environment:
+#   alias       ["http://<unit>:<port>"]: the network alias the unit's blue and green containers
+#               share; Docker's DNS answers with the running ones.
+#   lighthouse  ["eureka:<REGISTRY NAME>"] in gateway-rust, whose pools then follow the registry;
+#               `gateway_pair` in every other unit.
+# `doubled`: the units with a second instance per colour (Java prod ran core, ui and files twice
+# per colour; core-scheduler stays at one). Keep in step with scripts/<env>/rust.
+[env.dev]
+discovery = "alias"
+doubled = []
+
+[env.stage]
+discovery = "alias"
+doubled = []
+
+[env.prod]
+discovery = "alias"
+doubled = ["core-exec", "core-editor", "core-events", "ui-engine", "ui-shell", "ui-editor", "files-serve", "files-manage"]
+
+# The units: their port, the Java service whose settings they read, their name in the registry
+# (default: the unit's name in capitals) and the keys they apply live besides `live` above.
+[[units]]
+name = "gateway-rust"
+port = 8080
+service = "gateway"
+registry = "GATEWAY"
+# Routes and pools, with each pool's breaker, retry and outlier settings.
+live = ["routes", "pools"]
+
+[[units]]
+name = "security-auth"
+port = 8101
+service = "security"
+
+[[units]]
+name = "security-internal"
+port = 8112
+service = "security"
+
+[[units]]
+name = "security-admin"
+port = 8113
+service = "security"
+
+[[units]]
+name = "files-serve"
+port = 8103
+service = "files"
+
+[[units]]
+name = "files-manage"
+port = 8104
+service = "files"
+
+[[units]]
+name = "core-exec"
+port = 8105
+service = "core"
+
+[[units]]
+name = "core-editor"
+port = 8111
+service = "core"
+
+[[units]]
+name = "core-events"
+port = 8109
+service = "core"
+
+[[units]]
+name = "core-scheduler"
+port = 8108
+service = "core"
+
+[[units]]
+name = "ui-engine"
+port = 8102
+service = "ui"
+
+[[units]]
+name = "ui-shell"
+port = 8106
+service = "ui"
+
+[[units]]
+name = "ui-editor"
+port = 8107
+service = "ui"
+
+[[units]]
+name = "multi"
+port = 8110
+service = "multi"
+
+[[units]]
+name = "notification"
+port = 8114
+service = "notification"
+
+# The database of each schema's units: the Spring datasource the Java service connected with
+# (`<prefix>.url`, `.username`, else `<schema>.db.url`, `.username`). Placeholders
+# `<db.host:schema>`, `<db.port:schema>`, `<db.name:schema>`, `<db.user:schema>`.
+[db_prefix]
+security = "spring.r2dbc"
+core = "spring.r2dbc"
+files = "spring.datasource"
+notification = "spring.datasource"
+
+# Placeholders read from the unit's Java service: `<name>` is the Java key `key` (default: the
+# name) of kind str, int or bool. Unset, Spring injected the `@Value` default (`default`); with
+# `required = true` there is none and the value must be set.
+[[settings]]
+name = "security.appCodeSuffix"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "security.subdomain.endings"
+kind = "str"
+required = true
+
+[[settings]]
+name = "jwt.token.default.expiry"
+kind = "int"
+required = true
+
+[[settings]]
+name = "jwt.token.rememberme.expiry"
+kind = "int"
+required = true
+
+[[settings]]
+name = "jwt.token.default.refresh"
+kind = "int"
+default = 10
+
+[[settings]]
+name = "files.resources.endpoint"
+kind = "str"
+required = true
+
+[[settings]]
+name = "files.resources.bucketPrefix"
+kind = "str"
+required = true
+
+[[settings]]
+name = "ui.cdnHostName"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "ui.cdnStripAPIPrefix"
+kind = "bool"
+default = true
+
+[[settings]]
+name = "ui.cdnReplacePlus"
+kind = "bool"
+default = false
+
+[[settings]]
+name = "ui.cdnResizeOptionsType"
+kind = "str"
+default = "none"
+
+[[settings]]
+name = "ui.jsURL"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "ui.analytics.ingestionHost"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "ui.analytics.engine.url"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "ui.apple.bundleIdPrefix"
+kind = "str"
+default = "com.modlix.apps"
+
+[[settings]]
+name = "ui.apple.teamId"
+kind = "str"
+default = ""
+
+[[settings]]
+name = "ui.apple.certificateId"
+kind = "str"
+default = ""
+
+# The secrets, in the line order of rust-units.env: the Java service and key they come from
+# (`key = "mq"`: the AMQP URI made of the service's spring.rabbitmq.* or mq.* settings), whether
+# they must be set, where a unit's document holds them (`path`) and which units get them. Each
+# unit gets only its own; the rendered TOMLs never hold them.
+[[secrets]]
+name = "MODLIX__REDIS__URL"
+service = "gateway"
+key = "redis.url"
+required = true
+path = "redis.url"
+units = ["gateway-rust", "security-auth", "security-internal", "security-admin", "files-serve", "files-manage",
+  "core-exec", "core-editor", "core-events", "core-scheduler", "ui-engine", "ui-shell", "ui-editor", "notification"]
+
+[[secrets]]
+name = "MODLIX__JWT__KEY"
+service = "security"
+key = "jwt.key"
+required = true
+path = "jwt.key"
+units = ["security-auth", "security-internal", "security-admin"]
+
+[[secrets]]
+name = "MODLIX__MQ__URI"
+service = "core"
+key = "mq"
+required = true
+path = "mq.uri"
+units = ["security-auth", "security-internal", "security-admin", "core-exec", "core-editor", "core-events",
+  "core-scheduler", "notification"]
+
+[[secrets]]
+name = "MODLIX__SMS__TWO_FACTOR_API_KEY"
+service = "security"
+key = "sms.provider.2factor.api.key"
+required = false
+path = "sms.two_factor_api_key"
+units = ["security-auth", "security-admin"]
+
+[[secrets]]
+name = "MODLIX__STORAGE__ACCESS_KEY_ID"
+service = "files"
+key = "files.resources.accessKeyId"
+required = true
+path = "storage.access_key_id"
+units = ["files-serve", "files-manage"]
+
+[[secrets]]
+name = "MODLIX__STORAGE__SECRET_ACCESS_KEY"
+service = "files"
+key = "files.resources.secretAccessKey"
+required = true
+path = "storage.secret_access_key"
+units = ["files-serve", "files-manage"]
+
+[[secrets]]
+name = "MODLIX__SHELL__ANALYTICS_ENGINE_SECRET"
+service = "ui"
+key = "ui.analytics.engine.secret"
+required = false
+path = "shell.analytics_engine_secret"
+units = ["ui-shell"]
+
+[[secrets]]
+name = "MODLIX__EDITOR__APPLE_API_KEY_ID"
+service = "ui"
+key = "ui.apple.apiKeyId"
+required = false
+path = "editor.apple_api_key_id"
+units = ["ui-editor"]
+
+[[secrets]]
+name = "MODLIX__EDITOR__APPLE_API_ISSUER_ID"
+service = "ui"
+key = "ui.apple.apiIssuerId"
+required = false
+path = "editor.apple_api_issuer_id"
+units = ["ui-editor"]
+
+[[secrets]]
+name = "MODLIX__EDITOR__APPLE_API_KEY_CONTENT"
+service = "ui"
+key = "ui.apple.apiKeyContent"
+required = false
+path = "editor.apple_api_key_content"
+units = ["ui-editor"]
+
+# Different per unit: the compose file maps each to the MODLIX__DATABASE__PASSWORD or
+# MODLIX__MONGO__URI of the units below.
+[[secrets]]
+name = "SECURITY_DB_PASSWORD"
+service = "security"
+key = "spring.r2dbc.password"
+required = true
+path = "database.password"
+units = ["security-auth", "security-internal", "security-admin"]
+
+[[secrets]]
+name = "CORE_DB_PASSWORD"
+service = "core"
+key = "spring.r2dbc.password"
+required = true
+path = "database.password"
+units = ["core-exec", "core-editor", "core-events", "core-scheduler"]
+
+[[secrets]]
+name = "FILES_DB_PASSWORD"
+service = "files"
+key = "spring.datasource.password"
+required = true
+path = "database.password"
+units = ["files-serve", "files-manage"]
+
+[[secrets]]
+name = "NOTIFICATION_DB_PASSWORD"
+service = "notification"
+key = "spring.datasource.password"
+required = true
+path = "database.password"
+units = ["notification"]
+
+[[secrets]]
+name = "CORE_MONGO_URI"
+service = "core"
+key = "spring.data.mongodb.uri"
+required = true
+path = "mongo.uri"
+units = ["core-exec", "core-editor", "core-events", "core-scheduler"]
+
+[[secrets]]
+name = "UI_MONGO_URI"
+service = "ui"
+key = "spring.data.mongodb.uri"
+required = true
+path = "mongo.uri"
+units = ["ui-engine", "ui-shell", "ui-editor"]
+
+# ai.env: what nocode-ai applied from config-server, as the variables it reads. `keys`: where it
+# takes the value from (the first one config-server sends wins). Kinds: "gateway" is written as
+# `gateway_url`; "str" is written when the key is set, even empty; "set" only when not empty;
+# "bool" as true or false. `only_with`: written only when that variable was. `then`: written after
+# the variables, each when the variable named in `when` was written (or always).
+[ai]
+then = [
+  { name = "REDIS_ENABLED", value = "true", when = "REDIS_URL" },
+  { name = "AI_TRACKING_ENABLED", value = "true", when = "MYSQL_URL" },
+  { name = "CONFIG_SERVER_ENABLED", value = "false" },
+  { name = "EUREKA_ENABLED", value = "false" },
+]
+
+[[ai.env]]
+name = "SECURITY_SERVICE_URL"
+keys = ["ai.security.url"]
+kind = "gateway"
+required = true
+
+[[ai.env]]
+name = "FILES_SERVICE_URL"
+keys = ["ai.files.url"]
+kind = "gateway"
+required = true
+
+[[ai.env]]
+name = "GATEWAY_URL"
+keys = ["ai.gateway.url"]
+kind = "gateway"
+required = true
+
+[[ai.env]]
+name = "LLM_PROVIDER"
+keys = ["ai.llm.provider"]
+kind = "str"
+
+[[ai.env]]
+name = "ANTHROPIC_API_KEY"
+keys = ["ai.secrets.anthropicAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "OPENAI_API_KEY"
+keys = ["ai.secrets.openaiAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "DEEPSEEK_API_KEY"
+keys = ["ai.secrets.deepSeekAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "MINIMAX_API_KEY"
+keys = ["ai.secrets.minimaxAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "GOOGLE_API_KEY"
+keys = ["ai.secrets.googleAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "GOOGLE_MAPS_API_KEY"
+keys = ["ai.secrets.googleMapsAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "GOOGLE_MAP_ID"
+keys = ["ai.secrets.googleMapID"]
+kind = "str"
+
+[[ai.env]]
+name = "APPBUILDER_MAIN_MODEL"
+keys = ["ai.appbuilder.mainModel"]
+kind = "str"
+
+[[ai.env]]
+name = "APPBUILDER_CODER_MODEL"
+keys = ["ai.appbuilder.coderModel"]
+kind = "str"
+
+[[ai.env]]
+name = "APPBUILDER_CODER_ENABLED"
+keys = ["ai.appbuilder.coderEnabled"]
+kind = "bool"
+
+[[ai.env]]
+name = "COMPONENT_CATALOG_URL"
+keys = ["ai.componentCatalogUrl"]
+kind = "str"
+
+[[ai.env]]
+name = "SCRAPECREATORS_API_KEY"
+keys = ["ai.adzump.scrapeCreatorsAPIKey", "adzump.scrapeCreatorsAPIKey"]
+kind = "str"
+
+[[ai.env]]
+name = "REDIS_URL"
+keys = ["ai.redis.url", "redis.url"]
+kind = "set"
+required = true
+
+[[ai.env]]
+name = "MYSQL_URL"
+keys = ["ai.db.url"]
+kind = "set"
+
+[[ai.env]]
+name = "MYSQL_USERNAME"
+keys = ["ai.db.username"]
+kind = "set"
+only_with = "MYSQL_URL"
+
+[[ai.env]]
+name = "MYSQL_PASSWORD"
+keys = ["ai.db.password"]
+kind = "set"
+only_with = "MYSQL_URL"
+
+[[ai.env]]
+name = "ADZUMP_GOOGLE_ADS_DEVELOPER_TOKEN"
+keys = ["ai.adzump.googleAds.developerToken", "adzump.googleAds.developerToken"]
+kind = "set"
+
+[[ai.env]]
+name = "ADZUMP_GOOGLE_ADS_ACCESS_TOKEN"
+keys = ["ai.adzump.googleAds.accessToken", "adzump.googleAds.accessToken"]
+kind = "set"
+
+[[ai.env]]
+name = "ADZUMP_GOOGLE_ADS_REFRESH_TOKEN"
+keys = ["ai.adzump.googleAds.refreshToken", "adzump.googleAds.refreshToken"]
+kind = "set"
+
+[[ai.env]]
+name = "ADZUMP_GOOGLE_ADS_CLIENT_ID"
+keys = ["ai.adzump.googleAds.clientId", "adzump.googleAds.clientId"]
+kind = "set"
+
+[[ai.env]]
+name = "ADZUMP_GOOGLE_ADS_CLIENT_SECRET"
+keys = ["ai.adzump.googleAds.clientSecret", "adzump.googleAds.clientSecret"]
+kind = "set"
+
+[[ai.env]]
+name = "ADZUMP_META_ACCESS_TOKEN"
+keys = ["ai.adzump.meta.accessToken", "adzump.meta.accessToken"]
+kind = "set"
+
+# ssr.env (and ssr-<region>.env): what ssr-server's configLoader.ts read from config-server's
+# first property source, as the variables it reads. `{ssr}` is `ssr`, or `ssr-<region>` falling
+# back to `ssr` for a region. Kinds: "or" takes the first truthy group (`||`), "nullish" the first
+# group set (`??`), "bool" the first set as true or false, "gateway" is written as `gateway_url`
+# on the main hosts. `unmapped`: read by configLoader.ts with no variable for it, so reported when
+# set. SERVER_PORT is left out: the image sets it.
+[ssr]
+unmapped = ["{ssr}.routing.assignmentCookieMaxAgeSeconds"]
+then = [{ name = "CONFIG_SERVER_ENABLED", value = "false" }]
+
+[[ssr.env]]
+name = "GATEWAY_URL"
+keys = ["{ssr}.gateway.url", "gateway.url"]
+kind = "gateway"
+required = true
+
+[[ssr.env]]
+name = "REDIS_URL"
+keys = ["{ssr}.redis.url"]
+kind = "or"
+required = true
+
+[[ssr.env]]
+name = "REDIS_INVALIDATION_URL"
+keys = ["{ssr}.redis.invalidationUrl"]
+kind = "or"
+
+[[ssr.env]]
+name = "CDN_HOST_NAME"
+keys = ["{ssr}.cdn.hostName", "ui.cdnHostName"]
+kind = "or"
+
+[[ssr.env]]
+name = "CDN_STRIP_API_PREFIX"
+keys = ["{ssr}.cdn.stripAPIPrefix", "ui.cdnStripAPIPrefix"]
+kind = "bool"
+
+[[ssr.env]]
+name = "CDN_REPLACE_PLUS"
+keys = ["{ssr}.cdn.replacePlus", "ui.cdnReplacePlus"]
+kind = "bool"
+
+[[ssr.env]]
+name = "CDN_RESIZE_OPTIONS_TYPE"
+keys = ["{ssr}.cdn.resizeOptionsType", "ui.cdnResizeOptionsType"]
+kind = "or"
+
+[[ssr.env]]
+name = "CACHE_TTL_SECONDS"
+keys = ["{ssr}.cache.ttlSeconds"]
+kind = "or"
+
+[[ssr.env]]
+name = "ANALYTICS_INGESTION_HOST"
+keys = ["ui.analytics.ingestionHost"]
+kind = "or"
+
+[[ssr.env]]
+name = "SECURITY_APP_CODE_SUFFIX"
+keys = ["security.appCodeSuffix"]
+kind = "nullish"

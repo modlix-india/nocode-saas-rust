@@ -523,7 +523,7 @@ async fn refused_and_odd_requests() {
     let r = e.call(get_req("/api/ui/application").no_header("appCode")).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     assert_eq!(r.obj()["debugMessage"], s("400 BAD_REQUEST \"Required header 'appCode' is not present.\""));
-    assert_eq!(r.obj()["code"], s("DEF.HEADER_MISSING"));
+    assert_eq!(r.obj()["code"], s("COMMON.HEADER_MISSING"));
     assert_eq!(r.obj()["message"], s("The request is missing the appCode header."));
     for path in ["/api/ui/page/home", "/api/ui/style", "/api/ui/theme", "/api/ui/function/a/b", "/api/ui/urlDetails"] {
         let r = e.call(get_req(path).no_header("clientCode")).await;

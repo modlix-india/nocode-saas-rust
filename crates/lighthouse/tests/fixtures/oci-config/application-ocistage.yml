@@ -1,0 +1,42 @@
+# Synthetic fixture: stage. Some required values are left out on purpose.
+security:
+  subdomain:
+    endings: .stage.fixture.test
+  db:
+    url: r2dbc:mysql://db-stage.fixture.test/security
+    username: sec_stage
+    password: fixture-sec-stage
+spring:
+  r2dbc:
+    url: r2dbc:pool:mysql://db-stage.fixture.test:3310/core
+    username: core_stage
+    password: fixture-core-stage
+  datasource:
+    url: jdbc:mysql://a.fixture.test:3306,b.fixture.test:3306/files
+    username: files_stage
+    password: fixture-files-stage
+  data:
+    mongodb:
+      uri: mongodb://fixture-mongo-stage:27017
+  rabbitmq:
+    host: mq-stage.fixture.test
+    port: 5673
+    username: mq_stage
+    password: fixture-mq-stage
+files:
+  resources:
+    bucketPrefix: ""
+    accessKeyId: STAGEACCESS
+ui:
+  cdnReplacePlus: maybe
+ai:
+  llm:
+    provider: openai
+  appbuilder:
+    coderEnabled: perhaps
+ssr:
+  cdn:
+    stripAPIPrefix: true
+    hostName: cdn-stage.fixture.test
+  cache:
+    ttlSeconds: 0

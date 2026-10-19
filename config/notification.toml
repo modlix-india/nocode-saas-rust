@@ -1,5 +1,5 @@
 # notification on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
-# from config/local.env.
+# from config/local.toml.
 #
 # Consumes SCRATCH queues only. The real notifications1..3 hold ~600 local messages nobody has
 # consumed (Java notification is not running locally); consuming them would send real email to
@@ -36,13 +36,9 @@ internal_upstream = "http://localhost:8112"
 [core]
 # Java core answers both definition reads. With the Rust core units instead:
 # upstream = "http://localhost:8111" (core-editor), connections_upstream = "http://localhost:8105" (core-exec).
-upstream = "eureka:CORE"
+upstream = "http://localhost:8111"
+connections_upstream = "http://localhost:8105"
 timeout_seconds = 60
-
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-register = true
-register_as = "NOTIFICATION-RS"
 
 [mq]
 # RabbitMQ's default account, which the broker accepts from localhost only. Elsewhere the
@@ -60,3 +56,9 @@ prefetch = 10
 
 [sse]
 heartbeat_seconds = 15
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "NOTIFICATION"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

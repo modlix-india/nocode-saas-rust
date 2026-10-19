@@ -12,6 +12,7 @@ path = "src/bin/multi.rs"
 
 [dependencies]
 platform.workspace = true
+lighthouse-client.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

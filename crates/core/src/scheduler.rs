@@ -1818,7 +1818,7 @@ mod tests {
     /// The store and the definition writes against a scratch database on the local Mongo,
     /// dropped at the end: the rows and indexes as the server keeps them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+    #[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
     async fn against_a_scratch_database() {
         use futures::FutureExt;
         if !crate::testing::local_stack() {

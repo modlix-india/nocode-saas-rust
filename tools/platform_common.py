@@ -45,6 +45,11 @@ KINDS = (
     ("eventActions", "EventAction", "eventActions"),
 )
 
+# The jobs the seed carries: the worker's 11 less ENTITY_PROCESSOR_METERING (entity-processor
+# retired with the switch to Rust, 2026-10-18). A seed with any other count is refused, so a job
+# lost by an edit is caught before anything is written or exported.
+EXPECTED_JOBS = 10
+
 # Fields core manages on every document; never compared, never sent on a create.
 MANAGED = {"id", "_id", "version", "createdAt", "createdBy", "updatedAt", "updatedBy", "uniqueName", "baseClientCode", "message"}
 
@@ -67,13 +72,13 @@ def load_seed() -> dict[str, Any]:
 
 
 def check_seed(seed: dict[str, Any]) -> None:
-    """The file is what the Rust test checks: 11 jobs, one function, definition and action each."""
+    """The file is what the Rust test checks: EXPECTED_JOBS jobs, one function, definition and action each."""
     app = seed["app"]
     if (app.get("appCode"), app.get("clientCode")) != ("platform", "SYSTEM"):
         die("definitions.json is not for app platform / SYSTEM")
     names = [j["name"] for j in seed["jobs"]]
-    if len(names) != 11 or len(set(names)) != 11:
-        die(f"definitions.json should hold 11 distinct jobs, has {names}")
+    if len(names) != EXPECTED_JOBS or len(set(names)) != EXPECTED_JOBS:
+        die(f"definitions.json should hold {EXPECTED_JOBS} distinct jobs, has {names}")
     for key, prefix in (("functions", "Platform.Jobs."), ("eventDefinitions", ""), ("eventActions", "")):
         got = sorted(d["name"] for d in seed[key])
         if got != sorted(prefix + n for n in names):

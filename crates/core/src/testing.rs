@@ -59,7 +59,7 @@ pub fn request(auth: Authentication, draft: bool, debug: Option<&str>) -> Arc<Re
 }
 
 /// The tests against the local stack (Mongo, MySQL, security, entity-processor) run with
-/// `CORE_LOCAL_STACK=1` and `--include-ignored`, and the secrets of `config/local.env` in the
+/// `CORE_LOCAL_STACK=1` and `--include-ignored`, and the secrets of `config/local.toml` in the
 /// environment.
 pub fn local_stack() -> bool {
     std::env::var("CORE_LOCAL_STACK").is_ok_and(|v| v == "1")

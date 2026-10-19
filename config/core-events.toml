@@ -1,7 +1,7 @@
-# core-events, local. Consumes SCRATCH queues only: the real events1..3 belong to the local Java
-# core. The scratch exchange and queues are declared on start.
+# core-events, local. Since the local stack runs without Java (2026-10-18) it consumes the real
+# events1..3 queues of the `events` exchange.
 # core-exec on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
-# from config/local.env; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
+# from config/local.toml; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
 
 [server]
 port = 8109
@@ -34,13 +34,9 @@ auth_upstream = "http://localhost:8101"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[entity_processor]
-upstream = "eureka:ENTITY-PROCESSOR"
-
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [core]
+# Core's own internal routes for the platform jobs (core-editor).
+upstream = "http://localhost:8111"
 function_timeout_seconds = 300
 java_zone_offset = "+05:30"
 
@@ -48,10 +44,24 @@ java_zone_offset = "+05:30"
 # The password (or the whole URI) comes from MODLIX__MQ__PASSWORD / MODLIX__MQ__URI.
 host = "localhost"
 username = "guest"
-events_exchange = "rs_scratch_events"
-events_routing_keys = "rs_scratch_events1,rs_scratch_events2,rs_scratch_events3"
+events_exchange = "events"
+events_routing_keys = "events1,events2,events3"
 
 [events]
-queues = "rs_scratch_events1,rs_scratch_events2,rs_scratch_events3"
+queues = "events1,events2,events3"
 prefetch = 16
 declare = true
+
+[files]
+# files-manage (the files internal routes).
+upstream = "http://localhost:8104"
+
+[ui]
+# ui-editor (the transport cleanup the platform jobs call).
+upstream = "http://localhost:8107"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "CORE-EVENTS"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

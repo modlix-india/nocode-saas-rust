@@ -109,9 +109,17 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let security_upstream = platform::security::security_upstream(&cfg.security, eureka.as_ref())?;
     let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
     let store = Store::new(mongo.clone(), security.clone(), &cache);
-    let ep = Arc::new(EntityProcessor::new(Upstream::from_config(&cfg.entity_processor.upstream, eureka.as_ref())?)?);
+    // entity-processor retired and message is stopped (2026-10-18): a unit configured without
+    // them still starts, and only the calls that need them fail ("upstream has no addresses").
+    let retired = |what: &str, c: &platform::config::UpstreamConfig| {
+        Upstream::from_config(c, eureka.as_ref()).unwrap_or_else(|e| {
+            tracing::warn!(upstream = what, error = %e, "not configured: the calls that need it will fail");
+            Upstream::fixed(&[])
+        })
+    };
+    let ep = Arc::new(EntityProcessor::new(retired("entity-processor", &cfg.entity_processor.upstream))?);
     let security_calls = Arc::new(SecurityCalls::new(security_upstream.clone())?);
-    let message = Arc::new(message_calls::MessageCalls::new(Upstream::from_config(&cfg.message.upstream, eureka.as_ref())?)?);
+    let message = Arc::new(message_calls::MessageCalls::new(retired("message", &cfg.message.upstream))?);
     let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, eureka.as_ref())?)?);
     let platform = Arc::new(make_platform_calls(cfg, eureka.as_ref(), &security_upstream)?);
 
@@ -182,7 +190,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
 fn make_platform_calls(cfg: &CoreConfig, eureka: Option<&Eureka>, security: &Upstream) -> Result<platform_calls::PlatformCalls> {
     let make = |what: &str, c: &platform::config::UpstreamConfig| {
         Upstream::from_config(c, eureka).map_err(|e| {
-            tracing::warn!(service = what, error = %e, "no upstream for the platform functions");
+            tracing::warn!(upstream = what, error = %e, "no upstream for the platform functions");
             e.to_string()
         })
     };
@@ -261,11 +269,10 @@ pub(crate) fn storage_service(
 /// Starts core-exec and serves until a shutdown signal.
 pub async fn run_exec() -> Result<()> {
     const NAME: &str = "core-exec";
-    let cfg: CoreConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     let exec = connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
 
@@ -317,11 +324,10 @@ fn mongo_and_mysql_checks(health: &Health, mongo: &mongodb::Database, pool: Opti
 /// queue and never run KIRun. Serves only its health routes.
 pub async fn run_scheduler() -> Result<()> {
     const NAME: &str = "core-scheduler";
-    let cfg: CoreConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     overridable::pojo::set_java_zone_offset_seconds(cfg.core.zone_offset_seconds()?);
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
@@ -338,6 +344,7 @@ pub async fn run_scheduler() -> Result<()> {
     let security_calls = Arc::new(SecurityCalls::new(security_upstream)?);
     let pass = Arc::new(event_scheduler_of(cfg.clone(), store, cache.clone(), security_calls, mongo.clone(), pool.clone()));
     tracing::info!(instance = pass.instance_id(), "core-scheduler instance");
+    event_scheduler::describe_metrics();
     tokio::spawn(pass.run_forever());
 
     let health = Health::new(telemetry.metrics.clone());
@@ -389,17 +396,17 @@ pub fn events_listener_of(exec: &Exec, cfg: &CoreConfig) -> events::EventsListen
 /// only its health routes.
 pub async fn run_events() -> Result<()> {
     const NAME: &str = "core-events";
-    let cfg: CoreConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     let Some(uri) = cfg.mq.amqp_uri().filter(|_| cfg.mq.enabled) else {
         anyhow::bail!("core-events needs a broker: set [mq] (or MODLIX__MQ__URI)");
     };
     let exec = connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
     let listener = events_listener_of(&exec, &cfg);
+    events_queue::describe_metrics();
     tokio::spawn(events_queue::consume_forever(Arc::new(listener), uri, cfg.mq.events_exchange.clone(), cfg.events.clone()));
 
     let health = Health::new(telemetry.metrics.clone());

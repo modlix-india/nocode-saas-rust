@@ -1,0 +1,8 @@
+# Synthetic fixture: notification.
+server:
+  port: 8014
+spring:
+  datasource:
+    url: jdbc:mysql://notify.fixture.test:3306/notification
+    username: notify_user
+    password: fixture-notify-pass

@@ -1,5 +1,5 @@
 # security-internal on the local stack: the security service's service-to-service routes (see
-# crates/security/SPLIT.md). Secrets come from config/local.env: MODLIX__DATABASE__PASSWORD,
+# crates/security/SPLIT.md). Secrets come from config/local.toml: MODLIX__DATABASE__PASSWORD,
 # MODLIX__REDIS__URL, MODLIX__JWT__KEY (and MODLIX__MQ__URI to publish wallet events, left out
 # locally on purpose).
 
@@ -43,3 +43,9 @@ publish_events = false
 [mq]
 exchange = "events"
 routing_keys = "events1,events2,events3"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "SECURITY-INTERNAL"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

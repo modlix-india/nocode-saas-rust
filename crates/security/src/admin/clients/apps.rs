@@ -680,6 +680,30 @@ async fn evict_after_update(s: &AdminState, r: &Row) {
     svc.evict_everywhere(cache::APP_BY_ID, &opt_text(entity::u64_of(r, "id"))).await;
 }
 
+/// Everything cached against an app code, dropped when an app is created or deleted.
+///
+/// A code reused after a delete must not be served its predecessor's answers, nor a `false` or empty
+/// answer cached while the app did not exist: a cached `false` for read access turns every read of
+/// the new app's documents into "X with id ... not found", and an empty inheritance order hides its
+/// definitions from reads by name. Java evicted none of these on create or delete (see
+/// DIFFERENCES.md). Whole caches for the ones keyed `app:client` or `app:url:client`, and for the
+/// dependency caches (other apps' lists may name this code).
+async fn evict_app_code(s: &AdminState, code: &str) {
+    let svc = &s.caches().service;
+    for name in [
+        cache::APP_READ_ACCESS,
+        cache::APP_WRITE_ACCESS,
+        cache::INHERITANCE_ORDER,
+        cache::APP_DEPENDENCIES,
+        cache::APP_DEP_LIST,
+    ] {
+        svc.evict_all_everywhere(name).await;
+    }
+    for name in [cache::APP_BY_CODE_EXPLICIT, cache::APP_STATUS, cache::APP_BY_CODE] {
+        svc.evict_everywhere(name, code).await;
+    }
+}
+
 /// `AppService.create(entity)`.
 pub async fn create(s: &AdminState, ca: &ContextAuth, mut entity: Row) -> AuthResult<Row> {
     if let Some(code) = entity::str_of(&entity, "appCode") {
@@ -722,6 +746,7 @@ pub async fn create(s: &AdminState, ca: &ContextAuth, mut entity: Row) -> AuthRe
     let svc = &s.caches().service;
     svc.evict_all_everywhere(cache::APP_INHERITANCE).await;
     svc.evict_all_everywhere(cache::CLIENT_URI).await;
+    evict_app_code(s, &code).await;
     Ok(created)
 }
 
@@ -804,6 +829,7 @@ pub async fn delete(s: &AdminState, ca: &ContextAuth, id: u64) -> AuthResult<()>
     svc.evict_all_everywhere(cache::CLIENT_URL).await;
     svc.evict_all_everywhere(cache::GATEWAY_URL_CLIENT_APP_CODE).await;
     svc.evict_everywhere(cache::APP_STATUS, &code).await;
+    evict_app_code(s, &code).await;
     Ok(())
 }
 
@@ -856,6 +882,7 @@ pub async fn delete_everything(s: &AdminState, ca: &ContextAuth, id: u64, force:
     svc.evict_all_everywhere(cache::APP_INHERITANCE).await;
     svc.evict_everywhere(cache::APP_BY_CODE, &code).await;
     svc.evict_everywhere(cache::APP_BY_ID, &id.to_string()).await;
+    evict_app_code(s, &code).await;
     Ok(done)
 }
 

@@ -350,16 +350,19 @@ mod tests {
     }
 
     #[test]
-    fn the_local_files_of_the_scheduler_and_the_consumer_stay_on_scratch() {
+    /// The local stack runs without Java since 2026-10-18: the local scheduler is the only one and
+    /// publishes to the real `events` exchange that the local consumer reads.
+    fn the_local_files_of_the_scheduler_and_the_consumer_use_the_real_events() {
         let read = |f: &str| -> CoreConfig {
             let text = std::fs::read_to_string(format!("{}/../../config/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap();
             toml::from_str(&text).unwrap()
         };
         let s = read("core-scheduler.toml");
-        assert_eq!((s.server.port, s.core.scheduler.enabled, s.mq.events_exchange.as_str()), (8108, false, "rs_scratch_events"));
+        assert_eq!((s.server.port, s.core.scheduler.enabled, s.mq.events_exchange.as_str()), (8108, true, "events"));
+        assert_eq!(s.mq.events_routing_keys, "events1,events2,events3");
         let e = read("core-events.toml");
-        assert_eq!((e.server.port, e.mq.events_exchange.as_str(), e.events.declare), (8109, "rs_scratch_events", true));
-        assert!(e.events.queues.split(',').all(|q| q.starts_with("rs_scratch_")));
+        assert_eq!((e.server.port, e.mq.events_exchange.as_str()), (8109, "events"));
+        assert_eq!(e.events.queues, "events1,events2,events3");
     }
 
     #[test]

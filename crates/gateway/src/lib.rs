@@ -5,6 +5,8 @@
 //! route, pick a healthy instance of the route's pool, and stream the request there and the
 //! response back. See `proxy.rs` for exactly what the service receives.
 
+pub mod breaker;
+pub mod budget;
 pub mod config;
 pub mod messages;
 pub mod path;
@@ -12,6 +14,7 @@ pub mod pool;
 pub mod proxy;
 pub mod resolve;
 pub mod routes;
+pub mod window;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -37,11 +40,10 @@ pub const NAME: &str = "gateway-rust";
 
 /// Loads the configuration and serves until shut down.
 pub async fn run() -> Result<()> {
-    let cfg: GatewayConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<GatewayConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     platform::messages::configure(&cfg.messages)?;
     let (app, eureka) = build(&cfg).await?;
 
@@ -66,7 +68,7 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Eureka>)> {
     let mut pools = BTreeMap::new();
     for (name, p) in &cfg.pools {
         let pool = Pool::new(name, p, eureka.as_ref())?;
-        pool.spawn_health_checks();
+        pool.spawn_background();
         pools.insert(name.clone(), pool);
     }
     let routes = Routes::build(&cfg.routes, &pools)?;
@@ -78,6 +80,8 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Eureka>)> {
 
     let resolver = Resolver::new(
         // Host and draft resolution are security-internal routes: `internal_upstream` when set.
+        // Always the security units themselves, never this gateway: the gateway asks security
+        // before it can route anything, so going through itself would loop.
         platform::security::security_upstream(&cfg.security, eureka.as_ref())?,
         hosts,
         cfg.resolution.draft_trust_seconds,

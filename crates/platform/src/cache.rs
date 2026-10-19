@@ -38,6 +38,29 @@ pub fn normalize_redis_url(url: &str) -> String {
     format!("{scheme}://:{userinfo}@{host}")
 }
 
+/// Local cache lookups by `cache` and `result` (`hit`, `miss`): Micrometer's name for Caffeine's
+/// counters, so Java and Rust instances of a cache can share a panel.
+pub const CACHE_GETS: &str = "cache_gets_total";
+/// Local cache entries dropped for size or age, by `cache`.
+pub const CACHE_EVICTIONS: &str = "cache_evictions_total";
+
+/// The `cache` label for a cache name without its prefix. Most Java cache names carry the app,
+/// client, profile or storage they hold (`UIFunctionCache_<app>_<name>`, `profileAuthsById_42`,
+/// `<storage>_table_creation`), so the label keeps only the fixed part and the series stay
+/// bounded: the fixed tail when the name ends with one, else the leading letters.
+pub fn cache_label(name: &str) -> String {
+    const TAILS: [&str; 3] = ["_index_creation", "_table_creation", "_foreign_keys"];
+    if let Some(tail) = TAILS.iter().find(|t| name.ends_with(*t)) {
+        return tail[1..].to_string();
+    }
+    let head: String = name.chars().take_while(char::is_ascii_alphabetic).take(64).collect();
+    if head.is_empty() {
+        "other".into()
+    } else {
+        head
+    }
+}
+
 /// One cache's counters, as Caffeine's `stats()` reports them: lookups that found a value,
 /// lookups that did not, and entries dropped for size or age (not explicit evictions).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -193,10 +216,14 @@ impl CacheService {
                     let deleted: redis::RedisResult<i64> =
                         redis::cmd("DEL").arg(&full).query_async(&mut conn).await;
                     if let Err(e) = published.and(deleted) {
+                        crate::meter::redis_error("command");
                         tracing::warn!(cache = full, error = %e, "eviction not propagated");
                     }
                 }
-                Err(e) => tracing::warn!(cache = full, error = %e, "redis unavailable for eviction"),
+                Err(e) => {
+                    crate::meter::redis_error("connect");
+                    tracing::warn!(cache = full, error = %e, "redis unavailable for eviction");
+                }
             }
         }
     }
@@ -211,6 +238,7 @@ impl CacheService {
         let mut conn = match client.get_multiplexed_async_connection().await {
             Ok(c) => c,
             Err(e) => {
+                crate::meter::redis_error("connect");
                 tracing::warn!(error = %e, "redis unavailable for evictAllCaches");
                 return Some(false);
             }
@@ -219,6 +247,7 @@ impl CacheService {
             match redis::cmd("KEYS").arg(format!("{}-*", self.inner.prefix)).query_async(&mut conn).await {
                 Ok(k) => k,
                 Err(e) => {
+                    crate::meter::redis_error("command");
                     tracing::warn!(error = %e, "KEYS failed");
                     return Some(false);
                 }
@@ -231,6 +260,7 @@ impl CacheService {
                 redis::cmd("PUBLISH").arg(&self.inner.channel).arg(format!("{k}:*")).query_async(&mut conn).await;
             let deleted: redis::RedisResult<i64> = redis::cmd("DEL").arg(&k).query_async(&mut conn).await;
             if let Err(e) = published.and(deleted) {
+                crate::meter::redis_error("command");
                 tracing::warn!(cache = k, error = %e, "eviction not propagated");
             }
         }
@@ -251,10 +281,14 @@ impl CacheService {
                     let deleted: redis::RedisResult<i64> =
                         redis::cmd("HDEL").arg(&full).arg(key).query_async(&mut conn).await;
                     if let Err(e) = published.and(deleted) {
+                        crate::meter::redis_error("command");
                         tracing::warn!(cache = full, key, error = %e, "eviction not propagated");
                     }
                 }
-                Err(e) => tracing::warn!(cache = full, error = %e, "redis unavailable for eviction"),
+                Err(e) => {
+                    crate::meter::redis_error("connect");
+                    tracing::warn!(cache = full, error = %e, "redis unavailable for eviction");
+                }
             }
         }
     }
@@ -270,12 +304,14 @@ impl CacheService {
                 match r {
                     Ok(_) => true,
                     Err(e) => {
+                        crate::meter::redis_error("command");
                         tracing::warn!(channel, error = %e, "publish failed");
                         false
                     }
                 }
             }
             Err(e) => {
+                crate::meter::redis_error("connect");
                 tracing::warn!(channel, error = %e, "redis unavailable for publish");
                 false
             }
@@ -305,6 +341,7 @@ impl CacheService {
                             Err(e) => Err(e),
                         };
                         if let Err(e) = subscribed {
+                            crate::meter::redis_error("subscribe");
                             tracing::warn!(error = %e, "eviction channel subscribe failed");
                         } else {
                             if !first {
@@ -319,10 +356,14 @@ impl CacheService {
                                     this.dispatch(&payload).await;
                                 }
                             }
+                            crate::meter::redis_error("subscribe");
                             tracing::warn!("eviction channel closed, reconnecting");
                         }
                     }
-                    Err(e) => tracing::warn!(error = %e, "redis unreachable for evictions"),
+                    Err(e) => {
+                        crate::meter::redis_error("connect");
+                        tracing::warn!(error = %e, "redis unreachable for evictions");
+                    }
                 }
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
@@ -357,12 +398,14 @@ where
         self.caches
             .entry(full)
             .or_insert_with(|| {
+                let label = cache_label(cache_name);
                 Cache::builder()
                     .max_capacity(self.max_entries)
                     .time_to_live(self.ttl)
                     .eviction_listener(move |_k, _v, cause| {
                         if matches!(cause, moka::notification::RemovalCause::Expired | moka::notification::RemovalCause::Size) {
                             counters.evictions.fetch_add(1, Ordering::Relaxed);
+                            metrics::counter!(CACHE_EVICTIONS, "cache" => label.clone()).increment(1);
                         }
                     })
                     .build()
@@ -381,6 +424,8 @@ where
         } else {
             c.misses.fetch_add(1, Ordering::Relaxed);
         }
+        let name = full.strip_prefix(&self.prefix).and_then(|n| n.strip_prefix('-')).unwrap_or(full);
+        metrics::counter!(CACHE_GETS, "cache" => cache_label(name), "result" => if hit { "hit" } else { "miss" }).increment(1);
     }
 
     /// Java `cacheValueOrGet`: the cached value, or the loader's; a `None` from the loader is
@@ -469,6 +514,49 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_keep_the_fixed_part_of_a_name() {
+        assert_eq!(cache_label("UIFunctionCache_app_name"), "UIFunctionCache");
+        assert_eq!(cache_label("profileAuthsById_42"), "profileAuthsById");
+        assert_eq!(cache_label("fsGetDetail-STATIC-SYSTEM"), "fsGetDetail");
+        assert_eq!(cache_label("st42ab_table_creation"), "table_creation");
+        assert_eq!(cache_label("leads_index_creation"), "index_creation");
+        assert_eq!(cache_label("leads_foreign_keys"), "foreign_keys");
+        assert_eq!(cache_label("42"), "other");
+        assert_eq!(cache_label(&"a".repeat(100)).len(), 64);
+    }
+
+    #[test]
+    fn lookups_evictions_and_redis_failures_are_counted() {
+        let ((), text) = crate::meter::capture_async(async {
+            let svc = CacheService::new("cmn", "evictionChannel", Some("redis://127.0.0.1:1")).unwrap();
+            let fam = svc.family::<String, u32>();
+            for name in ["UIFunctionCache_a_x", "UIFunctionCache_b_y"] {
+                fam.get_or_load(name, "k".into(), || async { Ok::<_, ()>(Some(1)) }).await.unwrap();
+            }
+            fam.get_or_load("UIFunctionCache_a_x", "k".into(), || async { Ok::<_, ()>(Some(2)) }).await.unwrap();
+            svc.evict_everywhere("UIFunctionCache_a_x", "k").await;
+            svc.evict_all_everywhere("UIFunctionCache_a_x").await;
+            assert!(!svc.publish("ch", "m").await);
+
+            let small: LocalCaches<String, u32> = LocalCaches {
+                prefix: "cmn".into(),
+                caches: DashMap::new(),
+                counters: DashMap::new(),
+                ttl: Duration::from_secs(60),
+                max_entries: 2,
+            };
+            for i in 0..10u32 {
+                small.insert("pageCache_app", i.to_string(), i).await;
+            }
+            small.cache("pageCache_app").run_pending_tasks().await;
+        });
+        let gets = |result: &str| crate::meter::sample(&text, CACHE_GETS, &[("cache", "UIFunctionCache"), ("result", result)]);
+        assert_eq!((gets("hit"), gets("miss")), (Some(1.0), Some(2.0)));
+        assert!(crate::meter::sample(&text, CACHE_EVICTIONS, &[("cache", "pageCache")]).is_some_and(|n| n >= 1.0), "{text}");
+        assert_eq!(crate::meter::sample(&text, crate::meter::REDIS_ERRORS, &[("operation", "connect")]), Some(3.0));
+    }
 
     #[tokio::test]
     async fn evict_all_caches_without_and_with_an_unreachable_redis() {

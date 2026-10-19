@@ -1,9 +1,8 @@
-# core-scheduler, local. OFF by default: the local Java core runs its own scheduler on the same
-# Mongo, and a Rust pass here would claim ticks it should run and publish them elsewhere. Turn it
-# on only against a scratch database (MODLIX__CORE__SCHEDULER__ENABLED=true and
-# MODLIX__MONGO__DATABASE=<scratch>), publishing to a scratch exchange.
+# core-scheduler, local. Since the local stack runs without Java (2026-10-18) it is the only
+# scheduler: ON, publishing to the real `events` exchange that core-events consumes. Never run it
+# next to a Java core scheduler on the same Mongo.
 # core-exec on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
-# from config/local.env; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
+# from config/local.toml; the local Mongo needs no credentials (set MODLIX__MONGO__URI where it does).
 
 [server]
 port = 8108
@@ -36,20 +35,21 @@ auth_upstream = "http://localhost:8101"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[entity_processor]
-upstream = "eureka:ENTITY-PROCESSOR"
-
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [core]
 function_timeout_seconds = 300
 java_zone_offset = "+05:30"
 
 [core.scheduler]
-enabled = false
+# Local stack without Java (2026-10-18): this is the only scheduler.
+enabled = true
 
 [mq]
 # A scratch exchange: never the real `events` while Java core consumes it.
-events_exchange = "rs_scratch_events"
-events_routing_keys = "rs_scratch_events1,rs_scratch_events2,rs_scratch_events3"
+events_exchange = "events"
+events_routing_keys = "events1,events2,events3"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "CORE-SCHEDULER"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

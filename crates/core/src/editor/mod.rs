@@ -342,11 +342,10 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
 
 /// Starts core-editor and serves until a shutdown signal.
 pub async fn run() -> Result<()> {
-    let cfg: CoreConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     let exec = crate::connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
     let (_, router) = assemble(&cfg, &exec)?;

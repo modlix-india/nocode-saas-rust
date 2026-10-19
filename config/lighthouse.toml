@@ -1,0 +1,68 @@
+# lighthouse on the local stack: the registry every unit registers in, and the config server every
+# unit reads its configuration from ([config] below). Calls between units keep their static
+# localhost upstreams.
+#
+# A local pair, each listing both (an instance skips itself):
+#   MODLIX__REGISTRY__PEERS='["http://localhost:8761","http://localhost:8762"]' target/debug/lighthouse
+#   MODLIX__SERVER__PORT=8762 MODLIX__REGISTRY__SELF_URL=http://localhost:8762 \
+#   MODLIX__REGISTRY__PEERS='["http://localhost:8761","http://localhost:8762"]' target/debug/lighthouse
+
+[server]
+port = 8761
+shutdown_grace_seconds = 1
+
+[telemetry]
+log_format = "pretty"
+log_level = "info"
+environment = "local"
+
+[registry]
+self_url = "http://localhost:8761"
+peers = []
+
+# The config server for the local stack (env "local"): each unit's document is its own
+# config/<unit>.toml, and ai's and ssr's are config/ai.toml and config/ssr.toml (served as Spring
+# settings at /ai/default and /ssr/default). Their passwords and keys come from config/local.toml
+# (git-ignored): [units.*] into every unit, [ai] and [ssr] into those apps. Everything is read
+# again every 5 seconds; a change shows as a new version on the dashboard. tools/run-local.sh
+# starts the units with only LIGHTHOUSE_URLS and LIGHTHOUSE_TOKEN (local.toml's admin token, whose
+# SHA-256 it gives this instance as MODLIX__ADMIN_TOKEN_SHA256).
+#
+# To render dev from the local oci-config checkout instead (for `lighthouse parity`):
+#   MODLIX__CONFIG__SOURCE=dir:../oci-config MODLIX__CONFIG__ENV=dev MODLIX__CONFIG__LOCAL__DIR= \
+#   MODLIX__CONFIG__SPRING__PROFILES='["ocidev"]' target/release/lighthouse
+[config]
+source = "dir:config"
+env = "local"
+poll_seconds = 5
+
+[config.local]
+dir = "config"
+secrets_file = "config/local.toml"
+units = [
+  "gateway-rust",
+  "security-auth", "security-internal", "security-admin",
+  "files-serve", "files-manage",
+  "core-exec", "core-editor", "core-events", "core-scheduler",
+  "ui-engine", "ui-shell", "ui-editor",
+  "multi", "notification",
+]
+apps = ["ai", "ssr"]
+files = { "gateway-rust" = "gateway-rust-allrust.toml" }
+live = ["telemetry.log_level", "features"]
+unit_live = { "gateway-rust" = ["routes", "pools"] }
+
+[config.spring]
+profiles = ["default"]
+
+[config.spring.apps.ai]
+open = true
+prefixes = ["ai.", "adzump.", "redis."]
+
+[config.spring.apps.ssr]
+open = true
+prefixes = ["ssr.", "ssr-", "gateway.", "ui.", "security.appCodeSuffix", "server.port"]
+
+# Only this machine reaches it: what it serves holds real keys.
+[allowed]
+networks = ["127.0.0.0/8", "::1/128"]

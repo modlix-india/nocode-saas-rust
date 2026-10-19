@@ -1,0 +1,142 @@
+Rendered 15 unit configs, rust-units.env and ai.env, ssr.env, ssr-in.env for dev into {out} (TOMLs 0644, env files 0600).
+Filled from the Java settings: 121
+  ai.env: SECURITY_SERVICE_URL (ai.security.url, as http://gateway:8080)
+  ai.env: LLM_PROVIDER (ai.llm.provider)
+  ai.env: ANTHROPIC_API_KEY (ai.secrets.anthropicAPIKey)
+  ai.env: GOOGLE_MAP_ID (ai.secrets.googleMapID)
+  ai.env: APPBUILDER_MAIN_MODEL (ai.appbuilder.mainModel)
+  ai.env: APPBUILDER_CODER_ENABLED (ai.appbuilder.coderEnabled)
+  ai.env: SCRAPECREATORS_API_KEY (adzump.scrapeCreatorsAPIKey)
+  ai.env: REDIS_URL (ai.redis.url)
+  ai.env: MYSQL_URL (ai.db.url)
+  ai.env: MYSQL_USERNAME (ai.db.username)
+  ai.env: MYSQL_PASSWORD (ai.db.password)
+  ai.env: ADZUMP_GOOGLE_ADS_DEVELOPER_TOKEN (ai.adzump.googleAds.developerToken)
+  ai.env: ADZUMP_META_ACCESS_TOKEN (adzump.meta.accessToken)
+  core-editor.toml: db.host:core
+  core-editor.toml: db.port:core
+  core-editor.toml: db.name:core
+  core-editor.toml: db.user:core
+  core-editor.toml: security.appCodeSuffix
+  core-events.toml: db.host:core
+  core-events.toml: db.port:core
+  core-events.toml: db.name:core
+  core-events.toml: db.user:core
+  core-events.toml: security.appCodeSuffix
+  core-exec.toml: db.host:core
+  core-exec.toml: db.port:core
+  core-exec.toml: db.name:core
+  core-exec.toml: db.user:core
+  core-exec.toml: security.appCodeSuffix
+  core-scheduler.toml: db.host:core
+  core-scheduler.toml: db.port:core
+  core-scheduler.toml: db.name:core
+  core-scheduler.toml: db.user:core
+  core-scheduler.toml: security.appCodeSuffix
+  files-manage.toml: db.host:files
+  files-manage.toml: db.port:files
+  files-manage.toml: db.name:files
+  files-manage.toml: db.user:files
+  files-manage.toml: files.resources.endpoint
+  files-manage.toml: files.resources.bucketPrefix
+  files-serve.toml: db.host:files
+  files-serve.toml: db.port:files
+  files-serve.toml: db.name:files
+  files-serve.toml: db.user:files
+  files-serve.toml: files.resources.endpoint
+  files-serve.toml: files.resources.bucketPrefix
+  gateway-rust.toml: security.appCodeSuffix
+  gateway-rust.toml: security.subdomain.endings
+  notification.toml: db.host:notification
+  notification.toml: db.port:notification
+  notification.toml: db.name:notification
+  notification.toml: db.user:notification
+  rust-units.env: MODLIX__REDIS__URL (gateway: redis.url)
+  rust-units.env: MODLIX__JWT__KEY (security: jwt.key)
+  rust-units.env: MODLIX__MQ__URI (core: mq)
+  rust-units.env: MODLIX__SMS__TWO_FACTOR_API_KEY (security: sms.provider.2factor.api.key)
+  rust-units.env: MODLIX__STORAGE__ACCESS_KEY_ID (files: files.resources.accessKeyId)
+  rust-units.env: MODLIX__STORAGE__SECRET_ACCESS_KEY (files: files.resources.secretAccessKey)
+  rust-units.env: MODLIX__SHELL__ANALYTICS_ENGINE_SECRET (ui: ui.analytics.engine.secret)
+  rust-units.env: MODLIX__EDITOR__APPLE_API_KEY_ID (ui: ui.apple.apiKeyId)
+  rust-units.env: MODLIX__EDITOR__APPLE_API_ISSUER_ID (ui: ui.apple.apiIssuerId)
+  rust-units.env: MODLIX__EDITOR__APPLE_API_KEY_CONTENT (ui: ui.apple.apiKeyContent)
+  rust-units.env: SECURITY_DB_PASSWORD (security: spring.r2dbc.password)
+  rust-units.env: CORE_DB_PASSWORD (core: spring.r2dbc.password)
+  rust-units.env: FILES_DB_PASSWORD (files: spring.datasource.password)
+  rust-units.env: NOTIFICATION_DB_PASSWORD (notification: spring.datasource.password)
+  rust-units.env: CORE_MONGO_URI (core: spring.data.mongodb.uri)
+  rust-units.env: UI_MONGO_URI (ui: spring.data.mongodb.uri)
+  security-admin.toml: db.host:security
+  security-admin.toml: db.port:security
+  security-admin.toml: db.name:security
+  security-admin.toml: db.user:security
+  security-admin.toml: jwt.token.default.expiry
+  security-admin.toml: jwt.token.rememberme.expiry
+  security-admin.toml: jwt.token.default.refresh
+  security-admin.toml: security.appCodeSuffix
+  security-admin.toml: security.subdomain.endings
+  security-auth.toml: db.host:security
+  security-auth.toml: db.port:security
+  security-auth.toml: db.name:security
+  security-auth.toml: db.user:security
+  security-auth.toml: jwt.token.default.expiry
+  security-auth.toml: jwt.token.rememberme.expiry
+  security-auth.toml: jwt.token.default.refresh
+  security-auth.toml: security.appCodeSuffix
+  security-auth.toml: security.subdomain.endings
+  security-internal.toml: db.host:security
+  security-internal.toml: db.port:security
+  security-internal.toml: db.name:security
+  security-internal.toml: db.user:security
+  security-internal.toml: jwt.token.default.expiry
+  security-internal.toml: jwt.token.rememberme.expiry
+  security-internal.toml: jwt.token.default.refresh
+  security-internal.toml: security.appCodeSuffix
+  security-internal.toml: security.subdomain.endings
+  ssr-in.env: GATEWAY_URL (ssr.gateway.url)
+  ssr-in.env: REDIS_URL (ssr-in.redis.url)
+  ssr-in.env: CDN_HOST_NAME (ui.cdnHostName)
+  ssr-in.env: CDN_STRIP_API_PREFIX (ssr.cdn.stripAPIPrefix)
+  ssr-in.env: CDN_REPLACE_PLUS (ui.cdnReplacePlus)
+  ssr-in.env: CDN_RESIZE_OPTIONS_TYPE (ui.cdnResizeOptionsType)
+  ssr-in.env: CACHE_TTL_SECONDS (ssr.cache.ttlSeconds)
+  ssr-in.env: ANALYTICS_INGESTION_HOST (ui.analytics.ingestionHost)
+  ssr-in.env: SECURITY_APP_CODE_SUFFIX (security.appCodeSuffix)
+  ssr.env: GATEWAY_URL (ssr.gateway.url, as http://gateway:8080)
+  ssr.env: REDIS_URL (ssr.redis.url)
+  ssr.env: CDN_HOST_NAME (ui.cdnHostName)
+  ssr.env: CDN_STRIP_API_PREFIX (ssr.cdn.stripAPIPrefix)
+  ssr.env: CDN_REPLACE_PLUS (ui.cdnReplacePlus)
+  ssr.env: CDN_RESIZE_OPTIONS_TYPE (ui.cdnResizeOptionsType)
+  ssr.env: CACHE_TTL_SECONDS (ssr.cache.ttlSeconds)
+  ssr.env: ANALYTICS_INGESTION_HOST (ui.analytics.ingestionHost)
+  ssr.env: SECURITY_APP_CODE_SUFFIX (security.appCodeSuffix)
+  ui-editor.toml: ui.apple.bundleIdPrefix
+  ui-editor.toml: ui.apple.teamId
+  ui-engine.toml: ui.cdnHostName
+  ui-engine.toml: ui.cdnStripAPIPrefix
+  ui-engine.toml: ui.cdnReplacePlus
+  ui-engine.toml: ui.cdnResizeOptionsType
+  ui-engine.toml: ui.jsURL
+  ui-shell.toml: ui.analytics.ingestionHost
+  ui-shell.toml: ui.analytics.engine.url
+Not set in the Java settings, Java's default used: 14
+  ai.env: FILES_SERVICE_URL (ai.files.url not set; written as http://gateway:8080)
+  ai.env: GATEWAY_URL (ai.gateway.url not set; written as http://gateway:8080)
+  ai.env: DEEPSEEK_API_KEY (ai.secrets.deepSeekAPIKey: not set, the app's default stays)
+  ai.env: MINIMAX_API_KEY (ai.secrets.minimaxAPIKey: not set, the app's default stays)
+  ai.env: GOOGLE_API_KEY (ai.secrets.googleAPIKey: not set, the app's default stays)
+  ai.env: GOOGLE_MAPS_API_KEY (ai.secrets.googleMapsAPIKey: not set, the app's default stays)
+  ai.env: APPBUILDER_CODER_MODEL (ai.appbuilder.coderModel: not set, the app's default stays)
+  ai.env: COMPONENT_CATALOG_URL (ai.componentCatalogUrl: not set, the app's default stays)
+  ai.env: ADZUMP_GOOGLE_ADS_ACCESS_TOKEN (ai.adzump.googleAds.accessToken, adzump.googleAds.accessToken: not set, the app's default stays)
+  ai.env: ADZUMP_GOOGLE_ADS_REFRESH_TOKEN (ai.adzump.googleAds.refreshToken, adzump.googleAds.refreshToken: not set, the app's default stays)
+  ai.env: ADZUMP_GOOGLE_ADS_CLIENT_SECRET (ai.adzump.googleAds.clientSecret, adzump.googleAds.clientSecret: not set, the app's default stays)
+  ssr-in.env: REDIS_INVALIDATION_URL (ssr-in.redis.invalidationUrl: not set, the app's default stays)
+  ssr.env: REDIS_INVALIDATION_URL (ssr.redis.invalidationUrl: not set, the app's default stays)
+  ui-editor.toml: ui.apple.certificateId (ui: ui.apple.certificateId)
+Optional and empty in the Java settings: 2
+  ai.env: OPENAI_API_KEY (ai.secrets.openaiAPIKey)
+  ai.env: ADZUMP_GOOGLE_ADS_CLIENT_ID (ai.adzump.googleAds.clientId)
+REQUIRED and not found: 0

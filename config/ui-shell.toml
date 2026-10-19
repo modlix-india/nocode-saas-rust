@@ -1,5 +1,5 @@
 # ui-shell on the local stack. Secrets (MODLIX__MONGO__URI, MODLIX__REDIS__URL,
-# MODLIX__SHELL__ANALYTICS_ENGINE_SECRET) come from config/local.env.
+# MODLIX__SHELL__ANALYTICS_ENGINE_SECRET) come from config/local.toml.
 
 [server]
 port = 8106
@@ -27,9 +27,6 @@ internal_upstream = "http://localhost:8112"
 upstream = "eureka:CORE"
 timeout_seconds = 60
 
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
-
 [mongo]
 max_pool_size = 32
 
@@ -49,3 +46,9 @@ js_url = "https://cdn-local.modlix.com/js/dist/"
 analytics_ingestion_host = "https://engine.local.modlix.com"
 analytics_engine_url = "http://localhost:8096"
 ssr_channel = "ssr:cache:invalidation"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "UI-SHELL"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

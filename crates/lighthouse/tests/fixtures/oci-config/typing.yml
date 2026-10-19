@@ -1,0 +1,36 @@
+# Synthetic fixture: YAML typing and shapes only the Spring compat endpoint reads (app "typing").
+plain: hello world
+ints: [0, 7, -7, +12, 010, 0o17, 0x1F, 0b101, 1_000, 1:30, 190:20:30, 9223372036854775807, 9223372036854775808]
+floats: [1.0, -2.5, 1e5, 1.5e+3, .5, 6.02e23, 100000000.0, 0.0001, .inf, -.Inf, .NaN, 1_000.5]
+bools: [yes, No, ON, off, true, False, y, n]
+nulls: [~, null, Null, ""]
+dates: [2024-01-02, 2024-01-02T03:04:05Z]
+strings: ["010", '1:30', "yes", 1.2.3, v1, 0xZZ]
+emptylist: []
+emptymap: {}
+nothing:
+anchors:
+  base: &base
+    host: anchored
+    port: 1
+  copy: *base
+  merged:
+    <<: *base
+    port: 2
+keys:
+  8080: int-key
+  on: bool-key
+  "quoted.key": dotted
+  1.5: float-key
+nested:
+  - [a, b]
+  - - c
+    - d
+  - {x: 1, y: [2, 3]}
+block: |+
+  kept
+
+stripped: |-
+  no newline
+literal: |2
+    indented

@@ -9,7 +9,7 @@
 //! a scratch storage of the MySQL app `appa` (no rows, so no table), all through the APIs, and
 //! everything is deleted through them at the end.
 //!
-//! Run: `set -a; source config/local.env; set +a; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
+//! Run: `eval "$(tools/local-env.py)"; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
 
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
@@ -158,7 +158,7 @@ async fn scenario(h: &Http, editor: &str, data: &str, exec: &crate::Exec, st: &s
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn editor_on_the_local_stack() {
     if !local_stack() {
         return;

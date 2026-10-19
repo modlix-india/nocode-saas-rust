@@ -133,9 +133,9 @@ pub fn spring_code(status: StatusCode, reason: &str) -> Coded {
     crate::catalogue::register();
     let quoted = |prefix: &str| reason.strip_prefix(prefix).and_then(|r| r.split('\'').next()).filter(|n| !n.trim().is_empty());
     let code = if let Some(h) = quoted("Required header '") {
-        Coded::new("DEF.HEADER_MISSING").param("header", h)
+        input::header_missing(h)
     } else if reason.starts_with("Required header") || reason.starts_with("Missing request header") {
-        Coded::new("DEF.HEADER_MISSING")
+        Coded::new("COMMON.HEADER_MISSING")
     } else if let Some(p) = quoted("Required query parameter '").or_else(|| quoted("Required parameter '")) {
         input::param_missing(p)
     } else if let Some(p) = quoted("Required part '").or_else(|| quoted("Required request part '")) {
@@ -421,8 +421,8 @@ mod tests {
     #[tokio::test]
     async fn spring_refusals_are_coded() {
         for (status, reason, code, field) in [
-            (400, "Required header 'appCode' is not present.", "DEF.HEADER_MISSING", Some(("header", "appCode"))),
-            (400, "Required header is not present", "DEF.HEADER_MISSING", None),
+            (400, "Required header 'appCode' is not present.", "COMMON.HEADER_MISSING", Some(("field", "appCode"))),
+            (400, "Required header is not present", "COMMON.HEADER_MISSING", None),
             (400, "Required query parameter 'keys' is not present.", "COMMON.PARAM_MISSING", Some(("field", "keys"))),
             (400, "Required parameter 'filePath' is not present.", "COMMON.PARAM_MISSING", Some(("field", "filePath"))),
             (400, "Required part 'file' is not present.", "COMMON.FIELD_MISSING", Some(("field", "file"))),
@@ -444,7 +444,7 @@ mod tests {
         }
         let (status, v) = body(error_response(spring_refusal(StatusCode::BAD_REQUEST, "Required header 'clientCode' is not present."))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(v["code"], "DEF.HEADER_MISSING");
+        assert_eq!(v["code"], "COMMON.HEADER_MISSING");
         assert_eq!(v["message"], "The request is missing the clientCode header.");
         assert_eq!(v["debugMessage"], "400 BAD_REQUEST \"Required header 'clientCode' is not present.\"");
         let (_, v) = body(error_response(bool_param(&Params::from_query(Some("draft=maybe")), "draft", false).unwrap_err())).await;

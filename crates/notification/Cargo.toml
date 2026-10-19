@@ -22,6 +22,7 @@ chrono.workspace = true
 futures.workspace = true
 http.workspace = true
 lapin = "4"
+metrics.workspace = true
 parking_lot.workspace = true
 percent-encoding.workspace = true
 reqwest.workspace = true

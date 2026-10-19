@@ -34,6 +34,9 @@ use crate::messages::{self, Rendered};
 
 pub type AppResult<T> = Result<T, AppError>;
 
+/// Every coded error rendered for a response, by `code` and `status` ([`Coded::render`]).
+pub const CODED_ERRORS: &str = "coded_errors_total";
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     /// A message for the caller, as `GenericException(status, message)`.
@@ -240,9 +243,11 @@ impl Coded {
     }
 
     /// Renders this error for the current request: status, body, and the report later layers
-    /// read.
+    /// read. Counted in [`CODED_ERRORS`]: every coded answer, whichever unit's handler wrote it,
+    /// is rendered here once.
     pub fn render(&self, exception_id: &str) -> (StatusCode, Vec<u8>, ErrorReport) {
         let status = self.resolved_status();
+        metrics::counter!(CODED_ERRORS, "code" => self.code.to_string(), "status" => status.as_str().to_string()).increment(1);
         let rendered = match &self.relayed {
             Some(r) => self.relayed_rendered(r),
             None => messages::render(&self.code, &self.params, exception_id),
@@ -299,9 +304,20 @@ pub fn coded_body(report: &ErrorReport, rendered: &Rendered) -> Vec<u8> {
 /// A coded error as a response with the platform's headers. Server faults are logged with the
 /// detail; refusals at debug level.
 pub fn coded_response(c: &Coded) -> Response {
+    coded_response_logged(c, true)
+}
+
+/// [`coded_response`] logged at debug level whatever the status: for answers a service gives on
+/// purpose, many times a second, whose cause is already logged once elsewhere (the gateway's open
+/// circuit breaker logs its state changes).
+pub fn coded_response_quiet(c: &Coded) -> Response {
+    coded_response_logged(c, false)
+}
+
+fn coded_response_logged(c: &Coded, faults_as_errors: bool) -> Response {
     let id = exception_id();
     let (status, body, report) = c.render(&id);
-    if status.is_server_error() {
+    if status.is_server_error() && faults_as_errors {
         tracing::error!(exception_id = id, %status, code = %c.code, debug = report.debug, "request failed");
     } else {
         tracing::debug!(exception_id = id, %status, code = %c.code, debug = report.debug, "request refused");
@@ -355,16 +371,36 @@ impl IntoResponse for AppError {
                 headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("0"));
                 (status, headers).into_response()
             }
-            Self::Internal(e) => {
-                let id = exception_id();
-                tracing::error!(exception_id = id, error = ?e, "unexpected error");
-                // unknown_error_with_id, trailing space and all.
-                let message = format!("Please try again. A server error - {id} ");
-                json_error(StatusCode::INTERNAL_SERVER_ERROR, &id, &message)
-            }
+            // A real fault: COMMON.INTERNAL_ERROR with the cause in debugMessage, as security's
+            // are (Kiran, 2026-10-17: callers keep seeing the cause, as Java shows it), with any
+            // credentials inside a URL masked.
+            Self::Internal(e) => coded_response(&Coded::new("COMMON.INTERNAL_ERROR").debug(mask_url_credentials(&format!("{e:#}")))),
             Self::Coded(c) => coded_response(&c),
         }
     }
+}
+
+/// `scheme://user:password@host` with the part before `@` replaced by `***`: connection errors
+/// can name a URL, and the Redis URL carries its password in the user slot.
+pub fn mask_url_credentials(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("://") {
+        let start = at + 3;
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest.find(|c: char| c == '/' || c == '?' || c == '#' || c.is_whitespace() || c == '"' || c == '\'').unwrap_or(rest.len());
+        match rest[..end].rfind('@') {
+            Some(cred) => {
+                out.push_str("***");
+                out.push_str(&rest[cred..end]);
+            }
+            None => out.push_str(&rest[..end]),
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Bad input, named: what a request that cannot be read answers (400, never a 500).
@@ -555,6 +591,38 @@ pub fn format_message(template: &str, params: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_quiet_coded_response_answers_the_same() {
+        let c = Coded::new("COMMON.INTERNAL_ERROR").debug("x");
+        let (a, b) = (coded_response(&c), coded_response_quiet(&c));
+        assert_eq!((a.status(), b.status()), (StatusCode::INTERNAL_SERVER_ERROR, StatusCode::INTERNAL_SERVER_ERROR));
+        let (va, vb) = (body(a).await, body(b).await);
+        // Each answer has its own error id; everything else is the same.
+        assert_eq!((&va["code"], &va["debugMessage"], &va["action"]), (&vb["code"], &vb["debugMessage"], &vb["action"]));
+    }
+
+    #[test]
+    fn coded_answers_are_counted_by_code_and_status() {
+        let ((), text) = crate::meter::capture(|| {
+            let c = Coded::new("COMMON.FIELD_MISSING").status(StatusCode::BAD_REQUEST);
+            c.render("E1");
+            c.render("E2");
+            Coded::new("NO.SUCH_CODE").render("E3");
+        });
+        let count = |code: &str, status: &str| crate::meter::sample(&text, CODED_ERRORS, &[("code", code), ("status", status)]);
+        assert_eq!(count("COMMON.FIELD_MISSING", "400"), Some(2.0));
+        assert_eq!(count("NO.SUCH_CODE", "500"), Some(1.0));
+    }
+
+    #[test]
+    fn url_credentials_are_masked() {
+        assert_eq!(mask_url_credentials("mysql://root:pw@db:3306/core and mongodb://u:p@m1,m2/x?a=b"), "mysql://***@db:3306/core and mongodb://***@m1,m2/x?a=b");
+        assert_eq!(mask_url_credentials("GET http://example.com/a@b failed"), "GET http://example.com/a@b failed");
+        assert_eq!(mask_url_credentials("redis://:only@r:6379"), "redis://***@r:6379");
+        assert_eq!(mask_url_credentials("no address here: x@y"), "no address here: x@y");
+        assert_eq!(mask_url_credentials("\"amqp://g:g@mq:5672\""), "\"amqp://***@mq:5672\"");
+    }
+
     use super::*;
     use axum::body::to_bytes;
 
@@ -781,8 +849,12 @@ mod tests {
         assert_eq!(v, serde_json::json!({"exceptionId": v["exceptionId"], "message": "Taken", "stackTrace": "", "debugMessage": "Taken"}));
         let r = AppError::Empty(StatusCode::FORBIDDEN).into_response();
         assert_eq!(r.headers()["content-length"], "0");
-        let v = body(AppError::Internal(anyhow::anyhow!("x")).into_response()).await;
-        assert!(v["message"].as_str().unwrap().starts_with("Please try again. A server error - "));
+        let v = body(AppError::Internal(anyhow::anyhow!("pool timed out").context("reading users")).into_response()).await;
+        assert_eq!(v["code"], "COMMON.INTERNAL_ERROR");
+        assert!(v["message"].as_str().unwrap().starts_with("Something went wrong on our side."), "{v}");
+        assert_eq!(v["debugMessage"], "reading users: pool timed out");
+        let v = body(AppError::Internal(anyhow::anyhow!("connect redis://cmn:s3cret@redis:6379/0 failed")).into_response()).await;
+        assert_eq!(v["debugMessage"], "connect redis://***@redis:6379/0 failed");
     }
 
     #[test]

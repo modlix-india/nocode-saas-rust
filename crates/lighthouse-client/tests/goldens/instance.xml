@@ -1,0 +1,33 @@
+<instance>
+  <instanceId>h2:ai:8000</instanceId>
+  <hostName>h2</hostName>
+  <app>AI</app>
+  <ipAddr>10.1.1.2</ipAddr>
+  <status>UP</status>
+  <overriddenstatus>UNKNOWN</overriddenstatus>
+  <port enabled="true">8000</port>
+  <securePort enabled="false">9443</securePort>
+  <countryId>1</countryId>
+  <dataCenterInfo class="com.netflix.appinfo.InstanceInfo$DefaultDataCenterInfo">
+    <name>MyOwn</name>
+  </dataCenterInfo>
+  <leaseInfo>
+    <renewalIntervalInSecs>30</renewalIntervalInSecs>
+    <durationInSecs>90</durationInSecs>
+    <registrationTimestamp>1792395663072</registrationTimestamp>
+    <lastRenewalTimestamp>1792395663072</lastRenewalTimestamp>
+    <evictionTimestamp>0</evictionTimestamp>
+    <serviceUpTimestamp>1792395663072</serviceUpTimestamp>
+  </leaseInfo>
+  <metadata class="java.util.Collections$EmptyMap"/>
+  <homePageUrl>http://10.1.1.2:8000/</homePageUrl>
+  <statusPageUrl>http://10.1.1.2:8000/info</statusPageUrl>
+  <healthCheckUrl>http://10.1.1.2:8000/health</healthCheckUrl>
+  <secureHealthCheckUrl></secureHealthCheckUrl>
+  <vipAddress>ai</vipAddress>
+  <secureVipAddress>ai</secureVipAddress>
+  <isCoordinatingDiscoveryServer>false</isCoordinatingDiscoveryServer>
+  <lastUpdatedTimestamp>1792395663072</lastUpdatedTimestamp>
+  <lastDirtyTimestamp>1792395662982</lastDirtyTimestamp>
+  <actionType>ADDED</actionType>
+</instance>

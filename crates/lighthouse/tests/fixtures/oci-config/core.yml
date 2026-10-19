@@ -1,0 +1,15 @@
+# Synthetic fixture: core.
+server:
+  port: 8005
+mq:
+  port: 5674
+spring:
+  rabbitmq:
+    host: ${mq.host:mq-default}
+---
+spring:
+  config:
+    activate:
+      on-profile: ocistage
+mq:
+  host: mq-core-stage.fixture.test

@@ -1,0 +1,15 @@
+# Synthetic fixture: what only ssr reads in prod (its first property source there).
+ssr:
+  redis:
+    url: redis://ssr-prod:6379
+  cache:
+    ttlSeconds: 1200
+  cdn:
+    resizeOptionsType: cloudflare
+ssr-in:
+  redis:
+    url: redis://ssr-in-prod:6379
+  cache:
+    ttlSeconds: 300
+  routing:
+    assignmentCookieMaxAgeSeconds: 120

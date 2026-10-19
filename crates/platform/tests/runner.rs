@@ -137,8 +137,8 @@ async fn serves_observes_and_shuts_down() {
     let r = http.get(format!("{base}/empty")).send().await.unwrap();
     assert_eq!((r.status().as_u16(), r.headers()["content-length"].to_str().unwrap()), (404, "0"));
     let v: serde_json::Value = http.get(format!("{base}/internal")).send().await.unwrap().json().await.unwrap();
-    assert!(v["message"].as_str().unwrap().starts_with("Please try again. A server error - "));
-    assert!(!v.to_string().contains("secret detail"), "internal detail never reaches the caller");
+    // A real fault is coded; its cause is in debugMessage, as Java shows it (Kiran, 2026-10-17).
+    assert_eq!((v["code"].as_str(), v["debugMessage"].as_str()), (Some("COMMON.INTERNAL_ERROR"), Some("secret detail")));
     let r = http.get(format!("{base}/same")).send().await.unwrap();
     assert_eq!((r.status().as_u16(), r.headers()["x-cache"].to_str().unwrap()), (304, "HIT"));
 
@@ -172,6 +172,13 @@ async fn serves_observes_and_shuts_down() {
     assert!(m.contains("route=\"/ok\""));
     assert!(m.contains("route=\"unmatched\""));
     assert!(m.contains("service=\"runner-test\""));
+    // The process, the runtime and the build, read at the scrape.
+    use platform::meter::sample;
+    for name in ["process_resident_memory_bytes", "process_start_time_seconds", "process_cpu_seconds_total", "tokio_runtime_workers", "tokio_runtime_alive_tasks"] {
+        assert!(sample(&m, name, &[("service", "runner-test")]).is_some(), "{name} in {m}");
+    }
+    assert_eq!(sample(&m, "build_info", &[("service", "runner-test"), ("instance", "i1")]), Some(1.0));
+    assert!(m.contains("# HELP http_server_request_duration_seconds"));
 
     // Readiness reflects its checks.
     assert_eq!(http.get(format!("{base}/readyz")).send().await.unwrap().status(), 200);

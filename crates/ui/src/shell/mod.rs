@@ -27,11 +27,10 @@ pub const NAME: &str = "ui-shell";
 
 /// Loads configuration, connects everything, and serves until shut down.
 pub async fn run() -> Result<()> {
-    let cfg: ShellConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    if let Some(file) = platform::config::config_file(NAME) {
-        tracing::info!(file = %file.display(), "configuration file");
-    }
+    let loaded = platform::config::load_async::<ShellConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     overridable::pojo::set_java_zone_offset_seconds(cfg.ui.zone_offset_seconds()?);
 
     let db = platform::db::mongo_database(&cfg.mongo).await?;

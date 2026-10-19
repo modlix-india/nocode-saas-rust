@@ -1,9 +1,9 @@
 {
   "file": "platform_SYSTEM.cmodl",
-  "sha256": "72b872d89b44d41fd85313330166ef9328fd4ebf2c68899d65fb0ab40101fc8d",
+  "sha256": "b4c0b6bd3a3eaf4ca728edf032cd94e29fbc210bb9f2876bcf3159b089c5eb08",
   "madeFrom": "https://apps.local.modlix.com",
-  "madeAt": "2026-10-15T13:23:35+00:00",
-  "uniqueTransportCode": "3iU2lkoMRBvsSRqtJ85A1W",
+  "madeAt": "2026-10-18T17:03:25+00:00",
+  "uniqueTransportCode": "YzRtX9iDFR5w7GJK6X4m5R",
   "app": {
     "appCode": "platform",
     "appName": "Platform",
@@ -14,7 +14,6 @@
     "Function": [
       "Platform.Jobs.BILLING_RECONCILE",
       "Platform.Jobs.CORE_METERING",
-      "Platform.Jobs.ENTITY_PROCESSOR_METERING",
       "Platform.Jobs.EVENT_RUN_CLEANUP",
       "Platform.Jobs.FILES_METERING",
       "Platform.Jobs.FILES_TTL_CLEANUP",
@@ -27,7 +26,6 @@
     "EventDefinition": [
       "BILLING_RECONCILE",
       "CORE_METERING",
-      "ENTITY_PROCESSOR_METERING",
       "EVENT_RUN_CLEANUP",
       "FILES_METERING",
       "FILES_TTL_CLEANUP",
@@ -40,7 +38,6 @@
     "EventAction": [
       "BILLING_RECONCILE",
       "CORE_METERING",
-      "ENTITY_PROCESSOR_METERING",
       "EVENT_RUN_CLEANUP",
       "FILES_METERING",
       "FILES_TTL_CLEANUP",
@@ -54,7 +51,6 @@
   "changedFromLocal": [
     "BILLING_RECONCILE: schedule {\"cron\": \"45 0 * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"45 0 * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
     "CORE_METERING: schedule {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
-    "ENTITY_PROCESSOR_METERING: schedule {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
     "EVENT_RUN_CLEANUP: schedule {\"cron\": \"25 * * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"25 * * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
     "FILES_METERING: schedule {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"*/15 * * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
     "FILES_TTL_CLEANUP: schedule {\"cron\": \"20 * * * *\", \"timezone\": \"UTC\", \"enabled\": false, \"perClient\": false} -> {\"cron\": \"20 * * * *\", \"timezone\": \"UTC\", \"enabled\": true, \"perClient\": false}",
@@ -66,9 +62,9 @@
   ],
   "apply": [
     "Per environment, with approval; nothing here has been applied.",
-    "1. Cut over first or keep the schedules from double-running: stop the Java worker, set core.scheduler.enabled=false on Java core, run core-scheduler and core-events (CORE_SCHEDULER.md).",
+    "1. Only after the switch: the Java services (worker and core included) stopped, core-scheduler and core-events running (the runbook, oci-config rust/RUNBOOK.md). Java core has no CoreServices.Platform.* and the worker would run every job a second time.",
     "2. If the app is missing there: POST <env>/api/security/applications {\"appCode\": \"platform\", \"appName\": \"Platform\", \"appType\": \"APP\", \"appAccessType\": \"OWN\"} (security is not transported).",
-    "3. POST <env>/api/core/transports/createAndApply?isForBaseApp=true&applicationCode=platform multipart file=@platform_SYSTEM.cmodl (as app-transport.sh applies a core chunk; 33 objects, one request).",
-    "4. Verify: GET <env>/api/core/eventDefinitions?appCode=platform&clientCode=SYSTEM lists the 11 jobs with their schedules; the first ticks show in the event run log."
+    "3. POST <env>/api/core/transports/createAndApply?isForBaseApp=true&applicationCode=platform multipart file=@platform_SYSTEM.cmodl (as app-transport.sh applies a core chunk; 30 objects, one request).",
+    "4. Verify: GET <env>/api/core/eventDefinitions?appCode=platform&clientCode=SYSTEM lists the 10 jobs with their schedules; the first ticks show in the event run log."
   ]
 }

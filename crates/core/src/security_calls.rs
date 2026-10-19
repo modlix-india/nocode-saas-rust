@@ -220,13 +220,8 @@ impl SecurityCalls {
         let fail = |status: Option<u16>, body: String| FeignFailure { status, body };
         let path = format!("/api/security/users/internal/{user_id}");
         let base = self.upstream.base_for(&path).await.map_err(|e| fail(None, e.to_string()))?;
-        let resp = self
-            .http
-            .get(format!("{base}{path}"))
-            .headers(trace_headers())
-            .send()
-            .await
-            .map_err(|e| fail(None, e.to_string()))?;
+        let rb = self.http.get(format!("{base}{path}")).headers(trace_headers());
+        let resp = platform::meter::send_to_service(rb).await.map_err(|e| fail(None, e.to_string()))?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(|e| fail(Some(status.as_u16()), e.to_string()))?;
         let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -378,7 +373,7 @@ impl SecurityAsCaller {
         if let Some(b) = body {
             rb = rb.header("Content-Type", "application/json").body(b.to_string());
         }
-        let resp = rb.send().await.map_err(|e| FeignFailure { status: None, body: e.to_string() })?;
+        let resp = platform::meter::send_to_service(rb).await.map_err(|e| FeignFailure { status: None, body: e.to_string() })?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(|e| FeignFailure { status: Some(status.as_u16()), body: e.to_string() })?;
         let text = String::from_utf8_lossy(&bytes).into_owned();

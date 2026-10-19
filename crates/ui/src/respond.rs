@@ -440,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_errors_are_coded() {
         let (s, v) = coded(unknown_error(StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"Required header 'appCode' is not present.\"")).await;
-        assert_eq!((s, v["code"].as_str(), v["params"]["header"].as_str()), (StatusCode::BAD_REQUEST, Some("DEF.HEADER_MISSING"), Some("appCode")));
+        assert_eq!((s, v["code"].as_str(), v["params"]["field"].as_str()), (StatusCode::BAD_REQUEST, Some("COMMON.HEADER_MISSING"), Some("appCode")));
         assert_eq!(v["debugMessage"], "400 BAD_REQUEST \"Required header 'appCode' is not present.\"");
         let (_, v) = coded(unknown_error(StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"No request body\"")).await;
         assert_eq!(v["code"], "COMMON.BODY_MISSING");

@@ -34,7 +34,3 @@ tracing.workspace = true
 tokio = { workspace = true }
 reqwest.workspace = true
 
-# The read parity run against the Java core service; lives with the other parity tools.
-[[example]]
-name = "parity_appdata"
-path = "../../tools/parity_appdata/parity_appdata.rs"

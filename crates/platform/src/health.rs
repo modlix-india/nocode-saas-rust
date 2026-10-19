@@ -5,7 +5,7 @@
 //! - `/readyz`: this instance should get traffic. Runs every registered check (database, redis,
 //!   ...) with a short timeout, and fails as soon as shutdown begins so a load balancer drains
 //!   the instance before it stops.
-//! - `/metrics`: Prometheus text.
+//! - `/metrics`: Prometheus text, the scrape-time gauges read first ([`crate::meter::collect`]).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -68,37 +68,53 @@ impl Health {
         self.inner.draining.store(true, Ordering::SeqCst);
     }
 
+    pub fn is_draining(&self) -> bool {
+        self.inner.draining.load(Ordering::SeqCst)
+    }
+
+    /// What `/readyz` answers, for callers in this process (the Lighthouse registration waits
+    /// for it): not draining, and every check passing within its 2 seconds.
+    pub async fn ready(&self) -> bool {
+        !self.is_draining() && self.run_checks().await.0
+    }
+
+    /// Runs every check; whether all passed, and each one's outcome.
+    async fn run_checks(&self) -> (bool, Map<String, Value>) {
+        let checks: Vec<(String, Check)> = self.inner.checks.read().expect("health checks poisoned").clone();
+        let mut details = Map::new();
+        let mut ok = true;
+        for (name, check) in checks {
+            let result = tokio::time::timeout(Duration::from_secs(2), check()).await;
+            let v = match result {
+                Ok(Ok(())) => json!("ok"),
+                Ok(Err(e)) => {
+                    ok = false;
+                    json!(format!("failed: {e}"))
+                }
+                Err(_) => {
+                    ok = false;
+                    json!("timed out")
+                }
+            };
+            details.insert(name, v);
+        }
+        (ok, details)
+    }
+
     pub fn routes(&self) -> Router {
         async fn healthz() -> impl IntoResponse {
             (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], r#"{"status":"ok"}"#)
         }
 
         async fn readyz(State(h): State<Health>) -> impl IntoResponse {
-            if h.inner.draining.load(Ordering::SeqCst) {
+            if h.is_draining() {
                 return (
                     StatusCode::SERVICE_UNAVAILABLE,
                     [(header::CONTENT_TYPE, "application/json")],
                     r#"{"status":"draining"}"#.to_string(),
                 );
             }
-            let checks: Vec<(String, Check)> = h.inner.checks.read().expect("health checks poisoned").clone();
-            let mut details = Map::new();
-            let mut ok = true;
-            for (name, check) in checks {
-                let result = tokio::time::timeout(Duration::from_secs(2), check()).await;
-                let v = match result {
-                    Ok(Ok(())) => json!("ok"),
-                    Ok(Err(e)) => {
-                        ok = false;
-                        json!(format!("failed: {e}"))
-                    }
-                    Err(_) => {
-                        ok = false;
-                        json!("timed out")
-                    }
-                };
-                details.insert(name, v);
-            }
+            let (ok, details) = h.run_checks().await;
             let body = json!({"status": if ok { "ok" } else { "unavailable" }, "checks": Value::Object(details)});
             (
                 if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE },
@@ -108,6 +124,7 @@ impl Health {
         }
 
         async fn metrics(State(h): State<Health>) -> impl IntoResponse {
+            crate::meter::collect();
             (
                 [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
                 h.inner.metrics.render(),
@@ -149,5 +166,19 @@ mod tests {
         assert_eq!(&body[..], br#"{"status":"draining"}"#);
         let resp = app.oneshot(Request::get("/healthz").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "alive while draining");
+    }
+
+    #[tokio::test]
+    async fn ready_follows_the_checks_and_draining() {
+        let handle = || metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder().handle();
+        let h = Health::new(handle());
+        assert!(h.ready().await, "no checks: ready");
+        h.check("ok", || async { Ok(()) });
+        assert!(h.ready().await);
+        h.check("down", || async { anyhow::bail!("database unreachable") });
+        assert!(!h.ready().await);
+        let h = Health::new(handle());
+        h.start_draining();
+        assert!(h.is_draining() && !h.ready().await);
     }
 }

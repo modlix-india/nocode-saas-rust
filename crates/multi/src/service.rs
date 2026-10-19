@@ -72,7 +72,7 @@ impl Fwd {
     fn from(h: &HeaderMap) -> Res<Self> {
         let need = |n: &str| {
             header(h, n).ok_or_else(|| {
-                Failure::from(Coded::new("MULTI.HEADER_MISSING").param("header", n).debug(format!("Required header '{n}' is not present.")))
+                Failure::from(platform::error::input::header_missing(n).debug(format!("Required header '{n}' is not present.")))
             })
         };
         Ok(Self {
@@ -201,7 +201,7 @@ async fn downstream_error(resp: reqwest::Response, what: &str) -> Failure {
 }
 
 async fn send(rb: reqwest::RequestBuilder, what: &str) -> Res<reqwest::Response> {
-    let resp = rb.send().await.map_err(|e| call_failed(service_of(what), what, e.into()))?;
+    let resp = platform::meter::send_to_service(rb).await.map_err(|e| call_failed(service_of(what), what, e.into()))?;
     if !resp.status().is_success() {
         return Err(downstream_error(resp, what).await);
     }
@@ -273,7 +273,7 @@ async fn index_impl(s: &AppState, app_code: PathArg, q: QueryArg<IndexQuery>, se
                 if let Some(c) = &client {
                     rb = rb.query(&[("forClientCode", c)]);
                 }
-                let resp = fwd.apply(rb).send().await?.error_for_status()?;
+                let resp = platform::meter::send_to_service(fwd.apply(rb)).await?.error_for_status()?;
                 let v: Value = resp.json().await?;
                 Ok(v.as_object().cloned().unwrap_or_default())
             }
@@ -501,7 +501,8 @@ async fn download_definition(s: &AppState, url: &str) -> Res<Vec<u8>> {
             None => c,
         })
     };
-    let resp = s.http.get(url).send().await.map_err(|e| failed(None, e.to_string()))?;
+    // A caller's address: timed under one fixed target, never by its host or path.
+    let resp = platform::meter::send("definition-url", s.http.get(url)).await.map_err(|e| failed(None, e.to_string()))?;
     let status = resp.status();
     if !status.is_success() {
         return Err(failed(Some(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)), format!("answered {status}")));

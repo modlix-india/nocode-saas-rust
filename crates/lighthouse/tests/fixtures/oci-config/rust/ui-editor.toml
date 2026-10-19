@@ -1,0 +1,22 @@
+# ui-editor: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8107
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+
+[editor]
+apple_bundle_id_prefix = "<ui.apple.bundleIdPrefix>"
+apple_team_id = "<ui.apple.teamId>"
+apple_certificate_id = "<ui.apple.certificateId>"
+shell = "<urls:ui-shell>"
+files = "<urls:files-manage>"
+core = "<urls:core-editor>"

@@ -1,0 +1,29 @@
+# notification: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8114
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "stage"
+
+[database]
+host = "<db.host:notification>"
+port = "<db.port:notification>"
+database = "<db.name:notification>"
+username = "files_stage"
+
+[security]
+upstream = ["http://security-admin:8113"]
+auth_upstream = ["http://security-auth:8101"]
+internal_upstream = ["http://security-internal:8112"]
+
+[core]
+upstream = ["http://core-exec:8105"]
+
+[multi]
+upstream = ["http://multi:8110"]
+
+[notify]
+from = "fixture@\"quoted\".test"

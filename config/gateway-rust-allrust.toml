@@ -1,17 +1,15 @@
-# TEST VARIANT on 8182: every path with a Rust unit goes to it (files, multi, ui-engine, core-exec). gateway-rust on the local stack: the same routes as the Spring gateway (nocode-saas configfiles
-# gateway.yml), with every Java service followed through the local Eureka. Listens on 8180 next to
-# the Spring gateway on 8080.
+# gateway-rust on the local stack with no Java (2026-10-18): every route goes to a Rust unit, the
+# ai route to the local nocode-ai. Retired services (entity-processor, entity-collector, message,
+# worker, schedular, data, adzump) have no route; their paths fall through to ui-shell as any
+# unknown path does. Lighthouse serves this file as gateway-rust's document on the local stack.
 
 [server]
-port = 8182
+port = 8080
 
 [telemetry]
 log_format = "pretty"
 log_level = "info"
 environment = "local"
-
-[eureka]
-zones = ["http://localhost:9999/eureka/"]
 
 [redis]
 # The Java services' effective prefix; security's evictions of the host cache reach the gateway.
@@ -24,57 +22,43 @@ upstream = "http://localhost:8113"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
-[pools.security]
-upstreams = "eureka:SECURITY"
-health_path = "/actuator/health"
-
-[pools.files]
-upstreams = "eureka:FILES"
-health_path = "/actuator/health"
-
-[pools.core]
-upstreams = "eureka:CORE"
-health_path = "/actuator/health"
-
-[pools.ui]
-upstreams = "eureka:UI"
-health_path = "/actuator/health"
-
-[pools.multi]
-upstreams = "eureka:MULTI"
-health_path = "/actuator/health"
-
-[pools.entity-processor]
-upstreams = "eureka:ENTITY-PROCESSOR"
-health_path = "/actuator/health"
+# Resilience, per pool. Every pool has these defaults; a pool overrides any of them in its own
+# sub-table (for example [pools.core-exec.breaker] with open_ms = 10000 under it).
+#
+# [pools.NAME]
+# discovery_refresh_ms = 2000     # how often an eureka: pool reads the registry
+#
+# [pools.NAME.outlier]
+# consecutive_5xx = 5             # 502/503/504, broken connections or timeouts in a row; 0 = off
+# base_ejection_ms = 10000        # ejected for this times the number of ejections so far...
+# max_ejection_ms = 120000        # ...at most this, then back at its next passing health check
+# max_ejection_percent = 50       # never more of the pool than this at once
+#
+# [pools.NAME.retry]
+# on_5xx = true                   # one retry elsewhere for a GET/HEAD/OPTIONS/PUT/DELETE without
+#                                 # a body answered 502/503/504 (connect failures always retry)
+# jitter_min_ms = 25
+# jitter_max_ms = 50
+# budget_percent = 20             # 5xx retries stay within 20% of the pool's requests...
+# budget_window_seconds = 10      # ...over 10 s...
+# budget_min_per_second = 3       # ...or 3 a second, whichever allows more
+#
+# [pools.NAME.breaker]
+# enabled = true
+# window_seconds = 10             # measured in 1 s buckets
+# min_requests = 20               # opens at 20 or more requests in the window...
+# failure_percent = 50            # ...with 50% or more failed; then 503 at once
+# open_ms = 5000                  # for 5 s, then half_open_trials requests go through:
+# half_open_trials = 3            # all pass and it closes, one fails and it opens again
+# max_open_ms = 60000             # for twice as long, up to this
 
 [pools.notification]
 # Rust notification (it consumes scratch queues locally; its HTTP routes read the real tables).
 upstreams = ["http://localhost:8114"]
 health_path = "/readyz"
 
-[pools.message]
-upstreams = "eureka:MESSAGE"
-health_path = "/actuator/health"
-
-[pools.worker]
-upstreams = "eureka:WORKER"
-health_path = "/actuator/health"
-
-[pools.schedular]
-upstreams = "eureka:SCHEDULAR"
-health_path = "/actuator/health"
-
-[pools.data]
-upstreams = "eureka:DATA"
-health_path = "/actuator/health"
-
-[pools.adzump]
-upstreams = "eureka:ADZUMP"
-health_path = "/actuator/health"
-
 [pools.ai]
-upstreams = "eureka:AI"
+upstreams = ["http://localhost:5001"]
 health_path = "/health"
 
 [[routes]]
@@ -284,12 +268,6 @@ prefix = "/api/files"
 pool = "files-manage"
 
 [[routes]]
-id = "data"
-prefix = "/api/data"
-pool = "data"
-
-# core-editor: core's editor (CRUD, drafts, publish, versions, transports, index, cache, billing).
-[[routes]]
 id = "core-editor"
 prefix = "/api/core/functions"
 pool = "core-editor"
@@ -388,19 +366,9 @@ prefix = "/api/core"
 pool = "core-editor"
 
 [[routes]]
-id = "schedular"
-prefix = "/api/schedular"
-pool = "schedular"
-
-[[routes]]
 id = "multi"
 prefix = "/api/multi"
 pool = "multi-rs"
-
-[[routes]]
-id = "entity-processor"
-prefix = "/api/entity/processor"
-pool = "entity-processor"
 
 [[routes]]
 id = "notification"
@@ -408,31 +376,10 @@ prefix = "/api/notification"
 pool = "notification"
 
 [[routes]]
-id = "message"
-prefix = "/api/message"
-pool = "message"
-
-[[routes]]
-id = "worker"
-prefix = "/api/worker"
-pool = "worker"
-
-[[routes]]
-id = "entity-collector"
-prefix = "/api/entity/collector"
-pool = "entity-processor"
-
-[[routes]]
 id = "ai"
 prefix = "/api/ai"
 pool = "ai"
 
-[[routes]]
-id = "adzump"
-prefix = "/api/adzump"
-pool = "adzump"
-
-# The ui editor (CRUD, drafts, versions, publish, transport, filler, mobile apps): ui-editor.
 [[routes]]
 id = "ui-editor"
 prefix = "/api/ui/applications"
@@ -544,3 +491,9 @@ health_path = "/readyz"
 [pools.security-admin]
 upstreams = ["http://localhost:8113"]
 health_path = "/readyz"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "GATEWAY"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]

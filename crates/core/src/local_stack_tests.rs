@@ -1,10 +1,10 @@
 //! Tests against the local stack: the Mongo `core` database, MySQL `core`, security,
 //! entity-processor, as `config/core-exec.toml` names them, with the secrets of
-//! `config/local.env` in the environment. They only read: the definitions they execute are the
+//! `config/local.toml` in the environment. They only read: the definitions they execute are the
 //! local ones (appbuilder `Test.fibonacci`, leadzumptwo `LeadZumpV2.wzHoldText`, leadzump's
 //! entity-processor and marketingai dependency), nothing is written.
 //!
-//! Run: `set -a; source config/local.env; set +a; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
+//! Run: `eval "$(tools/local-env.py)"; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
 //!
 //! Java ports: `ContextLoadsTest` (core-exec starts and is ready), `ISecurityConfigurationTest
 //! .excludedPathStaysOpen` (the execute route answers an anonymous caller).
@@ -95,7 +95,7 @@ fn without<'a>(h: &[(&'a str, &'a str)], name: &str) -> Vec<(&'a str, &'a str)> 
 
 /// `ContextLoadsTest`, and every route of core-exec over HTTP.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn serves_every_route_on_the_local_stack() {
     if !local_stack() {
         return;
@@ -134,7 +134,9 @@ async fn serves_every_route_on_the_local_stack() {
     assert_eq!(a.json()[0]["result"]["auth"]["isAuthenticated"], json!(true));
     let a = c.post(&format!("{ex}/CoreServices.Hash/HashData"), &app, Some(r#"{"data":"abc","algorithm":"MD4"}"#)).await;
     assert_eq!(a.status, StatusCode::BAD_REQUEST);
-    assert_eq!(a.json()["message"], json!("Hash algorithm not supported: MD4"));
+    assert_eq!(a.json()["code"], json!("CORE.HASH_ALGORITHM_UNSUPPORTED"));
+    assert_eq!(a.json()["message"], json!("The hash algorithm MD4 is not supported."));
+    assert_eq!(a.json()["debugMessage"], json!("MD4 MessageDigest not available"));
     let a = c.get(&format!("{ex}/CoreServices.Security/GetAppUrl?appCode=appbuilder"), &app).await;
     assert_eq!(a.status, StatusCode::OK);
 
@@ -148,7 +150,8 @@ async fn serves_every_route_on_the_local_stack() {
     // Errors.
     let a = c.get(&format!("{ex}/Nope/Nothing"), &app).await;
     assert_eq!(a.status, StatusCode::NOT_FOUND);
-    assert_eq!(a.json()["message"], json!("Function with id Nope.Nothing not found"));
+    assert_eq!(a.json()["code"], json!("CORE.FUNCTION_NOT_FOUND"));
+    assert_eq!(a.json()["debugMessage"], json!("[object_not_found] Function with id Nope.Nothing not found"));
     let a = c.get(&format!("{ex}/NoDot"), &app).await;
     assert_eq!((a.status, a.json()["debugMessage"].clone()), (StatusCode::INTERNAL_SERVER_ERROR, json!("t1")));
     for header in ["X-Forwarded-Host", "X-Forwarded-Port", "appCode", "clientCode"] {
@@ -165,7 +168,8 @@ async fn serves_every_route_on_the_local_stack() {
     assert_eq!(a.json()["debugMessage"], json!("For input string: \"abc\""));
     let a = c.post(&format!("{ex}/LeadZumpV2/wzHoldText"), &caller("leadzumptwo"), Some(r#"{"reason":"x"}"#)).await;
     assert_eq!(a.status, StatusCode::FORBIDDEN);
-    assert_eq!(a.json()["message"], json!("Authorization $ is required to execute the function"));
+    assert_eq!(a.json()["code"], json!("CORE.FORBIDDEN_EXECUTION"));
+    assert_eq!(a.json()["debugMessage"], json!("[forbidden_execution] Authorization $ is required to execute the function"));
 
     // Remote (entity-processor) and dependency functions for leadzump.
     let lz = caller("leadzump");
@@ -174,7 +178,9 @@ async fn serves_every_route_on_the_local_stack() {
     // Found through the marketingai dependency; with a wrong verify token it raises no event,
     // as it does in Java.
     let a = c.get(&format!("{ex}/MarketingAI/verifyLeadgen?hubChallenge=5&hubMode=subscribe&hubVerifyToken=x"), &lz).await;
-    assert_eq!((a.status, a.json()["debugMessage"].clone()), (StatusCode::INTERNAL_SERVER_ERROR, json!("No events raised")));
+    assert_eq!(a.status, StatusCode::INTERNAL_SERVER_ERROR);
+    // KIRun's own text first; the steps it came out of (if any) follow on their own lines.
+    assert!(a.json()["debugMessage"].as_str().is_some_and(|d| d.lines().next() == Some("No events raised")), "{}", a.text);
 
     // repositoryFind / repositoryFilter.
     let f = "/api/core/functions";
@@ -231,7 +237,7 @@ pub(crate) async fn connected() -> crate::Exec {
 /// The execution path with a caller holding the function's execution authority, and the owner
 /// app code of a function found through an app dependency.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn executes_with_the_execution_authority() {
     if !local_stack() {
         return;
@@ -257,7 +263,7 @@ async fn executes_with_the_execution_authority() {
 
 /// The app repositories and the remote-repository lookup, read directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.env"]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn reads_definitions_and_remote_repositories() {
     if !local_stack() {
         return;

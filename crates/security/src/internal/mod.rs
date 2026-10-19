@@ -63,9 +63,10 @@ pub fn build(cfg: &AuthConfig, pool: sqlx::MySqlPool, cache: CacheService) -> Ar
 
 /// Loads configuration, connects, and serves until shut down.
 pub async fn run() -> Result<()> {
-    let cfg: AuthConfig = platform::config::load(NAME)?;
-    let telemetry = platform::telemetry::init(NAME, &cfg.telemetry)?;
-    crate::log_config_file(NAME);
+    let loaded = platform::config::load_async::<AuthConfig>(NAME).await?;
+    let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
+    loaded.log_source(NAME);
+    let cfg = loaded.config;
     crate::check_jwt_key(&cfg)?;
     crate::configure_messages(&cfg)?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;

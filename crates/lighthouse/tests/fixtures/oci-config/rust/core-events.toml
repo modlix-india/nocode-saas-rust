@@ -1,0 +1,27 @@
+# core-events: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8109
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[database]
+host = "<db.host:core>"
+port = "<db.port:core>"
+database = "<db.name:core>"
+username = "<db.user:core>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+app_code_suffix = "<security.appCodeSuffix>"
+
+[files]
+upstream = "<urls:files-manage>"
+
+[core]
+editor = "<urls:core-editor>"

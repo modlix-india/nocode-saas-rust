@@ -1,0 +1,89 @@
+# Synthetic fixture: the shared settings of every service. No value here is real.
+spring:
+  application:
+    name: fixture
+  codec:
+    max-in-memory-size: 10MB
+  r2dbc:
+    pool:
+      max-size: 20
+      validation-query: "SELECT 1"
+  lifecycle:
+    timeout-per-shutdown-phase: 1m
+eureka:
+  client:
+    enabled: off
+    fetch: yes
+    serviceUrl: { defaultZone: "http://eureka:9999/eureka/", other: x }
+jwt:
+  key: ${JWT_SECRET:fixture-jwt-default}
+  token:
+    default:
+      expiry: 0x1E
+      refresh: 010
+    rememberme:
+      expiry: 1:30:00
+ui:
+  jsURL: "https://cdn.fixture.test/js/dist"
+  cdnStripAPIPrefix: on
+files:
+  resources:
+    endpoint: ${files.resources.base}/objects
+    bucketPrefix: fixture
+    base: https://objects.fixture.test
+management:
+  endpoints:
+    web:
+      exposure:
+        include: [health, info, "metrics"]
+  ratio: 0.25
+  big: 12345678901
+  neg: -42
+  exp: 1.5e+3
+  plainexp: 1e5
+  dotted: .5
+  under: 1_000
+  inf: .inf
+  sci: 6.02e23
+logging:
+  level:
+    root: INFO
+    com.fincity: DEBUG
+redis:
+  url: redis://default:fixture-redis@redis-shared:6379
+  cache:
+    prefix: cmn
+message: |
+  first line
+  second line
+folded: >
+  folded one
+  folded two
+empty:
+nulled: ~
+quoted: 'it''s'
+escaped: "tab\there"
+list:
+  - one
+  - 2
+  - true
+  - nested: value
+    other: 3
+---
+spring:
+  config:
+    activate:
+      on-profile: ocidev
+redis:
+  url: redis://default:fixture-redis-dev@redis-dev:6379
+logging:
+  level:
+    root: WARN
+---
+spring:
+  config:
+    activate:
+      on-profile: "ocistage | ociprod"
+redis:
+  cache:
+    prefix: cmn-shared

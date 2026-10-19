@@ -275,6 +275,30 @@ async fn unreachable_security_is_an_error() {
 }
 
 #[tokio::test]
+async fn a_refused_member_moves_the_call_to_the_next() {
+    // The first member refuses every connection; each kind of call still lands, once, on the
+    // second (a GET with the caller's headers, a POST with its body, a plain-text read).
+    let (base, f) = fake().await;
+    let sec = SecurityClient::new(Upstream::fixed(&["http://127.0.0.1:1", &base]), 0).unwrap();
+    answer(&f, CTX, 200, r#"{"authenticated":true,"clientCode":"SYSTEM"}"#);
+    answer(&f, "/api/security/clients/internal/activeClientCodes", 200, r#"["FIN"]"#);
+    answer_as(&f, "/api/security/applications/internal/appStatus/a", 200, "text/plain", "ACTIVE");
+    answer(&f, CLIENT_BY_CODE, 200, r#"{"id":7}"#);
+    for _ in 0..2 {
+        assert!(sec.context_authentication(&caller("tok", false)).await.unwrap().authenticated);
+        let codes = vec!["FIN".to_string()];
+        assert_eq!(sec.active_client_codes(&codes).await.unwrap(), ["FIN"]);
+        assert_eq!(sec.app_status("a").await.unwrap().as_deref(), Some("ACTIVE"));
+        assert_eq!(sec.client_by_code("FIN").await.unwrap().unwrap()["id"], 7);
+    }
+    assert_eq!(count(&f, CTX), 2);
+    let (_, h) = last(&f, CTX);
+    assert_eq!((h["authorization"].to_str().unwrap(), h["x-debug"].to_str().unwrap()), ("tok", "tag-1"));
+    let seen = f.seen.lock().unwrap();
+    assert_eq!(seen.iter().filter(|(p, _, _)| p.ends_with("activeClientCodes")).count(), 2);
+}
+
+#[tokio::test]
 async fn active_client_codes_posts_the_codes() {
     let (c, f) = setup(0).await;
     answer(&f, "/api/security/clients/internal/activeClientCodes", 200, r#"["FIN"]"#);

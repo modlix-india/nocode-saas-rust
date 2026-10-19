@@ -1,0 +1,3 @@
+# Synthetic fixture: multi.
+server:
+  port: 8006

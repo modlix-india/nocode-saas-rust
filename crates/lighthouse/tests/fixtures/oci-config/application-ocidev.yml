@@ -1,0 +1,92 @@
+# Synthetic fixture: dev. No value here is real.
+security:
+  appCodeSuffix: "-dev"
+  subdomain:
+    endings: .dev.fixture.test,.dev-alt.fixture.test
+  db:
+    url: r2dbc:mysql://db-dev.fixture.test:3306/security
+    username: sec_user
+    password: fixture-sec-pass
+  sms:
+    provider:
+      2factor:
+        api:
+          key: fixture-2factor
+spring:
+  r2dbc:
+    url: r2dbc:mysql://db-dev.fixture.test:3306/${security.dbname:core}?sslMode=DISABLED
+    username: core_user
+    password: fixture-core-pass
+  datasource:
+    url: jdbc:mysql://db-dev.fixture.test:3307/files_db?useSSL=false
+    username: files_user
+    password: fixture-files-pass
+  data:
+    mongodb:
+      uri: mongodb://fixture-mongo:27017/core
+  rabbitmq:
+    host: mq-dev.fixture.test
+    username: mq_user
+    password: "p@ss/word"
+files:
+  resources:
+    accessKeyId: FIXTUREACCESS
+    secretAccessKey: fixture/secret+key
+ui:
+  cdnHostName: cdn-dev.fixture.test
+  cdnReplacePlus: yes
+  cdnResizeOptionsType: 1.50
+  analytics:
+    ingestionHost: ingest-dev.fixture.test
+    engine:
+      url: http://analytics:8000
+      secret: fixture-analytics-secret
+  apple:
+    teamId: FIXTURETEAM
+    apiKeyId: FIXTUREKEYID
+    apiIssuerId: fixture-issuer
+    apiKeyContent: |
+      -----BEGIN FIXTURE KEY-----
+      AAAA
+      -----END FIXTURE KEY-----
+ai:
+  security:
+    url: http://security:8001
+  llm:
+    provider: anthropic
+  secrets:
+    anthropicAPIKey: fixture-anthropic
+    openaiAPIKey: ""
+    googleMapID: 12345
+  appbuilder:
+    coderEnabled: on
+    mainModel: fixture-main
+  redis:
+    url: redis://ai-redis:6379
+  db:
+    url: mysql://ai-db:3306/ai
+    username: ai_user
+    password: it's-a-fixture
+  adzump:
+    googleAds:
+      developerToken: fixture-dev-token
+      clientId: ""
+adzump:
+  scrapeCreatorsAPIKey: fixture-scrape
+  meta:
+    accessToken: fixture-meta
+ssr:
+  redis:
+    url: redis://ssr-redis:6379
+  cdn:
+    stripAPIPrefix: false
+    hostName: ""
+  cache:
+    ttlSeconds: 900
+  gateway:
+    url: http://gateway-server:8080
+ssr-in:
+  redis:
+    url: redis://ssr-in-redis:6379
+gateway:
+  url: http://gateway-server:8080

@@ -44,8 +44,10 @@ pub(crate) fn trace_headers() -> HeaderMap {
     h
 }
 
+/// Sends a call to another service (timed by the service its path names) and reads the answer
+/// as Feign would.
 pub(crate) async fn text(rb: reqwest::RequestBuilder) -> Result<Option<String>, CoreError> {
-    let resp = rb.headers(trace_headers()).send().await.map_err(|e| CoreError::from(anyhow!(e)))?;
+    let resp = platform::meter::send_to_service(rb.headers(trace_headers())).await.map_err(|e| CoreError::from(anyhow!(e)))?;
     let status = resp.status();
     let bytes = resp.bytes().await.map_err(|e| CoreError::from(anyhow!(e)))?;
     if !status.is_success() {
@@ -109,6 +111,11 @@ pub struct RemoteCall<'a> {
 impl EntityProcessor {
     pub fn new(upstream: Upstream) -> anyhow::Result<Self> {
         Ok(Self { upstream, http: client()? })
+    }
+
+    /// Whether entity-processor is configured at all (it retired on 2026-10-18).
+    pub fn configured(&self) -> bool {
+        self.upstream.has_addresses()
     }
 
     async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Option<String>, CoreError> {

@@ -7,7 +7,7 @@
 //! `OtpServiceTest`, `UserSubOrganizationServiceTest`), with the expected values read from the same
 //! schema.
 //!
-//! Gated: `SECURITY_AUTH_LIVE=1` with `config/local.env` sourced. Reads change nothing (an OTP
+//! Gated: `SECURITY_AUTH_LIVE=1` with `eval "$(tools/local-env.py)"`. Reads change nothing (an OTP
 //! sent to an `example.invalid` address aside). The lifecycle test writes only to objects it
 //! makes: two scratch clients (`ZZRUL`, `ZZRUM`; brought back to ACTIVE on later runs, as the API
 //! only marks a client DELETED), and in them departments, designations, roles, users, managers,

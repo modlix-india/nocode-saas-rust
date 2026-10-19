@@ -25,3 +25,9 @@ rustc-ice-*.txt
 
 # Local secrets
 config/*.env
+# The local stack's passwords and keys, which Lighthouse merges into what it serves.
+config/local.toml
+
+# Python bytecode from the tools
+__pycache__/
+*.pyc

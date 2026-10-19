@@ -1,0 +1,20 @@
+# multi: a synthetic template (fixture). Each placeholder is a quoted name in angle brackets.
+
+[server]
+port = 8110
+
+[telemetry]
+log_format = "json"
+log_level = "info"
+environment = "<env>"
+
+[security]
+upstream = "<urls:security-admin>"
+auth_upstream = "<urls:security-auth>"
+internal_upstream = "<urls:security-internal>"
+
+[core]
+upstream = "<urls:core-editor>"
+
+[ui]
+upstream = "<urls:ui-editor>"

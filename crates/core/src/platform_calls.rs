@@ -135,6 +135,12 @@ impl PlatformCalls {
         Ok(Self { upstreams, http: client()? })
     }
 
+    /// Whether the service has an upstream (entity-processor retired on 2026-10-18 and may have
+    /// none).
+    pub fn has_upstream(&self, service: Service) -> bool {
+        self.upstream(service).is_ok()
+    }
+
     fn upstream(&self, service: Service) -> Result<&Upstream, CoreError> {
         let u = match service {
             Service::Security => &self.upstreams.security,

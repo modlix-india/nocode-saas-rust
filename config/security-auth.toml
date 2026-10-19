@@ -1,4 +1,4 @@
-# security-auth on the local stack. Secrets come from config/local.env:
+# security-auth on the local stack. Secrets come from config/local.toml:
 # MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL, MODLIX__JWT__KEY (and MODLIX__MQ__URI to publish
 # OTP events, MODLIX__SMS__TWO_FACTOR_API_KEY to send SMS; both left out locally on purpose).
 
@@ -39,3 +39,9 @@ publish_events = false
 [mq]
 exchange = "events"
 routing_keys = "events1,events2,events3"
+
+[eureka]
+# Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
+register = true
+register_as = "SECURITY-AUTH"
+zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]
