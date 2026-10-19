@@ -159,13 +159,13 @@ async fn nothing_is_served_before_a_snapshot_or_without_a_config_server() {
     let _n = TestNode::start(l, c);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(get(format!("{url}/security/ocidev"), None).await.status(), 503);
-    let view: Value = get(format!("{url}/v1/config"), None).await.json().await.unwrap();
+    let view: Value = get(format!("{url}/v1/config"), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     assert!(view["lastError"].as_str().unwrap().contains("cannot be read"));
     assert_eq!(view["snapshot"], Value::Null);
 
     let (l, url) = bind().await;
     let _off = TestNode::start(l, config(&url, &[]));
     assert_eq!(get(format!("{url}/security/ocidev"), None).await.status(), 404);
-    let view: Value = get(format!("{url}/v1/config"), None).await.json().await.unwrap();
+    let view: Value = get(format!("{url}/v1/config"), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     assert_eq!(view["enabled"], false);
 }

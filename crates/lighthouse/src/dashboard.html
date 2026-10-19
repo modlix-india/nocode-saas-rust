@@ -319,6 +319,16 @@ function renderConfig() {
   const note = document.getElementById("config-note");
   const host = document.getElementById("config-source");
   if (!c) return;
+  if (c.locked) {
+    note.textContent = "";
+    err.classList.remove("show");
+    host.replaceChildren(el("div", { class: "empty" }, "The configuration needs the admin token. ",
+      el("button", { class: "btn small", type: "button", onclick: () => { if (token()) load(); } }, "Enter the admin token")));
+    document.getElementById("config-units").replaceChildren();
+    document.getElementById("config-env").replaceChildren();
+    document.getElementById("config-refresh").hidden = true;
+    return;
+  }
   if (!c.enabled) {
     note.textContent = "";
     err.classList.remove("show");
@@ -439,11 +449,21 @@ function render() {
 async function load() {
   const err = document.getElementById("error");
   try {
-    const [r, p, c] = await Promise.all([fetch("v1/registry"), fetch("v1/peers"), fetch("v1/config")]);
-    if (!r.ok || !p.ok || !c.ok) throw new Error("the server answered " + r.status + " / " + p.status + " / " + c.status);
+    const t = sessionStorage.getItem(TOKEN_KEY);
+    const [r, p, c] = await Promise.all([fetch("v1/registry"), fetch("v1/peers"),
+      fetch("v1/config", t ? { headers: { Authorization: "Bearer " + t } } : {})]);
+    if (!r.ok || !p.ok) throw new Error("the server answered " + r.status + " / " + p.status);
     state.registry = await r.json();
     state.peers = await p.json();
-    state.config = await c.json();
+    if (c.status === 401 || c.status === 403) {
+      // The configuration is the admin's: ask for the token on the Config tab.
+      if (t) sessionStorage.removeItem(TOKEN_KEY);
+      state.config = { locked: true };
+    } else if (!c.ok) {
+      throw new Error("the server answered " + c.status + " for the configuration");
+    } else {
+      state.config = await c.json();
+    }
     err.classList.remove("show");
     document.getElementById("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
     render();
