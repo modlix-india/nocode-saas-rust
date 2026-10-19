@@ -96,3 +96,11 @@ quick-xml = "0.39"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# dev and stage images (rust-build-deploy.yml, profile `ci`): about twice as fast to compile as
+# release (each crate split over the runner's cores, no link-time optimisation), at the cost of
+# somewhat bigger and slightly slower binaries. prod builds with release.
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
