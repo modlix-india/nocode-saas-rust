@@ -49,7 +49,7 @@ crates/core       core units
 config/           local TOML per binary (config/<binary>.toml), ai.toml and ssr.toml; every password and
                   key in config/local.toml (git-ignored).
                   The local Lighthouse serves both to the units (config/lighthouse.toml, env local)
-tools/            run-local.sh, restart-local.sh, smoke.py, vault_secrets.py, the platform app seed
+tools/            run-local.sh, restart-local.sh, local-env.py, smoke.py, the platform app seed
 deploy/           Dockerfiles and example configs (not applied anywhere)
 ```
 

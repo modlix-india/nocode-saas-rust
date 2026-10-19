@@ -56,6 +56,10 @@ impl Served {
     /// endpoint still serves the files.
     pub fn prepare(snapshot: Snapshot, settings: &ConfigServerConfig, from: &'static str) -> Self {
         let snapshot = Arc::new(snapshot);
+        if settings.layout == "repo" {
+            let (units, registry_names, apps) = super::local::repo_documents(&settings.local, &snapshot.files);
+            return Self { snapshot, from, units, apps, registry_names, render_error: None, encoded: OnceLock::new() };
+        }
         if settings.env == "local" {
             let (units, registry_names) = settings.local.documents(&snapshot.files);
             return Self { snapshot, from, units, apps: vec![], registry_names, render_error: None, encoded: OnceLock::new() };
@@ -117,16 +121,37 @@ impl ConfigServer {
     /// `None` when `[config] source` is empty: no config server on this instance.
     pub fn new(settings: &ConfigServerConfig, auth: Arc<Auth>, peers: Vec<String>, peer_token: &str) -> Result<Option<Arc<Self>>> {
         let Some(spec) = Spec::parse(&settings.source)? else { return Ok(None) };
-        match (settings.env.as_str(), settings.local.enabled()) {
-            ("dev" | "stage" | "prod", false) => {}
-            ("local", true) if matches!(spec, Spec::Dir(_)) => {}
-            ("local", true) => anyhow::bail!("[config] env local reads its Spring settings from a dir: source"),
-            ("local", false) => anyhow::bail!("[config] env local needs [config.local] dir"),
-            (_, true) => anyhow::bail!("[config.local] is only for env local, not {:?}", settings.env),
-            _ => anyhow::bail!("[config] env must be dev, stage or prod, not {:?}", settings.env),
+        let mut settings = settings.clone();
+        match settings.layout.as_str() {
+            "" => match (settings.env.as_str(), settings.local.enabled()) {
+                ("dev" | "stage" | "prod", false) => {}
+                ("local", true) if matches!(spec, Spec::Dir(_)) => {}
+                ("local", true) => anyhow::bail!("[config] env local reads its Spring settings from a dir: source"),
+                ("local", false) => anyhow::bail!("[config] env local needs [config.local] dir"),
+                (_, true) => anyhow::bail!("[config.local] is only for env local, not {:?}", settings.env),
+                _ => anyhow::bail!("[config] env must be dev, stage or prod, not {:?}", settings.env),
+            },
+            // Any environment: the URL's folder is what is served. Its name is the folder's
+            // unless [config] env names it.
+            "repo" if !settings.local.enabled() => {
+                if settings.env.trim().is_empty() {
+                    let named = match &spec {
+                        Spec::Dir(p) => p.canonicalize().unwrap_or_else(|_| p.clone()).file_name().map(|n| n.to_string_lossy().into_owned()),
+                        Spec::GitHub { folder, .. } => folder.rsplit('/').next().map(str::to_string),
+                    };
+                    settings.env = named.filter(|n| !n.is_empty()).unwrap_or_else(|| "default".into());
+                }
+            }
+            "repo" => anyhow::bail!("[config] layout repo reads its folder from the source, not [config.local] dir"),
+            other => anyhow::bail!("[config] layout must be empty or repo, not {other:?}"),
         }
+        let settings = &settings;
         let token = Some(settings.github_token.clone()).filter(|t| !t.is_empty());
-        let source = Source::new(spec, &settings.label, &settings.github_api, token)?;
+        let folder = spec.folder();
+        let mut source = Source::new(spec, &settings.label, &settings.github_api, token)?;
+        if settings.layout == "repo" {
+            source.keep = super::source::Keep::Folder(folder);
+        }
         Ok(Some(Arc::new(Self {
             settings: settings.clone(),
             source,
@@ -301,7 +326,7 @@ impl ConfigServer {
             return self.settings.spring.uri.clone();
         }
         match &self.source.spec {
-            Spec::GitHub { owner, repo } => format!("https://github.com/{owner}/{repo}.git"),
+            Spec::GitHub { owner, repo, .. } => format!("https://github.com/{owner}/{repo}.git"),
             Spec::Dir(p) => p.display().to_string(),
         }
     }
@@ -509,9 +534,17 @@ fn spring_answer(cs: &ConfigServer, app: &str, profile: &str, label: Option<&str
     if spring::RESERVED.contains(&app) {
         return error(StatusCode::NOT_FOUND, format!("{app} is not an application"));
     }
-    let Some(rule) = cs.settings.spring.apps.get(app) else {
+    // In a repository folder, an app with `apps/<app>.toml` is served as that file says, without
+    // a token, as the Java config-server served everyone; [config.spring.apps] can still narrow it.
+    let repo_rule = (cs.settings.layout == "repo")
+        .then(|| cs.served())
+        .flatten()
+        .filter(|s| s.snapshot.files.contains_key(&format!("apps/{app}.toml")))
+        .map(|_| spring::AppRule { open: true, ..Default::default() });
+    let Some(rule) = cs.settings.spring.apps.get(app).cloned().or(repo_rule) else {
         return error(StatusCode::NOT_FOUND, format!("{app} is not served here"));
     };
+    let rule = &rule;
     if !rule.open {
         if let Err(d) = cs.auth.check(h, &[Scope::Ai, Scope::Ops]) {
             return d.into_response();
@@ -534,7 +567,8 @@ fn spring_answer(cs: &ConfigServer, app: &str, profile: &str, label: Option<&str
         Some(l) => format!("/{app}/{profile}/{l}"),
         None => format!("/{app}/{profile}"),
     };
-    let built = if cs.settings.local.is_app(app) {
+    let repo_app = cs.settings.layout == "repo" && served.snapshot.files.contains_key(&format!("apps/{app}.toml"));
+    let built = if cs.settings.local.is_app(app) || repo_app {
         local_environment(cs, &served, app, profile, label.as_deref())
     } else {
         spring::environment(&served.snapshot, &cs.spring_uri(), app, profile, label.as_deref())
@@ -562,15 +596,20 @@ fn local_environment(cs: &ConfigServer, served: &Served, app: &str, profile: &st
         Some(UnitState::Missing(names)) => anyhow::bail!("missing: {}", names.join("; ")),
         None => anyhow::bail!("no document for {app}"),
     };
-    let dir = std::path::Path::new(cs.settings.local.dir.trim());
-    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let name = if cs.settings.layout == "repo" {
+        format!("{}/apps/{app}.toml", cs.spring_uri())
+    } else {
+        let dir = std::path::Path::new(cs.settings.local.dir.trim());
+        let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        format!("file:{}/{app}.toml", dir.display())
+    };
     Ok(spring::Environment {
         name: app.to_string(),
         profiles: vec![profile.to_string()],
         label: label.map(str::to_string),
         version: Some(served.snapshot.sha.clone()),
         sources: vec![spring::PropertySource {
-            name: format!("file:{}/{app}.toml", dir.display()),
+            name,
             source: super::local::spring_keys(&doc.document)?,
         }],
     })
@@ -751,6 +790,39 @@ mod tests {
         assert!(cs.poll_once().await, "a changed unit file is a new snapshot");
         let Some(UnitState::Ready(d)) = cs.served().unwrap().unit("multi").cloned() else { panic!() };
         assert_ne!(restart_part(&d.version), restart_part(&v1));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_repository_is_served() {
+        let root = std::env::temp_dir().join(format!("lighthouse-repo-serve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("qa/units")).unwrap();
+        std::fs::create_dir_all(root.join("qa/apps")).unwrap();
+        std::fs::write(root.join("qa/units/multi.toml"), "[server]\nport = 8110\n[database]\npassword = 'pw'\n").unwrap();
+        std::fs::write(root.join("qa/apps/ai.env"), "A='1'\n").unwrap();
+        std::fs::write(root.join("qa/apps/ai.toml"), "[ai.db]\nurl = 'u'\n").unwrap();
+        // Any folder is an environment; its name comes from the folder unless [config] env says.
+        let c = ConfigServerConfig { source: format!("dir:{}", root.join("qa").display()), layout: "repo".into(), ..ConfigServerConfig::default() };
+        let auth = Arc::new(Auth::new(&Default::default(), "", "").unwrap());
+        let cs = ConfigServer::new(&c, auth.clone(), vec![], "").unwrap().unwrap();
+        assert!(cs.poll_once().await);
+        let served = cs.served().unwrap();
+        let Some(UnitState::Ready(d)) = served.unit("multi") else { panic!() };
+        assert_eq!(d.document["database"]["password"], "pw");
+        assert_eq!(served.apps.len(), 1);
+        assert_eq!(cs.settings.env, "qa");
+        let env = local_environment(&cs, &served, "ai", "ociqa", None).unwrap();
+        assert!(env.sources[0].name.ends_with("/apps/ai.toml"), "{}", env.sources[0].name);
+        std::fs::write(root.join("qa/units/multi.toml"), "[server]\nport = 8111\n").unwrap();
+        assert!(cs.poll_once().await, "a changed unit file is a new snapshot");
+        let named = ConfigServerConfig { env: "uat".into(), ..c.clone() };
+        assert_eq!(ConfigServer::new(&named, auth.clone(), vec![], "").unwrap().unwrap().settings.env, "uat");
+        let mut bad = c.clone();
+        bad.local.dir = "config".into();
+        assert!(ConfigServer::new(&bad, auth.clone(), vec![], "").is_err());
+        let bad = ConfigServerConfig { layout: "other".into(), ..c };
+        assert!(ConfigServer::new(&bad, auth, vec![], "").err().unwrap().to_string().contains("layout"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
