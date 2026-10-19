@@ -2,7 +2,7 @@
 //! the root `*.yml` (the Spring settings) and everything under `rust/` (the unit templates and
 //! the manifest).
 //!
-//! - `github:<owner>/<repo>`: `GET /repos/<owner>/<repo>/commits/<label>` with the last ETag
+//! - `https://github.com/<owner>/<repo>` (or `github:<owner>/<repo>`): `GET /repos/<owner>/<repo>/commits/<label>` with the last ETag
 //!   (`Accept: application/vnd.github.sha`, so the answer is the sha alone; a 304 costs nothing
 //!   against the rate limit), and on a new sha the tarball of that commit. The token is a
 //!   read-only one from the environment (`MODLIX__CONFIG__GITHUB_TOKEN`).
@@ -46,9 +46,33 @@ struct Meta {
     fetched_ms: i64,
 }
 
-/// Whether the config server keeps a file: a root `*.yml`, or anything under `rust/`.
+/// Whether the config server keeps a file of oci-config: a root `*.yml`, or anything under `rust/`.
 pub fn wanted(path: &str) -> bool {
     (!path.contains('/') && path.ends_with(".yml")) || (path.starts_with("rust/") && path.len() > 5)
+}
+
+/// Which files of the source a snapshot keeps, and under what name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Keep {
+    /// oci-config: [`wanted`]'s files, as they are named.
+    OciConfig,
+    /// One folder of the repository (`[config] layout = "repo"`), its files named relative to it;
+    /// empty: the whole repository.
+    Folder(String),
+}
+
+impl Keep {
+    /// The name a file is kept under, or `None` when it is left out.
+    pub fn key(&self, path: &str) -> Option<String> {
+        if path.split('/').any(|p| p.starts_with('.')) {
+            return None;
+        }
+        match self {
+            Keep::OciConfig => wanted(path).then(|| path.to_string()),
+            Keep::Folder(f) if f.is_empty() => Some(path.to_string()),
+            Keep::Folder(f) => path.strip_prefix(f.as_str()).and_then(|r| r.strip_prefix('/')).filter(|r| !r.is_empty()).map(str::to_string),
+        }
+    }
 }
 
 /// A hash of the files: what a directory's snapshot calls its sha.
@@ -77,8 +101,21 @@ impl Snapshot {
         &self.sha[..self.sha.len().min(12)]
     }
 
-    /// Reads a checkout: its root `*.yml` and its `rust/` tree.
+    /// Reads an oci-config checkout: its root `*.yml` and its `rust/` tree.
     pub fn from_dir(dir: &Path, label: &str) -> Result<Self> {
+        Self::from_dir_keeping(dir, label, &Keep::OciConfig)
+    }
+
+    /// Reads a checkout, keeping what `keep` keeps.
+    pub fn from_dir_keeping(dir: &Path, label: &str, keep: &Keep) -> Result<Self> {
+        if *keep != Keep::OciConfig {
+            let root = dir.canonicalize().with_context(|| format!("{} cannot be read", dir.display()))?;
+            let mut all = BTreeMap::new();
+            walk(&root, "", &mut all)?;
+            let files = all.into_iter().filter_map(|(k, v)| keep.key(&k).map(|k| (k, v))).collect();
+            let origin = format!("dir:{}", root.display());
+            return Ok(Self::new(&content_sha(&files), label, &origin, files));
+        }
         let root = dir.canonicalize().with_context(|| format!("{} cannot be read", dir.display()))?;
         let mut files = BTreeMap::new();
         for entry in std::fs::read_dir(&root)? {
@@ -99,6 +136,11 @@ impl Snapshot {
     /// A GitHub tarball: its top directory (`<owner>-<repo>-<sha>/`) dropped, only the files the
     /// config server reads kept.
     pub fn from_tarball(bytes: &[u8], sha: &str, label: &str, origin: &str) -> Result<Self> {
+        Self::from_tarball_keeping(bytes, sha, label, origin, &Keep::OciConfig)
+    }
+
+    /// A GitHub tarball, keeping what `keep` keeps.
+    pub fn from_tarball_keeping(bytes: &[u8], sha: &str, label: &str, origin: &str, keep: &Keep) -> Result<Self> {
         let mut files = BTreeMap::new();
         let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes).take(MAX_BYTES));
         for entry in archive.entries().context("the tarball cannot be read")? {
@@ -108,12 +150,10 @@ impl Snapshot {
             }
             let path = entry.path()?.to_string_lossy().into_owned();
             let Some((_, inner)) = path.split_once('/') else { continue };
-            if !wanted(inner) {
-                continue;
-            }
+            let Some(name) = keep.key(inner) else { continue };
             let mut text = String::new();
             if entry.read_to_string(&mut text).is_ok() {
-                files.insert(inner.to_string(), text);
+                files.insert(name, text);
             } else {
                 tracing::warn!(file = inner, "skipped a file that is not UTF-8 text");
             }
@@ -155,7 +195,8 @@ impl Snapshot {
             entry.read_to_string(&mut text)?;
             if path == META {
                 meta = Some(serde_json::from_str(&text)?);
-            } else if wanted(&path) {
+            } else {
+                // The sender's snapshot holds only what its source keeps.
                 files.insert(path, text);
             }
         }
@@ -209,7 +250,11 @@ fn append<W: Write>(tar: &mut tar::Builder<W>, path: &str, data: &[u8]) -> Resul
 fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
-        let name = format!("{prefix}/{}", entry.file_name().to_string_lossy());
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if file.starts_with('.') {
+            continue;
+        }
+        let name = if prefix.is_empty() { file } else { format!("{prefix}/{file}") };
         let ty = entry.file_type()?;
         if ty.is_dir() {
             walk(&entry.path(), &name, files)?;
@@ -229,11 +274,12 @@ fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) -> Resul
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Spec {
     Dir(PathBuf),
-    GitHub { owner: String, repo: String },
+    /// A GitHub repository; from a `/tree/<branch>/<folder>` URL also the branch and the folder.
+    GitHub { owner: String, repo: String, branch: Option<String>, folder: String },
 }
 
 impl Spec {
-    /// `dir:<path>` or `github:<owner>/<repo>`; empty is no source.
+    /// `dir:<path>`, a GitHub URL or `github:<owner>/<repo>`; empty is no source.
     pub fn parse(s: &str) -> Result<Option<Self>> {
         let s = s.trim();
         if s.is_empty() {
@@ -242,14 +288,27 @@ impl Spec {
         if let Some(p) = s.strip_prefix("dir:") {
             return Ok(Some(Spec::Dir(PathBuf::from(p))));
         }
-        if let Some(r) = s.strip_prefix("github:") {
-            if let Some((owner, repo)) = r.split_once('/') {
-                if !owner.is_empty() && !repo.is_empty() && !repo.contains('/') {
-                    return Ok(Some(Spec::GitHub { owner: owner.into(), repo: repo.trim_end_matches(".git").into() }));
+        // The repository's URL as GitHub shows it, https://github.com/<owner>/<repo>[.git], or a
+        // folder of one: https://github.com/<owner>/<repo>/tree/<branch>/<folder>.
+        let r = s
+            .strip_prefix("https://github.com/")
+            .or_else(|| s.strip_prefix("http://github.com/"))
+            .or_else(|| s.strip_prefix("git@github.com:"))
+            .or_else(|| s.strip_prefix("github:"));
+        if let Some(r) = r {
+            let parts: Vec<&str> = r.trim_end_matches('/').split('/').collect();
+            let (branch, folder) = match parts.get(2..) {
+                None | Some([]) => (None, String::new()),
+                Some(["tree", branch, rest @ ..]) if !branch.is_empty() => (Some(branch.to_string()), rest.join("/")),
+                Some(_) => bail!("[config] source: a GitHub URL is https://github.com/<owner>/<repo>[/tree/<branch>/<folder>], not {s:?}"),
+            };
+            if let [owner, repo, ..] = parts[..] {
+                if !owner.is_empty() && !repo.is_empty() {
+                    return Ok(Some(Spec::GitHub { owner: owner.into(), repo: repo.trim_end_matches(".git").into(), branch, folder }));
                 }
             }
         }
-        bail!("[config] source must be dir:<path> or github:<owner>/<repo>, not {s:?}")
+        bail!("[config] source must be a GitHub repository URL (https://github.com/<owner>/<repo>), github:<owner>/<repo> or dir:<path>, not {s:?}")
     }
 
     pub fn kind(&self) -> &'static str {
@@ -263,7 +322,28 @@ impl Spec {
     pub fn describe(&self) -> String {
         match self {
             Spec::Dir(p) => p.display().to_string(),
-            Spec::GitHub { owner, repo } => format!("{owner}/{repo}"),
+            Spec::GitHub { owner, repo, branch, folder } => match branch {
+                Some(b) if folder.is_empty() => format!("{owner}/{repo}@{b}"),
+                Some(b) => format!("{owner}/{repo}@{b}/{folder}"),
+                None => format!("{owner}/{repo}"),
+            },
+        }
+    }
+
+    /// The folder a `[config] layout = "repo"` deployment serves: the URL's folder, or the whole
+    /// directory or repository.
+    pub fn folder(&self) -> String {
+        match self {
+            Spec::Dir(_) => String::new(),
+            Spec::GitHub { folder, .. } => folder.clone(),
+        }
+    }
+
+    /// The branch the URL names, if any.
+    pub fn branch(&self) -> Option<&str> {
+        match self {
+            Spec::Dir(_) => None,
+            Spec::GitHub { branch, .. } => branch.as_deref(),
         }
     }
 }
@@ -279,6 +359,8 @@ pub enum Poll {
 pub struct Source {
     pub spec: Spec,
     pub label: String,
+    /// What a snapshot keeps of it.
+    pub keep: Keep,
     api: String,
     token: Option<String>,
     http: reqwest::Client,
@@ -288,8 +370,9 @@ pub struct Source {
 impl Source {
     pub fn new(spec: Spec, label: &str, api: &str, token: Option<String>) -> Result<Self> {
         Ok(Self {
+            label: spec.branch().unwrap_or(label).to_string(),
             spec,
-            label: label.to_string(),
+            keep: Keep::OciConfig,
             api: api.trim_end_matches('/').to_string(),
             token: token.filter(|t| !t.is_empty()),
             http: reqwest::Client::builder().timeout(Duration::from_secs(60)).user_agent("modlix-lighthouse").build()?,
@@ -302,10 +385,11 @@ impl Source {
         match &self.spec {
             Spec::Dir(dir) => {
                 let (dir, label) = (dir.clone(), self.label.clone());
-                let snap = tokio::task::spawn_blocking(move || Snapshot::from_dir(&dir, &label)).await??;
+                let keep = self.keep.clone();
+                let snap = tokio::task::spawn_blocking(move || Snapshot::from_dir_keeping(&dir, &label, &keep)).await??;
                 Ok(if current == Some(snap.sha.as_str()) { Poll::Unchanged } else { Poll::Changed(snap) })
             }
-            Spec::GitHub { owner, repo } => self.poll_github(owner, repo, current).await,
+            Spec::GitHub { owner, repo, .. } => self.poll_github(owner, repo, current).await,
         }
     }
 
@@ -351,7 +435,8 @@ impl Source {
         let bytes = resp.bytes().await?;
         let origin = format!("github:{owner}/{repo}");
         let (label, sha2) = (self.label.clone(), sha.clone());
-        let snap = tokio::task::spawn_blocking(move || Snapshot::from_tarball(&bytes, &sha2, &label, &origin)).await??;
+        let keep = self.keep.clone();
+        let snap = tokio::task::spawn_blocking(move || Snapshot::from_tarball_keeping(&bytes, &sha2, &label, &origin, &keep)).await??;
         *self.etag.lock() = new_etag;
         Ok(Poll::Changed(snap))
     }
@@ -374,6 +459,11 @@ mod tests {
     fn which_files_are_kept() {
         assert!(wanted("application.yml") && wanted("rust/units.toml") && wanted("rust/a/b.md"));
         assert!(!wanted("scripts/x.yml") && !wanted("README.md") && !wanted("rust/") && !wanted("a.yaml"));
+        let k = Keep::Folder("dev".into());
+        assert_eq!(k.key("dev/units/a.toml").as_deref(), Some("units/a.toml"));
+        assert_eq!((k.key("devx/a.toml"), k.key("dev/"), k.key("dev/.hidden/x")), (None, None, None));
+        assert_eq!(Keep::Folder(String::new()).key("units/a.toml").as_deref(), Some("units/a.toml"));
+        assert_eq!(Keep::OciConfig.key("rust/units.toml").as_deref(), Some("rust/units.toml"));
     }
 
     #[test]
@@ -458,7 +548,16 @@ mod tests {
         assert_eq!(Spec::parse(" ").unwrap(), None);
         assert_eq!(Spec::parse("dir:../oci-config").unwrap(), Some(Spec::Dir("../oci-config".into())));
         let gh = Spec::parse("github:modlix-india/oci-config.git").unwrap().unwrap();
-        assert_eq!(gh, Spec::GitHub { owner: "modlix-india".into(), repo: "oci-config".into() });
+        assert_eq!(gh, Spec::GitHub { owner: "modlix-india".into(), repo: "oci-config".into(), branch: None, folder: String::new() });
+        let url = Spec::parse("https://github.com/modlix-india/oci-config-rust/tree/master/dev").unwrap().unwrap();
+        assert_eq!((url.branch(), url.folder().as_str(), url.describe().as_str()), (Some("master"), "dev", "modlix-india/oci-config-rust@master/dev"));
+        let deep = Spec::parse("https://github.com/o/r/tree/b/envs/qa/").unwrap().unwrap();
+        assert_eq!((deep.branch(), deep.folder().as_str()), (Some("b"), "envs/qa"));
+        let plain = Spec::parse("https://github.com/o/r.git").unwrap().unwrap();
+        assert_eq!((plain.branch(), plain.folder().as_str(), plain.describe().as_str()), (None, "", "o/r"));
+        assert!(Spec::parse("https://github.com/o/r/blob/x").is_err());
+        assert!(Spec::parse("https://github.com/o").is_err());
+        assert_eq!(Spec::Dir("/x".into()).folder(), "");
         assert_eq!((gh.kind(), gh.describe()), ("github", "modlix-india/oci-config".to_string()));
         assert_eq!(Spec::Dir("/x".into()).kind(), "dir");
         for bad in ["github:x", "github:/r", "github:a/b/c", "svn:x"] {

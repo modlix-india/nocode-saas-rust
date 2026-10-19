@@ -10,11 +10,11 @@
 //! - [`auth`]: tokens and scopes. [`server`]: the routes. [`cli`]: `lighthouse render` and
 //!   `lighthouse parity`.
 //!
-//! Secrets are read from oci-config as they are today. OCI Vault (`{vault:name}` values,
-//! phase 3) plugs in at `server::Served::prepare`, where a snapshot becomes what is served: a
-//! pass there that resolves every `{vault:name}` into a resolved copy of the snapshot feeds the
-//! renderer and the Spring endpoint alike, while the raw snapshot (references only) is what goes
-//! to disk and to peers.
+//! Where secrets come from: on the hosts, oci-config-rust (`[config] layout = "repo"`), a private
+//! repository whose unit files hold them inline; locally, `config/local.toml`. Lighthouse reads
+//! the repository with a read-only GitHub token that reaches it only at deploy time (CI, as
+//! `MODLIX__CONFIG__GITHUB_TOKEN`), and serves units and ai/ssr without a token on the host's
+//! private Docker network (`[auth] open`), as the Java config-server did.
 
 pub mod auth;
 pub mod cli;
@@ -76,6 +76,10 @@ pub struct ConfigServerConfig {
     /// The environment whose units this deployment configures: dev, stage or prod, or `local`
     /// with `[config.local]` (the local stack).
     pub env: String,
+    /// What the source holds: empty for oci-config (the Java settings, rendered through
+    /// `rust/`), `repo` for oci-config-rust (each environment's unit files as they are; see
+    /// [`local::repo_documents`]).
+    pub layout: String,
     pub poll_seconds: u64,
     /// Where the last good snapshot is kept (a volume), readable by Lighthouse only. Empty: not
     /// kept.
@@ -94,6 +98,7 @@ impl Default for ConfigServerConfig {
             source: String::new(),
             label: "master".into(),
             env: String::new(),
+            layout: String::new(),
             poll_seconds: 30,
             snapshot_dir: String::new(),
             github_api: "https://api.github.com".into(),

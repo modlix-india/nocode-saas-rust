@@ -1,4 +1,4 @@
-# The Rust units for stage: on a push to oci-stage (or by hand), build all 15 images, push
+# The Rust units for stage: on a push to oci-stage (or by hand), build the images of the units it changed (of 15 units and Lighthouse), push
 # ocir.../idfmutpuhiky/stage-<unit>:<sha> and :latest, then deploy them to the stage host with
 # keepup-rust.sh. The work is in rust-build-deploy.yml.
 
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       units:
-        description: Units to deploy, space separated (empty deploys all 15; gateway-rust always goes last)
+        description: Units to deploy, space separated (empty builds and deploys what the push changed; Lighthouse first, gateway-rust last)
         required: false
         type: string
         default: ''
@@ -36,6 +36,7 @@ jobs:
     uses: ./.github/workflows/rust-build-deploy.yml
     with:
       environment: stage
+      profile: ci
       ssh_key: /home/ubuntu/keys/dev-internal.key
       deploy: true
       units: ${{ inputs.units || '' }}
@@ -43,3 +44,5 @@ jobs:
       ocir_user: ${{ secrets.OCI_NON_PROD_DOCKER_USER_NAME }}
       ocir_token: ${{ secrets.OCI_NON_PROD_CLI_AUTH_TOKEN }}
       server_ip: ${{ secrets.STAGE_SERVER_IP }}
+      lighthouse_github_token: ${{ secrets.LIGHTHOUSE_GITHUB_TOKEN }}
+      lighthouse_admin_token_sha256: ${{ secrets.LIGHTHOUSE_ADMIN_TOKEN_SHA256 }}

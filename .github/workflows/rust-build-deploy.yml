@@ -1,4 +1,4 @@
-# Builds the 15 Rust units' images and deploys them to one environment's host. Called by
+# Builds the 15 Rust units' images and Lighthouse's, and deploys them to one environment's host. Called by
 # rust-dev-ci.yml, rust-stage-ci.yml and rust-prod-ci.yml, which name the environment, the
 # secrets and whether the deploy runs.
 #
@@ -28,8 +28,13 @@ on:
         description: Run the deploy job (false builds and pushes only)
         required: true
         type: boolean
+      profile:
+        description: The cargo profile the binaries are built with (ci for dev and stage, release for prod)
+        required: false
+        type: string
+        default: release
       units:
-        description: Space-separated units to deploy; empty deploys all 15
+        description: Space-separated units to build and deploy; empty builds and deploys the units the push changed (all 16 when it cannot tell)
         required: false
         type: string
         default: ''
@@ -40,6 +45,14 @@ on:
         required: true
       server_ip:
         required: true
+      # Lighthouse's read-only token for oci-config-rust. It reaches the host only inside the
+      # deploy's SSH session (never a file there, never a command line); docker keeps it in the
+      # Lighthouse containers' settings until the next deploy.
+      lighthouse_github_token:
+        required: false
+      # SHA-256 of the dashboard's admin token; empty leaves the dashboard read-only.
+      lighthouse_admin_token_sha256:
+        required: false
 
 permissions:
   contents: read
@@ -48,8 +61,10 @@ env:
   OCIR_HOST: ocir.us-ashburn-1.oci.oraclecloud.com
   OCIR_NAMESPACE: ocir.us-ashburn-1.oci.oraclecloud.com/idfmutpuhiky
   RUST_IMAGE: rust:1.94-bookworm
-  # Every unit, in deploy order: security first (every other unit calls it), gateway-rust last.
+  # Every unit, in deploy order: Lighthouse first (every other unit reads its configuration from
+  # it), then security (every other unit calls it), gateway-rust last.
   UNITS: >-
+    lighthouse
     security-auth security-internal security-admin
     core-editor core-exec core-events core-scheduler
     ui-editor ui-engine ui-shell
@@ -57,7 +72,7 @@ env:
     multi notification
     gateway-rust
   # The workspace packages, whose build output is left out of the cache (it changes every run).
-  WORKSPACE_PACKAGES: platform gateway files overridable ui core appdata connections multi security notification
+  WORKSPACE_PACKAGES: platform gateway files overridable ui core appdata connections multi security notification lighthouse lighthouse-client
 
 jobs:
   build:
@@ -66,19 +81,46 @@ jobs:
 
     outputs:
       image_tag: ${{ github.sha }}
+      units: ${{ steps.units.outputs.units }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # A cold release build of the workspace plus 15 images needs more room than the runner
-      # leaves free; the preinstalled SDKs below are not used here.
-      - name: Free disk space
+      # Only the units a push changed are built, pushed and deployed: the changed paths, mapped to
+      # their crates and every workspace crate that depends on them (tools/ci_affected_units.py).
+      # A manual run with `units` names them; a new branch or anything it cannot tell, all.
+      - name: Work out the units to build
+        id: units
+        env:
+          ONLY: ${{ inputs.units }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+          if [ -n "$ONLY" ]; then
+            for unit in $ONLY; do
+              case " $UNITS " in
+                *" $unit "*) ;;
+                *) echo "::error::unknown unit '$unit' (known: $UNITS)"; exit 1 ;;
+              esac
+            done
+            selected=""
+            for unit in $UNITS; do case " $ONLY " in *" $unit "*) selected="$selected $unit" ;; esac; done
+          elif [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            cargo metadata --format-version 1 --no-deps --offline > "$RUNNER_TEMP/metadata.json"
+            read -ra all <<< "$UNITS"
+            selected="$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | python3 tools/ci_affected_units.py "$RUNNER_TEMP/metadata.json" "${all[@]}")"
+          else
+            selected="$UNITS"
+          fi
+          read -ra picked <<< "$selected"
+          selected="${picked[*]}"
+          echo "units=$selected" >> "$GITHUB_OUTPUT"
+          echo "Units to build and deploy: ${selected:-none}"
 
       - name: Restore the cargo cache
         id: cache
+        if: steps.units.outputs.units != ''
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -86,15 +128,27 @@ jobs:
             .ci/cargo/registry/cache
             .ci/cargo/git/db
             target
-          key: cargo-release-rust1.94-bookworm-${{ hashFiles('Cargo.lock') }}
+          key: cargo-${{ inputs.profile }}-rust1.94-bookworm-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-release-rust1.94-bookworm-
+            cargo-${{ inputs.profile }}-rust1.94-bookworm-
 
-      - name: Compile the 15 binaries in one cargo run
+      # A cold build needs more room than the runner leaves free; with a cache restored there is
+      # enough, and this takes a minute and a half.
+      - name: Free disk space
+        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-matched-key == ''
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Compile the binaries in one cargo run
+        if: steps.units.outputs.units != ''
+        env:
+          SELECTED: ${{ steps.units.outputs.units }}
+          PROFILE: ${{ inputs.profile }}
         run: |
           mkdir -p .ci/cargo/registry .ci/cargo/git target
           bins=()
-          for unit in $UNITS; do bins+=(--bin "$unit"); done
+          for unit in $SELECTED; do bins+=(--bin "$unit"); done
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp \
@@ -104,18 +158,24 @@ jobs:
             -v "$PWD/.ci/cargo/registry:/usr/local/cargo/registry" \
             -v "$PWD/.ci/cargo/git:/usr/local/cargo/git" \
             "$RUST_IMAGE" \
-            cargo build --release --locked "${bins[@]}"
+            cargo build --profile "$PROFILE" --locked "${bins[@]}"
 
       - name: Stage each binary as its own image context
+        if: steps.units.outputs.units != ''
+        env:
+          SELECTED: ${{ steps.units.outputs.units }}
+          PROFILE: ${{ inputs.profile }}
         run: |
-          for unit in $UNITS; do
+          for unit in $SELECTED; do
             mkdir -p "dist/$unit"
-            cp "target/release/$unit" "dist/$unit/app"
+            cp "target/$PROFILE/$unit" "dist/$unit/app"
           done
           ls -l dist/*/app
 
       - name: Trim the cache to the dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          PROFILE: ${{ inputs.profile }}
         run: |
           pkgs=()
           for p in $WORKSPACE_PACKAGES; do pkgs+=(-p "$p"); done
@@ -126,12 +186,12 @@ jobs:
             -v "$PWD/.ci/cargo/registry:/usr/local/cargo/registry" \
             -v "$PWD/.ci/cargo/git:/usr/local/cargo/git" \
             "$RUST_IMAGE" \
-            cargo clean --release "${pkgs[@]}"
+            cargo clean --profile "$PROFILE" "${pkgs[@]}"
           rm -rf .ci/cargo/registry/src .ci/cargo/git/checkouts
           du -sh target .ci/cargo || true
 
       - name: Save the cargo cache
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -142,11 +202,13 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Build the images
+        if: steps.units.outputs.units != ''
         env:
           ENV_NAME: ${{ inputs.environment }}
           TAG: ${{ github.sha }}
+          SELECTED: ${{ steps.units.outputs.units }}
         run: |
-          for unit in $UNITS; do
+          for unit in $SELECTED; do
             repo="$OCIR_NAMESPACE/$ENV_NAME-$unit"
             docker build -f deploy/Dockerfile.prebuilt \
               --label "org.opencontainers.image.revision=$TAG" \
@@ -156,56 +218,62 @@ jobs:
           done
 
       - name: Log in to OCIR
+        if: steps.units.outputs.units != ''
         env:
           OCIR_USER: ${{ secrets.ocir_user }}
           OCIR_TOKEN: ${{ secrets.ocir_token }}
         run: printf '%s' "$OCIR_TOKEN" | docker login "$OCIR_HOST" -u "$OCIR_USER" --password-stdin
 
       # Every <sha> tag first, then every latest, so a push that fails half way leaves latest
-      # on one release for all units.
+      # on one release for all the units built.
       - name: Push the images
+        if: steps.units.outputs.units != ''
         env:
           ENV_NAME: ${{ inputs.environment }}
           TAG: ${{ github.sha }}
+          SELECTED: ${{ steps.units.outputs.units }}
         run: |
-          for unit in $UNITS; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:$TAG"; done
-          for unit in $UNITS; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:latest"; done
+          for unit in $SELECTED; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:$TAG"; done
+          for unit in $SELECTED; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:latest"; done
 
   deploy:
     needs: build
-    if: inputs.deploy
+    if: inputs.deploy && needs.build.outputs.units != ''
     runs-on: self-hosted
     timeout-minutes: 90
 
     steps:
-      - name: Deploy every unit, gateway-rust last, stopping at the first failure
+      - name: Deploy the units built, gateway-rust last, stopping at the first failure
         env:
           ENV_NAME: ${{ inputs.environment }}
           SSH_KEY: ${{ inputs.ssh_key }}
           SERVER_IP: ${{ secrets.server_ip }}
           TAG: ${{ needs.build.outputs.image_tag }}
-          ONLY: ${{ inputs.units }}
+          SELECTED: ${{ needs.build.outputs.units }}
+          LIGHTHOUSE_GITHUB_TOKEN: ${{ secrets.lighthouse_github_token }}
+          LIGHTHOUSE_ADMIN_TOKEN_SHA256: ${{ secrets.lighthouse_admin_token_sha256 }}
         run: |
           set -euo pipefail
-          selected="$UNITS"
-          if [ -n "$ONLY" ]; then
-            for unit in $ONLY; do
-              case " $UNITS " in
-                *" $unit "*) ;;
-                *) echo "::error::unknown unit '$unit' (known: $UNITS)"; exit 1 ;;
-              esac
-            done
-            # Keep the deploy order (gateway-rust last) whatever order the input names them in.
-            selected=""
-            for unit in $UNITS; do
-              case " $ONLY " in *" $unit "*) selected="$selected $unit" ;; esac
-            done
-          fi
+          # The units the build job built, already in deploy order (Lighthouse first,
+          # gateway-rust last).
+          selected="$SELECTED"
           for unit in $selected; do
             image="$OCIR_NAMESPACE/$ENV_NAME-$unit:$TAG"
             echo "::group::deploy $unit ($image)"
-            ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
-              "set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy $unit $image 2>&1 | tee -a /var/log/keepup.log"
+            if [ "$unit" = lighthouse ]; then
+              if [ -z "$LIGHTHOUSE_GITHUB_TOKEN" ]; then
+                echo "::error::the repository secret LIGHTHOUSE_GITHUB_TOKEN is not set: Lighthouse cannot read oci-config-rust"
+                exit 1
+              fi
+              # The tokens go over the SSH session's stdin, read into the remote shell's
+              # environment: never a file on the host, never a command line.
+              printf '%s\n%s\n' "$LIGHTHOUSE_GITHUB_TOKEN" "$LIGHTHOUSE_ADMIN_TOKEN_SHA256" | \
+                ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
+                "IFS= read -r LIGHTHOUSE_GITHUB_TOKEN; IFS= read -r LIGHTHOUSE_ADMIN_TOKEN_SHA256; export LIGHTHOUSE_GITHUB_TOKEN LIGHTHOUSE_ADMIN_TOKEN_SHA256; set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy lighthouse $image 2>&1 | tee -a /var/log/keepup.log"
+            else
+              ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
+                "set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy $unit $image 2>&1 | tee -a /var/log/keepup.log"
+            fi
             echo "::endgroup::"
           done
           echo "deployed:$selected"
