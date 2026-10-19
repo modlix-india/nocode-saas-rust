@@ -1,9 +1,6 @@
 # The Rust units for prod: on a push to oci-production (or by hand), build all 15 images, push
 # ocir.../idfmutpuhiky/prod-<unit>:<sha> and :latest, then deploy them to the prod host with
 # keepup-rust.sh. The work is in rust-build-deploy.yml.
-#
-# The deploy job runs only when the repository variable RUST_DEPLOY_PROD is 'true': until the
-# switch the images are built and pushed, and nothing touches the host (the runbook: oci-config rust/RUNBOOK.md).
 
 name: rust-prod-ci
 
@@ -40,7 +37,7 @@ jobs:
     with:
       environment: prod
       ssh_key: /home/ubuntu/keys/prod-internal.key
-      deploy: ${{ vars.RUST_DEPLOY_PROD == 'true' }}
+      deploy: true
       units: ${{ inputs.units || '' }}
     secrets:
       ocir_user: ${{ secrets.OCI_NON_PROD_DOCKER_USER_NAME }}

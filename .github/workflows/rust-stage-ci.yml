@@ -1,9 +1,6 @@
 # The Rust units for stage: on a push to oci-stage (or by hand), build all 15 images, push
 # ocir.../idfmutpuhiky/stage-<unit>:<sha> and :latest, then deploy them to the stage host with
 # keepup-rust.sh. The work is in rust-build-deploy.yml.
-#
-# The deploy job runs only when the repository variable RUST_DEPLOY_STAGE is 'true': until the
-# switch the images are built and pushed, and nothing touches the host (the runbook: oci-config rust/RUNBOOK.md).
 
 name: rust-stage-ci
 
@@ -40,7 +37,7 @@ jobs:
     with:
       environment: stage
       ssh_key: /home/ubuntu/keys/dev-internal.key
-      deploy: ${{ vars.RUST_DEPLOY_STAGE == 'true' }}
+      deploy: true
       units: ${{ inputs.units || '' }}
     secrets:
       ocir_user: ${{ secrets.OCI_NON_PROD_DOCKER_USER_NAME }}
