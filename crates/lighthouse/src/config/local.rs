@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as Json};
 
-use super::units::{get_path, set_path, toml_to_json, version, UnitDoc, UnitState};
+use super::units::{get_path, set_path, toml_to_json, version, AppEnv, UnitDoc, UnitState};
 
 /// Where the local files sit in a snapshot.
 pub const PREFIX: &str = "local/";
@@ -128,6 +128,71 @@ impl LocalConfig {
         }
         (out, names)
     }
+}
+
+/// `[config] layout = "repo"`: one environment's folder of a repository such as
+/// oci-config-rust (the source URL names it; the snapshot holds its files relative to it):
+///
+/// - `units/<unit>.toml`: each unit's whole document, secrets inline (the repository is
+///   private). The units are the files there, in `[config.local] units` order first.
+/// - `apps/<app>.toml`: an app's Spring settings, served at `/<app>/<profile>`.
+/// - `apps/<name>.env`: an env file, served at `GET /v1/env/<name>` (`ssr-in.env` as
+///   `/v1/env/ssr?region=in`).
+///
+/// - `live.toml`: the keys units apply in place (`live = [...]`, and per unit under `[units]`);
+///   without it, `[config.local]`'s `live` and `unit_live`.
+///
+/// `[config.local] units` orders them; its `dir` and `secrets_file` are not used.
+pub fn repo_documents(local: &LocalConfig, files: &BTreeMap<String, String>) -> (Vec<(String, UnitState)>, Vec<(String, String)>, Vec<AppEnv>) {
+    let in_dir = |dir: &str, ext: &str| -> Vec<(String, String)> {
+        let prefix = format!("{dir}/");
+        files
+            .iter()
+            .filter_map(|(k, v)| {
+                let name = k.strip_prefix(&prefix)?.strip_suffix(ext)?;
+                (!name.is_empty() && !name.contains('/')).then(|| (name.to_string(), v.clone()))
+            })
+            .collect()
+    };
+    let units = in_dir("units", ".toml");
+    let apps = in_dir("apps", ".toml");
+    let mut order: Vec<String> = local.units.iter().filter(|u| units.iter().any(|(n, _)| n == *u)).cloned().collect();
+    let mut rest: Vec<String> = units.iter().map(|(n, _)| n.clone()).filter(|n| !order.contains(n)).collect();
+    rest.sort();
+    order.extend(rest);
+    let mut mapped = BTreeMap::new();
+    for (name, text) in &units {
+        mapped.insert(format!("{PREFIX}units/{name}.toml"), text.clone());
+    }
+    for (name, text) in &apps {
+        mapped.insert(format!("{PREFIX}apps/{name}.toml"), text.clone());
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Live {
+        live: Vec<String>,
+        units: BTreeMap<String, Vec<String>>,
+    }
+    let (live, unit_live) = match files.get("live.toml").map(|t| toml::from_str::<Live>(t)) {
+        Some(Ok(l)) => (l.live, l.units),
+        Some(Err(e)) => {
+            tracing::warn!(error = %e, "live.toml does not parse: no live keys");
+            (vec![], BTreeMap::new())
+        }
+        None => (local.live.clone(), local.unit_live.clone()),
+    };
+    let view = LocalConfig {
+        dir: "the repository".into(),
+        secrets_file: String::new(),
+        units: order,
+        apps: apps.iter().map(|(n, _)| n.clone()).collect(),
+        files: BTreeMap::new(),
+        live,
+        unit_live,
+    };
+    let (docs, names) = view.documents(&mapped);
+    let envs = in_dir("apps", ".env").into_iter().map(|(name, text)| AppEnv { who: name.clone(), name, text, missing: vec![] }).collect();
+    (docs, names, envs)
 }
 
 /// `file`'s document with `overlay` (its table of `config/local.toml`) merged in.
@@ -293,6 +358,41 @@ mod tests {
         assert!(c.read().unwrap().is_empty());
         c.secrets_file = tmp.to_str().unwrap().to_string();
         assert!(c.read().is_err(), "a directory is not a file");
+    }
+
+    #[test]
+    fn a_repository_folder_is_read() {
+        let mut files = BTreeMap::new();
+        for (k, v) in [
+            ("units/multi.toml", "[server]\nport = 8110\n[eureka]\nregister_as = \"MULTI\"\n"),
+            ("units/gateway-rust.toml", "[server]\nport = 8080\nroutes = 1\n[redis]\nurl = \"rediss://secret@h\"\n"),
+            ("units/zeta.toml", "[server]\nport = 1\n"),
+            ("units/nested/x.toml", "x = 1\n"),
+            ("apps/ai.env", "# ai\nA='1'\n"),
+            ("apps/ssr-in.env", "B='2'\n"),
+            ("apps/ai.toml", "[ai]\nn = 1\n"),
+            ("README.md", "x"),
+        ] {
+            files.insert(k.to_string(), v.to_string());
+        }
+        let local = LocalConfig { units: vec!["gateway-rust".into(), "multi".into(), "gone".into()], unit_live: [("gateway-rust".to_string(), vec!["routes".to_string()])].into(), ..Default::default() };
+        let (docs, names, envs) = repo_documents(&local, &files);
+        assert_eq!(docs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["gateway-rust", "multi", "zeta", "ai"]);
+        assert_eq!(names[1], ("multi".to_string(), "MULTI".to_string()));
+        let UnitState::Ready(gw) = &docs[0].1 else { panic!("{:?}", docs[0].1) };
+        assert_eq!((gw.document["redis"]["url"].as_str(), gw.live.len()), (Some("rediss://secret@h"), 1));
+        assert!(gw.secrets.is_empty(), "secrets are inline: nothing is merged in");
+        assert_eq!(envs.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["ai", "ssr-in"]);
+        assert_eq!(envs[0].text, "# ai\nA='1'\n");
+        let (none, _, no_envs) = repo_documents(&local, &BTreeMap::new());
+        assert!(none.is_empty() && no_envs.is_empty());
+        files.insert("live.toml".into(), "live = [\"telemetry.log_level\"]\n[units]\nmulti = [\"features\"]\n".into());
+        let (docs, _, _) = repo_documents(&local, &files);
+        let live = |i: usize| match &docs[i].1 { UnitState::Ready(d) => d.live.clone(), s => panic!("{s:?}") };
+        assert_eq!((live(0), live(1)), (vec!["telemetry.log_level".to_string()], vec!["telemetry.log_level".to_string(), "features".to_string()]));
+        files.insert("live.toml".into(), "live = 3\n".into());
+        let (docs, _, _) = repo_documents(&local, &files);
+        assert!(matches!(&docs[1].1, UnitState::Ready(d) if d.live.is_empty()));
     }
 
     #[test]

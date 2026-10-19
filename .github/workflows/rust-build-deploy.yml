@@ -1,4 +1,4 @@
-# Builds the 15 Rust units' images and deploys them to one environment's host. Called by
+# Builds the 15 Rust units' images and Lighthouse's, and deploys them to one environment's host. Called by
 # rust-dev-ci.yml, rust-stage-ci.yml and rust-prod-ci.yml, which name the environment, the
 # secrets and whether the deploy runs.
 #
@@ -29,7 +29,7 @@ on:
         required: true
         type: boolean
       units:
-        description: Space-separated units to deploy; empty deploys all 15
+        description: Space-separated units to deploy; empty deploys all 16
         required: false
         type: string
         default: ''
@@ -40,6 +40,14 @@ on:
         required: true
       server_ip:
         required: true
+      # Lighthouse's read-only token for oci-config-rust. It reaches the host only inside the
+      # deploy's SSH session (never a file there, never a command line); docker keeps it in the
+      # Lighthouse containers' settings until the next deploy.
+      lighthouse_github_token:
+        required: false
+      # SHA-256 of the dashboard's admin token; empty leaves the dashboard read-only.
+      lighthouse_admin_token_sha256:
+        required: false
 
 permissions:
   contents: read
@@ -48,8 +56,10 @@ env:
   OCIR_HOST: ocir.us-ashburn-1.oci.oraclecloud.com
   OCIR_NAMESPACE: ocir.us-ashburn-1.oci.oraclecloud.com/idfmutpuhiky
   RUST_IMAGE: rust:1.94-bookworm
-  # Every unit, in deploy order: security first (every other unit calls it), gateway-rust last.
+  # Every unit, in deploy order: Lighthouse first (every other unit reads its configuration from
+  # it), then security (every other unit calls it), gateway-rust last.
   UNITS: >-
+    lighthouse
     security-auth security-internal security-admin
     core-editor core-exec core-events core-scheduler
     ui-editor ui-engine ui-shell
@@ -57,7 +67,7 @@ env:
     multi notification
     gateway-rust
   # The workspace packages, whose build output is left out of the cache (it changes every run).
-  WORKSPACE_PACKAGES: platform gateway files overridable ui core appdata connections multi security notification
+  WORKSPACE_PACKAGES: platform gateway files overridable ui core appdata connections multi security notification lighthouse lighthouse-client
 
 jobs:
   build:
@@ -70,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A cold release build of the workspace plus 15 images needs more room than the runner
+      # A cold release build of the workspace plus 16 images needs more room than the runner
       # leaves free; the preinstalled SDKs below are not used here.
       - name: Free disk space
         run: |
@@ -90,7 +100,7 @@ jobs:
           restore-keys: |
             cargo-release-rust1.94-bookworm-
 
-      - name: Compile the 15 binaries in one cargo run
+      - name: Compile the 16 binaries in one cargo run
         run: |
           mkdir -p .ci/cargo/registry .ci/cargo/git target
           bins=()
@@ -185,6 +195,8 @@ jobs:
           SERVER_IP: ${{ secrets.server_ip }}
           TAG: ${{ needs.build.outputs.image_tag }}
           ONLY: ${{ inputs.units }}
+          LIGHTHOUSE_GITHUB_TOKEN: ${{ secrets.lighthouse_github_token }}
+          LIGHTHOUSE_ADMIN_TOKEN_SHA256: ${{ secrets.lighthouse_admin_token_sha256 }}
         run: |
           set -euo pipefail
           selected="$UNITS"
@@ -204,8 +216,20 @@ jobs:
           for unit in $selected; do
             image="$OCIR_NAMESPACE/$ENV_NAME-$unit:$TAG"
             echo "::group::deploy $unit ($image)"
-            ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
-              "set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy $unit $image 2>&1 | tee -a /var/log/keepup.log"
+            if [ "$unit" = lighthouse ]; then
+              if [ -z "$LIGHTHOUSE_GITHUB_TOKEN" ]; then
+                echo "::error::the repository secret LIGHTHOUSE_GITHUB_TOKEN is not set: Lighthouse cannot read oci-config-rust"
+                exit 1
+              fi
+              # The tokens go over the SSH session's stdin, read into the remote shell's
+              # environment: never a file on the host, never a command line.
+              printf '%s\n%s\n' "$LIGHTHOUSE_GITHUB_TOKEN" "$LIGHTHOUSE_ADMIN_TOKEN_SHA256" | \
+                ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
+                "IFS= read -r LIGHTHOUSE_GITHUB_TOKEN; IFS= read -r LIGHTHOUSE_ADMIN_TOKEN_SHA256; export LIGHTHOUSE_GITHUB_TOKEN LIGHTHOUSE_ADMIN_TOKEN_SHA256; set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy lighthouse $image 2>&1 | tee -a /var/log/keepup.log"
+            else
+              ssh -i "$SSH_KEY" -o BatchMode=yes "opc@$SERVER_IP" \
+                "set -o pipefail; bash /home/opc/rust/scripts/keepup-rust.sh --env $ENV_NAME deploy $unit $image 2>&1 | tee -a /var/log/keepup.log"
+            fi
             echo "::endgroup::"
           done
           echo "deployed:$selected"

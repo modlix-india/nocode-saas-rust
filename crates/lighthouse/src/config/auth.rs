@@ -42,6 +42,10 @@ pub struct TokenConfig {
 #[serde(default)]
 pub struct AuthConfig {
     pub tokens: Vec<TokenConfig>,
+    /// Scopes served without a token (`units`, `ai`), as the Java config-server served everyone.
+    /// The network allow-list (`[allowed] networks`) is then the boundary: on a host, Lighthouse's
+    /// ports bind to 127.0.0.1 and the units reach it over the host's private Docker network.
+    pub open: Vec<Scope>,
 }
 
 struct Token {
@@ -54,6 +58,7 @@ struct Token {
 /// The tokens one instance accepts.
 pub struct Auth {
     tokens: Vec<Token>,
+    open: Vec<Scope>,
 }
 
 /// Why a call was refused.
@@ -101,7 +106,15 @@ impl Auth {
         if !peer_token.is_empty() {
             tokens.push(Token { name: "peer".into(), hash: Sha256::digest(peer_token.as_bytes()).into(), scopes: vec![Scope::Peer], units: vec![] });
         }
-        Ok(Self { tokens })
+        if cfg.open.iter().any(|s| matches!(s, Scope::Ops | Scope::Peer)) {
+            anyhow::bail!("[auth] open may hold units and ai only: ops and peer always need their token");
+        }
+        Ok(Self { tokens, open: cfg.open.clone() })
+    }
+
+    /// Whether one of `scopes` is served without a token.
+    fn open_for(&self, scopes: &[Scope]) -> bool {
+        scopes.iter().any(|s| self.open.contains(s))
     }
 
     /// Whether any token grants `scope`.
@@ -111,13 +124,21 @@ impl Auth {
 
     /// The name of the token presented, when it has one of `scopes`.
     pub fn check(&self, h: &HeaderMap, scopes: &[Scope]) -> Result<String, Denied> {
-        self.find(h, scopes).map(|t| t.name.clone())
+        match self.find(h, scopes) {
+            Ok(t) => Ok(t.name.clone()),
+            Err(_) if self.open_for(scopes) => Ok("open".into()),
+            Err(d) => Err(d),
+        }
     }
 
     /// Like [`Auth::check`], for one unit's document: a token limited to some units reads only
     /// theirs (an `ops` token reads any).
     pub fn check_unit(&self, h: &HeaderMap, scopes: &[Scope], unit: &str) -> Result<String, Denied> {
-        let t = self.find(h, scopes)?;
+        let t = match self.find(h, scopes) {
+            Ok(t) => t,
+            Err(_) if self.open_for(scopes) => return Ok("open".into()),
+            Err(d) => return Err(d),
+        };
         let any = t.units.is_empty() || t.scopes.contains(&Scope::Ops);
         if any || t.units.iter().any(|u| u == unit) {
             Ok(t.name.clone())
@@ -180,6 +201,7 @@ mod tests {
                 TokenConfig { name: "ai".into(), sha256: sha("a-token").to_uppercase(), scopes: vec![Scope::Ai], units: vec![] },
                 TokenConfig { name: "multi".into(), sha256: sha("m-token"), scopes: vec![Scope::Units], units: vec!["multi".into()] },
             ],
+            open: vec![],
         };
         let auth = Auth::new(&cfg, &sha("admin"), "peer-secret").unwrap();
         assert!(auth.has(Scope::Ops) && auth.has(Scope::Peer) && auth.has(Scope::Units));
@@ -204,13 +226,22 @@ mod tests {
         assert_eq!(auth.check_unit(&headers("Bearer nope"), &units, "multi"), Err(Denied::Unknown));
         let none = Auth::new(&AuthConfig::default(), "", "").unwrap();
         assert!(!none.has(Scope::Ops));
+
+        // Open scopes: no token needed for them, ops still needs one.
+        let open = Auth::new(&AuthConfig { tokens: vec![], open: vec![Scope::Units, Scope::Ai] }, &sha("admin"), "").unwrap();
+        assert_eq!(open.check(&HeaderMap::new(), &[Scope::Ai, Scope::Ops]), Ok("open".into()));
+        assert_eq!(open.check_unit(&HeaderMap::new(), &units, "core-exec"), Ok("open".into()));
+        assert_eq!(open.check_unit(&headers("Bearer wrong"), &units, "core-exec"), Ok("open".into()));
+        assert_eq!(open.check(&headers("Bearer admin"), &[Scope::Ops]), Ok("admin".into()));
+        assert_eq!(open.check(&HeaderMap::new(), &[Scope::Ops]), Err(Denied::Unknown));
+        assert!(Auth::new(&AuthConfig { tokens: vec![], open: vec![Scope::Ops] }, "", "").is_err());
     }
 
     #[test]
     fn bad_configuration() {
-        let no_scope = AuthConfig { tokens: vec![TokenConfig { name: "x".into(), sha256: sha("x"), scopes: vec![], units: vec![] }] };
+        let no_scope = AuthConfig { tokens: vec![TokenConfig { name: "x".into(), sha256: sha("x"), scopes: vec![], units: vec![] }], open: vec![] };
         assert!(Auth::new(&no_scope, "", "").is_err());
-        let bad_hex = AuthConfig { tokens: vec![TokenConfig { name: "x".into(), sha256: "zz".into(), scopes: vec![Scope::Ai], units: vec![] }] };
+        let bad_hex = AuthConfig { tokens: vec![TokenConfig { name: "x".into(), sha256: "zz".into(), scopes: vec![Scope::Ai], units: vec![] }], open: vec![] };
         assert!(Auth::new(&bad_hex, "", "").is_err());
         assert!(Auth::new(&AuthConfig::default(), "abcd", "").is_err());
     }
