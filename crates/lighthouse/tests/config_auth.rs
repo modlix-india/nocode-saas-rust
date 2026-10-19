@@ -39,7 +39,7 @@ async fn unit_documents() {
 
     let r = get(u("/v1/units/multi/config"), None).await;
     assert_eq!(r.status(), 401);
-    assert!(r.headers().get("www-authenticate").is_some());
+    assert!(r.headers().get("www-authenticate").is_none(), "no browser sign-in box");
     assert_eq!(get(u("/v1/units/multi/config"), Some(AI_TOKEN)).await.status(), 403);
     assert_eq!(get(u("/v1/units/multi/config"), Some(MULTI_TOKEN)).await.status(), 200);
     assert_eq!(get(u("/v1/units/core-exec/config"), Some(MULTI_TOKEN)).await.status(), 403, "a token limited to multi");
