@@ -39,7 +39,7 @@ async fn unit_documents() {
 
     let r = get(u("/v1/units/multi/config"), None).await;
     assert_eq!(r.status(), 401);
-    assert!(r.headers().get("www-authenticate").is_some());
+    assert!(r.headers().get("www-authenticate").is_none(), "no browser sign-in box");
     assert_eq!(get(u("/v1/units/multi/config"), Some(AI_TOKEN)).await.status(), 403);
     assert_eq!(get(u("/v1/units/multi/config"), Some(MULTI_TOKEN)).await.status(), 200);
     assert_eq!(get(u("/v1/units/core-exec/config"), Some(MULTI_TOKEN)).await.status(), 403, "a token limited to multi");
@@ -140,8 +140,10 @@ async fn missing_values_are_named_never_shown() {
     let body: Value = r.json().await.unwrap();
     assert!(body["missing"][0].as_str().unwrap().starts_with("APPBUILDER_CODER_ENABLED"));
 
-    // The dashboard view shows the problem by name too.
-    let view: Value = get(u("/v1/config"), None).await.json().await.unwrap();
+    // The dashboard view shows the problem by name too, to the admin only.
+    assert_eq!(get(u("/v1/config"), None).await.status(), 401);
+    assert_eq!(get(u("/v1/config"), Some(UNITS_TOKEN)).await.status(), 403);
+    let view: Value = get(u("/v1/config"), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     let fs = view["units"].as_array().unwrap().iter().find(|x| x["unit"] == "files-serve").unwrap();
     assert!(fs["problem"].as_str().unwrap().starts_with("missing: "));
     assert_eq!(fs["version"], Value::Null);

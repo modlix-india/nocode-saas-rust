@@ -9,7 +9,7 @@
 //! A token comes as `Authorization: Bearer <token>`, or as the password of Basic (any user), so
 //! a client that can only put credentials in a URL (`http://ai:<token>@lighthouse:8761`) works.
 
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -42,9 +42,9 @@ pub struct TokenConfig {
 #[serde(default)]
 pub struct AuthConfig {
     pub tokens: Vec<TokenConfig>,
-    /// Scopes served without a token (`units`, `ai`), as the Java config-server served everyone.
-    /// The network allow-list (`[allowed] networks`) is then the boundary: on a host, Lighthouse's
-    /// ports bind to 127.0.0.1 and the units reach it over the host's private Docker network.
+    /// Scopes served without a token (`units`, `ai`), as the Java config-server served everyone,
+    /// to callers from the trusted networks only (`[allowed] trusted`: on a host, its own Docker
+    /// network); anyone else needs a token for them.
     pub open: Vec<Scope>,
 }
 
@@ -76,11 +76,10 @@ impl IntoResponse for Denied {
             Denied::Unknown => (StatusCode::UNAUTHORIZED, "a valid token is required"),
             Denied::Scope => (StatusCode::FORBIDDEN, "this token may not read this"),
         };
-        let mut r = (status, axum::Json(serde_json::json!({ "error": msg }))).into_response();
-        if self == Denied::Unknown {
-            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"lighthouse\""));
-        }
-        r
+        // No WWW-Authenticate challenge: a browser would answer it with its own sign-in box over
+        // the dashboard, which asks for the admin token itself; the clients that use Basic (ai,
+        // from a URL with credentials) send it without being asked.
+        (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
     }
 }
 
@@ -126,7 +125,7 @@ impl Auth {
     pub fn check(&self, h: &HeaderMap, scopes: &[Scope]) -> Result<String, Denied> {
         match self.find(h, scopes) {
             Ok(t) => Ok(t.name.clone()),
-            Err(_) if self.open_for(scopes) => Ok("open".into()),
+            Err(_) if self.open_for(scopes) && crate::allowed::is_trusted(h) => Ok("open".into()),
             Err(d) => Err(d),
         }
     }
@@ -136,7 +135,7 @@ impl Auth {
     pub fn check_unit(&self, h: &HeaderMap, scopes: &[Scope], unit: &str) -> Result<String, Denied> {
         let t = match self.find(h, scopes) {
             Ok(t) => t,
-            Err(_) if self.open_for(scopes) => return Ok("open".into()),
+            Err(_) if self.open_for(scopes) && crate::allowed::is_trusted(h) => return Ok("open".into()),
             Err(d) => return Err(d),
         };
         let any = t.units.is_empty() || t.scopes.contains(&Scope::Ops);
@@ -229,11 +228,19 @@ mod tests {
 
         // Open scopes: no token needed for them, ops still needs one.
         let open = Auth::new(&AuthConfig { tokens: vec![], open: vec![Scope::Units, Scope::Ai] }, &sha("admin"), "").unwrap();
-        assert_eq!(open.check(&HeaderMap::new(), &[Scope::Ai, Scope::Ops]), Ok("open".into()));
-        assert_eq!(open.check_unit(&HeaderMap::new(), &units, "core-exec"), Ok("open".into()));
-        assert_eq!(open.check_unit(&headers("Bearer wrong"), &units, "core-exec"), Ok("open".into()));
+        let trusted = |mut h: HeaderMap| {
+            h.insert(crate::allowed::TRUSTED_HEADER, "1".parse().unwrap());
+            h
+        };
+        assert_eq!(open.check(&trusted(HeaderMap::new()), &[Scope::Ai, Scope::Ops]), Ok("open".into()));
+        assert_eq!(open.check_unit(&trusted(HeaderMap::new()), &units, "core-exec"), Ok("open".into()));
+        assert_eq!(open.check_unit(&trusted(headers("Bearer wrong")), &units, "core-exec"), Ok("open".into()));
         assert_eq!(open.check(&headers("Bearer admin"), &[Scope::Ops]), Ok("admin".into()));
-        assert_eq!(open.check(&HeaderMap::new(), &[Scope::Ops]), Err(Denied::Unknown));
+        assert_eq!(open.check(&trusted(HeaderMap::new()), &[Scope::Ops]), Err(Denied::Unknown));
+        // From outside the trusted networks the open scopes need a token like any other.
+        assert_eq!(open.check(&HeaderMap::new(), &[Scope::Ai]), Err(Denied::Unknown));
+        assert_eq!(open.check_unit(&HeaderMap::new(), &units, "core-exec"), Err(Denied::Unknown));
+        assert_eq!(open.check_unit(&headers("Bearer admin"), &units, "core-exec"), Ok("admin".into()));
         assert!(Auth::new(&AuthConfig { tokens: vec![], open: vec![Scope::Ops] }, "", "").is_err());
     }
 
@@ -250,7 +257,7 @@ mod tests {
     fn refusals_answer_json() {
         let r = Denied::Unknown.into_response();
         assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-        assert!(r.headers().get(header::WWW_AUTHENTICATE).is_some());
+        assert!(r.headers().get(header::WWW_AUTHENTICATE).is_none(), "no browser sign-in box over the dashboard");
         let r = Denied::Scope.into_response();
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         assert!(r.headers().get(header::WWW_AUTHENTICATE).is_none());
