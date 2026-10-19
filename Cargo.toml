@@ -61,7 +61,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql", "chrono", "macros"] }
+# MySQL over OpenSSL (native-tls), not rustls: OCI HeatWave serves an X.509 v1 certificate, which
+# rustls refuses outright ("UnsupportedCertVersion") even in the default "preferred" mode, where
+# the certificate is not verified. OpenSSL takes it, as Java's drivers did (sslMode PREFERRED:
+# encrypted, not verified). The runtime image (distroless cc-debian12) carries libssl3.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "mysql", "chrono", "macros"] }
 thiserror = "2"
 toml = "0.8"
 tokio = { version = "1", features = ["full"] }
