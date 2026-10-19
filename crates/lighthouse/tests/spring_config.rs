@@ -90,6 +90,19 @@ fn ssr_reads(env: &Value) -> Value {
 }
 
 #[tokio::test]
+async fn open_apps_are_open_to_the_trusted_networks_only() {
+    // The caller (this test, from 127.0.0.1) is outside the trusted network.
+    let n = node(|c| {
+        c.config.spring.apps.insert("ssr".into(), AppRule { open: true, ..AppRule::default() });
+        c.allowed.trusted = vec!["10.255.0.0/16".into()];
+    })
+    .await;
+    let u = |p: &str| format!("{}{p}", n.url);
+    assert_eq!(get(u("/ssr/ocidev"), None).await.status(), 401);
+    assert_eq!(get(u("/ssr/ocidev"), Some(AI_TOKEN)).await.status(), 200);
+}
+
+#[tokio::test]
 async fn guardrails() {
     let n = node(|c| {
         open_apps(c, &["security", "broken"]);

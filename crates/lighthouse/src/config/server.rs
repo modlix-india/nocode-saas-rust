@@ -545,7 +545,9 @@ fn spring_answer(cs: &ConfigServer, app: &str, profile: &str, label: Option<&str
         return error(StatusCode::NOT_FOUND, format!("{app} is not served here"));
     };
     let rule = &rule;
-    if !rule.open {
+    // An open app is served without a token to the trusted networks only (the host's Docker
+    // network); anyone else needs one, as for a unit's configuration.
+    if !(rule.open && crate::allowed::is_trusted(h)) {
         if let Err(d) = cs.auth.check(h, &[Scope::Ai, Scope::Ops]) {
             return d.into_response();
         }

@@ -9,7 +9,7 @@
 //! A token comes as `Authorization: Bearer <token>`, or as the password of Basic (any user), so
 //! a client that can only put credentials in a URL (`http://ai:<token>@lighthouse:8761`) works.
 
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -76,11 +76,10 @@ impl IntoResponse for Denied {
             Denied::Unknown => (StatusCode::UNAUTHORIZED, "a valid token is required"),
             Denied::Scope => (StatusCode::FORBIDDEN, "this token may not read this"),
         };
-        let mut r = (status, axum::Json(serde_json::json!({ "error": msg }))).into_response();
-        if self == Denied::Unknown {
-            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"lighthouse\""));
-        }
-        r
+        // No WWW-Authenticate challenge: a browser would answer it with its own sign-in box over
+        // the dashboard, which asks for the admin token itself; the clients that use Basic (ai,
+        // from a URL with credentials) send it without being asked.
+        (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
     }
 }
 
@@ -258,7 +257,7 @@ mod tests {
     fn refusals_answer_json() {
         let r = Denied::Unknown.into_response();
         assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-        assert!(r.headers().get(header::WWW_AUTHENTICATE).is_some());
+        assert!(r.headers().get(header::WWW_AUTHENTICATE).is_none(), "no browser sign-in box over the dashboard");
         let r = Denied::Scope.into_response();
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         assert!(r.headers().get(header::WWW_AUTHENTICATE).is_none());
