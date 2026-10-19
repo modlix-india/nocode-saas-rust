@@ -626,7 +626,14 @@ pub fn instance_state(running: Option<&str>, current: Option<&str>) -> &'static 
     }
 }
 
-async fn config_view(State((cs, registry)): State<(Arc<ConfigServer>, Arc<Registry>)>) -> Response {
+async fn config_view(State((cs, registry)): State<(Arc<ConfigServer>, Arc<Registry>)>, h: HeaderMap) -> Response {
+    // The configuration's view (commit, units, versions) is the admin's whenever an admin token is
+    // configured, as on every host; the registry stays readable without it.
+    if cs.auth.has(Scope::Ops) {
+        if let Err(d) = cs.auth.check(&h, &[Scope::Ops]) {
+            return d.into_response();
+        }
+    }
     let st = cs.status();
     let served = cs.served();
     let snapshot = served.as_ref().map(|s| {
