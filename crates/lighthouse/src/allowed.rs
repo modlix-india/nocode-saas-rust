@@ -100,6 +100,38 @@ pub async fn peer_token(State(token): State<Arc<String>>, req: Request, next: Ne
     next.run(req).await
 }
 
+/// The header [`trust`] sets on a request from a trusted network (a client's own copy is
+/// removed first, so no caller can claim it). [`crate::config::auth::Auth`] serves its open
+/// scopes only to requests carrying it.
+pub const TRUSTED_HEADER: &str = "x-lighthouse-trusted";
+
+/// Marks requests from the trusted networks (`[allowed] trusted`: the host's own Docker network),
+/// and keeps registry writes and peer calls to them: from anywhere else (the VPN, through the
+/// jumphost) the registry and the dashboard are read-only, and configuration needs a token. An
+/// empty list trusts every allowed caller; a request without a peer address (served
+/// in-process) is trusted.
+pub async fn trust(State(trusted): State<Allowed>, mut req: Request, next: Next) -> Response {
+    req.headers_mut().remove(TRUSTED_HEADER);
+    let inside = match req.extensions().get::<ConnectInfo<SocketAddr>>() {
+        Some(ConnectInfo(addr)) => trusted.permits(addr.ip()),
+        None => true,
+    };
+    if inside {
+        req.headers_mut().insert(TRUSTED_HEADER, axum::http::HeaderValue::from_static("1"));
+        return next.run(req).await;
+    }
+    let path = req.uri().path();
+    let read = matches!(*req.method(), axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS);
+    if path.starts_with("/v1/peer/") || path.starts_with("/eureka/peerreplication") || (path.starts_with("/eureka") && !read) {
+        return (StatusCode::FORBIDDEN, "registry writes and peer calls are for the host's own network").into_response();
+    }
+    next.run(req).await
+}
+
+pub fn is_trusted(h: &axum::http::HeaderMap) -> bool {
+    h.contains_key(TRUSTED_HEADER)
+}
+
 pub fn is_replication(h: &axum::http::HeaderMap) -> bool {
     h.get(REPLICATION_HEADER).and_then(|v| v.to_str().ok()).is_some_and(|v| v.eq_ignore_ascii_case("true"))
 }
@@ -111,6 +143,44 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use axum::routing::any;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    async fn call(trusted: &[&str], from: &str, method: &str, path: &str, claim: bool) -> (StatusCode, bool) {
+        let t = Allowed::parse(&trusted.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        let app = Router::new()
+            .route("/{*rest}", any(|h: axum::http::HeaderMap| async move { if is_trusted(&h) { "trusted" } else { "outside" } }))
+            .layer(axum::middleware::from_fn_with_state(t, trust));
+        let mut req = HttpRequest::builder().method(method).uri(path).body(Body::empty()).unwrap();
+        if claim {
+            req.headers_mut().insert(TRUSTED_HEADER, "1".parse().unwrap());
+        }
+        req.extensions_mut().insert(ConnectInfo::<SocketAddr>(format!("{from}:5555").parse().unwrap()));
+        let resp = app.oneshot(req).await.unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        (status, body.as_ref() == b"trusted")
+    }
+
+    #[tokio::test]
+    async fn only_the_trusted_network_reads_configuration_and_writes_the_registry() {
+        let docker = ["172.21.0.0/16"];
+        assert_eq!(call(&docker, "172.21.0.5", "GET", "/v1/units/multi/config", false).await, (StatusCode::OK, true));
+        assert_eq!(call(&docker, "172.21.0.5", "POST", "/eureka/apps/MULTI", false).await, (StatusCode::OK, true));
+        // The VPN, through the jumphost: reads only, never trusted, whatever it claims.
+        assert_eq!(call(&docker, "172.16.0.107", "GET", "/v1/units/multi/config", true).await, (StatusCode::OK, false));
+        assert_eq!(call(&docker, "172.16.0.107", "GET", "/eureka/apps", false).await, (StatusCode::OK, false));
+        assert_eq!(call(&docker, "172.16.0.107", "DELETE", "/eureka/apps/MULTI/x", false).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(&docker, "172.16.0.107", "POST", "/eureka/peerreplication/batch", false).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(&docker, "172.16.0.107", "GET", "/v1/peer/snapshot", false).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(&docker, "172.16.0.107", "PUT", "/v1/admin/apps/MULTI/x/status", false).await, (StatusCode::OK, false), "admin actions go on to their token check");
+        // No list: every allowed caller is trusted (the local stack).
+        assert_eq!(call(&[], "10.8.0.10", "POST", "/eureka/apps/MULTI", false).await, (StatusCode::OK, true));
+    }
+
     use super::*;
 
     fn ip(s: &str) -> IpAddr {

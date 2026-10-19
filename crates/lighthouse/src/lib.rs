@@ -50,6 +50,8 @@ pub struct Node {
     pub registry: Arc<Registry>,
     pub peers: Vec<Arc<Peer>>,
     allowed: Allowed,
+    /// `[allowed] trusted`: the networks served tokenless configuration and registry writes.
+    trusted: Allowed,
     client: PeerClient,
     /// For the dashboard's peer probes: short, so a dead peer does not hold the page.
     probe: reqwest::Client,
@@ -106,6 +108,7 @@ impl Node {
         let config = ConfigServer::new(&cfg.config, auth.clone(), urls.clone(), &r.peer_token)?;
         Ok(Arc::new(Self {
             allowed: Allowed::parse(&cfg.allowed.networks)?,
+            trusted: Allowed::parse(&cfg.allowed.trusted)?,
             client: PeerClient { http, token },
             probe: reqwest::Client::builder().timeout(dashboard::PROBE_TIMEOUT).build()?,
             auth,
@@ -182,6 +185,7 @@ impl Node {
             .merge(dashboard::routes(self.clone()))
             .merge(config)
             .layer(middleware::from_fn_with_state(Arc::new(self.cfg.registry.peer_token.clone()), allowed::peer_token))
+            .layer(middleware::from_fn_with_state(self.trusted.clone(), allowed::trust))
             .layer(middleware::from_fn_with_state(self.allowed.clone(), allowed::networks))
     }
 }

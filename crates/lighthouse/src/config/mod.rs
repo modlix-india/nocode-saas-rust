@@ -178,6 +178,10 @@ pub struct AllowedConfig {
     pub networks: Vec<String>,
     /// App names allowed to register (any case). Empty allows any app.
     pub apps: Vec<String>,
+    /// The networks trusted with tokenless configuration reads, registry writes and peer calls
+    /// (on a host: its own Docker network). Callers from the other allowed networks see the
+    /// registry and the dashboard read-only. Empty trusts every allowed caller.
+    pub trusted: Vec<String>,
 }
 
 impl Default for AllowedConfig {
@@ -187,6 +191,7 @@ impl Default for AllowedConfig {
                 .map(String::from)
                 .to_vec(),
             apps: vec![],
+            trusted: vec![],
         }
     }
 }
