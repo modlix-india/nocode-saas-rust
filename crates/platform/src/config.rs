@@ -61,6 +61,8 @@ fn layered<T>(service: &str, document: Option<&serde_json::Value>) -> Result<T>
 where
     T: DeserializeOwned + Serialize + Default,
 {
+    // Configuration is the first thing every unit loads, before any TLS client exists.
+    crate::crypto::install();
     let mut fig = Figment::from(Serialized::defaults(T::default()));
     if let Some(file) = config_file(service) {
         fig = fig.merge(Toml::file(&file));
@@ -121,6 +123,7 @@ pub async fn load_async<T>(service: &str) -> Result<Loaded<T>>
 where
     T: DeserializeOwned + Serialize + Default,
 {
+    crate::crypto::install();
     if !lighthouse_urls_set() {
         return Ok(Loaded { config: load(service)?, lighthouse: None, warning: None });
     }
