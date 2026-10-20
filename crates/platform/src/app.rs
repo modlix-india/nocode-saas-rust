@@ -25,7 +25,7 @@ use tokio::sync::watch;
 use crate::config::ServerConfig;
 use crate::eureka::Eureka;
 use crate::health::Health;
-use crate::http::{observe, spring_cors};
+use crate::http::{catch_panic, observe, spring_cors};
 use crate::telemetry::Telemetry;
 
 pub struct Service {
@@ -58,8 +58,12 @@ impl Service {
         S: Future<Output = ()> + Send + 'static,
     {
         // The message scope sits inside CORS and observation, around every handler, so a coded
-        // error anywhere is written in the request's language.
-        let mut app = app.merge(self.health.routes()).layer(middleware::from_fn(crate::messages::layer));
+        // error anywhere is written in the request's language. Panic recovery sits inside it, so
+        // a handler's panic is answered as COMMON.INTERNAL_ERROR in that language too.
+        let mut app = app
+            .merge(self.health.routes())
+            .layer(middleware::from_fn(catch_panic))
+            .layer(middleware::from_fn(crate::messages::layer));
         if self.cors {
             app = app.layer(middleware::from_fn(spring_cors));
         }

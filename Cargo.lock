@@ -3957,6 +3957,7 @@ dependencies = [
  "opentelemetry_sdk",
  "redis",
  "reqwest",
+ "rustls 0.23.45",
  "serde",
  "serde_json",
  "sha2",
