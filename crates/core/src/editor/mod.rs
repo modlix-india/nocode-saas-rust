@@ -15,6 +15,7 @@ pub mod docs;
 pub mod index;
 pub mod kinds;
 pub mod preview;
+pub mod recovery;
 pub mod routes;
 pub mod schedules;
 pub mod storage;
@@ -164,8 +165,14 @@ impl DataStores for LiveData {
             }
         };
         for conn in conns {
-            if let Err(e) = self.mysql.reconcile(Some(&conn), app, &s, Some(applied_by)).await {
-                tracing::error!(storage = s.name, app, error = %e, "Could not reconcile on a connection");
+            match self.mysql.reconcile(Some(&conn), app, &s, Some(applied_by)).await {
+                // Each blocked tenant's reason is in its own storage_migration or
+                // storage_migration_issue table; this line says which tenants to look in.
+                Ok(report) if !report.all_clean() => {
+                    tracing::warn!(storage = s.name, app, summary = report.summary(), "Tables reconciled with blocked tenants");
+                }
+                Ok(_) => {}
+                Err(e) => tracing::error!(storage = s.name, app, error = %e, "Could not reconcile on a connection"),
             }
         }
     }
@@ -306,9 +313,10 @@ fn engines(cfg: &CoreConfig, cache: &CacheService, defs: Arc<crate::storage::def
     (mongo, mysql)
 }
 
-/// The editor on a connected core: its state, and the whole router (with the run log and the
-/// event raise of step 4, so every internal route the platform jobs call is on this unit).
-pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>, axum::Router)> {
+/// The editor on a connected core: its state, the whole router (with the run log and the
+/// event raise of step 4, so every internal route the platform jobs call is on this unit), and
+/// the storage migration recovery, for `run` to start.
+pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>, axum::Router, recovery::Recovery)> {
     let s = exec.state.inner();
     let store = s.definitions.store().clone();
     let security = SecurityClient::from_config(&cfg.security, exec.eureka.as_ref())?;
@@ -321,6 +329,7 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         "" => None,
         url => redis::Client::open(platform::cache::normalize_redis_url(url).as_str()).ok(),
     };
+    let recovery = recovery::Recovery { catalog: catalog.clone(), mysql: mysql.clone(), settings: cfg.appdata.migration_recovery.clone() };
     let parts = Parts {
         catalog: catalog.clone(),
         kirun_schemas: s.kirun_schemas.clone(),
@@ -337,7 +346,7 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
     let st = state(store, exec.cache.clone(), callers, parts);
     let resolver: Arc<dyn caller::Resolver> = Arc::new(StateResolver { callers: security_callers, state: exec.state.clone() });
     let router = routes::with_layers(routes::router(st.clone()).merge(crate::event_routes::router().with_state(exec.state.clone())), resolver);
-    Ok((st, router))
+    Ok((st, router, recovery))
 }
 
 /// Starts core-editor and serves until a shutdown signal.
@@ -348,7 +357,8 @@ pub async fn run() -> Result<()> {
     let cfg = loaded.config;
     let exec = crate::connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
-    let (_, router) = assemble(&cfg, &exec)?;
+    let (_, router, recovery) = assemble(&cfg, &exec)?;
+    recovery.spawn();
     let health = Health::new(telemetry.metrics.clone());
     let db = exec.mongo.clone();
     health.check("mongo", move || {

@@ -390,3 +390,16 @@ by name found nothing. Seen repeatedly in the AppBuilder eval runs, which delete
 apps every run. The Rust routes now also evict all of those (`apps::evict_app_code`): whole caches
 for the ones keyed `app:client` / `app:url:client` and for the dependency caches, by code for the
 rest. Evictions are published, so they reach every Rust process and any Java one still listening.
+
+## Caching and logging (2026-10-20)
+
+- **A host that names no client is cached too (`uri`).** Java's `getClientPattern` caches only a
+  found pattern, so every request on a host no client names (every internal call between units)
+  looked the pattern up again: on the local stack about 59,000 misses in 13 hours, none hit. The
+  answer "no pattern" is now cached under the same key; every change to client URLs or apps
+  already evicts `uri` everywhere, so a new URL is seen as before. Answers are unchanged.
+- **A signed token without its row is logged at debug, not error.** Java fails the lookup with
+  "Source was empty" and continues anonymous; so does Rust, but it reported it as a server error
+  (about 25 lines an hour on dev from browsers holding signed-out tokens). It is now the client's
+  condition (`UNKNOWN_TOKEN`, with the old text as the debug message), logged at debug. The
+  request still continues anonymous, as in Java.

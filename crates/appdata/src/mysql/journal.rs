@@ -191,6 +191,49 @@ pub fn schemas_with_journal() -> String {
     format!("SELECT TABLE_SCHEMA FROM information_schema.TABLES WHERE TABLE_NAME = '{TABLE}' ORDER BY TABLE_SCHEMA")
 }
 
+// ------------------------------------------------------------------ issues
+
+/// What a storage publish could not do for one tenant, beside the journal. Kept apart because
+/// the journal's FAILED and NEEDS_ATTENTION rows hold back later publishes of the storage, and
+/// these issues must not: nothing in the tenant's table changed when they were written.
+pub const ISSUE_TABLE: &str = "storage_migration_issue";
+
+pub fn create_issue_table(db: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS `{db}`.`{ISSUE_TABLE}` (`id` CHAR(26) NOT NULL,`storage_name` VARCHAR(255) NOT NULL,`table_name` VARCHAR(255) NOT NULL,`surface` VARCHAR(16) NULL,`kind` VARCHAR(32) NOT NULL,`shape` CHAR(32) NULL,`to_version` INT NULL,`offending` BIGINT NOT NULL DEFAULT 0,`detail` TEXT NULL,`applied_by` VARCHAR(255) NULL,`node` VARCHAR(255) NULL,`created_at` DATETIME(3) NOT NULL,PRIMARY KEY (`id`),KEY `idx_storage_created` (`storage_name`, `created_at`),KEY `idx_kind_created` (`kind`, `created_at`))"
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn insert_issue(
+    db: &str,
+    id: &str,
+    storage_name: &str,
+    table: &str,
+    surface: Option<&str>,
+    kind: &str,
+    shape: Option<&str>,
+    to_version: Option<i32>,
+    offending: i64,
+    detail: &str,
+    applied_by: Option<&str>,
+    node: &str,
+) -> String {
+    let text = |v: Option<&str>| v.map(|s| format!("'{}'", escape(s))).unwrap_or_else(|| "NULL".into());
+    format!(
+        "INSERT INTO `{db}`.`{ISSUE_TABLE}` (`id`, `storage_name`, `table_name`, `surface`, `kind`, `shape`, `to_version`, `offending`, `detail`, `applied_by`, `node`, `created_at`) VALUES ('{id}', '{}', '{}', {}, '{}', {}, {}, {offending}, '{}', {}, '{}', NOW(3))",
+        escape(storage_name),
+        escape(table),
+        text(surface),
+        escape(kind),
+        text(shape.filter(|s| !s.is_empty())),
+        to_version.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into()),
+        escape(detail),
+        text(applied_by),
+        escape(node),
+    )
+}
+
 pub fn finish(db: &str, id: &str, state: MigrationState, error: Option<&str>, applied_count: i32) -> String {
     format!(
         "UPDATE `{db}`.`{TABLE}` SET `state` = '{}', `finished_at` = NOW(3), `applied_count` = {applied_count}, `error` = {} WHERE `id` = '{id}'",

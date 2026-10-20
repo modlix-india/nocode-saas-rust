@@ -195,26 +195,29 @@ impl Directory {
         (!code.is_empty() && !code.contains('.')).then(|| code.to_string())
     }
 
-    /// `ClientService.getClientPattern(scheme, host, port)`.
+    /// `ClientService.getClientPattern(scheme, host, port)`. Unlike Java, a host that resolves to
+    /// no pattern is cached as such (see [`caches::Caches::url_patterns`]).
     pub async fn client_pattern(&self, scheme: &str, host: &str, port: &str) -> AuthResult<Option<Arc<UrlPattern>>> {
         let this = self.clone();
         let (h, p) = (host.to_string(), port.to_string());
-        self.caches
+        let found = self
+            .caches
             .url_patterns
             .get_or_load(caches::CLIENT_URI, format!("{scheme}{host}:{port}"), || async move {
                 if let Some(found) = this.url_patterns().await?.iter().find(|u| u.matches(&h, &p)) {
-                    return Ok(Some(Arc::new(found.clone())));
+                    return Ok(Some(Some(Arc::new(found.clone()))));
                 }
-                let Some(code) = this.subdomain_app_code(&h) else { return Ok(None) };
+                let Some(code) = this.subdomain_app_code(&h) else { return Ok(Some(None)) };
                 let Some(app) = this.app_by_code(&code).await?.filter(|a| a.status.as_deref() == Some("ACTIVE")) else {
-                    return Ok(None);
+                    return Ok(Some(None));
                 };
                 let client = this.client(app.client_id).await?;
-                Ok::<_, AuthError>(client.map(|c| {
+                Ok::<_, AuthError>(Some(client.map(|c| {
                     Arc::new(UrlPattern::new(String::new(), c.code.clone(), Some(h.clone()), Some(app.app_code.clone())))
-                }))
+                })))
             })
-            .await
+            .await?;
+        Ok(found.flatten())
     }
 
     /// `ClientService.getClientBy(request)`: the client a host names, else SYSTEM (id 1).

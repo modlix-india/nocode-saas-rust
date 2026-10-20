@@ -1295,9 +1295,8 @@ impl MySqlAppDataService {
         if tenants.is_empty() {
             return Ok(FanOutReport::default());
         }
-        let desired = self.desired_by_tenant(app_code, storage, &tenants).await;
+        let (desired, unresolved) = self.desired_by_tenant(app_code, storage, &tenants).await;
 
-        let unresolved: Vec<String> = tenants.iter().filter(|d| !desired.contains_key(*d)).cloned().collect();
         let live: Vec<String> = tenants.iter().filter(|d| desired.contains_key(*d) && !is_draft(d)).cloned().collect();
         let draft: Vec<String> = tenants.iter().filter(|d| desired.contains_key(*d) && is_draft(d)).cloned().collect();
 
@@ -1305,11 +1304,11 @@ impl MySqlAppDataService {
         let live_report = self.surface(&pool, &live, &desired, storage, &table_name, version, "LIVE", applied_by).await?;
         let draft_report = self.surface(&pool, &draft, &desired, storage, &table_name, version, "DRAFT", applied_by).await?;
         let mut report = FanOutReport::merge(live_report, draft_report);
-        for db_name in unresolved {
-            report.by_tenant.insert(
-                db_name.clone(),
-                MigrationOutcome::needs_attention("no storage definition resolves for this client"),
-            );
+        let issue = |surface: &str| migration::Issue::new(&storage.name, &table_name, Some(surface), applied_by).version(version);
+        let surface_of = |db_name: &str| if is_draft(db_name) { "DRAFT" } else { "LIVE" };
+        for (db_name, why) in unresolved {
+            migration::record_issue(&pool, &db_name, &issue(surface_of(&db_name)).kind(migration::IssueKind::NoDefinition).detail(&why)).await;
+            report.by_tenant.insert(db_name.clone(), MigrationOutcome::needs_attention(&why));
             report.blocked.push(db_name);
         }
 
@@ -1329,7 +1328,8 @@ impl MySqlAppDataService {
             }
             .await;
             if let Err(e) = synced {
-                tracing::error!(storage = storage.name, db = db_name, error = %e, "could not sync indexes");
+                let detail = format!("could not sync indexes: {e}");
+                migration::record_issue(&pool, db_name, &issue(surface_of(db_name)).kind(migration::IssueKind::IndexSync).detail(&detail)).await;
             }
         }
         for db_name in &tenants {
@@ -1346,7 +1346,8 @@ impl MySqlAppDataService {
             }
             .await;
             if let Err(e) = synced {
-                tracing::error!(storage = storage.name, db = db_name, error = %e, "could not sync foreign keys");
+                let detail = format!("could not sync foreign keys: {e}");
+                migration::record_issue(&pool, db_name, &issue(surface_of(db_name)).kind(migration::IssueKind::ForeignKeySync).detail(&detail)).await;
             }
         }
         Ok(report)
@@ -1372,21 +1373,33 @@ impl MySqlAppDataService {
         out
     }
 
-    async fn desired_by_tenant(&self, app_code: &str, storage: &Storage, tenants: &[String]) -> IndexMap<String, Vec<MySqlColumn>> {
+    /// Each tenant's columns, and why for the tenants that have none.
+    async fn desired_by_tenant(&self, app_code: &str, storage: &Storage, tenants: &[String])
+        -> (IndexMap<String, Vec<MySqlColumn>>, IndexMap<String, String>) {
         let mut out = IndexMap::new();
+        let mut unresolved = IndexMap::new();
         for db_name in tenants {
             let ts = self
                 .hooks
                 .read_for_tenant(&storage.name, app_code, &client_code_of(db_name, app_code), is_draft(db_name))
                 .await;
-            if let Ok(Some(ts)) = ts {
-                let schema = self.physical_schema(&ts, is_draft(db_name)).await;
-                if let Ok(cols) = mapped_columns(&schema, defs(&ts).as_ref()) {
-                    out.insert(db_name.clone(), cols);
+            let why = match ts {
+                Ok(Some(ts)) => {
+                    let schema = self.physical_schema(&ts, is_draft(db_name)).await;
+                    match mapped_columns(&schema, defs(&ts).as_ref()) {
+                        Ok(cols) => {
+                            out.insert(db_name.clone(), cols);
+                            continue;
+                        }
+                        Err(e) => format!("the storage's schema does not map to columns: {e}"),
+                    }
                 }
-            }
+                Ok(None) => "no storage definition resolves for this client".to_string(),
+                Err(e) => format!("the storage definition could not be read for this client: {e}"),
+            };
+            unresolved.insert(db_name.clone(), why);
         }
-        out
+        (out, unresolved)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1404,8 +1417,30 @@ impl MySqlAppDataService {
         if tenants.is_empty() {
             return Ok(FanOutReport::default());
         }
-        let plans = migration::plan_tenants(pool, tenants, table_name, version, desired).await?;
-        migration::apply(pool, &plans, &storage.name, table_name, None, version, surface, applied_by).await
+        // Planned one tenant at a time, so a tenant whose table cannot be read is that
+        // tenant's issue and the others still migrate.
+        let mut plans = Vec::new();
+        let mut unplanned = IndexMap::new();
+        for db_name in tenants {
+            match migration::plan_tenants(pool, std::slice::from_ref(db_name), table_name, version, desired).await {
+                Ok(p) => plans.extend(p),
+                Err(e) => {
+                    let detail = format!("could not plan the change: {}", db::message(&e));
+                    let issue = migration::Issue::new(&storage.name, table_name, Some(surface), applied_by)
+                        .version(version)
+                        .kind(migration::IssueKind::PlanFailed)
+                        .detail(&detail);
+                    migration::record_issue(pool, db_name, &issue).await;
+                    unplanned.insert(db_name.clone(), MigrationOutcome::failed(&detail, 0, 0));
+                }
+            }
+        }
+        let mut report = migration::apply(pool, &plans, &storage.name, table_name, None, version, surface, applied_by).await?;
+        for (db_name, o) in unplanned {
+            report.blocked.push(db_name.clone());
+            report.by_tenant.insert(db_name, o);
+        }
+        Ok(report)
     }
 
     /// Finish any migration on this connection that nobody is driving.

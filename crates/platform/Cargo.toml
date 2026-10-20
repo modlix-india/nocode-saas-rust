@@ -7,6 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# Picks the process-wide rustls crypto provider at startup (see crypto.rs).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 anyhow.workspace = true
 arc-swap.workspace = true
 async-trait.workspace = true

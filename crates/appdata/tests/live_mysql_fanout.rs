@@ -283,6 +283,24 @@ mod mysql_fan_out_integration_test {
                     "no journal table should even have been created for a tenant that never ran"
                 );
 
+                // blockedTenantRecordsAnIssue: the reason, in the tenant's own issue table
+                let b = tenant("B");
+                assert_eq!(
+                    number(&p, &format!("SELECT COUNT(*) FROM `{b}`.`storage_migration_issue` WHERE `kind` = 'PREFLIGHT_BLOCKED' AND `storage_name` = 'orders' AND `offending` = 1 AND `surface` = 'LIVE' AND `applied_by` = 'kiran' AND `to_version` = 9")).await,
+                    1
+                );
+                assert!(
+                    number(&p, &format!("SELECT COUNT(*) FROM `{b}`.`storage_migration_issue` WHERE `detail` LIKE '%amount%'")).await == 1,
+                    "the detail names the check that found the rows"
+                );
+                // ... and it does not hold back a later publish at another shape
+                let report = apply(&p, &desired(&[("amount", "VARCHAR(40)"), ("currency", "VARCHAR(3)")])).await;
+                assert!(report.by_tenant.get(&b).is_some_and(|o| o.is_success()), "{}", report.summary());
+                assert_eq!(column_of(&p, &b, TABLE, "currency").await.as_deref(), Some("varchar(3)"));
+                for db in [tenant("A"), tenant("C")] {
+                    assert_eq!(journal_rows(&p, &db, " WHERE `state` = 'APPLIED'").await, 2, "{db}");
+                }
+
                 // preflightIsReadOnly
                 fresh_tenants(&p).await;
                 let blocked = migration::preflight(&p, &plans(&p, &doubles()).await).await.unwrap();
