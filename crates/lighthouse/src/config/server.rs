@@ -767,7 +767,7 @@ mod tests {
         std::fs::create_dir_all(&spring).unwrap();
         std::fs::create_dir_all(&units_dir).unwrap();
         std::fs::write(spring.join("application-default.yml"), "ai:\n  x: 1\n").unwrap();
-        std::fs::write(units_dir.join("multi.toml"), "[server]\nport = 8110\n[eureka]\nregister_as = \"MULTI\"\n").unwrap();
+        std::fs::write(units_dir.join("multi.toml"), "[server]\nport = 8110\n[registry]\nregister_as = \"MULTI\"\n").unwrap();
         std::fs::write(units_dir.join("local.toml"), "[units.database]\npassword = 'pw'\n[ai]\nai.db.password = 'aipw'\n").unwrap();
         std::fs::write(units_dir.join("ai.toml"), "[ai.db]\nurl = 'u'\nport = 1\n").unwrap();
         let mut c = ConfigServerConfig { source: format!("dir:{}", spring.display()), env: "local".into(), ..ConfigServerConfig::default() };

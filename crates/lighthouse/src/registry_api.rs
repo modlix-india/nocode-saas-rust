@@ -1,9 +1,9 @@
-//! The Eureka REST API under `/eureka`, as the Java server answers it.
+//! The registry REST API under `/eureka`, as the Java server answers it.
 //!
 //! - Bodies are XML unless `Accept` names `application/json` (py_eureka_client reads only
 //!   XML; the Rust clients ask for JSON). Registrations are read as JSON, which every client in
 //!   use sends.
-//! - App names are upper case. Status codes are Eureka's: 204 for a registration, 200 or 404
+//! - App names are upper case. Status codes are the registry protocol's: 204 for a registration, 200 or 404
 //!   for the rest, 409 with our copy for a stale replicated heartbeat.
 //! - The discovery GETs answer 503 while the instance is warming up; writes are always taken.
 //! - As an extension, the GETs carry an ETag and answer `If-None-Match` with 304.

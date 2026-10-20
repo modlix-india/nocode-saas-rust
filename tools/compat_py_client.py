@@ -5,7 +5,7 @@ Registers, heartbeats, fetches the registry and its delta (both read through the
 XML parser), drains with an OUT_OF_SERVICE override and back, and stops. Every step is checked
 through the library's own calls; the first failure exits 1.
 
-    python tools/compat_py_eureka.py [http://127.0.0.1:8761/eureka/]
+    python tools/compat_py_client.py [http://127.0.0.1:8761/eureka/]
 
 Locally: nocode-ai/venv/bin/python (py_eureka_client 0.11.10) with a Lighthouse started by
 `cargo run -p lighthouse`. In CI: .github/workflows/lighthouse-py-compat.yml.
@@ -90,8 +90,8 @@ async def main():
     check(me.dataCenterInfo.className.endswith("DefaultDataCenterInfo"), "dataCenterInfo class")
     check(me.leaseInfo.renewalIntervalInSecs == 1 and me.leaseInfo.durationInSecs == 5, "its own lease, 1/5 s")
     check(me.metadata.get("runtime") == "python", "metadata")
-    # Eureka's XML writes `_` in an element name as `__` (XStream); py reads it back like that from Java too.
-    check(me.metadata.get("with__underscore") == "kept", "metadata key with an underscore, as Eureka writes it")
+    # The registry protocol's XML writes `_` in an element name as `__` (XStream); py reads it back like that from Java too.
+    check(me.metadata.get("with__underscore") == "kept", "metadata key with an underscore, as Lighthouse writes it")
     check("UP_" in apps.appsHashcode, f"apps__hashcode {apps.appsHashcode}")
 
     # Heartbeats renew the lease.

@@ -1,9 +1,9 @@
-//! Lighthouse: the registry that replaces the Java Eureka server, run as several instances
-//! that replicate to each other the way Eureka peers do.
+//! Lighthouse: the registry that replaces the Java registry server, run as several instances
+//! that replicate to each other the way Lighthouse peers do.
 //!
-//! - [`eureka`]: the Eureka API every client in use speaks (XML for py_eureka_client, JSON for
+//! - [`registry_api`]: the registry API every client in use speaks (XML for py_eureka_client, JSON for
 //!   the Rust clients).
-//! - [`registry`]: Eureka's registration, status and lease rules, self-preservation, delta.
+//! - [`registry`]: the registry protocol's registration, status and lease rules, self-preservation, delta.
 //! - [`replication`], [`sync`]: batches to the peers, healing, startup sync, digest repair.
 //! - [`eviction`]: the eviction timer.
 //! - [`allowed`]: source networks and the peer token.
@@ -17,7 +17,7 @@
 pub mod allowed;
 pub mod config;
 pub mod dashboard;
-pub mod eureka;
+pub mod registry_api;
 pub mod eviction;
 pub mod registry;
 pub mod replication;
@@ -181,7 +181,7 @@ impl Node {
             Some(cs) => config::server::routes(cs.clone(), self.registry.clone()),
             None => config::server::disabled_routes(),
         };
-        eureka::routes(self.clone())
+        registry_api::routes(self.clone())
             .merge(dashboard::routes(self.clone()))
             .merge(config)
             .layer(middleware::from_fn_with_state(Arc::new(self.cfg.registry.peer_token.clone()), allowed::peer_token))
@@ -230,7 +230,7 @@ pub async fn run() -> Result<()> {
             }
         }
     });
-    let service = Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: None, cors: false };
+    let service = Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: None, cors: false };
     let result = service.run(node.router()).await;
     node.stop();
     result

@@ -2,7 +2,7 @@
 //! `MODLIX__REDIS__URL`, `MODLIX__SHELL__ANALYTICS_ENGINE_SECRET`) from the environment.
 
 use platform::config::{
-    EurekaConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
+    RegistryConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ use crate::config::{UiConfig, UiSection};
 pub struct ShellConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     pub mongo: MongoConfig,
@@ -27,7 +27,7 @@ impl Default for ShellConfig {
         Self {
             server: ServerConfig { port: 8106, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig { cache_prefix: "cmn".into(), ..Default::default() },
             security: SecurityConfig::default(),
             mongo: MongoConfig::default(),
@@ -44,7 +44,7 @@ impl ShellConfig {
         UiConfig {
             server: self.server.clone(),
             telemetry: self.telemetry.clone(),
-            eureka: self.eureka.clone(),
+            registry: self.registry.clone(),
             redis: self.redis.clone(),
             security: self.security.clone(),
             mongo: self.mongo.clone(),
@@ -109,7 +109,7 @@ pub struct CoreConfig {
 
 impl Default for CoreConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:CORE".into()), timeout_seconds: 60 }
+        Self { upstream: UpstreamConfig::One("lighthouse:CORE".into()), timeout_seconds: 60 }
     }
 }
 
@@ -126,7 +126,7 @@ mod tests {
         assert!(!c.shell.cdn_replace_plus);
         assert_eq!(c.shell.cdn_resize_options_type, "none");
         assert_eq!(c.shell.ssr_channel, "ssr:cache:invalidation");
-        assert_eq!(c.core.upstream.entries(), vec!["eureka:CORE".to_string()]);
+        assert_eq!(c.core.upstream.entries(), vec!["lighthouse:CORE".to_string()]);
         assert_eq!(c.engine_config().server.port, 8106);
     }
 }

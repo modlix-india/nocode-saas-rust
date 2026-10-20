@@ -6,7 +6,7 @@
 //!
 //! Shutdown order on SIGTERM / Ctrl-C:
 //! 1. `/readyz` starts failing, so the gateway's health checks take this instance out;
-//! 2. the Eureka registration (if any) is withdrawn, for Java callers; the Lighthouse one (if
+//! 2. the Lighthouse registration (if any) is withdrawn, for Java callers; the Lighthouse one (if
 //!    any) goes OUT_OF_SERVICE, so the gateway drains the instance;
 //! 3. requests keep being served for `shutdown_grace_seconds`;
 //! 4. the instance is deleted from every Lighthouse;
@@ -23,7 +23,7 @@ use lighthouse_client::Registration;
 use tokio::sync::watch;
 
 use crate::config::ServerConfig;
-use crate::eureka::Eureka;
+use crate::registry::Registry;
 use crate::health::Health;
 use crate::http::{catch_panic, observe, spring_cors};
 use crate::telemetry::Telemetry;
@@ -33,8 +33,8 @@ pub struct Service {
     pub server: ServerConfig,
     pub telemetry: Telemetry,
     pub health: Health,
-    /// Registered under `[eureka] register_as` when `[eureka] register` is on.
-    pub eureka: Option<Eureka>,
+    /// Registered under `[registry] register_as` when `[registry] register` is on.
+    pub registry: Option<Registry>,
     /// Answer CORS like the Java services (`*`). Off for the gateway, which passes preflights
     /// through to the service that owns the path.
     pub cors: bool,
@@ -70,8 +70,8 @@ impl Service {
         let app = app.layer(middleware::from_fn(observe));
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let eureka = self
-            .eureka
+        let registry = self
+            .registry
             .as_ref()
             .filter(|e| e.me().is_some())
             .map(|e| e.spawn_lifecycle(shutdown_rx.clone()));
@@ -99,7 +99,7 @@ impl Service {
                 let draining_since = tokio::time::Instant::now();
                 health.start_draining();
                 let _ = shutdown_tx.send(true);
-                if let Some(e) = eureka {
+                if let Some(e) = registry {
                     let _ = e.await;
                 }
                 // Lighthouse: OUT_OF_SERVICE, the grace period, then the DELETE.
@@ -248,7 +248,7 @@ mod tests {
             server: ServerConfig { port, shutdown_grace_seconds: 1 },
             telemetry,
             health,
-            eureka: None,
+            registry: None,
             cors: false,
         };
         let registration = lighthouse_client::registration("app-test", port, "/readyz")

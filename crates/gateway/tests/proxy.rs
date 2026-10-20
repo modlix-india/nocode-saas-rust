@@ -386,9 +386,9 @@ async fn bad_config_is_refused() {
     cfg.pools.insert("p".into(), pool(&["http://127.0.0.1:1"], "/h"));
     assert!(gateway::build(&cfg).await.is_err(), "no routes");
 
-    cfg.pools.insert("e".into(), PoolConfig { upstreams: UpstreamConfig::One("eureka:X".into()), ..Default::default() });
+    cfg.pools.insert("e".into(), PoolConfig { upstreams: UpstreamConfig::One("lighthouse:X".into()), ..Default::default() });
     cfg.routes = vec![route("x", "/", "p")];
-    assert!(gateway::build(&cfg).await.is_err(), "eureka pool without eureka zones");
+    assert!(gateway::build(&cfg).await.is_err(), "lighthouse pool without lighthouse zones");
 
     let d = GatewayConfig::default();
     assert_eq!(d.server.port, 8180);

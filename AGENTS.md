@@ -41,7 +41,7 @@ around after use. Check `df -h /System/Volumes/Data` before a big build.
 
 ```
 crates/platform   shared: config, telemetry, health, app runner, http helpers, errors, security
-                  client, cache eviction, upstream resolution, mysql pool, Java hashing, eureka shim
+                  client, cache eviction, upstream resolution, mysql pool, Java hashing, lighthouse shim
 crates/gateway    gateway-rust
 crates/files      files-serve + files-manage (bins in src/bin, everything else in the library)
 crates/ui         ui units
@@ -62,7 +62,7 @@ deploy/           Dockerfiles and example configs (not applied anywhere)
    and add it to the crate's `DIFFERENCES.md` with the reason. Never change behaviour silently.
 3. Use the platform pieces:
    - `platform::config::load::<YourConfig>("<binary>")`, struct with `#[serde(default)]` sections,
-     reusing `ServerConfig`, `TelemetryConfig`, `EurekaConfig`, `RedisConfig`, `SecurityConfig`,
+     reusing `ServerConfig`, `TelemetryConfig`, `RegistryConfig`, `RedisConfig`, `SecurityConfig`,
      `MySqlConfig`.
    - `platform::telemetry::init`, `platform::health::Health` (add readiness checks),
      `platform::app::Service { .. }.run(router)`.
@@ -74,7 +74,7 @@ deploy/           Dockerfiles and example configs (not applied anywhere)
      service: `application-<profile>.yml` outranks the per-service yml), so Java evictions reach
      Rust and Rust evictions reach Java (`evict_all_everywhere`). Check what Java really publishes
      on `evictionChannel` before relying on a cache name.
-   - Other services: `platform::upstream::Upstream` (`eureka:<APP>` or base URLs).
+   - Other services: `platform::upstream::Upstream` (`lighthouse:<APP>` or base URLs).
 4. Unit tests for every non-trivial rule, using values observed from the running Java service.
 5. Java is retired (2026-10-19): the parity scripts that compared Rust with it are gone. A
    behaviour change against what Java did still gets its `DIFFERENCES.md` entry.
@@ -85,7 +85,7 @@ deploy/           Dockerfiles and example configs (not applied anywhere)
 |---|---|
 | security / ui / files / core (Java) | `localhost:8001` / `8002` / `8003` / `8005` |
 | Spring gateway | `localhost:8080` |
-| config server / eureka | `localhost:8888` / `localhost:9999/eureka/` |
+| config server / lighthouse | `localhost:8888` / `localhost:9999/eureka/` |
 | MySQL | `127.0.0.1:3306`, `root` / `[units.database] password` in config/local.toml |
 | MongoDB | `mongodb://localhost:27017`, no auth (`ui`, `core` databases) |
 | Redis | `[units.redis] url` in `config/local.toml` |

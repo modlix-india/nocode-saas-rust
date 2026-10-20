@@ -1,45 +1,45 @@
 //! The clients in use today, unchanged, against Lighthouse:
-//! - `platform::eureka::Eureka` (every Rust unit) registers, heartbeats, discovers and
+//! - `platform::registry::Lighthouse` (every Rust unit) registers, heartbeats, discovers and
 //!   deregisters;
 //! - the requests py_eureka_client 0.11.10 sends, replayed byte for byte, and the XML it reads
-//!   checked for what its parser requires (`tools/compat_py_eureka.py` runs the real library).
+//!   checked for what its parser requires (`tools/compat_py_client.py` runs the real library).
 
 mod common;
 
 use std::time::Duration;
 
 use common::*;
-use platform::config::EurekaConfig;
-use platform::eureka::Eureka;
+use platform::config::RegistryConfig;
+use platform::registry::Registry;
 use tokio::sync::watch;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_platform_eureka_client_works_unchanged() {
+async fn the_platform_registry_client_works_unchanged() {
     let (l, url) = bind().await;
     let lh = TestNode::start(l, config(&url, &[]));
     wait_ready(&[&lh]).await;
 
-    let cfg = EurekaConfig {
+    let cfg = RegistryConfig {
         register: true,
         register_as: "files".into(),
         zones: vec![format!("{url}/eureka/")],
         instance_ip: "127.0.0.1".into(),
     };
-    let eureka = Eureka::new(&cfg, 8104).unwrap();
-    let id = eureka.me().unwrap().instance_id.clone();
+    let registry = Registry::new(&cfg, 8104).unwrap();
+    let id = registry.me().unwrap().instance_id.clone();
     let (tx, rx) = watch::channel(false);
-    let lifecycle = eureka.spawn_lifecycle(rx);
+    let lifecycle = registry.spawn_lifecycle(rx);
 
     // Registers.
     assert!(eventually(Duration::from_secs(3), || async { lh.node.registry.instance("FILES", &id).is_some() }).await);
     let registered = lh.node.registry.instance("FILES", &id).unwrap();
-    assert_eq!(registered.lease_info.duration_in_secs, 90, "its own lease, Eureka's default");
+    assert_eq!(registered.lease_info.duration_in_secs, 90, "its own lease, the registry protocol's default");
     assert_eq!(registered.metadata.0["runtime"], "rust");
 
     // Discovers, through GET /eureka/apps/FILES as JSON.
-    assert_eq!(eureka.resolve("files").await.unwrap(), "http://127.0.0.1:8104");
-    assert_eq!(eureka.instances("FILES").await.unwrap(), vec!["http://127.0.0.1:8104"]);
-    assert!(eureka.resolve("nobody").await.is_err(), "404 for an app without instances");
+    assert_eq!(registry.resolve("files").await.unwrap(), "http://127.0.0.1:8104");
+    assert_eq!(registry.instances("FILES").await.unwrap(), vec!["http://127.0.0.1:8104"]);
+    assert!(registry.resolve("nobody").await.is_err(), "404 for an app without instances");
 
     // Heartbeats (its first is 30 seconds after registering).
     let first = registered.lease_info.last_renewal_timestamp;

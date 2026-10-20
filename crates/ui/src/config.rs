@@ -1,7 +1,7 @@
 //! ui-engine configuration: `config/ui-engine.toml`, secrets (`MODLIX__MONGO__URI`,
 //! `MODLIX__REDIS__URL`) from the environment.
 
-use platform::config::{EurekaConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
+use platform::config::{RegistryConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct UiConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     pub mongo: MongoConfig,
@@ -21,7 +21,7 @@ impl Default for UiConfig {
         Self {
             server: ServerConfig { port: 8102, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig { cache_prefix: "cmn".into(), ..Default::default() },
             security: SecurityConfig::default(),
             mongo: MongoConfig::default(),

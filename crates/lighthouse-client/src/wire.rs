@@ -1,4 +1,4 @@
-//! Eureka's JSON, as the Java server writes it (Jackson, `EurekaJacksonCodec`) and as the
+//! The registry protocol's JSON, as the Java server writes it (Jackson, `EurekaJacksonCodec`) and as the
 //! clients in use send it.
 //!
 //! Written exactly in Jackson's shape and field order: `"port":{"$":8104,"@enabled":"true"}`,
@@ -9,7 +9,7 @@
 //! Read leniently, because every client spells something differently: numbers may come as
 //! strings and the other way round, `overriddenstatus` (py_eureka_client) or `overriddenStatus`
 //! (Jackson), a lone `instance` or `application` as an object instead of an array, and missing
-//! fields take Eureka's defaults.
+//! fields take the registry protocol's defaults.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_DATA_CENTER_CLASS: &str = "com.netflix.appinfo.InstanceInfo$DefaultDataCenterInfo";
 /// What Jackson writes for an empty metadata map.
 pub const EMPTY_MAP_CLASS: &str = "java.util.Collections$EmptyMap";
-/// Eureka's default lease when a client sends none.
+/// The registry protocol's default lease when a client sends none.
 pub const DEFAULT_RENEWAL_SECS: u32 = 30;
 pub const DEFAULT_DURATION_SECS: u32 = 90;
 
@@ -48,7 +48,7 @@ impl Status {
         }
     }
 
-    /// Eureka's `InstanceStatus.toEnum`: any case, and anything unrecognised is `UNKNOWN`.
+    /// The registry protocol's `InstanceStatus.toEnum`: any case, and anything unrecognised is `UNKNOWN`.
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_uppercase().as_str() {
             "UP" => Status::Up,
@@ -332,7 +332,7 @@ impl<'de> Deserialize<'de> for LeaseInfo {
             service_up_timestamp: Lenient,
         }
         let w = Wire::deserialize(d)?;
-        // A zero or negative duration means "the default", as in Eureka.
+        // A zero or negative duration means "the default", as in Lighthouse.
         let secs = |v: Option<Lenient>, default: u32| match v {
             Some(Lenient(n)) if n > 0 => u32::try_from(n).unwrap_or(u32::MAX),
             _ => default,
@@ -444,7 +444,7 @@ impl<'de> Deserialize<'de> for InstanceInfo {
             sid: Option<String>,
             status: Option<Status>,
             overridden_status: Option<Status>,
-            /// py_eureka_client's spelling (and Eureka's XML element name).
+            /// py_eureka_client's spelling (and the registry protocol's XML element name).
             overriddenstatus: Option<Status>,
             port: Option<PortInfo>,
             secure_port: Option<PortInfo>,
@@ -468,7 +468,7 @@ impl<'de> Deserialize<'de> for InstanceInfo {
         let w = Wire::deserialize(d)?;
         let def = InstanceInfo::default();
         let host_name = w.host_name.unwrap_or_default();
-        // Eureka's `InstanceInfo.getId()`: the instance id, else the host name.
+        // The registry protocol's `InstanceInfo.getId()`: the instance id, else the host name.
         let instance_id = w.instance_id.filter(|s| !s.is_empty()).unwrap_or_else(|| host_name.clone());
         Ok(InstanceInfo {
             instance_id,
@@ -529,7 +529,7 @@ impl Serialize for Application {
     }
 }
 
-/// One element or a list: older Eureka servers send a lone instance (or app) as an object.
+/// One element or a list: older registry servers send a lone instance (or app) as an object.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum OneOrMany<T> {
@@ -638,7 +638,7 @@ impl Applications {
             .unwrap_or_default()
     }
 
-    /// Eureka's reconcile hash code of these instances.
+    /// The registry protocol's reconcile hash code of these instances.
     pub fn hashcode(&self) -> String {
         reconcile_hashcode(self.instances().map(|i| i.status))
     }
@@ -655,7 +655,7 @@ impl Applications {
     }
 }
 
-/// Eureka's `apps__hashcode`: each status with its count, sorted by status name, as
+/// The registry protocol's `apps__hashcode`: each status with its count, sorted by status name, as
 /// `STATUS_count_` (`OUT_OF_SERVICE_1_UP_2_`). Empty for an empty registry. Clients compare it
 /// with their own copy after applying a delta and fetch everything again when it differs.
 pub fn reconcile_hashcode(statuses: impl Iterator<Item = Status>) -> String {
@@ -721,7 +721,7 @@ mod tests {
         assert_eq!(i.data_center_info.class, "x.Y");
         assert_eq!(i.base_url(), "http://10.1.1.2:8000");
 
-        // A bare minimum: Eureka's defaults.
+        // A bare minimum: the registry protocol's defaults.
         let bare: InstanceInfo = serde_json::from_value(json!({"hostName": "h", "port": 81, "metadata": null,
             "isCoordinatingDiscoveryServer": true, "lastDirtyTimestamp": "", "dataCenterInfo": {}})).unwrap();
         assert_eq!((bare.status, bare.overridden_status, bare.port.port), (Status::Up, Status::Unknown, 81));

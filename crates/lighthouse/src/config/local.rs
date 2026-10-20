@@ -97,7 +97,7 @@ impl LocalConfig {
 
     /// The document of every unit, then of every app, from a snapshot holding
     /// [`LocalConfig::read`]'s files, and their names in the registry (a unit's
-    /// `[eureka] register_as`, else the name in capitals).
+    /// `[registry] register_as`, else the name in capitals).
     pub fn documents(&self, files: &BTreeMap<String, String>) -> (Vec<(String, UnitState)>, Vec<(String, String)>) {
         let secrets = match files.get(SECRETS_FILE).map(|t| t.parse::<toml::Table>()) {
             None => Ok(Json::Object(Map::new())),
@@ -119,7 +119,7 @@ impl LocalConfig {
             };
             let registry = match &state {
                 UnitState::Ready(d) if !self.is_app(name) => {
-                    get_path(&d.document, "eureka.register_as").and_then(Json::as_str).filter(|s| !s.is_empty()).map(str::to_string)
+                    get_path(&d.document, "registry.register_as").and_then(Json::as_str).filter(|s| !s.is_empty()).map(str::to_string)
                 }
                 _ => None,
             };
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn documents_from_the_local_files() {
         let d = tempdir("docs");
-        std::fs::write(d.join("security-auth.toml"), "[server]\nport = 8101\n[telemetry]\nlog_level = \"info\"\n[eureka]\nregister_as = \"SECURITY-AUTH\"\n").unwrap();
+        std::fs::write(d.join("security-auth.toml"), "[server]\nport = 8101\n[telemetry]\nlog_level = \"info\"\n[registry]\nregister_as = \"SECURITY-AUTH\"\n").unwrap();
         std::fs::write(d.join("gateway-rust-allrust.toml"), "[server]\nport = 8080\nroutes = 1\n").unwrap();
         std::fs::write(d.join("ai.toml"), "[ai.db]\nurl = \"mysql://h/ai\"\n[redis]\ncodec = \"string\"\n").unwrap();
         std::fs::write(d.join("local.toml"), SECRETS).unwrap();
@@ -364,7 +364,7 @@ mod tests {
     fn a_repository_folder_is_read() {
         let mut files = BTreeMap::new();
         for (k, v) in [
-            ("units/multi.toml", "[server]\nport = 8110\n[eureka]\nregister_as = \"MULTI\"\n"),
+            ("units/multi.toml", "[server]\nport = 8110\n[registry]\nregister_as = \"MULTI\"\n"),
             ("units/gateway-rust.toml", "[server]\nport = 8080\nroutes = 1\n[redis]\nurl = \"rediss://secret@h\"\n"),
             ("units/zeta.toml", "[server]\nport = 1\n"),
             ("units/nested/x.toml", "x = 1\n"),

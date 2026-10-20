@@ -48,7 +48,7 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 
 use crate::caches::Caches;
@@ -100,9 +100,9 @@ pub(crate) fn check_jwt_key(cfg: &AuthConfig) -> Result<()> {
 }
 
 /// Discovery, when the unit registers in it or reaches other units through it.
-pub(crate) fn eureka_for(cfg: &AuthConfig) -> Result<Option<Eureka>> {
-    if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Ok(Some(Eureka::new(&cfg.eureka, cfg.server.port)?))
+pub(crate) fn registry_for(cfg: &AuthConfig) -> Result<Option<Registry>> {
+    if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Ok(Some(Registry::new(&cfg.registry, cfg.server.port)?))
     } else {
         Ok(None)
     }
@@ -121,7 +121,7 @@ pub async fn run() -> Result<()> {
     let auth = build(&cfg, pool.clone(), cache.clone());
     cache.spawn_eviction_listener();
 
-    let eureka = crate::eureka_for(&cfg)?;
+    let registry = crate::registry_for(&cfg)?;
     let health = Health::new(telemetry.metrics.clone());
     health.check("mysql", move || {
         let pool = pool.clone();
@@ -131,7 +131,7 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: true }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: true }
         .run(handlers::router(auth))
         .await
 }
@@ -140,7 +140,7 @@ pub async fn run() -> Result<()> {
 mod startup_tests {
     use super::*;
 
-    /// (`Eureka::new` starts its refresh task, so a runtime is needed.)
+    /// (`Registry::new` starts its refresh task, so a runtime is needed.)
     #[tokio::test]
     async fn key_and_discovery() {
         let mut cfg = AuthConfig::default();
@@ -149,9 +149,9 @@ mod startup_tests {
         cfg.jwt.key = "k".repeat(64);
         check_jwt_key(&cfg).unwrap();
         configure_messages(&cfg).unwrap();
-        assert!(eureka_for(&cfg).unwrap().is_none());
-        cfg.eureka.zones = vec!["http://127.0.0.1:9/eureka".into()];
-        assert!(eureka_for(&cfg).unwrap().is_some());
+        assert!(registry_for(&cfg).unwrap().is_none());
+        cfg.registry.zones = vec!["http://127.0.0.1:9/eureka".into()];
+        assert!(registry_for(&cfg).unwrap().is_some());
     }
 
     /// Every unit wired with events on, an MQ address and a files upstream (nothing connects

@@ -44,7 +44,7 @@ publish_events = false
 exchange = "events"
 routing_keys = "events1,events2,events3"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "SECURITY-INTERNAL"

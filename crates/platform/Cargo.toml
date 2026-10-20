@@ -1,6 +1,6 @@
 [package]
 name = "platform"
-description = "The contracts every Modlix Rust service shares with the Java estate: config server, Eureka, cache eviction, security, errors, metrics."
+description = "The contracts every Modlix Rust service shares with the Java estate: config server, Lighthouse, cache eviction, security, errors, metrics."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

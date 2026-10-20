@@ -1,7 +1,7 @@
-//! The registry, with Eureka's rules (`AbstractInstanceRegistry`, `PeerAwareInstanceRegistryImpl`
-//! and the `InstanceResource` checks), so every Eureka client sees the behaviour it was built for.
+//! The registry, with the registry protocol's rules (`AbstractInstanceRegistry`, `PeerAwareInstanceRegistryImpl`
+//! and the `InstanceResource` checks), so every Lighthouse client sees the behaviour it was built for.
 //!
-//! - **Status.** A registration's status goes through Eureka's override rules: an instance
+//! - **Status.** A registration's status goes through the registry protocol's override rules: an instance
 //!   reporting DOWN or STARTING wins; else an OUT_OF_SERVICE (or other) override set through
 //!   `/status` wins; else, for a client's own call, an existing UP or OUT_OF_SERVICE is kept.
 //! - **Dirty timestamps.** A registration older than the copy held is ignored in favour of the
@@ -152,7 +152,7 @@ impl Window {
 
 struct State {
     apps: BTreeMap<String, BTreeMap<String, Lease>>,
-    /// Status overrides by instance id, as Eureka keys them.
+    /// Status overrides by instance id, as Lighthouse keys them.
     overrides: HashMap<String, Status>,
     recent: VecDeque<(i64, InstanceInfo)>,
     tombstones: HashMap<(String, String), Tombstone>,
@@ -218,7 +218,7 @@ impl State {
     }
 }
 
-/// Eureka's `FirstMatchWinsCompositeRule(DownOrStartingRule, OverrideExistsRule,
+/// The registry protocol's `FirstMatchWinsCompositeRule(DownOrStartingRule, OverrideExistsRule,
 /// LeaseExistsRule)`, then the instance's own status.
 fn status_rules(incoming: Status, id: &str, existing: Option<Status>, overrides: &HashMap<String, Status>, origin: Origin) -> Status {
     if incoming != Status::Up && incoming != Status::OutOfService {
@@ -341,7 +341,7 @@ impl Registry {
         let existing_status = existing.map(|l| l.info.status);
         let existing_service_up = existing.map(|l| l.service_up_ms);
         if let Some(e) = existing {
-            // Eureka keeps its own copy when it is newer than the registration.
+            // Lighthouse keeps its own copy when it is newer than the registration.
             if e.info.last_dirty_timestamp > r.last_dirty_timestamp {
                 r = e.info.clone();
             }
@@ -373,7 +373,7 @@ impl Registry {
         true
     }
 
-    /// `PUT /apps/{APP}/{ID}`: Eureka's `renew` followed by `validateDirtyTimestamp`.
+    /// `PUT /apps/{APP}/{ID}`: the registry protocol's `renew` followed by `validateDirtyTimestamp`.
     pub fn renew(&self, app: &str, id: &str, origin: Origin, last_dirty: Option<i64>, overridden: Option<Status>) -> Renewal {
         let now = self.now_ms();
         let app = app.to_ascii_uppercase();
@@ -386,7 +386,7 @@ impl Registry {
         let current = lease.info.status;
         let status = if current != Status::Up && current != Status::OutOfService { current } else { override_now.unwrap_or(current) };
         if status == Status::Unknown {
-            // A deleted override left the status unknown: Eureka asks for a new registration.
+            // A deleted override left the status unknown: Lighthouse asks for a new registration.
             return Renewal::NotFound;
         }
         lease.last_renewal_ms = now;

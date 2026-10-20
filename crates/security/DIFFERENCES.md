@@ -97,9 +97,9 @@ Kept so both implementations answer alike while both run; each is a candidate fi
   (which reads that cache first) asks security for every request instead of every new token.
   Measured locally: signed-in context p50 0.76 ms in Rust against 2.66 ms in Java.
 - The Java services reach `internal/securityContextAuthentication` through Feign on
-  `eureka:SECURITY`, not through the gateway. Routing the controller's paths at gateway-rust
+  `lighthouse:SECURITY`, not through the gateway. Routing the controller's paths at gateway-rust
   moves browser traffic only; the service-to-service share moves when security-auth is given an
-  Eureka name of its own (`[eureka] register_as`) and commons-security's Feign client points at
+  Lighthouse name of its own (`[registry] register_as`) and commons-security's Feign client points at
   it.
 
 ## security-internal: deliberate differences

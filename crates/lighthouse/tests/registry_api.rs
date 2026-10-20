@@ -1,4 +1,4 @@
-//! The Eureka API's edges: formats, ETags, warming up, validation, and who may call.
+//! The Lighthouse API's edges: formats, ETags, warming up, validation, and who may call.
 
 mod common;
 
@@ -19,7 +19,7 @@ async fn single() -> TestNode {
 #[tokio::test]
 async fn formats_etags_and_lookups() {
     let n = single().await;
-    let (e, c) = (n.eureka(), http());
+    let (e, c) = (n.registry(), http());
     assert_eq!(register(&n.url, "files", "f1", 1).await, 204);
 
     // XML unless Accept names JSON; /apps/ is /apps.
@@ -102,7 +102,7 @@ async fn registrations_are_checked() {
     cfg.allowed.apps = vec!["files".into()];
     let n = TestNode::start(l, cfg);
     wait_ready(&[&n]).await;
-    let (e, c) = (n.eureka(), http());
+    let (e, c) = (n.registry(), http());
     let post = |app: &str, body: Value| c.post(format!("{e}/apps/{app}")).json(&body).send();
 
     let mut b = body("files", "f1", 1, 1);

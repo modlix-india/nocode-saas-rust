@@ -23,7 +23,7 @@ gateway_pair = ["http://gateway-1:8080", "http://gateway-2:8080"]
 # How `<urls:unit>` renders, per environment:
 #   alias       ["http://<unit>:<port>"]: the network alias the unit's blue and green containers
 #               share; Docker's DNS answers with the running ones.
-#   lighthouse  ["eureka:<REGISTRY NAME>"] in gateway-rust, whose pools then follow the registry;
+#   lighthouse  ["lighthouse:<REGISTRY NAME>"] in gateway-rust, whose pools then follow the registry;
 #               `gateway_pair` in every other unit.
 # `doubled`: the units with a second instance per colour (Java prod ran core, ui and files twice
 # per colour; core-scheduler stays at one). Keep in step with scripts/<env>/rust.

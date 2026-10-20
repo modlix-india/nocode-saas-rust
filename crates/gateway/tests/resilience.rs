@@ -457,9 +457,9 @@ async fn a_registry_pool_follows_membership_within_its_refresh() {
     let addr = |b: &str| b.trim_start_matches("http://").to_string();
     let listing: Listing = Arc::new(parking_lot::RwLock::new(vec![addr(&one_base)]));
     let zone = registry(listing.clone()).await;
-    let p = PoolConfig { upstreams: UpstreamConfig::One("eureka:REG".into()), health_path: "/health".into(), ..Default::default() };
+    let p = PoolConfig { upstreams: UpstreamConfig::One("lighthouse:REG".into()), health_path: "/health".into(), ..Default::default() };
     assert_eq!(p.discovery_refresh_ms, 2_000, "the default");
-    let app = gateway_with(&one_base, vec![("reg", p)], |cfg| cfg.eureka.zones = vec![zone]).await;
+    let app = gateway_with(&one_base, vec![("reg", p)], |cfg| cfg.registry.zones = vec![zone]).await;
 
     let mut first = None;
     for _ in 0..50 {

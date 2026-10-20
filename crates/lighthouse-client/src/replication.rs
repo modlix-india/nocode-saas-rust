@@ -1,4 +1,4 @@
-//! What Lighthouse servers send each other: Eureka's peer replication batch, and the digest
+//! What Lighthouse servers send each other: the registry protocol's peer replication batch, and the digest
 //! they compare once a minute to repair anything a batch lost.
 
 use serde::{Deserialize, Serialize};

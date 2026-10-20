@@ -39,7 +39,7 @@ use self::spring::SpringConfig;
 pub struct LighthouseConfig {
     /// SHA-256 (hex) of the token that unlocks managing instances from the dashboard
     /// (`MODLIX__ADMIN_TOKEN_SHA256`). Empty: the dashboard is read-only. Reads stay open, as
-    /// Eureka's are.
+    /// The registry protocol's are.
     pub admin_token_sha256: String,
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
@@ -124,7 +124,7 @@ pub struct RegistryConfig {
     /// An eviction tick that runs this much later than planned is skipped: the process was
     /// stalled, and heartbeats were probably held up with it.
     pub late_tick_skip_ms: u64,
-    /// Eureka's self-preservation: no eviction while the renewals of the last minute are below
+    /// The registry protocol's self-preservation: no eviction while the renewals of the last minute are below
     /// this fraction of the renewals expected.
     pub renewal_percent_threshold: f64,
     pub self_preservation: bool,

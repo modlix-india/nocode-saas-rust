@@ -21,7 +21,7 @@ use overridable::write::transport::TransportService;
 use overridable::write::{Commons, OverridableService};
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::security::SecurityClient;
 
@@ -69,12 +69,12 @@ pub async fn run() -> Result<()> {
 
     let db = platform::db::mongo_database(&cfg.mongo).await?;
     let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
-    let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, registry.as_ref())?;
     let store = overridable::Store::new(db.clone(), security.clone(), &cache);
     let health = Health::new(telemetry.metrics.clone());
     {
@@ -92,7 +92,7 @@ pub async fn run() -> Result<()> {
     cache.spawn_eviction_listener();
 
     // CORS is answered inside the router, under the security headers, as the Java ui does.
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: false }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: false }
         .run(routes::router(st))
         .await
 }

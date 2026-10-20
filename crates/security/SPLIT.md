@@ -10,8 +10,8 @@ Redis, exactly as security-auth does today.
 | security-internal | 8112 | the service-to-service routes (55) | Rust units through `platform::security::SecurityClient`, later Java services |
 | security-admin | 8113 | everything else (223) | browsers through gateway-rust |
 
-None of the three registers in Eureka. Java services reach security through Feign
-(`eureka:SECURITY`), and Feign picks any instance of that name, so a Rust unit registered under it
+None of the three registers in Lighthouse. Java services reach security through Feign
+(`lighthouse:SECURITY`), and Feign picks any instance of that name, so a Rust unit registered under it
 would have to answer every one of the 302 routes. Until Java security is retired, Java callers keep
 going to Java; Rust callers are pointed at the Rust units by configuration.
 
