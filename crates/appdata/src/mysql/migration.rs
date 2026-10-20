@@ -182,14 +182,45 @@ impl TenantPlan {
     }
 }
 
-/// How far one tenant got, read back from its journal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How far one tenant got, read back from its journal, with what the status screen shows of it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TenantProgress {
     pub database: String,
     pub state: Option<MigrationState>,
     pub statement_index: i32,
     pub total: i32,
     pub attempt: i32,
+    /// The client the tenant schema belongs to; set by the service, which knows the app.
+    pub client_code: String,
+    /// `LIVE` or `DRAFT`, from the schema's name.
+    pub surface: String,
+    pub to_version: Option<i32>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub applied_by: Option<String>,
+    pub error: Option<String>,
+    /// The newest issues of this storage in the tenant, newest first.
+    pub issues: Vec<TenantIssue>,
+}
+
+/// One row of a tenant's `storage_migration_issue`, for the status screen.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TenantIssue {
+    pub kind: String,
+    pub surface: Option<String>,
+    pub offending: i64,
+    pub detail: String,
+    pub created_at: String,
+    pub applied_by: Option<String>,
+    /// Newer than the tenant's last clean migration of the storage: not yet resolved by one.
+    pub current: bool,
+}
+
+impl TenantProgress {
+    /// Something to look at: a migration that did not finish cleanly, or a current issue.
+    pub fn needs_attention(&self) -> bool {
+        matches!(self.state, Some(s) if s != MigrationState::Applied) || self.issues.iter().any(|i| i.current)
+    }
 }
 
 impl TenantProgress {
@@ -795,27 +826,70 @@ pub async fn apply(
     Ok(FanOutReport { by_tenant: outcomes, blocked: blocked_dbs, no_op, resumed })
 }
 
-/// How far each tenant got, from its own journal.
+/// How far each tenant got, from its own journal, with its newest `issue_limit` issues.
 pub async fn status(pool: &MySqlPool, tenants: &[String], storage_name: &str) -> AppDataResult<Vec<TenantProgress>> {
+    status_with_issues(pool, tenants, storage_name, 5).await
+}
+
+pub async fn status_with_issues(pool: &MySqlPool, tenants: &[String], storage_name: &str, issue_limit: usize)
+    -> AppDataResult<Vec<TenantProgress>> {
     let mut out = Vec::new();
     for db_name in tenants {
-        let untouched = TenantProgress { database: db_name.clone(), state: None, statement_index: 0, total: 0, attempt: 0 };
-        if !table_exists(pool, db_name, journal::TABLE).await? {
-            out.push(untouched);
-            continue;
+        let mut t = TenantProgress {
+            database: db_name.clone(),
+            surface: if db_name.ends_with("_draft") { "DRAFT" } else { "LIVE" }.into(),
+            ..Default::default()
+        };
+        let mut last_applied: Option<String> = None;
+        if table_exists(pool, db_name, journal::TABLE).await? {
+            if let Some(r) = fetch_raw(pool, &journal::latest_detail(db_name, storage_name)).await?.first() {
+                let v: Vec<&Value> = r.values().collect();
+                t.state = MigrationState::from_name(&string_of(v.first().copied()));
+                t.statement_index = int_of(v.get(1).copied());
+                t.total = int_of(v.get(2).copied());
+                t.attempt = int_of(v.get(3).copied());
+                t.to_version = opt_string(v.get(5).copied()).and_then(|s| s.parse().ok());
+                t.started_at = opt_string(v.get(6).copied()).map(|s| trim_micros(&s));
+                t.finished_at = opt_string(v.get(7).copied()).map(|s| trim_micros(&s));
+                t.applied_by = opt_string(v.get(8).copied());
+                t.error = opt_string(v.get(9).copied());
+            }
+            last_applied = fetch_raw(pool, &journal::last_applied_at(db_name, storage_name))
+                .await?
+                .first()
+                .and_then(|r| opt_string(r.values().next()));
         }
-        match find_entry(pool, &journal::find_latest(db_name, storage_name)).await? {
-            Some(e) => out.push(TenantProgress {
-                database: db_name.clone(),
-                state: Some(e.state),
-                statement_index: e.statement_index,
-                total: e.total,
-                attempt: e.attempt,
-            }),
-            None => out.push(untouched),
+        if issue_limit > 0 && table_exists(pool, db_name, journal::ISSUE_TABLE).await? {
+            for r in fetch_raw(pool, &journal::recent_issues(db_name, storage_name, issue_limit)).await? {
+                let v: Vec<&Value> = r.values().collect();
+                let created = opt_string(v.get(4).copied()).unwrap_or_default();
+                t.issues.push(TenantIssue {
+                    kind: string_of(v.first().copied()),
+                    surface: opt_string(v.get(1).copied()),
+                    offending: opt_string(v.get(2).copied()).and_then(|s| s.parse().ok()).unwrap_or(0),
+                    detail: opt_string(v.get(3).copied()).unwrap_or_default(),
+                    // the same text format on both sides, so the strings compare as times do
+                    current: last_applied.as_deref().is_none_or(|a| created.as_str() > a),
+                    created_at: trim_micros(&created),
+                    applied_by: opt_string(v.get(5).copied()),
+                });
+            }
         }
+        out.push(t);
     }
     Ok(out)
+}
+
+fn opt_string(v: Option<&Value>) -> Option<String> {
+    match v {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.java_string()),
+    }
+}
+
+/// `2026-10-20 08:16:22.054465` as `2026-10-20 08:16:22`.
+fn trim_micros(s: &str) -> String {
+    s.split('.').next().unwrap_or(s).to_string()
 }
 
 // ------------------------------------------------------------------ sweeper

@@ -293,6 +293,12 @@ mod mysql_fan_out_integration_test {
                     number(&p, &format!("SELECT COUNT(*) FROM `{b}`.`storage_migration_issue` WHERE `detail` LIKE '%amount%'")).await == 1,
                     "the detail names the check that found the rows"
                 );
+                // the status carries it, current (nothing has migrated cleanly since)
+                let st = migration::status(&p, &[b.clone()], "orders").await.unwrap();
+                assert_eq!(st[0].issues.len(), 1, "{:?}", st[0]);
+                assert_eq!(st[0].issues[0].kind, "PREFLIGHT_BLOCKED");
+                assert!(st[0].issues[0].current && st[0].needs_attention());
+                assert_eq!((st[0].surface.as_str(), st[0].issues[0].offending), ("LIVE", 1));
                 // ... and it does not hold back a later publish at another shape
                 let report = apply(&p, &desired(&[("amount", "VARCHAR(40)"), ("currency", "VARCHAR(3)")])).await;
                 assert!(report.by_tenant.get(&b).is_some_and(|o| o.is_success()), "{}", report.summary());
@@ -300,6 +306,11 @@ mod mysql_fan_out_integration_test {
                 for db in [tenant("A"), tenant("C")] {
                     assert_eq!(journal_rows(&p, &db, " WHERE `state` = 'APPLIED'").await, 2, "{db}");
                 }
+                // a clean migration since: the issue is history, not current
+                let st = migration::status(&p, &[b.clone()], "orders").await.unwrap();
+                assert_eq!(st[0].state, Some(MigrationState::Applied));
+                assert!(st[0].finished_at.is_some() && st[0].applied_by.as_deref() == Some("kiran"), "{:?}", st[0]);
+                assert!(!st[0].issues[0].current && !st[0].needs_attention(), "{:?}", st[0]);
 
                 // preflightIsReadOnly
                 fresh_tenants(&p).await;
