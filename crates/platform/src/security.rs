@@ -557,6 +557,32 @@ impl SecurityClient {
         })
     }
 
+    /// `clients/internal/filterManagedClientCodes`: of `codes`, the ones `managing` manages, in one
+    /// call (duplicates and unknown codes left out).
+    pub async fn filter_managed_client_codes(&self, managing: &str, codes: &[String]) -> Result<Vec<String>> {
+        if codes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let path = "/api/security/clients/internal/filterManagedClientCodes";
+        let body = serde_json::to_string(codes)?;
+        let query = [("managingClientCode", managing.to_string())];
+        let resp = self
+            .send(path, None, |http, url| {
+                http.post(url).query(&query).header(header::CONTENT_TYPE, "application/json").body(body.clone())
+            })
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(anyhow!("filterManagedClientCodes: {status}"));
+        }
+        let bytes = resp.bytes().await?;
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let v: Value = serde_json::from_slice(&bytes)?;
+        Ok(Self::string_list(&v))
+    }
+
     pub async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> Result<bool> {
         let v = self
             .get_json(

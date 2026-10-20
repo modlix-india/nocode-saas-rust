@@ -605,8 +605,9 @@ mod doubles {
         axum::Json(body).into_response()
     }
 
-    /// Security's two internal answers the policy layer asks for: `doesClientManageClientCode`
-    /// (`managing>client` pairs; `GHOST` answers nothing) and `hasWriteAccess` (apps listed).
+    /// Security's internal answers the policy layer asks for: `doesClientManageClientCode` and
+    /// `filterManagedClientCodes` (`managing>client` pairs; `GHOST` answers nothing) and
+    /// `hasWriteAccess` (apps listed).
     pub async fn security_stub(manages: &'static [(&'static str, &'static str)], writable: &'static [&'static str]) -> String {
         let pairs = move |q: Option<String>| -> std::collections::HashMap<String, String> {
             crate::exec::parse_query(q.as_deref()).into_iter().collect()
@@ -622,6 +623,19 @@ mod doubles {
                         return String::new();
                     }
                     (m == c || manages.iter().any(|(a, b)| *a == m && *b == c)).to_string()
+                }),
+            )
+            .route(
+                "/api/security/clients/internal/filterManagedClientCodes",
+                axum::routing::post(move |RawQuery(q): RawQuery, body: String| async move {
+                    let p = pairs(q);
+                    let m = p.get("managingClientCode").cloned().unwrap_or_default();
+                    let codes: Vec<String> = serde_json::from_str(&body).unwrap_or_default();
+                    let kept: Vec<String> = codes
+                        .into_iter()
+                        .filter(|c| *c == m || manages.iter().any(|(a, b)| *a == m && b == c))
+                        .collect();
+                    axum::Json(kept)
                 }),
             )
             .route(
@@ -656,15 +670,25 @@ mod doubles {
 
     #[async_trait]
     impl crate::storage::service::MySqlAdmin for NoMySql {
-        async fn migration_status(&self, _: &Connection, app: &str, _: &Storage)
+        /// Schemas of SYSTEM, FIN, a client FIN manages in the service tests (`BP1`) and one
+        /// nobody does (`STRANGER`).
+        async fn migration_tenants(&self, _: &Connection, app: &str, _: &Storage) -> AppDataResult<Vec<String>> {
+            Ok(["SYSTEM", "FIN", "BP1", "STRANGER"].iter().map(|c| format!("{c}_{app}")).collect())
+        }
+        async fn migration_status_of(&self, _: &Connection, app: &str, _: &Storage, tenants: &[String])
             -> AppDataResult<Vec<appdata::mysql::migration::TenantProgress>> {
-            Ok(vec![appdata::mysql::migration::TenantProgress {
-                database: format!("SYSTEM_{app}"),
-                state: Some(appdata::mysql::journal::MigrationState::Failed),
-                statement_index: 1,
-                total: 2,
-                attempt: 3,
-            }])
+            Ok(tenants
+                .iter()
+                .map(|d| appdata::mysql::migration::TenantProgress {
+                    database: d.clone(),
+                    client_code: d.trim_end_matches(&format!("_{app}")).to_string(),
+                    state: Some(appdata::mysql::journal::MigrationState::Failed),
+                    statement_index: 1,
+                    total: 2,
+                    attempt: 3,
+                    ..Default::default()
+                })
+                .collect())
         }
         async fn drift(&self, _: &Connection, _: &str, _: &Storage) -> AppDataResult<Vec<appdata::mysql::drift::Report>> {
             Ok(Vec::new())
