@@ -40,7 +40,7 @@ pub async fn state_with(events: Option<Arc<dyn EventSink>>) -> Option<AdminState
     let s = crate::admin::build(&cfg, pool, platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap(), None).unwrap();
     Some(match events {
         None => s,
-        Some(e) => Arc::new(Admin { internal: s.internal.clone(), events: e, files: s.files.clone() }),
+        Some(e) => Arc::new(Admin { internal: s.internal.clone(), events: e, files: s.files.clone(), hosting: s.hosting.clone() }),
     })
 }
 

@@ -53,6 +53,7 @@ async fn live_with(files: Option<&str>) -> Option<Live> {
             internal: state.internal.clone(),
             events: state.events.clone(),
             files: Some(platform::upstream::Upstream::fixed(&[f])),
+            hosting: state.hosting.clone(),
         });
     }
     Some(Live { router: security::admin::router(state), pool })
