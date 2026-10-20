@@ -365,6 +365,150 @@ async fn find_entry(pool: &MySqlPool, sql: &str) -> AppDataResult<Option<Journal
     }))
 }
 
+// ------------------------------------------------------------------ issues
+
+/// The kinds of [`Issue`], as written to the `kind` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueKind {
+    /// Rows in the tenant's table would not survive the change; nothing ran.
+    PreflightBlocked,
+    /// The pre-flight checks could not be run; nothing ran.
+    PreflightFailed,
+    /// The tenant's columns could not be read or the change could not be planned.
+    PlanFailed,
+    /// The migration journal could not be written or read.
+    JournalFailed,
+    /// An unresolved migration of this storage at another shape holds this one back.
+    HeldBack,
+    /// No storage definition resolves for the tenant's client.
+    NoDefinition,
+    /// The table's indexes could not be brought into line.
+    IndexSync,
+    /// The table's foreign keys could not be brought into line.
+    ForeignKeySync,
+}
+
+impl IssueKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            IssueKind::PreflightBlocked => "PREFLIGHT_BLOCKED",
+            IssueKind::PreflightFailed => "PREFLIGHT_FAILED",
+            IssueKind::PlanFailed => "PLAN_FAILED",
+            IssueKind::JournalFailed => "JOURNAL_FAILED",
+            IssueKind::HeldBack => "HELD_BACK",
+            IssueKind::NoDefinition => "NO_DEFINITION",
+            IssueKind::IndexSync => "INDEX_SYNC",
+            IssueKind::ForeignKeySync => "FOREIGN_KEY_SYNC",
+        }
+    }
+}
+
+/// One thing a storage publish could not do for one tenant.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Issue {
+    pub storage_name: String,
+    pub table: String,
+    pub surface: Option<String>,
+    pub kind: IssueKind,
+    pub shape: Option<String>,
+    pub to_version: Option<i32>,
+    pub offending: i64,
+    pub detail: String,
+    pub applied_by: Option<String>,
+}
+
+impl Issue {
+    pub fn new(storage_name: &str, table: &str, surface: Option<&str>, applied_by: Option<&str>) -> Self {
+        Issue {
+            storage_name: storage_name.into(),
+            table: table.into(),
+            surface: surface.map(Into::into),
+            kind: IssueKind::PlanFailed,
+            shape: None,
+            to_version: None,
+            offending: 0,
+            detail: String::new(),
+            applied_by: applied_by.map(Into::into),
+        }
+    }
+
+    pub fn kind(&self, kind: IssueKind) -> Self {
+        Issue { kind, ..self.clone() }
+    }
+
+    pub fn shape(mut self, shape: &str) -> Self {
+        self.shape = Some(shape.into()).filter(|s: &String| !s.is_empty());
+        self
+    }
+
+    pub fn version(mut self, v: i32) -> Self {
+        self.to_version = Some(v);
+        self
+    }
+
+    pub fn offending(mut self, n: i64) -> Self {
+        self.offending = n;
+        self
+    }
+
+    pub fn detail(mut self, d: &str) -> Self {
+        self.detail = if d.chars().count() > 4000 { d.chars().take(4000).collect() } else { d.to_string() };
+        self
+    }
+}
+
+/// The pre-flight checks of a plan, for an issue's detail.
+fn checks_of(p: &TenantPlan) -> String {
+    p.steps
+        .iter()
+        .filter(|s| s.phase == Phase::Preflight)
+        .filter_map(|s| s.data_check.clone())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+pub async fn ensure_issue_table(pool: &MySqlPool, db_name: &str) -> AppDataResult<()> {
+    execute_raw(pool, &journal::create_issue_table(db_name)).await.map(|_| ())
+}
+
+/// Writes `issue` to the tenant's own issue table. Never fails the caller: when even this
+/// write fails, the issue goes to the service log instead.
+pub async fn record_issue(pool: &MySqlPool, db_name: &str, issue: &Issue) {
+    let written = async {
+        ensure_issue_table(pool, db_name).await?;
+        execute_raw(
+            pool,
+            &journal::insert_issue(
+                db_name,
+                &ulid(),
+                &issue.storage_name,
+                &issue.table,
+                issue.surface.as_deref(),
+                issue.kind.name(),
+                issue.shape.as_deref(),
+                issue.to_version,
+                issue.offending,
+                &issue.detail,
+                issue.applied_by.as_deref(),
+                node(),
+            ),
+        )
+        .await
+    }
+    .await;
+    match written {
+        Ok(_) => tracing::warn!(db = db_name, storage = issue.storage_name, kind = issue.kind.name(), detail = issue.detail, "storage migration issue"),
+        Err(e) => tracing::error!(
+            db = db_name,
+            storage = issue.storage_name,
+            kind = issue.kind.name(),
+            detail = issue.detail,
+            error = %e,
+            "storage migration issue (could not be written to the tenant's issue table)"
+        ),
+    }
+}
+
 // ------------------------------------------------------------------ runner
 
 fn error_message(e: &AppDataError) -> String {
@@ -578,7 +722,8 @@ pub async fn preflight(pool: &MySqlPool, plans: &[TenantPlan]) -> AppDataResult<
     Ok(blocked)
 }
 
-/// Pre-flight, then migrate only the tenants that are clean.
+/// Pre-flight, then migrate only the tenants that are clean. One tenant's trouble is that
+/// tenant's outcome (and a row in its [`journal::ISSUE_TABLE`]); the others still migrate.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply(
     pool: &MySqlPool,
@@ -593,17 +738,47 @@ pub async fn apply(
     let work: Vec<&TenantPlan> = plans.iter().filter(|p| !p.is_no_op()).collect();
     let no_op: Vec<String> = plans.iter().filter(|p| p.is_no_op()).map(|p| p.database.clone()).collect();
 
-    let work_owned: Vec<TenantPlan> = work.iter().map(|p| (*p).clone()).collect();
-    let blocked = preflight(pool, &work_owned).await?;
-
     let mut outcomes = IndexMap::new();
-    for (db_name, offending) in &blocked {
-        outcomes.insert(db_name.clone(), MigrationOutcome::blocked("pre-flight", *offending, 0, 0));
+    let mut blocked = IndexMap::new();
+    for p in &work {
+        let issue = Issue::new(storage_name, table, Some(surface), applied_by).shape(&p.shape).version(to_version);
+        match preflight(pool, std::slice::from_ref(*p)).await {
+            Ok(b) => {
+                if let Some(offending) = b.get(&p.database) {
+                    let o = MigrationOutcome::blocked("pre-flight", *offending, 0, 0);
+                    record_issue(pool, &p.database, &issue.kind(IssueKind::PreflightBlocked).offending(*offending).detail(&checks_of(p))).await;
+                    blocked.insert(p.database.clone(), *offending);
+                    outcomes.insert(p.database.clone(), o);
+                }
+            }
+            Err(e) => {
+                let m = error_message(&e);
+                record_issue(pool, &p.database, &issue.kind(IssueKind::PreflightFailed).detail(&m)).await;
+                blocked.insert(p.database.clone(), 0);
+                outcomes.insert(p.database.clone(), MigrationOutcome::failed(&m, 0, 0));
+            }
+        }
     }
 
     for p in work.iter().filter(|p| !blocked.contains_key(&p.database)) {
-        let o = run(pool, &p.database, storage_name, table, from_version, to_version, &p.shape, surface, &p.steps, applied_by)
-            .await?;
+        let o = match run(pool, &p.database, storage_name, table, from_version, to_version, &p.shape, surface, &p.steps, applied_by)
+            .await
+        {
+            Ok(o) => o,
+            // The journal itself could not be written or read: nothing records this tenant's
+            // migration but this row (if the database takes even that).
+            Err(e) => {
+                let m = error_message(&e);
+                let issue = Issue::new(storage_name, table, Some(surface), applied_by).shape(&p.shape).version(to_version);
+                record_issue(pool, &p.database, &issue.kind(IssueKind::JournalFailed).detail(&m)).await;
+                MigrationOutcome::failed(&m, 0, 0)
+            }
+        };
+        if matches!(o.state, MigrationState::NeedsAttention) {
+            // Held back by an unresolved migration of this storage at another shape.
+            let issue = Issue::new(storage_name, table, Some(surface), applied_by).shape(&p.shape).version(to_version);
+            record_issue(pool, &p.database, &issue.kind(IssueKind::HeldBack).detail(o.error.as_deref().unwrap_or(""))).await;
+        }
         outcomes.insert(p.database.clone(), o);
     }
 
@@ -689,18 +864,35 @@ pub async fn sweep(pool: &MySqlPool, stale_after_seconds: i32) -> AppDataResult<
 pub async fn sweep_schemas(pool: &MySqlPool, schemas: &[String], stale_after_seconds: i32) -> AppDataResult<RecoveryReport> {
     let mut report = RecoveryReport::default();
     for db_name in schemas.iter().map(String::as_str) {
-        for row in interrupted(pool, db_name, stale_after_seconds).await? {
+        // One tenant's trouble is logged and the sweep goes on to the next.
+        let rows = match interrupted(pool, db_name, stale_after_seconds).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!(db = db_name, error = %e, "migration recovery could not read the journal");
+                continue;
+            }
+        };
+        for row in rows {
             report.found += 1;
             if !row.is_replayable() {
                 report.unplayable.push(row.describe());
                 continue;
             }
-            let won = execute_raw(pool, &journal::claim(db_name, &row.id, node(), stale_after_seconds)).await? == 1;
+            let won = match execute_raw(pool, &journal::claim(db_name, &row.id, node(), stale_after_seconds)).await {
+                Ok(n) => n == 1,
+                Err(e) => {
+                    tracing::error!(db = db_name, storage = row.storage_name, error = %e, "migration recovery could not claim a migration");
+                    false
+                }
+            };
             if !won {
                 continue;
             }
             report.claimed += 1;
-            let outcome = resume(pool, db_name, &row.id, &row.plan, row.statement_index, row.applied_count).await?;
+            let outcome = match resume(pool, db_name, &row.id, &row.plan, row.statement_index, row.applied_count).await {
+                Ok(o) => o,
+                Err(e) => MigrationOutcome::failed(&error_message(&e), 0, 0),
+            };
             if outcome.is_success() {
                 report.resumed += 1;
             }

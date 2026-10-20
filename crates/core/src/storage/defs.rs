@@ -36,6 +36,11 @@ pub trait Catalog: Send + Sync {
     async fn raw_connection(&self, name: &str, app_code: &str, client_code: &str) -> Result<Option<Connection>, CoreError>;
     /// `ConnectionService.allAppData(subType, appCode)`.
     async fn all_app_data(&self, sub_type: &str, app_code: &str) -> Result<Vec<Connection>, CoreError>;
+    /// Every app's APP_DATA connections of a backend, one per distinct set of connection
+    /// details (`ConnectionService.allAppData(subType)`): what the migration recovery sweeps.
+    async fn all_app_data_everywhere(&self, _sub_type: &str) -> Result<Vec<Connection>, CoreError> {
+        Ok(Vec::new())
+    }
     /// `StorageService.storagesReferencing`.
     async fn storages_referencing(&self, app_code: &str, storage_name: &str) -> Result<Vec<String>, CoreError>;
     /// `StorageService.storageNames`.
@@ -61,6 +66,9 @@ impl Catalog for StorageDefs {
     async fn all_app_data(&self, sub_type: &str, app_code: &str) -> Result<Vec<Connection>, CoreError> {
         StorageDefs::all_app_data(self, sub_type, app_code).await
     }
+    async fn all_app_data_everywhere(&self, sub_type: &str) -> Result<Vec<Connection>, CoreError> {
+        StorageDefs::all_app_data_everywhere(self, sub_type).await
+    }
     async fn storages_referencing(&self, app_code: &str, storage_name: &str) -> Result<Vec<String>, CoreError> {
         StorageDefs::storages_referencing(self, app_code, storage_name).await
     }
@@ -77,6 +85,22 @@ impl Catalog for StorageDefs {
 
 /// `StorageService.CACHE_NAME_STORAGE_REFERENCES`, evicted whole by every storage save.
 pub const CACHE_STORAGE_REFERENCES: &str = "storageReferences";
+
+/// The connections, one per distinct set of connection details, as stored.
+fn distinct_connections(docs: Vec<BsonDocument>) -> Result<Vec<Connection>, CoreError> {
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    for d in docs {
+        let plain = appdata::lookup::plain(&d);
+        let key = plain.get("connectionDetails").map(Value::to_java_json).unwrap_or_default();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(Connection::from_value(&Value::Object(plain)).map_err(CoreError::unknown)?);
+    }
+    Ok(out)
+}
 
 pub type ReferenceIndex = Arc<IndexMap<String, Vec<String>>>;
 
@@ -199,18 +223,17 @@ impl StorageDefs {
                 doc! {"$and": [{"connectionType": "APP_DATA"}, {"connectionSubType": sub_type}, {"appCode": app_code}]},
             )
             .await?;
-        let mut seen = Vec::new();
-        let mut out = Vec::new();
-        for d in docs {
-            let plain = appdata::lookup::plain(&d);
-            let key = plain.get("connectionDetails").map(Value::to_java_json).unwrap_or_default();
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.push(key);
-            out.push(Connection::from_value(&Value::Object(plain)).map_err(CoreError::unknown)?);
-        }
-        Ok(out)
+        distinct_connections(docs)
+    }
+
+    /// [`StorageDefs::all_app_data`] over every app.
+    pub async fn all_app_data_everywhere(&self, sub_type: &str) -> Result<Vec<Connection>, CoreError> {
+        let docs = self
+            .defs
+            .store()
+            .find_docs("connection", doc! {"$and": [{"connectionType": "APP_DATA"}, {"connectionSubType": sub_type}]})
+            .await?;
+        distinct_connections(docs)
     }
 
     /// `StorageService.storagesReferencing`: the storages whose relations point at this one,

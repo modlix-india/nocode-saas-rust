@@ -180,6 +180,29 @@ pub async fn observe(req: Request, next: Next) -> Response {
     resp
 }
 
+/// Turns a panic in a handler into COMMON.INTERNAL_ERROR (the panic's message in debugMessage)
+/// instead of a dropped connection. Without it the task dies, hyper closes the socket, and the
+/// caller sees only the gateway's "client error (SendRequest)" 502 with no exception id; the
+/// cause is then only in the unit's stderr (2026-10-20, dev core-editor, rustls provider panic).
+/// A panic while a streamed body is being written is not caught: the headers are already sent.
+pub async fn catch_panic(req: Request, next: Next) -> Response {
+    use futures::FutureExt;
+    match std::panic::AssertUnwindSafe(next.run(req)).catch_unwind().await {
+        Ok(resp) => resp,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "panic with a non-text payload".to_string());
+            crate::error::coded_response(
+                &crate::error::Coded::new("COMMON.INTERNAL_ERROR")
+                    .debug(crate::error::mask_url_credentials(&format!("panic: {message}"))),
+            )
+        }
+    }
+}
+
 /// A response with only Spring Security's headers, for 304s.
 pub fn not_modified() -> Response {
     let mut resp = Response::new(Body::empty());
@@ -210,5 +233,24 @@ mod tests {
         assert!(h.get("referrer-policy").is_none());
         assert!(h.get(header::CACHE_CONTROL).is_none());
         assert_eq!(header_style(), HeaderStyle::Reactive, "unset is reactive");
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_answers_internal_error() {
+        use tower::ServiceExt;
+        let app = axum::Router::new()
+            .route("/boom", axum::routing::get(|| async { panic!("no crypto provider") as &'static str }))
+            .route("/ok", axum::routing::get(|| async { "fine" }))
+            .layer(axum::middleware::from_fn(catch_panic));
+
+        let resp = app.clone().oneshot(Request::get("/boom").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(v["exceptionId"].is_string());
+        assert!(v["debugMessage"].as_str().unwrap().contains("panic: no crypto provider"), "{v}");
+
+        let resp = app.oneshot(Request::get("/ok").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "the service keeps answering after a panic");
     }
 }

@@ -273,6 +273,8 @@ pub struct AppDataSection {
     /// as `VersionRetentionDefaults` reads them.
     pub version_retention_days: i32,
     pub version_retention_count: i32,
+    /// `[appdata.migration_recovery]`: core-editor's sweep of interrupted MySQL migrations.
+    pub migration_recovery: crate::editor::recovery::RecoverySettings,
 }
 
 impl AppDataSection {
@@ -290,6 +292,7 @@ impl Default for AppDataSection {
             text_search_stemming: true,
             version_retention_days: appdata::retention::DEFAULT_DAYS,
             version_retention_count: appdata::retention::DEFAULT_COUNT,
+            migration_recovery: crate::editor::recovery::RecoverySettings::default(),
         }
     }
 }
