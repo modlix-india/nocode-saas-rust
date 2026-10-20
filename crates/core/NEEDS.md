@@ -80,16 +80,16 @@ is started once by `run_exec`.
    never logged (`MqSection`'s `Debug` hides them). `events_exchange` / `events_routing_keys` and
    the notification pair default to Java's.
 2. **The message and files services**: `[message] upstream` and `[files] upstream` default to
-   `eureka:MESSAGE` and `eureka:FILES`.
+   `lighthouse:MESSAGE` and `lighthouse:FILES`.
 3. **The scheduler's one-off settings**: `[core.scheduler]` defaults to Java's
    `EventSchedulerSettings`.
 4. **The platform functions' services** (`CoreServices.Platform.*`, for core-events):
-   `[core] upstream` (default `eureka:CORE`) and `[ui] upstream` (default `eureka:UI`) are new;
+   `[core] upstream` (default `lighthouse:CORE`) and `[ui] upstream` (default `lighthouse:UI`) are new;
    security, `[entity_processor]` and `[files]` are the existing upstreams. `[core] upstream`
    must reach instances that serve the Java core's internal routes (`internal/billing/meter` and
    `reconcile`, `transports/internal/cleanupOlderThan`, `eventRuns/internal/cleanupOlderThan`,
    `events/internal/raise`); a unit that registers as `CORE` without them would answer the jobs
-   404. An upstream the configuration cannot make (an `eureka:` one without `[eureka] zones`)
+   404. An upstream the configuration cannot make (a `lighthouse:` one without `[registry] zones`)
    is logged at startup and fails only the jobs that need it.
 
 ## core-scheduler and core-events (step 4): deployment

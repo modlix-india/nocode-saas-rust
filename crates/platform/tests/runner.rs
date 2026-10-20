@@ -1,5 +1,5 @@
 //! The service runner end to end: telemetry (logs, metrics, OTLP traces), the shared layers,
-//! health and readiness, error bodies, Eureka registration and a SIGTERM shutdown.
+//! health and readiness, error bodies, Lighthouse registration and a SIGTERM shutdown.
 //! One test: telemetry and signal handlers are process-wide.
 
 use std::sync::{Arc, Mutex};
@@ -11,16 +11,16 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::Router;
 use platform::app::{probe, Service};
-use platform::config::{EurekaConfig, ServerConfig, TelemetryConfig};
+use platform::config::{RegistryConfig, ServerConfig, TelemetryConfig};
 use platform::error::AppError;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::http::{not_modified, with_route};
 
 #[derive(Default)]
 struct Seen(Mutex<Vec<String>>);
 
-async fn collector_and_eureka() -> (String, Arc<Seen>) {
+async fn collector_and_registry() -> (String, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let app = Router::new()
         .route(
@@ -53,7 +53,7 @@ async fn collector_and_eureka() -> (String, Arc<Seen>) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_observes_and_shuts_down() {
-    let (side, seen) = collector_and_eureka().await;
+    let (side, seen) = collector_and_registry().await;
     let telemetry = platform::telemetry::init(
         "runner-test",
         &TelemetryConfig {
@@ -93,8 +93,8 @@ async fn serves_observes_and_shuts_down() {
         );
 
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let eureka = Eureka::new(
-        &EurekaConfig {
+    let registry = Registry::new(
+        &RegistryConfig {
             register: true,
             register_as: "runner".into(),
             zones: vec![format!("{side}/eureka/")],
@@ -108,7 +108,7 @@ async fn serves_observes_and_shuts_down() {
         server: ServerConfig { port, shutdown_grace_seconds: 0 },
         telemetry,
         health,
-        eureka: Some(eureka),
+        registry: Some(registry),
         cors: true,
     };
     let task = tokio::spawn(service.run(app));
@@ -189,7 +189,7 @@ async fn serves_observes_and_shuts_down() {
     assert_eq!(v["checks"]["flip"], "failed: down");
     assert_eq!(v["checks"]["ok"], "ok");
 
-    // SIGTERM: drain, leave Eureka, stop.
+    // SIGTERM: drain, leave Lighthouse, stop.
     assert!(seen.0.lock().unwrap().contains(&"register".to_string()));
     std::process::Command::new("kill").args(["-TERM", &std::process::id().to_string()]).status().unwrap();
     tokio::time::timeout(Duration::from_secs(20), task).await.expect("stopped in time").unwrap().unwrap();

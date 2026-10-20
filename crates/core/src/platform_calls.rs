@@ -505,10 +505,10 @@ pub(crate) mod tests {
     async fn a_service_without_an_upstream_fails_only_its_calls() {
         let t = Arc::new(Targets::default());
         let (mut ups, _) = t.serve().await;
-        ups.ui = Err("upstream eureka:UI needs [eureka] zones configured".into());
+        ups.ui = Err("upstream lighthouse:UI needs [registry] zones configured".into());
         let c = PlatformCalls::new(ups).unwrap();
         let e = c.cleanup_transports(Service::Ui, 90, 200).await.unwrap_err();
-        assert_eq!(e.text(), "No upstream for the ui service: upstream eureka:UI needs [eureka] zones configured");
+        assert_eq!(e.text(), "No upstream for the ui service: upstream lighthouse:UI needs [registry] zones configured");
         assert_eq!(c.meter(Service::Core).await.unwrap(), Some(true));
         assert_eq!(t.lines(), ["core /api/core/internal/billing/meter"]);
         let dead = PlatformCalls::new(Upstreams::all(Upstream::fixed(&["http://127.0.0.1:1"]))).unwrap();

@@ -57,7 +57,7 @@ prefetch = 10
 [sse]
 heartbeat_seconds = 15
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "NOTIFICATION"

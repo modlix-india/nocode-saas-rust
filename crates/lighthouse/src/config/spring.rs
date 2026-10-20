@@ -10,7 +10,7 @@
 //!
 //! Lighthouse adds guardrails the Java server lacked: only the apps configured are served, only
 //! the profiles this deployment serves, each app's keys can be limited to some prefixes, and
-//! `eureka` and `v1` are never app names.
+//! `eureka` (the registry API's path prefix) and `v1` are never app names.
 
 use std::collections::BTreeMap;
 

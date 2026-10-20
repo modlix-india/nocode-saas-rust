@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use parking_lot::{Mutex, RwLock};
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 
 use crate::breaker::Breaker;
 use crate::budget::RetryBudget;
@@ -83,7 +83,7 @@ impl Member {
 
 enum Source {
     Static(Vec<String>),
-    Eureka { eureka: Eureka, app: String },
+    Registry { registry: Registry, app: String },
 }
 
 pub struct Pool {
@@ -107,7 +107,7 @@ pub struct Pool {
 /// nothing of Lighthouse is reachable from outside through the gateway).
 pub fn is_lighthouse(entry: &str) -> bool {
     let e = entry.trim().to_ascii_lowercase();
-    if let Some(app) = e.strip_prefix("eureka:") {
+    if let Some(app) = platform::upstream::registry_app(&e) {
         return app == "lighthouse";
     }
     let authority = e.split("://").nth(1).unwrap_or(&e).split(['/', '?', '#']).next().unwrap_or("");
@@ -120,26 +120,26 @@ pub fn is_lighthouse(entry: &str) -> bool {
 }
 
 impl Pool {
-    pub fn new(name: &str, cfg: &PoolConfig, eureka: Option<&Eureka>) -> Result<Arc<Self>> {
+    pub fn new(name: &str, cfg: &PoolConfig, registry: Option<&Registry>) -> Result<Arc<Self>> {
         let entries = cfg.upstreams.entries();
         if let Some(bad) = entries.iter().find(|e| is_lighthouse(e)) {
             anyhow::bail!("pool {name} points at Lighthouse ({bad}): the gateway never exposes the registry or its config");
         }
         let source = match entries.as_slice() {
-            [one] if one.starts_with("eureka:") => {
-                let app = one["eureka:".len()..].to_ascii_uppercase();
-                let Some(eureka) = eureka else {
-                    anyhow::bail!("pool {name} uses {one} but [eureka] zones are not configured");
+            [one] if platform::upstream::registry_app(one).is_some() => {
+                let app = platform::upstream::registry_app(one).unwrap_or_default().to_ascii_uppercase();
+                let Some(registry) = registry else {
+                    anyhow::bail!("pool {name} uses {one} but [registry] zones are not configured");
                 };
-                eureka.watch(&app);
-                Source::Eureka { eureka: eureka.clone(), app }
+                registry.watch(&app);
+                Source::Registry { registry: registry.clone(), app }
             }
             [] => anyhow::bail!("pool {name} has no upstreams"),
             list => Source::Static(list.to_vec()),
         };
         let members = match &source {
             Source::Static(list) => list.iter().map(|b| Arc::new(Member::new(b))).collect(),
-            Source::Eureka { .. } => Vec::new(),
+            Source::Registry { .. } => Vec::new(),
         };
         register_metrics(name);
         Ok(Arc::new(Self {
@@ -295,22 +295,22 @@ impl Pool {
 
     /// Membership from the registry's last answer.
     async fn refresh_members(&self) {
-        let Source::Eureka { eureka, app } = &self.source else { return };
-        match eureka.instances(app).await {
+        let Source::Registry { registry, app } = &self.source else { return };
+        match registry.instances(app).await {
             Ok(bases) => self.apply_listing(bases, false),
-            Err(e) => tracing::warn!(pool = self.name, error = %e, "eureka lookup failed, keeping members"),
+            Err(e) => tracing::warn!(pool = self.name, error = %e, "lighthouse lookup failed, keeping members"),
         }
     }
 
     /// Asks the registry again now.
     async fn discover(&self) {
-        let Source::Eureka { eureka, app } = &self.source else { return };
-        match eureka.refresh(app).await {
-            Ok(()) => match eureka.instances(app).await {
+        let Source::Registry { registry, app } = &self.source else { return };
+        match registry.refresh(app).await {
+            Ok(()) => match registry.instances(app).await {
                 Ok(bases) => self.apply_listing(bases, true),
-                Err(e) => tracing::warn!(pool = self.name, error = %e, "eureka lookup failed, keeping members"),
+                Err(e) => tracing::warn!(pool = self.name, error = %e, "lighthouse lookup failed, keeping members"),
             },
-            Err(e) => tracing::warn!(pool = self.name, error = %e, "eureka lookup failed, keeping members"),
+            Err(e) => tracing::warn!(pool = self.name, error = %e, "lighthouse lookup failed, keeping members"),
         }
     }
 
@@ -357,7 +357,7 @@ impl Pool {
                 this.check().await;
             }
         });
-        if matches!(self.source, Source::Eureka { .. }) {
+        if matches!(self.source, Source::Registry { .. }) {
             let this = self.clone();
             tokio::spawn(async move {
                 let mut tick = tokio::time::interval(Duration::from_millis(this.cfg.discovery_refresh_ms.max(100)));
@@ -389,13 +389,13 @@ mod tests {
     #[test]
     fn no_pool_may_point_at_lighthouse() {
         for e in ["http://lighthouse:8761", "http://LIGHTHOUSE-1:8761/", "http://lighthouse-2:8761", "http://localhost:8761",
-                  "http://127.0.0.1:8762/eureka", "eureka:LIGHTHOUSE", "http://u:p@lighthouse:80"] {
+                  "http://127.0.0.1:8762/eureka", "lighthouse:LIGHTHOUSE", "http://u:p@lighthouse:80"] {
             assert!(is_lighthouse(e), "{e}");
             let cfg = PoolConfig { upstreams: UpstreamConfig::One(e.into()), ..Default::default() };
             let err = Pool::new("x", &cfg, None).err().expect("refused").to_string();
             assert!(err.contains("points at Lighthouse"), "{err}");
         }
-        for e in ["http://security-auth:8101", "http://lighthouses:80", "http://ai:5001", "eureka:SECURITY-AUTH", "http://localhost:87610"] {
+        for e in ["http://security-auth:8101", "http://lighthouses:80", "http://ai:5001", "lighthouse:SECURITY-AUTH", "http://localhost:87610"] {
             assert!(!is_lighthouse(e), "{e}");
         }
     }
@@ -439,12 +439,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn eureka_membership_and_health_transitions() {
+    async fn registry_membership_and_health_transitions() {
         use axum::extract::State;
         use axum::routing::get;
         use std::sync::atomic::AtomicBool;
 
-        // One upstream whose health we flip, and a fake Eureka listing it plus a dead one.
+        // One upstream whose health we flip, and a fake Lighthouse listing it plus a dead one.
         let healthy = Arc::new(AtomicBool::new(true));
         let up = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let up_port = up.local_addr().unwrap().port();
@@ -467,7 +467,7 @@ mod tests {
         let ek = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let ek_base = format!("http://{}/eureka/", ek.local_addr().unwrap());
         let l = listing.clone();
-        let eureka_app = axum::Router::new()
+        let registry_app = axum::Router::new()
             .route(
                 "/eureka/apps/{app}",
                 get(|State(l): State<Arc<parking_lot::RwLock<Vec<u16>>>>| async move {
@@ -480,20 +480,20 @@ mod tests {
                 }),
             )
             .with_state(l);
-        tokio::spawn(async move { axum::serve(ek, eureka_app).await.unwrap() });
+        tokio::spawn(async move { axum::serve(ek, registry_app).await.unwrap() });
 
-        let eureka = Eureka::new(
-            &platform::config::EurekaConfig { zones: vec![ek_base], ..Default::default() },
+        let registry = Registry::new(
+            &platform::config::RegistryConfig { zones: vec![ek_base], ..Default::default() },
             0,
         )
         .unwrap();
         let cfg = PoolConfig {
-            upstreams: UpstreamConfig::One("eureka:SVC".into()),
+            upstreams: UpstreamConfig::One("lighthouse:SVC".into()),
             health_path: "/health".into(),
             unhealthy_after: 2,
             ..Default::default()
         };
-        let p = Pool::new("svc", &cfg, Some(&eureka)).unwrap();
+        let p = Pool::new("svc", &cfg, Some(&registry)).unwrap();
         assert!(p.pick(None).is_none(), "no members before the first refresh");
 
         p.check().await;
@@ -511,16 +511,16 @@ mod tests {
 
         // A second instance appears; the first keeps its state.
         listing.write().push(1);
-        eureka.refresh("SVC").await.unwrap();
+        registry.refresh("SVC").await.unwrap();
         p.check().await;
         assert_eq!(p.members.read().len(), 2);
-        assert_eq!(p.healthy_count(), 2, "a new instance starts healthy, as Eureka lists it UP");
+        assert_eq!(p.healthy_count(), 2, "a new instance starts healthy, as Lighthouse lists it UP");
         p.check().await;
         assert_eq!(p.healthy_count(), 1, "the dead one is out after its second failed check");
 
-        // Eureka unreachable: members kept.
-        let lost = Eureka::new(
-            &platform::config::EurekaConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
+        // Lighthouse unreachable: members kept.
+        let lost = Registry::new(
+            &platform::config::RegistryConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
             0,
         )
         .unwrap();
@@ -528,7 +528,7 @@ mod tests {
         p2.check().await;
         assert!(p2.pick(None).is_none());
 
-        // Without eureka configured, an eureka pool is refused; an empty static pool too.
+        // Without lighthouse configured, an lighthouse pool is refused; an empty static pool too.
         assert!(Pool::new("x", &cfg, None).is_err());
         let empty = PoolConfig { upstreams: UpstreamConfig::Many(vec![]), ..Default::default() };
         assert!(Pool::new("x", &empty, None).is_err());
@@ -692,14 +692,14 @@ mod tests {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let zone = format!("http://{}/eureka/", l.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
-        let eureka = Eureka::new(&platform::config::EurekaConfig { zones: vec![zone], ..Default::default() }, 0).unwrap();
+        let registry = Registry::new(&platform::config::RegistryConfig { zones: vec![zone], ..Default::default() }, 0).unwrap();
         let cfg = PoolConfig {
-            upstreams: UpstreamConfig::One("eureka:SVC".into()),
+            upstreams: UpstreamConfig::One("lighthouse:SVC".into()),
             health_interval_seconds: 3600,
             discovery_refresh_ms: 100,
             ..Default::default()
         };
-        let p = Pool::new("svc", &cfg, Some(&eureka)).unwrap();
+        let p = Pool::new("svc", &cfg, Some(&registry)).unwrap();
         let bases = |p: &Pool| p.members.read().iter().map(|m| m.base.clone()).collect::<Vec<_>>();
 
         p.discover().await;
@@ -727,8 +727,8 @@ mod tests {
         assert!(seen);
 
         // The registry gone: members kept.
-        let gone = Eureka::new(
-            &platform::config::EurekaConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
+        let gone = Registry::new(
+            &platform::config::RegistryConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
             0,
         )
         .unwrap();

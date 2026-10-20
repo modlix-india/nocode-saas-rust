@@ -319,7 +319,7 @@ fn engines(cfg: &CoreConfig, cache: &CacheService, defs: Arc<crate::storage::def
 pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>, axum::Router, recovery::Recovery)> {
     let s = exec.state.inner();
     let store = s.definitions.store().clone();
-    let security = SecurityClient::from_config(&cfg.security, exec.eureka.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, exec.registry.as_ref())?;
     let defs = crate::storage_defs(&exec.cache, s.definitions.clone(), s.core_schemas.clone());
     let (mongo, mysql) = engines(cfg, &exec.cache, defs, s.kirun_schemas.clone());
     let catalog = s.appdata.catalog().clone();
@@ -368,5 +368,5 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
     });
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: exec.eureka, cors: true }.run(router).await
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: true }.run(router).await
 }

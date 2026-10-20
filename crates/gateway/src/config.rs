@@ -6,7 +6,7 @@
 //! health_path = "/readyz"
 //!
 //! [pools.security]
-//! upstreams = "eureka:SECURITY"          # follow the Java registry during the migration
+//! upstreams = "lighthouse:SECURITY"          # follow the Lighthouse registry
 //! health_path = "/actuator/health"
 //!
 //! [[routes]]
@@ -29,7 +29,7 @@
 
 use std::collections::BTreeMap;
 
-use platform::config::{EurekaConfig, MessagesConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
+use platform::config::{RegistryConfig, MessagesConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,8 +37,8 @@ use serde::{Deserialize, Serialize};
 pub struct GatewayConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    /// Needed for `eureka:` pools and for the security upstream when it is `eureka:SECURITY`.
-    pub eureka: EurekaConfig,
+    /// Needed for `lighthouse:` pools and for the security upstream when it is `lighthouse:SECURITY`.
+    pub registry: RegistryConfig,
     /// Listens for security's evictions of the host resolution cache (`cmn-gatewayClientAppCodeType`).
     pub redis: RedisConfig,
     /// Where host names are resolved to client and app codes.
@@ -56,7 +56,7 @@ impl Default for GatewayConfig {
         Self {
             server: ServerConfig { port: 8180, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig::default(),
             security: SecurityConfig::default(),
             resolution: ResolutionConfig::default(),
@@ -109,7 +109,7 @@ impl Default for ProxyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PoolConfig {
-    /// Base URLs, or `eureka:<APP>`.
+    /// Base URLs, or `lighthouse:<APP>`.
     pub upstreams: UpstreamConfig,
     /// Checked on every instance; 2xx means healthy. `/readyz` for Rust units,
     /// `/actuator/health` for Java services.
@@ -117,7 +117,7 @@ pub struct PoolConfig {
     pub health_interval_seconds: u64,
     /// Consecutive failures before an instance stops getting traffic.
     pub unhealthy_after: u32,
-    /// How often an `eureka:<APP>` pool reads its instance list again. The registry client's own
+    /// How often an `lighthouse:<APP>` pool reads its instance list again. The registry client's own
     /// refresh (every 30 s) is too slow for a gateway that must follow deploys.
     pub discovery_refresh_ms: u64,
     pub outlier: OutlierConfig,

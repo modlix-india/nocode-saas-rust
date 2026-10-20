@@ -17,13 +17,14 @@ auth_upstream = "http://localhost:8101"
 internal_upstream = "http://localhost:8112"
 
 [core]
-upstream = "eureka:CORE"
+# index/internal, transports/internal/makeTransport and createAndApply: core-editor routes.
+upstream = "lighthouse:CORE-EDITOR"
 
 [ui]
 # index, makeTransport, createAndApply and DELETE /api/ui are all editor routes: ui-editor.
 upstream = "http://localhost:8107"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "MULTI"

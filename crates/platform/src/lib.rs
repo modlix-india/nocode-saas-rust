@@ -1,6 +1,6 @@
 //! What every Modlix Rust service shares: configuration, telemetry, health, the HTTP behaviour
 //! callers depend on, the caller's identity from security, cache eviction, and the few
-//! compatibility pieces (Eureka, Java hashing) the migration window needs.
+//! compatibility pieces (Lighthouse, Java hashing) the migration window needs.
 
 pub mod app;
 pub mod cache;
@@ -8,7 +8,7 @@ pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod error;
-pub mod eureka;
+pub mod registry;
 pub mod health;
 pub mod http;
 pub mod java;

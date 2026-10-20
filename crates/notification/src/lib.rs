@@ -31,7 +31,7 @@ use std::time::Duration;
 use anyhow::Result;
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::security::SecurityClient;
 use platform::upstream::Upstream;
@@ -54,15 +54,15 @@ pub struct Built {
     pub state: Arc<AppState>,
     pub send: Arc<SendService>,
     pub hub: Arc<Hub>,
-    pub eureka: Option<Eureka>,
+    pub registry: Option<Registry>,
     pub pool: sqlx::MySqlPool,
 }
 
 pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
     let pool = platform::db::mysql_pool(&cfg.database).await?;
     let dao = Dao::new(pool.clone());
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
@@ -72,12 +72,12 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         Some(CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?)
     };
     let timeout = Duration::from_secs(cfg.core.timeout_seconds.max(1));
-    let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, eureka.as_ref())?, timeout)?;
-    let core_up = Upstream::from_config(&cfg.core.upstream, eureka.as_ref())?;
+    let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, registry.as_ref())?, timeout)?;
+    let core_up = Upstream::from_config(&cfg.core.upstream, registry.as_ref())?;
     let connections_up = if cfg.core.connections_upstream.entries().is_empty() {
         core_up.clone()
     } else {
-        Upstream::from_config(&cfg.core.connections_upstream, eureka.as_ref())?
+        Upstream::from_config(&cfg.core.connections_upstream, registry.as_ref())?
     };
     let core = CoreClient::with_connections(core_up, connections_up, timeout)?;
     let hub = Hub::new(cfg.sse.buffer);
@@ -90,13 +90,13 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         in_app: Arc::new(InAppService { dao: dao.clone(), hub: hub.clone() }),
     });
     let state = Arc::new(AppState {
-        security: SecurityClient::from_config(&cfg.security, eureka.as_ref())?,
+        security: SecurityClient::from_config(&cfg.security, registry.as_ref())?,
         inapp: in_app,
         prefs: PreferenceService { dao, directory, cache },
         hub: hub.clone(),
         server_port: cfg.server.port,
     });
-    Ok(Built { state, send, hub, eureka, pool })
+    Ok(Built { state, send, hub, registry, pool })
 }
 
 /// Loads configuration, connects everything, starts the queue consumer and the heartbeat, and
@@ -142,7 +142,7 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: built.eureka.clone(), cors: false }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: built.registry.clone(), cors: false }
         .run(handlers::router(built.state.clone()))
         .await
 }

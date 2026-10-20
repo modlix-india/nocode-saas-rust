@@ -183,7 +183,7 @@ pub async fn handle(
 ) -> Response {
     let (parts, body) = req.into_parts();
 
-    // Lighthouse's Eureka API is never served from outside (Kiran, 2026-10-19). No pool may point
+    // Lighthouse's Lighthouse API is never served from outside (Kiran, 2026-10-19). No pool may point
     // at Lighthouse either (`pool::is_lighthouse`), so its other paths fall through to the ui.
     if parts.uri.path() == "/eureka" || parts.uri.path().starts_with("/eureka/") {
         return error("COMMON.NOT_FOUND", "the registry's API is not served through the gateway".into(), "registry-blocked");
