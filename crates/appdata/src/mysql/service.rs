@@ -1455,12 +1455,32 @@ impl MySqlAppDataService {
     /// How far each tenant got, from its own journal.
     pub async fn migration_status(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage)
         -> AppDataResult<Vec<TenantProgress>> {
+        let tenants = self.migration_tenants(conn, app_code, storage).await?;
+        self.migration_status_of(conn, app_code, storage, &tenants).await
+    }
+
+    /// The tenant schemas that hold this storage's table.
+    pub async fn migration_tenants(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage)
+        -> AppDataResult<Vec<String>> {
         if conn.is_none() {
             return Ok(Vec::new());
         }
         let pool = self.pool(conn).await?;
-        let tenants = migration::tenants_with_table(&pool, app_code, &storage.unique_name).await?;
-        migration::status(&pool, &tenants, &storage.name).await
+        migration::tenants_with_table(&pool, app_code, &storage.unique_name).await
+    }
+
+    /// How far each of these tenants got, with its client and newest issues.
+    pub async fn migration_status_of(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage, tenants: &[String])
+        -> AppDataResult<Vec<TenantProgress>> {
+        if conn.is_none() || tenants.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pool = self.pool(conn).await?;
+        let mut out = migration::status(&pool, tenants, &storage.name).await?;
+        for t in &mut out {
+            t.client_code = client_code_of(&t.database, app_code);
+        }
+        Ok(out)
     }
 
     /// What every tenant's table has that its definition does not, and the reverse.

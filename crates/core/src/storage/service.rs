@@ -66,7 +66,11 @@ pub trait EventSink: Send + Sync {
 /// The MySQL engine's own operations, which have no Mongo counterpart.
 #[async_trait]
 pub trait MySqlAdmin: Send + Sync {
-    async fn migration_status(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<TenantProgress>>;
+    /// The tenant schemas that hold the storage's table.
+    async fn migration_tenants(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<String>>;
+    /// How far each of these tenants got, with its client and newest issues.
+    async fn migration_status_of(&self, conn: &Connection, app_code: &str, storage: &Storage, tenants: &[String])
+        -> appdata::AppDataResult<Vec<TenantProgress>>;
     async fn drift(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<Report>>;
     async fn repair_drift(&self, conn: &Connection, app_code: &str, storage: &Storage, approved: bool)
         -> appdata::AppDataResult<Vec<DriftRepair>>;
@@ -74,8 +78,12 @@ pub trait MySqlAdmin: Send + Sync {
 
 #[async_trait]
 impl MySqlAdmin for appdata::mysql::MySqlAppDataService {
-    async fn migration_status(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<TenantProgress>> {
-        appdata::mysql::MySqlAppDataService::migration_status(self, Some(conn), app_code, storage).await
+    async fn migration_tenants(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<String>> {
+        appdata::mysql::MySqlAppDataService::migration_tenants(self, Some(conn), app_code, storage).await
+    }
+    async fn migration_status_of(&self, conn: &Connection, app_code: &str, storage: &Storage, tenants: &[String])
+        -> appdata::AppDataResult<Vec<TenantProgress>> {
+        appdata::mysql::MySqlAppDataService::migration_status_of(self, Some(conn), app_code, storage, tenants).await
     }
     async fn drift(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<Report>> {
         appdata::mysql::MySqlAppDataService::drift(self, Some(conn), app_code, storage).await
@@ -1424,9 +1432,10 @@ impl AppDataService {
         Ok(out)
     }
 
-    /// `migrationStatus`: readAuth; on MySQL the engine's journal. Built with `flatMapMono`, so
-    /// an app with no appData connection (every Mongo app), or a storage that does not
-    /// resolve, completes empty (`None`): a 200 with no body.
+    /// `migrationStatus`: readAuth; on MySQL the engine's journal and issues, one row per tenant
+    /// schema of a client the caller may see (its own, and the ones it manages). Built with
+    /// `flatMapMono`, so an app with no appData connection (every Mongo app), or a storage that
+    /// does not resolve, completes empty (`None`): a 200 with no body.
     pub async fn migration_status(&self, app_code: Option<&str>, client_code: Option<&str>, storage_name: &str)
         -> CoreResult<Option<Vec<TenantProgress>>> {
         let app = Self::app_code(app_code);
@@ -1439,12 +1448,33 @@ impl AppDataService {
         };
         self.generic(Some(&storage), Gate::Read, |s| async {
             if conn.connection_sub_type == Some(appdata::model::ConnectionSubType::MySql) {
-                Ok(Some(self.engines.mysql_admin.migration_status(&conn, &app, s).await?))
+                let tenants = self.engines.mysql_admin.migration_tenants(&conn, &app, s).await?;
+                let visible = self.visible_tenants(&app, tenants).await?;
+                Ok(Some(self.engines.mysql_admin.migration_status_of(&conn, &app, s, &visible).await?))
             } else {
                 Ok(Some(Vec::new()))
             }
         })
         .await
+    }
+
+    /// Of these tenant schemas, the ones whose client the caller may see: its own client and the
+    /// clients it manages (one call to security for all of them).
+    async fn visible_tenants(&self, app: &str, tenants: Vec<String>) -> CoreResult<Vec<String>> {
+        let own = context::authentication().client_code().unwrap_or_default().to_string();
+        let mut codes: Vec<String> = tenants.iter().map(|d| appdata::mysql::service::client_code_of(d, app)).collect();
+        codes.sort();
+        codes.dedup();
+        codes.retain(|c| *c != own);
+        let managed: std::collections::HashSet<String> =
+            self.security.filter_managed_client_codes(&own, &codes).await.map_err(CoreError::from)?.into_iter().collect();
+        Ok(tenants
+            .into_iter()
+            .filter(|d| {
+                let c = appdata::mysql::service::client_code_of(d, app);
+                c == own || managed.contains(&c)
+            })
+            .collect())
     }
 
     /// `drift`: write access to the app; every MySQL server the app uses.

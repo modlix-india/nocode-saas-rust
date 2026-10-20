@@ -113,6 +113,33 @@ pub fn find_latest(db: &str, storage_name: &str) -> String {
     find(db, &format!("`storage_name` = '{}'", escape(storage_name)))
 }
 
+/// The text a timestamp column is read back as, for the status screen.
+const AT: &str = "%Y-%m-%d %H:%i:%s.%f";
+
+/// The most recent migration of this storage with what the status screen shows of it.
+pub fn latest_detail(db: &str, storage_name: &str) -> String {
+    format!(
+        "SELECT `state`, `statement_index`, `total_statements`, `attempt`, `surface`, `to_version`, DATE_FORMAT(`started_at`, '{AT}'), DATE_FORMAT(`finished_at`, '{AT}'), `applied_by`, `error` FROM `{db}`.`{TABLE}` WHERE `storage_name` = '{}' ORDER BY `started_at` DESC, `id` DESC LIMIT 1",
+        escape(storage_name)
+    )
+}
+
+/// When this storage last finished a migration cleanly in the tenant.
+pub fn last_applied_at(db: &str, storage_name: &str) -> String {
+    format!(
+        "SELECT DATE_FORMAT(MAX(`finished_at`), '{AT}') FROM `{db}`.`{TABLE}` WHERE `storage_name` = '{}' AND `state` = 'APPLIED'",
+        escape(storage_name)
+    )
+}
+
+/// The newest issues of this storage in the tenant.
+pub fn recent_issues(db: &str, storage_name: &str, limit: usize) -> String {
+    format!(
+        "SELECT `kind`, `surface`, `offending`, `detail`, DATE_FORMAT(`created_at`, '{AT}'), `applied_by` FROM `{db}`.`{ISSUE_TABLE}` WHERE `storage_name` = '{}' ORDER BY `created_at` DESC, `id` DESC LIMIT {limit}",
+        escape(storage_name)
+    )
+}
+
 fn find(db: &str, where_: &str) -> String {
     format!(
         "SELECT `id`, `state`, `statement_index`, `attempt`, `applied_count`, `total_statements` FROM `{db}`.`{TABLE}` WHERE {where_} ORDER BY `started_at` DESC, `id` DESC LIMIT 1"
