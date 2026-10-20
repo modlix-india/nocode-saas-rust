@@ -144,12 +144,6 @@ pub fn draft_token_json(token: &str, suffix: &str, expires_at: NaiveDateTime) ->
         .build()
 }
 
-/// The Cloudflare client this unit runs with: unconfigured until its configuration carries a
-/// token and a zone (see the piece's report).
-pub fn cloudflare() -> CustomHostnames {
-    CustomHostnames::unconfigured()
-}
-
 /// `syncToCloudflare(entity, add)`: LIVE rows only, and only when configured.
 async fn sync_to_cloudflare(cf: &CustomHostnames, row: &Row, add: bool) {
     if entity::str_of(row, "urlType") != Some("LIVE") || !cf.is_configured() {
@@ -227,7 +221,7 @@ pub async fn create(s: &AdminState, ca: &ContextAuth, mut entity: Row) -> AuthRe
     entity.insert("createdBy".into(), Value::from(ca.user.id()));
     let id = entity::insert(&s.db, &CLIENT_URL, &entity).await?;
     let created = entity::read_by_id(&s.db, &CLIENT_URL, id).await?;
-    sync_to_cloudflare(&cloudflare(), &created, true).await;
+    sync_to_cloudflare(&s.hosting.cloudflare, &created, true).await;
     evict_url_caches(s).await;
     Ok(Some(created))
 }
@@ -250,7 +244,7 @@ pub async fn create_for_registration(s: &AdminState, ca: &ContextAuth, mut entit
 pub async fn delete(s: &AdminState, ca: &ContextAuth, id: u64) -> AuthResult<u64> {
     let r = read(s, ca, id).await?;
     let n = entity::delete(&s.db, &CLIENT_URL, id).await?;
-    sync_to_cloudflare(&cloudflare(), &r, false).await;
+    sync_to_cloudflare(&s.hosting.cloudflare, &r, false).await;
     evict_url_caches(s).await;
     Ok(n)
 }
@@ -620,7 +614,6 @@ mod tests {
         let at = chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap().naive_utc();
         assert_eq!(draft_token_json("ab", ".local", at), json!({"token": "ab", "host": "t-ab.local.modlix.com", "expiresAt": 1_800_000_000}));
         assert_ne!(random_hex(), random_hex());
-        assert!(!cloudflare().is_configured());
     }
 
     #[test]

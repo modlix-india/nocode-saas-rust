@@ -24,6 +24,100 @@ pub struct AuthConfig {
     pub files: FilesConfig,
     /// The error texts: override files (`[messages] override_dir`) and the default language.
     pub messages: MessagesConfig,
+    /// The certificate authority security-admin's SSL routes order certificates from.
+    pub letsencrypt: LetsEncryptConfig,
+    /// Cloudflare for SaaS custom hostnames for LIVE client URLs (security-admin).
+    pub cloudflare: CloudflareConfig,
+}
+
+/// Let's Encrypt's production directory (`[letsencrypt] directory`'s default).
+pub const LETS_ENCRYPT_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.org/directory";
+
+/// The ACME account security-admin orders certificates with. Java's `letsencrypt.session`,
+/// `.login` and `.key` (an acme4j session URL, account URL and RSA account key) become
+/// instant-acme's credentials: `security-admin acme-rollover` moves that same account to a new
+/// P-256 key and prints them (see `admin/clients/rollover.rs`).
+///
+/// ```toml
+/// [letsencrypt]
+/// # The ACME directory (Let's Encrypt staging and Pebble are just other URLs). Used when the
+/// # credentials do not name one; the credentials' own directory wins (an account lives on one
+/// # server).
+/// directory = "https://acme-v02.api.letsencrypt.org/directory"
+/// # A secret: MODLIX__LETSENCRYPT__CREDENTIALS. Empty: no authority, and the SSL routes that
+/// # would reach one answer 500 `lets_encrypt_credentials`.
+/// credentials = ""
+/// ```
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LetsEncryptConfig {
+    pub directory: String,
+    /// The account credentials JSON `acme-rollover` (or `acme-register`) prints (account URL,
+    /// key, directory).
+    pub credentials: String,
+}
+
+impl Default for LetsEncryptConfig {
+    fn default() -> Self {
+        Self { directory: LETS_ENCRYPT_DIRECTORY.into(), credentials: String::new() }
+    }
+}
+
+/// Key names only: the credentials hold the account's private key.
+impl std::fmt::Debug for LetsEncryptConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LetsEncryptConfig").field("directory", &self.directory).field("credentials", &secret(&self.credentials)).finish()
+    }
+}
+
+/// `security.cloudflare.*`: `CloudflareCustomHostnameService`'s settings.
+///
+/// ```toml
+/// [cloudflare]
+/// # security.cloudflare.apiToken. A secret: MODLIX__CLOUDFLARE__API_TOKEN.
+/// api_token = ""
+/// # security.cloudflare.zoneId.
+/// zone_id = ""
+/// # security.cloudflare.ownDomains: hosts at or under these are never registered.
+/// own_domains = ["modlix.com", "sitezump.ai", "authzump.ai", "adzump.ai", "leadzump.ai", "fincity.com"]
+/// ```
+///
+/// An empty token or zone leaves it off, as Java was on local, dev and stage.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CloudflareConfig {
+    pub api_token: String,
+    pub zone_id: String,
+    pub own_domains: Vec<String>,
+}
+
+impl Default for CloudflareConfig {
+    fn default() -> Self {
+        Self {
+            api_token: String::new(),
+            zone_id: String::new(),
+            own_domains: crate::admin::clients::cloudflare::OWN_DOMAINS.iter().map(|d| d.to_string()).collect(),
+        }
+    }
+}
+
+/// Key names only: the token is a secret.
+impl std::fmt::Debug for CloudflareConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudflareConfig")
+            .field("api_token", &secret(&self.api_token))
+            .field("zone_id", &self.zone_id)
+            .field("own_domains", &self.own_domains)
+            .finish()
+    }
+}
+
+fn secret(v: &str) -> &'static str {
+    if v.trim().is_empty() {
+        "<empty>"
+    } else {
+        "<set>"
+    }
 }
 
 /// The events security-admin raises through `EventCreationService` (users, invites, ...).
@@ -79,6 +173,8 @@ impl Default for AuthConfig {
             events: EventsConfig::default(),
             files: FilesConfig::default(),
             messages: MessagesConfig::default(),
+            letsencrypt: LetsEncryptConfig::default(),
+            cloudflare: CloudflareConfig::default(),
         }
     }
 }
@@ -186,16 +282,37 @@ mod tests {
         assert!(c.security.subdomain_endings().is_empty());
         let s = SecurityProps { subdomain_endings: ".local.modlix.com, .local.sitezump.ai".into(), ..Default::default() };
         assert_eq!(s.subdomain_endings(), vec![".local.modlix.com", ".local.sitezump.ai"]);
+        assert_eq!((c.letsencrypt.directory.as_str(), c.letsencrypt.credentials.as_str()), (LETS_ENCRYPT_DIRECTORY, ""));
+        assert!(c.cloudflare.api_token.is_empty() && c.cloudflare.zone_id.is_empty());
+        assert_eq!(c.cloudflare.own_domains.len(), 6);
+    }
+
+    #[test]
+    fn secrets_never_print() {
+        let le = LetsEncryptConfig { credentials: "{\"id\":\"zz-secret\"}".into(), ..Default::default() };
+        let cf = CloudflareConfig { api_token: "zz-token".into(), zone_id: "z".into(), ..Default::default() };
+        let shown = format!("{:?}", AuthConfig { letsencrypt: le, cloudflare: cf, ..Default::default() });
+        assert!(!shown.contains("zz-secret") && !shown.contains("zz-token"), "{shown}");
+        assert!(shown.contains("credentials: \"<set>\"") && shown.contains("api_token: \"<set>\""));
+        assert!(format!("{:?}", LetsEncryptConfig::default()).contains("<empty>"));
     }
 
     #[test]
     fn loads_from_toml_and_environment() {
         figment::Jail::expect_with(|jail| {
             jail.create_dir("config")?;
-            jail.create_file("config/security-auth.toml", "[jwt]\nrefresh_minutes = 5\n[otp]\npublish_events = false\n")?;
+            jail.create_file(
+                "config/security-auth.toml",
+                "[jwt]\nrefresh_minutes = 5\n[otp]\npublish_events = false\n[letsencrypt]\ndirectory = \"https://pebble.test/dir\"\n[cloudflare]\nzone_id = \"z\"\nown_domains = [\"a.io\"]\n",
+            )?;
             jail.set_env("MODLIX__JWT__KEY", "k");
+            jail.set_env("MODLIX__LETSENCRYPT__CREDENTIALS", r#"{"id":"https://ca.test/acct/1","key_pkcs8":"MIGH-_x","directory":"https://ca.test/dir"}"#);
+            jail.set_env("MODLIX__CLOUDFLARE__API_TOKEN", "t");
             let c: AuthConfig = platform::config::load("security-auth").map_err(|e| e.to_string())?;
             assert_eq!((c.jwt.refresh_minutes, c.jwt.key.as_str(), c.otp.publish_events), (5, "k", false));
+            assert_eq!(c.letsencrypt.directory, "https://pebble.test/dir");
+            assert_eq!(c.letsencrypt.credentials, r#"{"id":"https://ca.test/acct/1","key_pkcs8":"MIGH-_x","directory":"https://ca.test/dir"}"#);
+            assert_eq!((c.cloudflare.api_token.as_str(), c.cloudflare.zone_id.as_str(), c.cloudflare.own_domains.clone()), ("t", "z", vec!["a.io".to_string()]));
             Ok(())
         });
     }

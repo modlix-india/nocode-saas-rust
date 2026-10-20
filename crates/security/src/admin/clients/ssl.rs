@@ -8,10 +8,13 @@
 //! | `POST ssl/request/challenges`, `DELETE ssl/{id}` | signed in |
 //!
 //! Every certificate authority call goes through [`Acme`] and every key or CSR through
-//! [`CertCrypto`]. This unit runs with [`Unavailable`] for both: it has no ACME client and no RSA
-//! (see DIFFERENCES.md), so the routes that would contact Let's Encrypt answer what Java answers
-//! without Let's Encrypt credentials, before changing anything. Tests drive the whole flow
-//! through in-process fakes; nothing here ever reaches a real authority or DNS.
+//! [`CertCrypto`]. The unit runs with the ones [`super::hosting::Hosting`] builds at startup:
+//! instant-acme against `[letsencrypt]`'s account ([`super::acme::LetsEncrypt`]) and real RSA keys
+//! and CSRs ([`super::csr::RsaCsr`]). Without `[letsencrypt] credentials` the authority is
+//! [`Unavailable`], and the routes that would contact it answer what Java answers without Let's
+//! Encrypt credentials, before changing anything (see DIFFERENCES.md). Tests drive the whole
+//! flow through in-process fakes, and the ACME client against Pebble; nothing here ever reaches a
+//! real authority or DNS in a test.
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
@@ -213,7 +216,8 @@ pub struct Issued {
 /// What `SSLCertificateService` does with acme4j. `Err` carries an `AcmeException`'s message.
 #[async_trait]
 pub trait Acme: Send + Sync {
-    /// `letsencrypt.session`, `.login` and `.key` are all set.
+    /// There is an account to use (Java: `letsencrypt.session`, `.login` and `.key` all set; here
+    /// `[letsencrypt] credentials`).
     fn configured(&self) -> bool;
     /// `login.getAccount().newOrder().domains(...).create()`.
     async fn new_order(&self, domains: &[String]) -> Result<AcmeOrder, String>;
@@ -236,7 +240,7 @@ pub trait CertCrypto: Send + Sync {
     fn key_and_csr(&self, domains: &[String], organization: Option<&str>) -> Option<(String, String)>;
 }
 
-/// No authority and no RSA: what this unit runs with.
+/// No authority and no RSA: the authority of a unit without `[letsencrypt] credentials`.
 pub struct Unavailable;
 
 #[async_trait]
@@ -277,7 +281,7 @@ pub struct Ssl<'a> {
 }
 
 impl Ssl<'static> {
-    /// This unit's: neither is available.
+    /// Neither available.
     pub fn unit() -> Self {
         Ssl { acme: &Unavailable, crypto: &Unavailable }
     }
@@ -814,7 +818,7 @@ web_route!(create_route, AdminState, "/ssl", true, |s, r, ca| {
     let body = object_body(&r.body)?;
     let req = order_request(&body)?;
     pre_authorize(&ca, "Authorities.Client_UPDATE")?;
-    Ok(match create_request(&s, &ca, &Ssl::unit(), &req).await? {
+    Ok(match create_request(&s, &ca, &s.hosting.ssl(), &req).await? {
         Some(v) => json_resp(&v),
         None => web::nothing(),
     })
@@ -861,13 +865,13 @@ web_route!(query, AdminState, "/ssl/query", true, |s, r, ca| {
 web_route!(certificate_route, AdminState, "/ssl/certificate", true, |s, r, ca| {
     let id = req_u64(&r.params, "requestId")?;
     pre_authorize(&ca, "Authorities.Client_UPDATE")?;
-    Ok(super::common::bool_json(create_certificate(&s, &Ssl::unit(), id).await?))
+    Ok(super::common::bool_json(create_certificate(&s, &s.hosting.ssl(), id).await?))
 });
 
 web_route!(trigger_route, AdminState, "/ssl/request/challenge", true, |s, r, ca| {
     let id = req_u64(&r.params, "challengeId")?;
     pre_authorize(&ca, "Authorities.Client_UPDATE")?;
-    Ok(match trigger_challenge(&s, &ca, &Ssl::unit(), id).await? {
+    Ok(match trigger_challenge(&s, &ca, &s.hosting.ssl(), id).await? {
         Some(v) => json_resp(&v),
         None => web::nothing(),
     })
@@ -894,7 +898,7 @@ web_route_path!(delete_certificate_route, AdminState, "/ssl/{id}", true, |s, r, 
 
 web_route!(challenges_route, AdminState, "/ssl/request/challenges", true, |s, r, ca| {
     let id = req_u64(&r.params, "requestId")?;
-    Ok(match create_challenges(&s, &ca, &Ssl::unit(), id).await? {
+    Ok(match create_challenges(&s, &ca, &s.hosting.ssl(), id).await? {
         Some(v) => json_resp(&v),
         None => web::nothing(),
     })
@@ -912,7 +916,7 @@ web_route!(renew_route, AdminState, "/ssl/internal/renew-certificates", false, |
     if !ca.is_system_client() {
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, ONLY_SYS_USER_CERTS, &[]));
     }
-    Ok(json_resp(&renew(&s, &ca, &Ssl::unit(), days).await?))
+    Ok(json_resp(&renew(&s, &ca, &s.hosting.ssl(), days).await?))
 });
 
 #[cfg(test)]
@@ -1225,6 +1229,72 @@ mod tests {
         assert_eq!(made["current"], true);
         let calls = acme.calls.lock().unwrap().clone();
         assert!(calls.iter().any(|c| c.starts_with("finalize ZZ CSR")), "{calls:?}");
+        super::super::urls::delete(&s, &ca, url_id).await.unwrap();
+        assert!(super::super::apps::delete_everything(&s, &ca, app_id, true).await.unwrap());
+    }
+
+    /// A certificate request through the service against Pebble, with a real key and CSR, stored
+    /// as the URL's current certificate (gated: `SECURITY_AUTH_LIVE=1` with `config/local.toml`,
+    /// and `SECURITY_ACME_PEBBLE=1` with Pebble running as `acme.rs`'s Pebble test says).
+    #[tokio::test]
+    async fn order_flow_against_pebble() {
+        let (Ok(_), Ok(_), Ok(password), Ok(key)) = (
+            std::env::var("SECURITY_AUTH_LIVE"),
+            std::env::var("SECURITY_ACME_PEBBLE"),
+            std::env::var("MODLIX__DATABASE__PASSWORD"),
+            std::env::var("MODLIX__JWT__KEY"),
+        ) else {
+            return;
+        };
+        use super::super::acme::{credentials, register, LetsEncrypt, ReqwestHttp};
+        let directory = std::env::var("SECURITY_ACME_PEBBLE_DIRECTORY").unwrap_or_else(|_| "https://localhost:14000/dir".into());
+        let http = ReqwestHttp(reqwest::Client::builder().danger_accept_invalid_certs(true).build().unwrap());
+        let creds = register(&directory, "zz-acme@example.com", http.clone()).await.unwrap();
+        let acme = LetsEncrypt::new(credentials(&creds, &directory).unwrap(), http);
+        let ssl = Ssl { acme: &acme, crypto: &super::super::csr::RsaCsr };
+
+        let mut cfg = crate::config::AuthConfig::default();
+        cfg.database = platform::config::MySqlConfig { database: "security".into(), password, max_connections: 2, ..Default::default() };
+        cfg.jwt.key = key;
+        cfg.security.app_code_suffix = ".local".into();
+        cfg.security.subdomain_endings = ".local.modlix.com".into();
+        cfg.events.publish_events = false;
+        let pool = platform::db::mysql_pool(&cfg.database).await.unwrap();
+        let s = crate::admin::build(&cfg, pool, platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap(), None).unwrap();
+        let ca = system_caller();
+        let left: Vec<u64> = sqlx::query_scalar("SELECT ID FROM security_app WHERE APP_CODE LIKE 'zzrustpebble%'").fetch_all(&s.db.pool).await.unwrap();
+        for id in left {
+            super::super::apps::delete_everything(&s, &ca, id, true).await.unwrap();
+        }
+        let code = format!("zzrustpebble{}", super::super::apps::unique_letters("").chars().take(8).collect::<String>());
+        let app = super::super::apps::create(&s, &ca, json!({"appName": "ZZ Pebble", "appCode": code, "appUsageType": "B2C"}).as_object().unwrap().clone())
+            .await
+            .unwrap();
+        let app_id = entity::u64_of(&app, "id").unwrap();
+        let host = format!("{code}.example.test");
+        let url = super::super::urls::create(&s, &ca, json!({"appCode": code, "urlPattern": host}).as_object().unwrap().clone()).await.unwrap().unwrap();
+        let url_id = entity::u64_of(&url, "id").unwrap();
+
+        let req = OrderRequest { domain_names: Some(vec![host.clone()]), organization_name: Some("ZZ".into()), url_id: Some(url_id), validity_in_months: Some(3) };
+        let order = create_request(&s, &ca, &ssl, &req).await.unwrap().unwrap();
+        let ch = &order["challenges"][0];
+        assert_eq!((ch["challengeType"].as_str(), ch["status"].as_str()), (Some(HTTP_01), Some("PENDING")));
+        // The token the nginx side answers /.well-known/acme-challenge/<token> with.
+        let auth = token(&s, ch["token"].as_str().unwrap()).await.unwrap();
+        assert!(auth.starts_with(&format!("{}.", ch["token"].as_str().unwrap())));
+        let triggered = trigger_challenge(&s, &ca, &ssl, ch["id"].as_u64().unwrap()).await.unwrap().unwrap();
+        assert_eq!(triggered["challenges"][0]["status"], "VALID", "{triggered}");
+        assert!(create_certificate(&s, &ssl, order["request"]["id"].as_u64().unwrap()).await.unwrap());
+
+        let page = certificates_page(&s, &ca, Some(url_id), &Pageable::of(0, 10, vec![]), None).await.unwrap();
+        let cert = &page["content"][0];
+        assert_eq!((page["totalElements"].as_i64(), cert["current"].as_bool()), (Some(1), Some(true)));
+        assert!(cert["issuer"].as_str().unwrap().starts_with("cn=pebble intermediate ca "), "{cert}");
+        // The stored key is the request's, PKCS#1 as Java stored it, and the certificate's.
+        let (crt, crt_key): (String, String) = sqlx::query_as("SELECT CRT, CRT_KEY FROM security_ssl_certificate WHERE URL_ID = ?").bind(url_id).fetch_one(&s.db.pool).await.unwrap();
+        assert!(crt_key.starts_with("-----BEGIN RSA PRIVATE KEY-----"));
+        assert!(validate_crt_and_key(Some(&crt), Some(&crt_key), s.auth.clock.utc()).is_ok());
+
         super::super::urls::delete(&s, &ca, url_id).await.unwrap();
         assert!(super::super::apps::delete_everything(&s, &ca, app_id, true).await.unwrap());
     }

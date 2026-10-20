@@ -155,9 +155,15 @@ ai|ssr <image>`, from nocode-ai's and nocode-ui's workflows).
   `ssr.env` (`CONFIG_SERVER_ENABLED=false`, ai also `EUREKA_ENABLED=false`); a change to their
   settings in oci-config needs a new render and a redeploy (`deploy ai|ssr` with the running
   image).
-- **security-admin** has no ACME client and does not register Cloudflare custom hostnames
-  (crates/security/DIFFERENCES.md): certificate requests answer `lets_encrypt_credentials`, and a
-  new LIVE client URL is not added to Cloudflare (prod configures it today).
+- **security-admin's Let's Encrypt** is wired but off until configured. It keeps Java's ACME
+  account: `security-admin acme-rollover --account <letsencrypt.login> --key-file <letsencrypt.key
+  in a file>` moves that account to a new P-256 key (instant-acme signs with P-256 only; the same
+  account URL, so pending orders stay bound) and prints its credentials JSON (a secret). It goes in
+  `<env>/units/security-admin.toml` of oci-config-rust as `[letsencrypt] credentials`. After the
+  rollover the old key no longer works, so Java's acme4j can no longer issue: run it when prod
+  moves to Rust. Without the credentials, certificate requests answer `lets_encrypt_credentials`.
+  **Cloudflare custom hostnames** are ported but stay off (no `[cloudflare] api_token`/`zone_id`):
+  the load balancers take certificates from `ssl/internal/certificates`, not from Cloudflare.
 - **Flyway**: the Java services ran their schema migrations on start; nothing does now. A
   migration runner is needed before the first schema change after cutover.
 
@@ -181,7 +187,7 @@ gateway breaks pages in ways no single endpoint test shows.
   `/api/security` to security-admin; every Rust unit splits its own security calls the same way
   (`[security] auth_upstream`, `internal_upstream`, `upstream`). `lighthouse render` fills the
   app code suffix, subdomain endings, JWT expiries, the JWT key and the MQ URI; Razorpay keys come
-  from the database; Let's Encrypt and Cloudflare are not wired (above). Keep
+  from the database; Let's Encrypt needs its credentials added (above). Keep
   `[billing] serve_wallet_adjust = false` unless the owner decides otherwise.
 - **ui (engine + shell + editor)**: ready; Java ui retires. The gateway splits the ui three
   ways: engine GETs (and personalization) to ui-engine, the editor controllers

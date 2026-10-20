@@ -31,6 +31,7 @@ use platform::upstream::Upstream;
 
 use crate::config::AuthConfig;
 use crate::events::{AmqpEvents, EventSink, LoggedEvents};
+pub use clients::hosting::Hosting;
 use crate::handlers::security_headers;
 use crate::internal::Internal;
 
@@ -43,6 +44,9 @@ pub struct Admin {
     pub events: Arc<dyn EventSink>,
     /// `IFeignFilesService`; `None` when `[files] upstream` is not configured.
     pub files: Option<Upstream>,
+    /// The certificate authority, key maker and Cloudflare client (`[letsencrypt]`,
+    /// `[cloudflare]`), one per process.
+    pub hosting: Arc<Hosting>,
 }
 
 impl Deref for Admin {
@@ -64,7 +68,14 @@ pub fn build(cfg: &AuthConfig, pool: sqlx::MySqlPool, cache: CacheService, eurek
         Arc::new(LoggedEvents)
     };
     let files = if cfg.files.upstream.entries().is_empty() { None } else { Some(Upstream::from_config(&cfg.files.upstream, eureka)?) };
-    Ok(Arc::new(Admin { internal, events, files }))
+    let hosting = Arc::new(Hosting::from_config(cfg)?);
+    Ok(Arc::new(Admin { internal, events, files, hosting }))
+}
+
+/// The commands besides serving (`security-admin acme-register ...`, see
+/// [`clients::acme::run_if_asked`]); `None` for a normal start.
+pub async fn run_if_asked(args: &[String]) -> Option<i32> {
+    clients::acme::run_if_asked(args).await
 }
 
 pub fn router(state: AdminState) -> Router {
