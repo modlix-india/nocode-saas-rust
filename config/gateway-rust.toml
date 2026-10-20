@@ -1,5 +1,5 @@
 # gateway-rust on the local stack: the same routes as the Spring gateway (nocode-saas configfiles
-# gateway.yml), with every Java service followed through the local Eureka. Listens on 8180 next to
+# gateway.yml), with every Java service followed through the local Lighthouse. Listens on 8180 next to
 # the Spring gateway on 8080.
 
 [server]
@@ -10,7 +10,7 @@ log_format = "pretty"
 log_level = "info"
 environment = "local"
 
-[eureka]
+[registry]
 zones = ["http://localhost:9999/eureka/"]
 
 [redis]
@@ -19,7 +19,7 @@ cache_prefix = "cmn"
 eviction_channel = "evictionChannel"
 
 [security]
-upstream = "eureka:SECURITY"
+upstream = "lighthouse:SECURITY"
 # The service-to-service routes (clients/internal, users/internal, ...) run in security-internal.
 internal_upstream = "http://localhost:8112"
 
@@ -27,7 +27,7 @@ internal_upstream = "http://localhost:8112"
 # sub-table (for example [pools.core-exec.breaker] with open_ms = 10000 under it).
 #
 # [pools.NAME]
-# discovery_refresh_ms = 2000     # how often an eureka: pool reads the registry
+# discovery_refresh_ms = 2000     # how often a lighthouse: pool reads the registry
 #
 # [pools.NAME.outlier]
 # consecutive_5xx = 5             # 502/503/504, broken connections or timeouts in a row; 0 = off
@@ -54,55 +54,55 @@ internal_upstream = "http://localhost:8112"
 # max_open_ms = 60000             # for twice as long, up to this
 
 [pools.security]
-upstreams = "eureka:SECURITY"
+upstreams = "lighthouse:SECURITY"
 health_path = "/actuator/health"
 
 [pools.files]
-upstreams = "eureka:FILES"
+upstreams = "lighthouse:FILES"
 health_path = "/actuator/health"
 
 [pools.core]
-upstreams = "eureka:CORE"
+upstreams = "lighthouse:CORE"
 health_path = "/actuator/health"
 
 [pools.ui]
-upstreams = "eureka:UI"
+upstreams = "lighthouse:UI"
 health_path = "/actuator/health"
 
 [pools.multi]
-upstreams = "eureka:MULTI"
+upstreams = "lighthouse:MULTI"
 health_path = "/actuator/health"
 
 [pools.entity-processor]
-upstreams = "eureka:ENTITY-PROCESSOR"
+upstreams = "lighthouse:ENTITY-PROCESSOR"
 health_path = "/actuator/health"
 
 [pools.notification]
-upstreams = "eureka:NOTIFICATION"
+upstreams = "lighthouse:NOTIFICATION"
 health_path = "/actuator/health"
 
 [pools.message]
-upstreams = "eureka:MESSAGE"
+upstreams = "lighthouse:MESSAGE"
 health_path = "/actuator/health"
 
 [pools.worker]
-upstreams = "eureka:WORKER"
+upstreams = "lighthouse:WORKER"
 health_path = "/actuator/health"
 
 [pools.schedular]
-upstreams = "eureka:SCHEDULAR"
+upstreams = "lighthouse:SCHEDULAR"
 health_path = "/actuator/health"
 
 [pools.data]
-upstreams = "eureka:DATA"
+upstreams = "lighthouse:DATA"
 health_path = "/actuator/health"
 
 [pools.adzump]
-upstreams = "eureka:ADZUMP"
+upstreams = "lighthouse:ADZUMP"
 health_path = "/actuator/health"
 
 [pools.ai]
-upstreams = "eureka:AI"
+upstreams = "lighthouse:AI"
 health_path = "/health"
 
 [[routes]]

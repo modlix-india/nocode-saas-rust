@@ -300,7 +300,7 @@ impl Default for TelemetryConfig {
     }
 }
 
-/// How to reach another service: a fixed list of base URLs (round robin), or `eureka:<APP>`
+/// How to reach another service: a fixed list of base URLs (round robin), or `lighthouse:<APP>`
 /// to follow the Java registry while it still exists.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
@@ -326,14 +326,14 @@ impl UpstreamConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub struct EurekaConfig {
-    /// Register this instance in Eureka so Java Feign clients can call it by name. Off unless a
+pub struct RegistryConfig {
+    /// Register this instance in Lighthouse so Java Feign clients can call it by name. Off unless a
     /// Java service calls this unit.
     pub register: bool,
     /// The name to register under, e.g. `FILES`.
     pub register_as: String,
-    /// Eureka base URLs, e.g. `http://eureka:9999/eureka/`. Needed by `register` and by any
-    /// `eureka:<APP>` upstream.
+    /// Lighthouse base URLs, e.g. `http://eureka:9999/eureka/`. Needed by `register` and by any
+    /// `lighthouse:<APP>` upstream.
     pub zones: Vec<String>,
     /// The address to advertise. Defaults to this machine's primary IP.
     pub instance_ip: String,
@@ -364,7 +364,7 @@ impl Default for RedisConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SecurityConfig {
-    /// Where the security service is: base URL(s) or `eureka:SECURITY`.
+    /// Where the security service is: base URL(s) or `lighthouse:SECURITY`.
     pub upstream: UpstreamConfig,
     /// Where `AuthenticationController` runs when it runs apart from the rest of security
     /// (security-auth): the caller's context (`internal/securityContextAuthentication`, 73% of

@@ -1,6 +1,6 @@
 [package]
 name = "lighthouse-client"
-description = "Lighthouse's wire types (Eureka InstanceInfo and Applications in Jackson's JSON and in XML, peer replication) and the small client: readiness-gated registration and the registry watch."
+description = "Lighthouse's wire types (Lighthouse InstanceInfo and Applications in Jackson's JSON and in XML, peer replication) and the small client: readiness-gated registration and the registry watch."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

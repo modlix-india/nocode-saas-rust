@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use crate::config::SecurityConfig;
 use crate::error::{AppError, Coded};
-use crate::eureka::Eureka;
+use crate::registry::Registry;
 use crate::upstream::Upstream;
 
 pub const CLIENT_TYPE_SYSTEM: &str = "SYS";
@@ -75,15 +75,15 @@ pub fn is_internal_route(path: &str) -> bool {
 /// `[security]` as one upstream: `upstream`, with `AuthenticationController`'s paths sent to
 /// `auth_upstream` and security-internal's to `internal_upstream` when they are set. Callers
 /// pick with [`Upstream::base_for`].
-pub fn security_upstream(cfg: &SecurityConfig, eureka: Option<&Eureka>) -> Result<Upstream> {
+pub fn security_upstream(cfg: &SecurityConfig, registry: Option<&Registry>) -> Result<Upstream> {
     let mut routes: Vec<(crate::upstream::PathTest, Upstream)> = Vec::new();
     if !cfg.auth_upstream.entries().is_empty() {
-        routes.push((is_auth_route, Upstream::from_config(&cfg.auth_upstream, eureka)?));
+        routes.push((is_auth_route, Upstream::from_config(&cfg.auth_upstream, registry)?));
     }
     if !cfg.internal_upstream.entries().is_empty() {
-        routes.push((is_internal_route, Upstream::from_config(&cfg.internal_upstream, eureka)?));
+        routes.push((is_internal_route, Upstream::from_config(&cfg.internal_upstream, registry)?));
     }
-    Ok(Upstream::from_config(&cfg.upstream, eureka)?.with_routes(routes))
+    Ok(Upstream::from_config(&cfg.upstream, registry)?.with_routes(routes))
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -255,8 +255,8 @@ impl SecurityClient {
 
     /// `[security]` as configured: `upstream` for everything, `auth_upstream` (when set) for the
     /// `AuthenticationController` calls, `internal_upstream` (when set) for the internal ones.
-    pub fn from_config(cfg: &SecurityConfig, eureka: Option<&Eureka>) -> Result<Self> {
-        Self::routed(security_upstream(cfg, eureka)?, cfg.auth_cache_seconds)
+    pub fn from_config(cfg: &SecurityConfig, registry: Option<&Registry>) -> Result<Self> {
+        Self::routed(security_upstream(cfg, registry)?, cfg.auth_cache_seconds)
     }
 
     /// The caller's context and one-time token sign-ins go to `auth_upstream` when given.

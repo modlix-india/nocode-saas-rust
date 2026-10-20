@@ -4,7 +4,7 @@ Measured against `nocode-saas/notification` (the jar built 2026-10-13, current w
 `3cf6ebc54`; the notification module last changed 2026-09-01) on the local stack with
 `tools/parity_notification.py`: 80 cases, 73 SAME, 7 EXPECTED (N4), 0 DIFF. Java notification
 does not run locally; it was started for the comparison with a self-contained configuration
-(no config server, no Eureka, a scratch queue) and stopped afterwards.
+(no config server, no Lighthouse, a scratch queue) and stopped afterwards.
 
 ## What Java notification is
 

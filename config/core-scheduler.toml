@@ -36,6 +36,8 @@ auth_upstream = "http://localhost:8101"
 internal_upstream = "http://localhost:8112"
 
 [core]
+# Core's own internal routes for the platform jobs (core-editor).
+upstream = "lighthouse:CORE-EDITOR"
 function_timeout_seconds = 300
 java_zone_offset = "+05:30"
 
@@ -48,7 +50,7 @@ enabled = true
 events_exchange = "events"
 events_routing_keys = "events1,events2,events3"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "CORE-SCHEDULER"

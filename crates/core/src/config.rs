@@ -2,7 +2,7 @@
 //! `MODLIX__REDIS__URL`, a credentialed `MODLIX__MONGO__URI`) from the environment.
 
 use platform::config::{
-    EurekaConfig, MongoConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
+    RegistryConfig, MongoConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct CoreConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     /// The `core` Mongo database (`core.mongo.uri` of the Java service).
@@ -42,7 +42,7 @@ impl Default for CoreConfig {
         Self {
             server: ServerConfig { port: 8105, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig { cache_prefix: "cmn".into(), ..Default::default() },
             security: SecurityConfig::default(),
             mongo: MongoConfig { database: "core".into(), ..Default::default() },
@@ -183,7 +183,7 @@ pub struct EntityProcessorConfig {
 
 impl Default for EntityProcessorConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:ENTITY-PROCESSOR".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:ENTITY-PROCESSOR".into()) }
     }
 }
 
@@ -196,7 +196,7 @@ pub struct MessageConfig {
 
 impl Default for MessageConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:MESSAGE".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:MESSAGE".into()) }
     }
 }
 
@@ -209,7 +209,7 @@ pub struct FilesConfig {
 
 impl Default for FilesConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:FILES".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:FILES".into()) }
     }
 }
 
@@ -222,7 +222,7 @@ pub struct UiConfig {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:UI".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:UI".into()) }
     }
 }
 
@@ -250,7 +250,7 @@ impl Default for CoreSection {
             function_timeout_seconds: 300,
             java_zone_offset: "+00:00".into(),
             scheduler: crate::scheduler::EventSchedulerSettings::default(),
-            upstream: UpstreamConfig::One("eureka:CORE".into()),
+            upstream: UpstreamConfig::One("lighthouse:CORE".into()),
             event_runs: crate::event_runs::EventRunsSettings::default(),
         }
     }
@@ -378,11 +378,11 @@ mod tests {
         assert_eq!(c.redis.cache_prefix, "cmn");
         assert_eq!(c.mongo.database, "core");
         assert_eq!(c.database.database, "core");
-        assert_eq!(c.entity_processor.upstream.entries(), ["eureka:ENTITY-PROCESSOR"]);
-        assert_eq!(c.message.upstream.entries(), ["eureka:MESSAGE"]);
-        assert_eq!(c.files.upstream.entries(), ["eureka:FILES"]);
-        assert_eq!(c.ui.upstream.entries(), ["eureka:UI"]);
-        assert_eq!(c.core.upstream.entries(), ["eureka:CORE"]);
+        assert_eq!(c.entity_processor.upstream.entries(), ["lighthouse:ENTITY-PROCESSOR"]);
+        assert_eq!(c.message.upstream.entries(), ["lighthouse:MESSAGE"]);
+        assert_eq!(c.files.upstream.entries(), ["lighthouse:FILES"]);
+        assert_eq!(c.ui.upstream.entries(), ["lighthouse:UI"]);
+        assert_eq!(c.core.upstream.entries(), ["lighthouse:CORE"]);
         assert_eq!(c.core.function_timeout_seconds, 300);
         assert_eq!(c.appdata.builder_app_codes, ["appbuilder", "sitezump"]);
         assert!(c.appdata.text_search_stemming);
@@ -403,9 +403,9 @@ mod tests {
         assert_eq!(c.core.upstream.entries(), ["http://core-a:8005", "http://core-b:8005"]);
         assert_eq!(c.ui.upstream.entries(), ["http://ui:8002"]);
         assert_eq!(c.core.function_timeout_seconds, 300);
-        assert_eq!(c.files.upstream.entries(), ["eureka:FILES"]);
+        assert_eq!(c.files.upstream.entries(), ["lighthouse:FILES"]);
         let d: CoreConfig = serde_json::from_value(serde_json::json!({"core": {"function_timeout_seconds": 5}})).unwrap();
-        assert_eq!((d.core.upstream.entries(), d.ui.upstream.entries()), (vec!["eureka:CORE".to_string()], vec!["eureka:UI".to_string()]));
+        assert_eq!((d.core.upstream.entries(), d.ui.upstream.entries()), (vec!["lighthouse:CORE".to_string()], vec!["lighthouse:UI".to_string()]));
     }
 
     #[test]

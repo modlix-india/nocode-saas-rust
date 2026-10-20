@@ -38,7 +38,7 @@ app_code_suffix = ".local"
 ssr_channel = "ssr:cache:invalidation"
 apple_bundle_id_prefix = "com.modlix.apps"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "UI-EDITOR"

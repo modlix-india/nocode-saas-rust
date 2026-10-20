@@ -34,7 +34,7 @@ pub struct Manifest {
 pub enum Discovery {
     /// `http://<unit>:<port>`: the network alias of the unit's containers.
     Alias,
-    /// The registry: `eureka:<NAME>` in the gateway, the gateway pair elsewhere.
+    /// The registry: `lighthouse:<NAME>` in the gateway, the gateway pair elsewhere.
     Lighthouse,
 }
 

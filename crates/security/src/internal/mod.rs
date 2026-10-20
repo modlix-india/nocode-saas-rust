@@ -74,7 +74,7 @@ pub async fn run() -> Result<()> {
     let state = build(&cfg, pool.clone(), cache.clone());
     cache.spawn_eviction_listener();
 
-    let eureka = crate::eureka_for(&cfg)?;
+    let registry = crate::registry_for(&cfg)?;
     let health = Health::new(telemetry.metrics.clone());
     health.check("mysql", move || {
         let pool = pool.clone();
@@ -84,7 +84,7 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: true }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: true }
         .run(routes::router(state))
         .await
 }

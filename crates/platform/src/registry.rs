@@ -1,12 +1,8 @@
-//! Eureka compatibility, for the migration window only.
+//! The Lighthouse registry client: registers this unit under `[registry] register_as`, renews it,
+//! and lists the instances a `lighthouse:<APP>` upstream follows (blue/green included).
 //!
-//! Java services find each other by Eureka name through Feign. A Rust unit that a Java service
-//! calls (files-manage as `FILES`, for example) registers here exactly like a Spring Boot
-//! instance would, so the Java caller needs no change. A Rust service that calls a Java one can
-//! use an `eureka:<APP>` upstream to follow its blue/green instances.
-//!
-//! When the last Java service is gone this module goes with it. The wire format is the one a
-//! Spring Boot instance sends (see `GET /eureka/apps/FILES`).
+//! The wire format is the one a Spring Boot instance sends (see `GET /eureka/apps/FILES`), which
+//! Lighthouse and the Python services' client both speak.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -17,7 +13,7 @@ use dashmap::DashMap;
 use serde_json::{json, Value};
 use tokio::sync::watch;
 
-use crate::config::EurekaConfig;
+use crate::config::RegistryConfig;
 
 #[derive(Debug, Clone)]
 pub struct InstanceInfo {
@@ -28,7 +24,7 @@ pub struct InstanceInfo {
 }
 
 #[derive(Clone)]
-pub struct Eureka {
+pub struct Registry {
     inner: Arc<Inner>,
 }
 
@@ -43,10 +39,10 @@ struct Inner {
     round_robin: AtomicUsize,
 }
 
-impl Eureka {
+impl Registry {
     /// Builds the client and starts the background refresh of watched apps. Registration starts
-    /// with [`Eureka::spawn_lifecycle`] when `cfg.register` is set.
-    pub fn new(cfg: &EurekaConfig, port: u16) -> Result<Self> {
+    /// with [`Registry::spawn_lifecycle`] when `cfg.register` is set.
+    pub fn new(cfg: &RegistryConfig, port: u16) -> Result<Self> {
         let zones: Vec<String> = if cfg.zones.is_empty() {
             vec!["http://localhost:9999/eureka/".into()]
         } else {
@@ -149,7 +145,7 @@ impl Eureka {
                 Err(e) => last = Some(anyhow!("{url}: {e}")),
             }
         }
-        Err(last.unwrap_or_else(|| anyhow!("no eureka zones configured")))
+        Err(last.unwrap_or_else(|| anyhow!("no lighthouse zones configured")))
     }
 
     async fn heartbeat(&self) -> Result<()> {
@@ -158,10 +154,10 @@ impl Eureka {
             let url = format!("{zone}apps/{}/{}?status=UP", me.app, me.instance_id);
             match self.inner.http.put(&url).send().await {
                 Ok(r) if r.status().is_success() => return Ok(()),
-                // Eureka forgot us (it restarted, or evicted a lease): register again.
+                // Lighthouse forgot us (it restarted, or evicted a lease): register again.
                 Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => return self.register().await,
-                Ok(r) => tracing::warn!(url, status = %r.status(), "eureka heartbeat rejected"),
-                Err(e) => tracing::warn!(url, error = %e, "eureka heartbeat failed"),
+                Ok(r) => tracing::warn!(url, status = %r.status(), "lighthouse heartbeat rejected"),
+                Err(e) => tracing::warn!(url, error = %e, "lighthouse heartbeat failed"),
             }
         }
         bail!("heartbeat failed on every zone")
@@ -187,10 +183,10 @@ impl Eureka {
             loop {
                 match this.register().await {
                     Ok(()) => {
-                        tracing::info!(app = ?this.me().map(|m| &m.app), "registered with eureka");
+                        tracing::info!(app = ?this.me().map(|m| &m.app), "registered with lighthouse");
                         break;
                     }
-                    Err(e) => tracing::warn!(error = %e, "eureka registration failed, retrying"),
+                    Err(e) => tracing::warn!(error = %e, "lighthouse registration failed, retrying"),
                 }
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(10)) => {}
@@ -204,7 +200,7 @@ impl Eureka {
                     _ = tick.tick() => { let _ = this.heartbeat().await; }
                     _ = shutdown.changed() => {
                         this.deregister().await;
-                        tracing::info!("deregistered from eureka");
+                        tracing::info!("deregistered from lighthouse");
                         return;
                     }
                 }
@@ -222,7 +218,7 @@ impl Eureka {
                 let apps: Vec<String> = this.inner.watched.iter().map(|e| e.key().clone()).collect();
                 for app in apps {
                     if let Err(e) = this.refresh(&app).await {
-                        tracing::warn!(app, error = %e, "eureka lookup failed, keeping the last list");
+                        tracing::warn!(app, error = %e, "lighthouse lookup failed, keeping the last list");
                     }
                 }
             }
@@ -266,7 +262,7 @@ impl Eureka {
                 Err(e) => last = Some(anyhow!("{url}: {e}")),
             }
         }
-        Err(last.unwrap_or_else(|| anyhow!("no eureka zones configured")))
+        Err(last.unwrap_or_else(|| anyhow!("no lighthouse zones configured")))
     }
 
     /// A base URL (`http://ip:port`) of an UP instance of `app`, round robin.
@@ -283,14 +279,14 @@ impl Eureka {
             .map(|v| v.clone())
             .unwrap_or_default();
         if urls.is_empty() {
-            bail!("no UP instance of {app} in eureka");
+            bail!("no UP instance of {app} in lighthouse");
         }
         let i = self.inner.round_robin.fetch_add(1, Ordering::Relaxed);
         Ok(urls[i % urls.len()].clone())
     }
 }
 
-/// `application.instance` is an array normally, but older Eureka servers send a lone instance
+/// `application.instance` is an array normally, but older registry servers send a lone instance
 /// as an object.
 fn parse_instances(body: &Value) -> Vec<String> {
     let inst = &body["application"]["instance"];
@@ -327,21 +323,21 @@ mod tests {
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct FakeEureka {
+    struct FakeRegistry {
         calls: Mutex<Vec<String>>,
-        /// Heartbeats answer 404 this many times (Eureka forgot the lease).
+        /// Heartbeats answer 404 this many times (Lighthouse forgot the lease).
         forget: Mutex<u32>,
     }
 
-    async fn fake_eureka() -> (String, Arc<FakeEureka>) {
+    async fn fake_registry() -> (String, Arc<FakeRegistry>) {
         use axum::extract::{Path, State};
         use axum::http::StatusCode;
         use axum::routing::{get, post, put};
-        let f = Arc::new(FakeEureka::default());
+        let f = Arc::new(FakeRegistry::default());
         let app = axum::Router::new()
             .route(
                 "/eureka/apps/{app}",
-                post(|Path(app): Path<String>, State(f): State<Arc<FakeEureka>>, body: String| async move {
+                post(|Path(app): Path<String>, State(f): State<Arc<FakeRegistry>>, body: String| async move {
                     let v: Value = serde_json::from_str(&body).unwrap();
                     assert_eq!(v["instance"]["app"], app);
                     f.calls.lock().unwrap().push(format!("register {app}"));
@@ -363,7 +359,7 @@ mod tests {
             )
             .route(
                 "/eureka/apps/{app}/{id}",
-                put(|Path((app, _)): Path<(String, String)>, State(f): State<Arc<FakeEureka>>| async move {
+                put(|Path((app, _)): Path<(String, String)>, State(f): State<Arc<FakeRegistry>>| async move {
                     let mut forget = f.forget.lock().unwrap();
                     f.calls.lock().unwrap().push(format!("heartbeat {app}"));
                     if *forget > 0 {
@@ -372,7 +368,7 @@ mod tests {
                     }
                     StatusCode::OK
                 })
-                .delete(|Path((app, _)): Path<(String, String)>, State(f): State<Arc<FakeEureka>>| async move {
+                .delete(|Path((app, _)): Path<(String, String)>, State(f): State<Arc<FakeRegistry>>| async move {
                     f.calls.lock().unwrap().push(format!("deregister {app}"));
                     StatusCode::OK
                 }),
@@ -389,23 +385,23 @@ mod tests {
 
     #[tokio::test]
     async fn registers_heartbeats_and_deregisters() {
-        let (base, f) = fake_eureka().await;
+        let (base, f) = fake_registry().await;
         // The first zone is down: registration falls through to the next.
-        let cfg = EurekaConfig {
+        let cfg = RegistryConfig {
             register: true,
             register_as: "files".into(),
             zones: vec!["http://127.0.0.1:1/eureka".into(), base],
             instance_ip: "10.1.1.1".into(),
         };
-        let e = Eureka::new(&cfg, 8104).unwrap();
+        let e = Registry::new(&cfg, 8104).unwrap();
         let me = e.me().unwrap();
         assert_eq!((me.app.as_str(), me.ip.as_str(), me.port), ("FILES", "10.1.1.1", 8104));
         assert!(me.instance_id.ends_with(":files:8104"));
-        let body = Eureka::instance_body(me);
+        let body = Registry::instance_body(me);
         assert_eq!(body["instance"]["healthCheckUrl"], "http://10.1.1.1:8104/readyz");
         assert_eq!(body["instance"]["metadata"]["metrics.path"], "/metrics");
         lighthouse_client::config::set_running_version("0123456789abcdef.01234567");
-        assert_eq!(Eureka::instance_body(me)["instance"]["metadata"]["configVersion"], "0123456789abcdef.01234567");
+        assert_eq!(Registry::instance_body(me)["instance"]["metadata"]["configVersion"], "0123456789abcdef.01234567");
 
         e.register().await.unwrap();
         e.heartbeat().await.unwrap();
@@ -429,8 +425,8 @@ mod tests {
 
     #[tokio::test]
     async fn discovers_and_round_robins() {
-        let (base, _) = fake_eureka().await;
-        let e = Eureka::new(&EurekaConfig { zones: vec![base], ..Default::default() }, 0).unwrap();
+        let (base, _) = fake_registry().await;
+        let e = Registry::new(&RegistryConfig { zones: vec![base], ..Default::default() }, 0).unwrap();
         assert!(e.me().is_none());
         e.register().await.unwrap();
         e.heartbeat().await.unwrap();
@@ -446,21 +442,21 @@ mod tests {
         assert!(e.resolve("NONE").await.is_err(), "no UP instance");
         assert!(e.refresh("BROKEN").await.is_err());
 
-        let none = Eureka::new(&EurekaConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() }, 0).unwrap();
+        let none = Registry::new(&RegistryConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() }, 0).unwrap();
         assert!(none.resolve("svc").await.is_err());
-        let default_zone = Eureka::new(&EurekaConfig::default(), 0).unwrap();
+        let default_zone = Registry::new(&RegistryConfig::default(), 0).unwrap();
         assert_eq!(default_zone.inner.zones, vec!["http://localhost:9999/eureka/"]);
     }
 
     #[tokio::test]
     async fn registration_failures_are_errors() {
-        let cfg = EurekaConfig {
+        let cfg = RegistryConfig {
             register: true,
             register_as: "x".into(),
             zones: vec!["http://127.0.0.1:1/eureka/".into()],
             instance_ip: String::new(),
         };
-        let e = Eureka::new(&cfg, 1).unwrap();
+        let e = Registry::new(&cfg, 1).unwrap();
         assert!(!e.me().unwrap().ip.is_empty(), "falls back to this machine's address");
         assert!(e.register().await.is_err());
         assert!(e.heartbeat().await.is_err());

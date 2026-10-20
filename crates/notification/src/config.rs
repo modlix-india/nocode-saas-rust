@@ -2,7 +2,7 @@
 //! queues it consumes, and the SSE heartbeat.
 
 use platform::config::{
-    EurekaConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
+    RegistryConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct NotificationConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     /// The caller's context, recipients (`users/internal/notification`) and the user checks of
     /// the preference routes.
     pub security: SecurityConfig,
@@ -31,7 +31,7 @@ impl Default for NotificationConfig {
         Self {
             server: ServerConfig { port: 8114, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             security: SecurityConfig::default(),
             redis: RedisConfig::default(),
             database: MySqlConfig { database: "notification".into(), max_connections: 4, ..Default::default() },
@@ -48,7 +48,7 @@ impl Default for NotificationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CoreSection {
-    /// Base URL(s) or `eureka:CORE`, for `/api/core/notifications/internal/{name}` (and for the
+    /// Base URL(s) or `lighthouse:CORE`, for `/api/core/notifications/internal/{name}` (and for the
     /// connection read too when `connections_upstream` is empty). Java core serves both reads;
     /// of the Rust units, core-editor serves this one.
     pub upstream: UpstreamConfig,

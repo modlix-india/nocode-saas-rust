@@ -28,7 +28,7 @@ stripping).
 
 - **Load balancing** is the gateway's own: round robin over instances that pass active health
   checks (every 5 s, configurable path), with an instance ejected on a connect failure. Spring
-  used Eureka's list as is. A pool whose instances all fail still routes to them (a wrong
+  used the registry protocol's list as is. A pool whose instances all fail still routes to them (a wrong
   health path must not black-hole a service).
 - **Outlier ejection**: an instance that gives 5 gateway failures in a row (502/503/504, a
   broken connection, a timeout) is ejected for 10 s times the number of times it has been
@@ -68,8 +68,8 @@ stripping).
   `GW.HOST_UNRESOLVED` (502, host resolution failed), `GW.NO_ROUTE` (404). Spring answered
   500/503 with its own error body. A service's own errors pass through untouched. The CORS
   preflight refusal stays an empty 403: browsers never show a preflight's body.
-- **No Eureka needed**: pools are static addresses (compose container names, later Kubernetes
-  Services) or `eureka:<APP>` during the migration. An `eureka:` pool reads the registry every
+- **No Lighthouse needed**: pools are static addresses (compose container names, later Kubernetes
+  Services) or `lighthouse:<APP>` during the migration. A `lighthouse:` pool reads the registry every
   2 s (`discovery_refresh_ms`), not every 30 s, and believes an empty list only after the
   registry has answered empty 3 times in a row.
 - `X-Forwarded-Prefix` is not added (Spring adds it only for its discovery-locator routes,

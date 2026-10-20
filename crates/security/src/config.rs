@@ -2,7 +2,7 @@
 //! Every value here mirrors a Java `security` property; the Java name is on each field so the two
 //! can be kept in step while both run.
 
-use platform::config::{EurekaConfig, MessagesConfig, MySqlConfig, RedisConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
+use platform::config::{RegistryConfig, MessagesConfig, MySqlConfig, RedisConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct AuthConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     /// The `security` schema (`security.db.*`).
     pub database: MySqlConfig,
@@ -138,7 +138,7 @@ impl Default for EventsConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilesConfig {
-    /// Base URL(s) or `eureka:FILES`. Empty: the routes that need files answer 500.
+    /// Base URL(s) or `lighthouse:FILES`. Empty: the routes that need files answer 500.
     pub upstream: UpstreamConfig,
 }
 
@@ -161,7 +161,7 @@ impl Default for AuthConfig {
         Self {
             server: ServerConfig { port: 8101, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig::default(),
             database: MySqlConfig { database: "security".into(), max_connections: 16, ..Default::default() },
             jwt: JwtConfig::default(),
