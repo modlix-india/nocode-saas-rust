@@ -61,6 +61,17 @@ serve_wallet_adjust = false
 # port, so no local run can reach Razorpay: a purchase that gets that far answers 500.
 razorpay_base_url = "http://127.0.0.1:9/razorpay-stub"
 
+[letsencrypt]
+# The ACME account certificate requests use: `credentials` (a secret, MODLIX__LETSENCRYPT__CREDENTIALS)
+# is the JSON `security-admin acme-rollover` prints (Java's account moved to a new key; see
+# crates/security/src/admin/clients/rollover.rs). Left out locally, so certificate requests answer
+# lets_encrypt_credentials and nothing reaches Let's Encrypt (try the flow against Pebble instead:
+# crates/security/src/admin/clients/acme.rs).
+directory = "https://acme-v02.api.letsencrypt.org/directory"
+
+[cloudflare]
+# Custom hostnames for LIVE client URLs: off locally (no api_token, no zone_id), as Java was.
+
 [eureka]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
