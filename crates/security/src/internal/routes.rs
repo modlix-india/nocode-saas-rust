@@ -495,7 +495,12 @@ route!(certificates, "/ssl/internal/certificates", true, |s, r, ca| {
         return Err(AuthError::msg(StatusCode::INTERNAL_SERVER_ERROR, ONLY_SYS_USER_CERTS, &[]));
     }
     let updated = s.certificates_last_updated().await?;
-    if r.info.header("If-None-Match").as_deref() == Some(updated.as_str()) {
+    // The ETag goes out quoted, as HTTP has it, and nginxconf.js sends it back as it came, so compare
+    // the tag inside the quotes (a weak `W/` prefix too). Comparing the raw header never matched, so
+    // every LB run got a 200 and restarted nginx: a refused connection every 5 minutes (QA-0469).
+    let sent = r.info.header("If-None-Match");
+    let sent = sent.as_deref().map(|v| v.trim().trim_start_matches("W/").trim_matches('"'));
+    if sent == Some(updated.as_str()) {
         return Ok(empty(StatusCode::NOT_MODIFIED));
     }
     let list = s.certificates().await?;

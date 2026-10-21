@@ -34,7 +34,7 @@ pub async fn run() -> Result<()> {
     overridable::pojo::set_java_zone_offset_seconds(cfg.ui.zone_offset_seconds()?);
 
     let db = platform::db::mongo_database(&cfg.mongo).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
         Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
@@ -57,10 +57,10 @@ pub async fn run() -> Result<()> {
     let ui = AppState::new(Inner {
         store,
         security,
-        properties: cache.family(),
-        fillers: cache.family(),
+        properties: cache.family_weighed(|v: &std::sync::Arc<overridable::JMap>| overridable::json::map_heap_bytes(v)),
+        fillers: cache.family_weighed(|v: &std::sync::Arc<Option<std::sync::Arc<overridable::Resolved>>>| v.as_ref().as_ref().map_or(0, |r| r.approx_bytes())),
         app_status: cache.family(),
-        app_dependencies: cache.family(),
+        app_dependencies: cache.family_weighed(|v: &std::sync::Arc<Vec<String>>| platform::cache::strings_bytes(v)),
         cache: cache.clone(),
         config: cfg.engine_config(),
     });
@@ -75,10 +75,12 @@ pub async fn run() -> Result<()> {
         cfg: cfg.clone(),
         http,
         core,
-        index: cache.family(),
-        js: cache.family(),
-        patterns: cache.family(),
-        analytics: cache.family(),
+        index: cache.family_weighed(|v: &std::sync::Arc<index::IndexPage>| {
+            v.html.capacity() + v.unique_id.capacity() + v.headers.iter().map(|(k, x)| 48 + k.capacity() + x.capacity()).sum::<usize>()
+        }),
+        js: cache.family_weighed(|v: &std::sync::Arc<server::JsFile>| v.body.capacity() + v.unique_id.capacity()),
+        patterns: cache.family_weighed(|v: &std::sync::Arc<Vec<String>>| platform::cache::strings_bytes(v)),
+        analytics: cache.family_weighed(|v: &std::sync::Arc<Option<overridable::JValue>>| v.as_ref().as_ref().map_or(0, overridable::JValue::heap_bytes)),
         entrypoints,
         redis,
     });

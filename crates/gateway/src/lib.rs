@@ -74,7 +74,7 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Registry>)> {
     let routes = Routes::build(&cfg.routes, &pools)?;
 
     // Security's evictions of the host cache reach us on the shared channel.
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let hosts = cache.family();
     cache.spawn_eviction_listener();
 

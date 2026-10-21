@@ -180,9 +180,7 @@ impl TemplateToPdf {
             // PdfConversionService sends the message key itself.
             _ => return Err(CoreError::coded(StatusCode::INTERNAL_SERVER_ERROR, "CORE.TEMPLATE_BODY_MISSING", "template_details_missing")),
         };
-        let pdf = tokio::task::spawn_blocking(move || crate::pdf::html_to_pdf(&html))
-            .await
-            .map_err(|e| CoreError::unknown(e.to_string()))?;
+        let pdf = crate::pdf_render::render(html).await.map_err(CoreError::unknown)?;
         Ok(Some(pdf))
     }
 

@@ -125,6 +125,13 @@ pub struct Resolved {
     pub unique_id: String,
 }
 
+impl Resolved {
+    /// Estimated bytes, inline and heap, for cache budgets.
+    pub fn approx_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + crate::json::map_heap_bytes(&self.entity) + self.unique_id.capacity()
+    }
+}
+
 /// The fields a reconciliation never merges (`RECONCILE_IGNORED_ROOT_KEYS`).
 const RECONCILE_IGNORED: &[&str] = &[
     "id", "_id", "_class", "version", "createdAt", "createdBy", "updatedAt", "updatedBy", "published", "message",
@@ -191,8 +198,8 @@ impl Store {
                 security,
                 backend,
                 directory,
-                inheritance: cache.family(),
-                defs: cache.family(),
+                inheritance: cache.family_weighed(|v: &Arc<Vec<String>>| platform::cache::strings_bytes(v)),
+                defs: cache.family_weighed(|v: &Arc<Resolved>| v.approx_bytes()),
             }),
         }
     }

@@ -41,6 +41,7 @@ pub mod integrations;
 pub mod java_model;
 pub mod message_calls;
 pub mod pdf;
+pub mod pdf_render;
 pub mod platform_calls;
 pub mod repos;
 pub mod scheduler;
@@ -100,7 +101,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
 
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
         Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
@@ -121,14 +122,18 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let security_calls = Arc::new(SecurityCalls::new(security_upstream.clone())?);
     let message = Arc::new(message_calls::MessageCalls::new(retired("message", &cfg.message.upstream))?);
     let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, registry.as_ref())?)?);
+    pdf_render::install(&cfg.pdf, registry.as_ref())?;
     let platform = Arc::new(make_platform_calls(cfg, registry.as_ref(), &security_upstream)?);
 
-    let definitions = Arc::new(Definitions::new(
-        store,
-        security.clone(),
-        cache.family(),
-        Duration::from_secs(cfg.core.function_timeout_seconds),
-    ));
+    let definitions = Arc::new(
+        Definitions::new(
+            store,
+            security.clone(),
+            cache.family_weighed(|v: &Arc<Vec<String>>| platform::cache::strings_bytes(v)),
+            Duration::from_secs(cfg.core.function_timeout_seconds),
+        )
+        .with_parsed_caches(&cache),
+    );
     let remote = RemoteRepositories::new(pool.clone(), cache.family(), ep);
 
     let kirun_schemas = Builtins::kirun_schemas();
@@ -331,7 +336,7 @@ pub async fn run_scheduler() -> Result<()> {
     overridable::pojo::set_java_zone_offset_seconds(cfg.core.zone_offset_seconds()?);
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     cache.spawn_eviction_listener();
     let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
         Some(Registry::new(&cfg.registry, cfg.server.port)?)

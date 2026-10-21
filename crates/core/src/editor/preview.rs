@@ -47,11 +47,12 @@ pub fn render_parts(template: Option<&Value>, language: Option<&str>, data: Opti
     Ok(java_map::by_puts(out))
 }
 
-/// `renderPdf(template, data)`: the `body` part (default language) as a PDF.
-pub fn render_pdf(template: Option<&Value>, data: Option<&Value>) -> Result<Vec<u8>, String> {
+/// `renderPdf(template, data)`: the `body` part (default language) as a PDF, with the
+/// installed renderer (`crate::pdf_render`).
+pub async fn render_pdf(template: Option<&Value>, data: Option<&Value>) -> Result<Vec<u8>, String> {
     let parts = render_parts(template, Some(""), data)?;
     let body = parts.get("body").and_then(JValue::as_str).unwrap_or("").to_string();
-    Ok(crate::pdf::html_to_pdf(&body))
+    crate::pdf_render::render(body).await
 }
 
 #[cfg(test)]
@@ -59,8 +60,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn parts_render_leniently_in_the_chosen_language() {
+    #[tokio::test]
+    async fn parts_render_leniently_in_the_chosen_language() {
         let t = json!({"templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${missing}x</p>"}, "fr": {"subject": "Salut ${name}"}},
             "defaultLanguage": "fr", "sampleData": {"name": "Ann"}});
         let p = render_parts(Some(&t), None, None).unwrap();
@@ -76,7 +77,7 @@ mod tests {
         let p = render_parts(Some(&t), None, None).unwrap();
         assert_eq!((p.get("a"), p.get("b")), (Some(&JValue::Str(String::new())), Some(&JValue::Str("3".into()))));
         assert!(render_parts(Some(&json!({"templateParts": {"en": {"a": "${"}}})), None, None).is_err());
-        let pdf = render_pdf(Some(&json!({"templateParts": {"en": {"body": "<p>Hello</p>"}}})), None).unwrap();
+        let pdf = render_pdf(Some(&json!({"templateParts": {"en": {"body": "<p>Hello</p>"}}})), None).await.unwrap();
         assert!(pdf.starts_with(b"%PDF"));
     }
 }

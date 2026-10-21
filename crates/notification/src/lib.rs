@@ -69,7 +69,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
     let cache = if cfg.redis.url.is_empty() {
         None
     } else {
-        Some(CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?)
+        Some(CacheService::configured(&cfg.redis)?)
     };
     let timeout = Duration::from_secs(cfg.core.timeout_seconds.max(1));
     let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, registry.as_ref())?, timeout)?;

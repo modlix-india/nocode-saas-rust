@@ -1,4 +1,5 @@
-//! The HTML-to-PDF step of `CoreServices.File.TemplateToPdf` (`PdfConversionService`).
+//! The HTML-to-PDF step of `CoreServices.File.TemplateToPdf` (`PdfConversionService`) when the
+//! pdf-render sidecar is not configured or fails (`crate::pdf_render`).
 //!
 //! Java renders the template's HTML with openhtmltopdf (a CSS 2.1 layout engine with images,
 //! SVG and embedded fonts). Rust has nothing comparable without heavy dependencies, so this is
@@ -548,6 +549,13 @@ const ENTITIES: &[(&str, &str)] = &[
     ("ugrave", "\u{F9}"), ("uacute", "\u{FA}"), ("ucirc", "\u{FB}"), ("uuml", "\u{FC}"), ("yacute", "\u{FD}"), ("thorn", "\u{FE}"),
     ("yuml", "\u{FF}"), ("OElig", "\u{152}"), ("oelig", "\u{153}"), ("Scaron", "\u{160}"), ("scaron", "\u{161}"), ("Yuml", "\u{178}"),
     ("fnof", "\u{192}"), ("circ", "\u{2C6}"), ("tilde", "\u{2DC}"),
+    // HTML5's ASCII punctuation names (jsoup, which Java parsed with, reads them all).
+    ("colon", ":"), ("semi", ";"), ("comma", ","), ("period", "."), ("excl", "!"), ("quest", "?"), ("num", "#"),
+    ("dollar", "$"), ("percnt", "%"), ("ast", "*"), ("midast", "*"), ("plus", "+"), ("equals", "="), ("commat", "@"),
+    ("sol", "/"), ("bsol", "\\"), ("lpar", "("), ("rpar", ")"), ("lsqb", "["), ("lbrack", "["), ("rsqb", "]"),
+    ("rbrack", "]"), ("lcub", "{"), ("lbrace", "{"), ("rcub", "}"), ("rbrace", "}"), ("lowbar", "_"), ("verbar", "|"),
+    ("vert", "|"), ("Hat", "^"), ("grave", "`"), ("hyphen", "\u{2010}"), ("dash", "\u{2010}"), ("Tab", "\t"),
+    ("NewLine", "\n"), ("AMP", "&"), ("LT", "<"), ("GT", ">"), ("QUOT", "\""), ("COPY", "\u{A9}"), ("REG", "\u{AE}"),
 ];
 
 /// The references HTML also reads without the `;`.
@@ -1154,6 +1162,8 @@ pub(crate) mod tests {
         assert_eq!(paras("<table><tbody><tr><td>a<tbody><tr><td>b</table>").iter().map(words).collect::<Vec<_>>(), ["a", "b"]);
         assert_eq!(paras("<hr style='display:none'><div hidden><br><hr></div>").len(), 0);
         assert_eq!(decode("&lt;&gt"), "<>");
+        // QA-0465: `Unit No &colon; A-1903` printed the reference as text.
+        assert_eq!(paras("<p>Unit No &colon; A&sol;1903 &lpar;4BHK&rpar; &commat;&num;&percnt;&excl;</p>").iter().map(words).collect::<Vec<_>>(), ["Unit No : A/1903 (4BHK) @#%!"]);
         assert_eq!(reference_char(0x81), '\u{81}');
         assert_eq!(declarations("COLOR : Red ; text-align:CENTER !important"), [("color".to_string(), "red".to_string()), ("text-align".into(), "center".into())]);
         assert_eq!(align_of("weird"), None);

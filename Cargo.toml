@@ -52,6 +52,7 @@ local-ip-address = "0.6"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 metrics-process = "2.4"
+mimalloc = { version = "0.1.52", default-features = false }
 mime_guess = "2"
 moka = { version = "0.12", features = ["future"] }
 percent-encoding = "2"

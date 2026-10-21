@@ -198,6 +198,18 @@ fn taken_identity(other: &User, email: Option<&str>, phone: Option<&str>) -> &'s
     "user name"
 }
 
+/// U7 (2026-10-21): may a caller of `caller.client_id` read a user of `target.client_id` by id.
+/// Yes for the same client, for a target client the caller's client manages at any level (its
+/// partners and customers, without being their client manager), and for the caller's client's
+/// direct managing client (a partner reading the business's user its deals are assigned to,
+/// what core's `GetUser` allows) unless that is the root (SYSTEM, the one client nobody manages).
+/// An unrelated client, a sibling, or a manager further up is not.
+fn may_read_user_of(caller: &ClientHierarchy, target: &ClientHierarchy) -> bool {
+    caller.client_id == target.client_id
+        || target.is_managed_by(caller.client_id)
+        || (caller.level0 == Some(target.client_id) && target.level0.is_some())
+}
+
 /// `validateUserCheckProperty`'s choice: the user's level under the app's client (`OWNER`, then
 /// `CLIENT`, `CUSTOMER`, `CONSUMER` going down), and for a `USER_CHECK` value that applies at that
 /// level, the client whose users are compared and whether its direct (level 0) and grand
@@ -325,12 +337,20 @@ impl Admin {
     }
 
     /// `GET /users/{id}`: `UserService.read` plus a client check Java does not make. A user of
-    /// another client is read only by SYSTEM or by a caller who manages that client
-    /// (`isUserClientManageClient`); to anyone else the user is not found (DIFFERENCES.md).
+    /// another client is read by SYSTEM, by a caller whose client manages the user's client at
+    /// any level, and by a caller of a client the user's client directly manages; to anyone
+    /// else the user is not found (DIFFERENCES.md U7, 2026-10-21).
     pub async fn user_read_managed(&self, ca: &ContextAuth, id: u64) -> AuthResult<User> {
         let u = self.user_read(ca, id).await?;
-        if id != ca.user.id() && !ca.is_system_client() && !self.caller_manages_client(ca, u.client_id).await? {
-            return Err(super::common::not_found("User", id));
+        if id == ca.user.id() || ca.is_system_client() {
+            return Ok(u);
+        }
+        let own = ca.user.client_id();
+        if own != u.client_id {
+            let (caller, target) = (self.dir().hierarchy(own).await?, self.dir().hierarchy(u.client_id).await?);
+            if !may_read_user_of(&caller, &target) {
+                return Err(super::common::not_found("User", id));
+            }
         }
         Ok(u)
     }
@@ -1123,6 +1143,36 @@ mod tests {
         assert_eq!(user_check_scope("NO_DUPLICATE_USER_CONSUMER", 1, 50, &elsewhere), None);
         assert_eq!(user_check_scope("SOMETHING_ELSE", 1, 50, &consumer), None);
     }
+
+    #[test]
+    fn reading_another_clients_user_follows_the_hierarchy() {
+        let h = |client_id: u64, l: [Option<u64>; 4]| ClientHierarchy { client_id, level0: l[0], level1: l[1], level2: l[2], level3: l[3] };
+        // SYSTEM 1, business 28 under it, partner 3570 under the business, its customer 4286,
+        // and 3919, another business under SYSTEM.
+        let business = h(28, [Some(1), None, None, None]);
+        let partner = h(3570, [Some(28), Some(1), None, None]);
+        let customer = h(4286, [Some(3570), Some(28), Some(1), None]);
+        let other = h(3919, [Some(1), None, None, None]);
+        let sibling = h(3571, [Some(28), Some(1), None, None]);
+        // Same client.
+        assert!(may_read_user_of(&partner, &partner));
+        // A managed child client, and one further down: the caller need not be its client manager.
+        assert!(may_read_user_of(&business, &partner));
+        assert!(may_read_user_of(&business, &customer));
+        assert!(may_read_user_of(&partner, &customer));
+        // The caller's client's direct managing client.
+        assert!(may_read_user_of(&partner, &business));
+        assert!(may_read_user_of(&customer, &partner));
+        // Not: an unrelated client, a sibling, a manager above the direct one.
+        assert!(!may_read_user_of(&business, &other));
+        assert!(!may_read_user_of(&other, &customer));
+        assert!(!may_read_user_of(&partner, &sibling));
+        assert!(!may_read_user_of(&customer, &business));
+        // SYSTEM's users are not read upward by the businesses directly under it.
+        let system = h(1, [None; 4]);
+        assert!(!may_read_user_of(&business, &system));
+        assert!(may_read_user_of(&system, &customer));
+    }
 }
 
 #[cfg(test)]
@@ -1322,6 +1372,30 @@ mod live {
         assert_eq!(st, StatusCode::OK);
         let (st, _) = fx.http("PATCH", "/users/makeUserActive?userId=x", None).await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+        fx.finish().await;
+    }
+
+    /// U7 (2026-10-21, QA-0482): `GET users/{id}` by a plain `User_READ` holder, no client
+    /// manager role or assignment: own client, a client its client manages, and its client's
+    /// direct manager are read; a sibling client is not found.
+    #[tokio::test]
+    async fn reading_users_by_id_follows_the_client_hierarchy() {
+        let Some(fx) = fx().await else { return };
+        let (s, c, m, i) = (&fx.s, fx.c, fx.m, fx.i);
+        let reader = &["Authorities.User_READ"];
+        let lu = fx.user(c, "ra").await;
+        let lu2 = fx.user(c, "rb").await;
+        let mu = fx.user(m, "rc").await;
+        let iu = fx.user(i, "rd").await;
+        let on_c = fx.as_user(&lu, "ZZRUL", reader);
+        let on_m = fx.as_user(&mu, "ZZRUM", reader);
+
+        assert_eq!(s.user_read_managed(&on_c, lu2.id).await.unwrap().id, lu2.id, "same client");
+        assert_eq!(s.user_read_managed(&on_c, mu.id).await.unwrap().id, mu.id, "a managed client, not as its manager");
+        assert_eq!(s.user_read_managed(&on_c, iu.id).await.unwrap().id, iu.id, "an individual's client it manages");
+        assert_eq!(s.user_read_managed(&on_m, lu.id).await.unwrap().id, lu.id, "the direct managing client");
+        let (st, msg) = status(s.user_read_managed(&on_m, iu.id).await);
+        assert_eq!(st, StatusCode::NOT_FOUND, "a sibling client stays not found: {msg}");
         fx.finish().await;
     }
 }
