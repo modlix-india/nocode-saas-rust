@@ -30,6 +30,7 @@ local-ip-address.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 metrics-process.workspace = true
+mimalloc.workspace = true
 moka.workspace = true
 redis.workspace = true
 reqwest.workspace = true

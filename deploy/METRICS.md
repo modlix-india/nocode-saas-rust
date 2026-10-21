@@ -68,6 +68,9 @@ From `metrics-process`, at each scrape (Linux `/proc` on the hosts).
 | `process_max_fds` | gauge | | The descriptor limit. |
 | `process_threads` | gauge | | OS threads. |
 | `process_start_time_seconds` | gauge | | Start time, Unix seconds (`time() - process_start_time_seconds` is the uptime). |
+| `container_memory_limit_bytes` | gauge | | The container's memory limit (`mem_limit` in the compose file), from the unit's own cgroup (v1 or v2). Absent without a limit. |
+| `container_memory_working_set_bytes` | gauge | | The cgroup's usage less its inactive file pages: what the kernel compares with the limit before it kills (cAdvisor's name). |
+| `container_memory_oom_kills` | gauge | | Processes of the container the kernel killed for memory since the cgroup was made. Docker makes a new cgroup when it restarts the container, so a kill of the unit itself resets this to 0 (checked on dev 2026-10-21): that kill shows as a restart in place, `changes(process_start_time_seconds[15m]) > 0` on one `instance` (a deploy starts a new colour, a new `instance`). |
 
 ### Runtime and build
 
@@ -87,11 +90,17 @@ From `metrics-process`, at each scrape (Linux `/proc` on the hosts).
 | `redis_errors_total` | counter | `operation` (`connect`, `command`, `subscribe`) | Redis calls that failed: eviction publishes and deletes, and the eviction channel subscription (`subscribe` also counts a subscription that dropped). Any rise means cache evictions may not have reached the other instances. |
 | `cache_gets_total` | counter | `cache`, `result` (`hit`, `miss`) | Local cache lookups. The name and labels are Micrometer's for Caffeine, so Java and Rust can share a panel. |
 | `cache_evictions_total` | counter | `cache` | Local cache entries dropped for size or age (not the evictions the services publish). |
+| `cache_size` | gauge | `family`, `cache` | Entries held now. |
+| `cache_bytes` | gauge | `family`, `cache` | Estimated bytes held now (for families without a size estimate, their inline size only). |
+| `cache_family_used` | gauge | `family`, `unit` (`bytes`, `entries`) | What a family holds, in the unit its limit is in. |
+| `cache_family_limit` | gauge | `family`, `unit` | The family's limit: `[redis] cache_budget_mb` for weighed families (`bytes`), `[redis] cache_max_entries` for the others (`entries`). `used / limit` near 1 means the family is evicting to stay within it. |
 | `coded_errors_total` | counter | `code`, `status` | Every coded error a unit answered with (`SEC.APP_ACCESS_FORBIDDEN`, `COMMON.INTERNAL_ERROR`, ...), with the HTTP status sent. Errors relayed from another unit count where they are answered too. |
 
 `cache` is the fixed part of the Java cache name: the leading letters (`UIFunctionCache`,
 `profileAuthsById`, `fsGetDetail`), or the fixed tail of storage caches (`table_creation`,
-`index_creation`, `foreign_keys`).
+`index_creation`, `foreign_keys`). `family` is the cached value type without module paths
+(`Arc<Resolved>`, `Parsed<DefinitionFunction>`); how families are bounded is in
+crates/platform/DIFFERENCES.md.
 
 Only pools a unit opens through `platform::db` are exported. The per-tenant pools appdata opens
 for app data connections are not.
@@ -177,5 +186,7 @@ registers or watches). `peer` is a configured peer URL.
 - Dependencies: the same on `http_client_request_duration_seconds` by `target`.
 - Saturation: `db_client_connection_count{state="used"} / db_client_connection_max`,
   `tokio_runtime_global_queue_depth`, `process_resident_memory_bytes`.
+- Memory: `container_memory_working_set_bytes / container_memory_limit_bytes` by `job`, and
+  `cache_family_used / cache_family_limit` by `job` and `family`.
 - Which commit runs where: `build_info` by `job`, `colour` and `commit`.
 - Blue and green: `colour` tells them apart; during a deploy both colours report.

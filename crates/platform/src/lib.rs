@@ -18,6 +18,13 @@ pub mod security;
 pub mod telemetry;
 pub mod upstream;
 
+/// Every unit allocates through mimalloc. glibc's malloc keeps freed memory in per-thread arenas
+/// under Tokio's worker threads, so a unit's resident memory stayed near its peak after caches
+/// emptied; kirun's own benchmark (kirun-rust/bench) has mimalloc 30-40% faster with 40% less
+/// peak memory. Declared here because every unit links platform; a process has one allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// A future that resolves on SIGINT or SIGTERM (what `docker stop` sends).
 pub async fn shutdown_signal() {
     let ctrl_c = async {

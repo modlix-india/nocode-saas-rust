@@ -122,7 +122,7 @@ impl<K: Kind> Clone for OverridableService<K> {
 
 impl<K: Kind> OverridableService<K> {
     pub fn new(kind: K, cx: Commons) -> Self {
-        let lro = cx.cache.family();
+        let lro = cx.cache.family_weighed(|v: &Arc<LroPage>| v.content.iter().map(crate::json::map_heap_bytes).sum::<usize>());
         Self { inner: Arc::new(Inner { kind, cx, lro }) }
     }
 

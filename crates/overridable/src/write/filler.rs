@@ -34,11 +34,11 @@ pub struct Filler {
 
 impl Filler {
     pub fn ui(cache: &CacheService) -> Self {
-        Self { cache_prefix: "UI", reads: cache.family() }
+        Self { cache_prefix: "UI", reads: cache.family_weighed(|v: &Option<Arc<Resolved>>| v.as_ref().map_or(0, |r| r.approx_bytes())) }
     }
 
     pub fn core(cache: &CacheService) -> Self {
-        Self { cache_prefix: "", reads: cache.family() }
+        Self { cache_prefix: "", reads: cache.family_weighed(|v: &Option<Arc<Resolved>>| v.as_ref().map_or(0, |r| r.approx_bytes())) }
     }
 
     /// The per-app read cache: `<getCacheName(app, app)>_FILLER_READ`.

@@ -2017,11 +2017,24 @@ impl AppDataEngine for MySqlAppDataService {
         if columns.is_empty() {
             return Ok(0);
         }
-        let cols = columns.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ");
+        // Key checks off, as for the whole-app copy: one storage is copied on its own, so its
+        // rows may point at draft rows not copied yet, and replacing a storage other draft rows
+        // point at would be refused by a RESTRICT key (DIFFERENCES.md, QA-0483).
+        let target = Sql::name(&[&draft_db, &t]);
+        let fields: Vec<Sql> = columns.iter().map(|c| Sql::name(&[c])).collect();
+        let mut statements = Vec::new();
         if replace == Some(true) {
-            execute_raw(&pool, &format!("DELETE FROM `{draft_db}`.`{t}`")).await?;
+            statements.push(sql::delete(&target, &Cond::None));
         }
-        execute_raw(&pool, &format!("INSERT INTO `{draft_db}`.`{t}` ({cols}) SELECT {cols} FROM `{live_db}`.`{t}`")).await?;
+        statements.push(
+            Sql::raw("insert into ")
+                .then_sql(&target)
+                .then(" (")
+                .then_sql(&Sql::join(&fields, ", "))
+                .then(") ")
+                .then_sql(&Select::fields(fields.clone(), Sql::name(&[&live_db, &t])).to_sql()),
+        );
+        self.without_foreign_key_checks(&pool, &statements).await?;
         Ok(total)
     }
 

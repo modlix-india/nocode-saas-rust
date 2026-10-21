@@ -383,11 +383,13 @@ async fn template_preview_pdf(State(st): State<St>, h: HeaderMap, body: Bytes) -
     if let Err(r) = caller(&st, &h, R).await {
         return r;
     }
-    let r = preview_request(&body).and_then(|(t, _, d)| {
-        crate::editor::preview::render_pdf(t.as_ref(), d.as_ref())
+    let r = match preview_request(&body) {
+        Ok((t, _, d)) => crate::editor::preview::render_pdf(t.as_ref(), d.as_ref())
+            .await
             .map(|bytes| Reply { status: StatusCode::OK, headers: Vec::new(), body: c::ReplyBody::File { content_type: "application/pdf", bytes } })
-            .map_err(unknown)
-    });
+            .map_err(unknown),
+        Err(e) => Err(e),
+    };
     respond(R, r)
 }
 

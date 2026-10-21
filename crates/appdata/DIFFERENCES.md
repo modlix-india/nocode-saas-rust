@@ -76,6 +76,13 @@ Every compared case is the same, or is one of the entries below. The parity tool
   of 500; Rust reads in batches of 500 and upserts one document per call (`replace_one`
   with upsert). The result and the count are the same; it is more round trips. The Rust
   driver's only bulk write is the client-level one, which needs MongoDB 8.
+- **Copy one storage to draft on MySQL: key checks off (QA-0483, 2026-10-21).** Java's
+  `copyLiveToDraft(storage, replace)` ran its `DELETE` and `INSERT ... SELECT` with foreign
+  keys checked, so copying a storage whose rows point at another storage failed with MySQL 1452
+  until that storage had been copied first, and replacing a storage that other draft rows point at
+  failed on a RESTRICT key (1451). Rust runs both on one connection with
+  `FOREIGN_KEY_CHECKS = 0`, as the whole-app `copyAppToDraft` already does. The copied rows may
+  point at draft rows that are not there yet; copying the referenced storage later fills them in.
 - **Migration claim node id.** Both are `<host>:<time>`. Java's time is the JVM start time;
   Rust's is the first time the process asks. Either is unique to one process, which is all
   recovery uses it for.
