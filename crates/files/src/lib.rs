@@ -88,11 +88,7 @@ pub async fn run(unit: Unit) -> Result<()> {
     let static_store = Store::new(s3.clone(), format!("{}-static", cfg.storage.bucket_prefix), &temp_base)?;
     let secured_store = Store::new(s3, format!("{}-secured", cfg.storage.bucket_prefix), &temp_base)?;
 
-    let cache = CacheService::new(
-        &cfg.redis.cache_prefix,
-        &cfg.redis.eviction_channel,
-        Some(cfg.redis.url.as_str()),
-    )?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let details = cache.family();
     let exists = cache.family();
     let lists = cache.family();

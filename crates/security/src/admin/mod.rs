@@ -97,7 +97,7 @@ pub async fn run() -> Result<()> {
     crate::check_jwt_key(&cfg)?;
     crate::configure_messages(&cfg)?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let registry = crate::registry_for(&cfg)?;
     let state = build(&cfg, pool.clone(), cache.clone(), registry.as_ref())?;
     cache.spawn_eviction_listener();

@@ -559,11 +559,16 @@ async fn url_billing_cache_and_certificate_routes() {
             .body(Body::empty())
             .unwrap();
         let resp = l.router.clone().oneshot(req).await.unwrap();
-        resp.headers().get("etag").unwrap().to_str().unwrap().trim_matches('"').to_string()
+        resp.headers().get("etag").unwrap().to_str().unwrap().to_string()
     };
+    // nginxconf.js stores the header as it came (quoted) and sends it back unchanged.
+    assert!(etag.starts_with('"'));
     let mut with_etag = sys.to_vec();
-    with_etag.push(("If-None-Match", etag));
+    with_etag.push(("If-None-Match", etag.clone()));
     assert_eq!(l.call("GET", "/ssl/internal/certificates", &with_etag, None).await.0, StatusCode::NOT_MODIFIED);
+    let mut bare = sys.to_vec();
+    bare.push(("If-None-Match", etag.trim_matches('"').to_string()));
+    assert_eq!(l.call("GET", "/ssl/internal/certificates", &bare, None).await.0, StatusCode::NOT_MODIFIED);
     // A wrong method.
     assert_eq!(l.call("POST", "/clients/internal/getClientByCode", &[], Some(json!({}))).await.0, StatusCode::METHOD_NOT_ALLOWED);
 }

@@ -35,6 +35,8 @@ pub struct CoreConfig {
     pub mq: MqSection,
     /// The events consumer of core-events (`events.mq.queues`).
     pub events: EventsSection,
+    /// The HTML to PDF renderer (`crate::pdf_render`): the pdf-render sidecar, else text.
+    pub pdf: crate::pdf_render::PdfConfig,
 }
 
 impl Default for CoreConfig {
@@ -56,6 +58,7 @@ impl Default for CoreConfig {
             connections: ConnectionsSection::default(),
             mq: MqSection::default(),
             events: EventsSection::default(),
+            pdf: crate::pdf_render::PdfConfig::default(),
         }
     }
 }

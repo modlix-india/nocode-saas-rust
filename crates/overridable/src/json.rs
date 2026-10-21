@@ -48,7 +48,26 @@ impl PartialEq for JValue {
     }
 }
 
+/// Estimated heap bytes a map owns: its entries (`IndexMap` keeps hash, key and value in one
+/// vector, plus a table of indices) and what each key and value owns in turn. For cache
+/// budgets; allocator rounding is not counted.
+pub fn map_heap_bytes(m: &JMap) -> usize {
+    const SLOT: usize = std::mem::size_of::<usize>() * 2 + std::mem::size_of::<String>() + std::mem::size_of::<JValue>();
+    m.capacity() * SLOT + m.iter().map(|(k, v)| k.capacity() + v.heap_bytes()).sum::<usize>()
+}
+
 impl JValue {
+    /// Estimated heap bytes this value owns (its inline size not included). See
+    /// [`map_heap_bytes`].
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            JValue::Str(s) => s.capacity(),
+            JValue::Array(a) => a.capacity() * std::mem::size_of::<JValue>() + a.iter().map(JValue::heap_bytes).sum::<usize>(),
+            JValue::Object(m) => map_heap_bytes(m),
+            JValue::Null | JValue::Bool(_) | JValue::Int(_) | JValue::Float(_) => 0,
+        }
+    }
+
     pub fn is_null(&self) -> bool {
         matches!(self, JValue::Null)
     }

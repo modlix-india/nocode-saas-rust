@@ -17,7 +17,7 @@
 
 use std::future::Future;
 use std::hash::Hash;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,6 +86,10 @@ pub trait Evictable: Send + Sync {
             .map(|(n, entries)| (n, CacheStats { entries, ..Default::default() }))
             .collect()
     }
+    /// What the family holds against its budget, for the metrics.
+    fn usage(&self) -> FamilyUsage {
+        FamilyUsage::default()
+    }
 }
 
 #[derive(Clone)]
@@ -99,13 +103,88 @@ struct Inner {
     redis: Option<redis::Client>,
     families: std::sync::RwLock<Vec<Arc<dyn Evictable>>>,
     ttl: Duration,
-    max_entries_per_cache: u64,
+    budget_bytes: u64,
+    max_entries: u64,
 }
+
+/// A weighed family's budget when the caller sets none (`[redis] cache_budget_mb`'s default).
+const DEFAULT_BUDGET_BYTES: u64 = 128 * 1024 * 1024;
+/// Any other family's entry limit when the caller sets none (`[redis] cache_max_entries`).
+const DEFAULT_MAX_ENTRIES: u64 = 20_000;
+
+/// What bounds a family: estimated bytes when its values are weighed
+/// ([`CacheService::family_weighed`]), entries otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    Bytes(u64),
+    Entries(u64),
+}
+
+impl Default for Limit {
+    fn default() -> Self {
+        Limit::Entries(0)
+    }
+}
+
+impl Limit {
+    /// The `unit` label of the family gauges.
+    pub fn unit(&self) -> &'static str {
+        match self {
+            Limit::Bytes(_) => "bytes",
+            Limit::Entries(_) => "entries",
+        }
+    }
+
+    pub fn value(&self) -> u64 {
+        match self {
+            Limit::Bytes(n) | Limit::Entries(n) => *n,
+        }
+    }
+}
+
+/// Entries and estimated bytes held, by family and cache label.
+pub const CACHE_SIZE: &str = "cache_size";
+pub const CACHE_BYTES: &str = "cache_bytes";
+/// What a family holds and its limit, by `family` and `unit` (`bytes` or `entries`, see [`Limit`]).
+pub const CACHE_FAMILY_USED: &str = "cache_family_used";
+pub const CACHE_FAMILY_LIMIT: &str = "cache_family_limit";
 
 impl CacheService {
     /// `prefix` is the Java services' effective `redis.cache.prefix` (`cmn` everywhere): it must
     /// be the one the Java instances use, or their evictions will not be recognised.
     pub fn new(prefix: &str, channel: &str, redis_url: Option<&str>) -> anyhow::Result<Self> {
+        Self::build(prefix, channel, redis_url, Duration::from_secs(60 * 60), DEFAULT_BUDGET_BYTES, DEFAULT_MAX_ENTRIES)
+    }
+
+    /// The unit's cache service from its `[redis]` section, with its families' sizes reported
+    /// on every `/metrics` scrape.
+    pub fn configured(cfg: &crate::config::RedisConfig) -> anyhow::Result<Self> {
+        let svc = Self::build(
+            &cfg.cache_prefix,
+            &cfg.eviction_channel,
+            Some(cfg.url.as_str()),
+            Duration::from_secs(cfg.cache_ttl_secs.max(1)),
+            cfg.cache_budget_mb.max(1) * 1024 * 1024,
+            cfg.cache_max_entries.max(1),
+        )?;
+        let mut configured = CONFIGURED.lock().unwrap_or_else(|e| e.into_inner());
+        if configured.is_empty() {
+            crate::meter::on_scrape(|| {
+                let live: Vec<CacheService> = CONFIGURED
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .filter_map(|w| w.upgrade().map(|inner| CacheService { inner }))
+                    .collect();
+                report(live.iter().flat_map(CacheService::usage));
+            });
+        }
+        configured.retain(|w| w.strong_count() > 0);
+        configured.push(Arc::downgrade(&svc.inner));
+        Ok(svc)
+    }
+
+    fn build(prefix: &str, channel: &str, redis_url: Option<&str>, ttl: Duration, budget_bytes: u64, max_entries: u64) -> anyhow::Result<Self> {
         let redis = match redis_url.filter(|u| !u.is_empty()) {
             Some(url) => Some(redis::Client::open(normalize_redis_url(url).as_str())?),
             None => None,
@@ -117,8 +196,9 @@ impl CacheService {
                 redis,
                 families: std::sync::RwLock::new(Vec::new()),
                 // Caffeine's expire-after-write in AbstractBaseConfiguration.
-                ttl: Duration::from_secs(60 * 60),
-                max_entries_per_cache: 10_000,
+                ttl,
+                budget_bytes,
+                max_entries,
             }),
         })
     }
@@ -127,19 +207,40 @@ impl CacheService {
         format!("{}-{}", self.inner.prefix, cache_name)
     }
 
+    /// A weighed family's budget in bytes, any other family's entry limit, and how long a value
+    /// lives.
+    pub fn limits(&self) -> (u64, u64, Duration) {
+        (self.inner.budget_bytes, self.inner.max_entries, self.inner.ttl)
+    }
+
     /// A family of caches holding `V`, addressed by cache name. Registered for eviction.
+    /// Bounded by entries (`[redis] cache_max_entries` for the whole family, where Java allows
+    /// 10,000 per name): for small values, whose real size cannot be seen behind an `Arc`.
+    /// Large values (definitions, pages, files) use [`Self::family_weighed`].
     pub fn family<K, V>(&self) -> Arc<LocalCaches<K, V>>
     where
         K: Hash + Eq + Send + Sync + Clone + From<String> + 'static,
         V: Clone + Send + Sync + 'static,
     {
-        let f = Arc::new(LocalCaches {
-            prefix: self.inner.prefix.clone(),
-            caches: DashMap::new(),
-            counters: DashMap::new(),
-            ttl: self.inner.ttl,
-            max_entries: self.inner.max_entries_per_cache,
-        });
+        self.register(LocalCaches::new(&self.inner.prefix, self.inner.ttl, Limit::Entries(self.inner.max_entries), |_| std::mem::size_of::<V>()))
+    }
+
+    /// A family bounded by estimated size (`[redis] cache_budget_mb`), `weigh` estimating each
+    /// value's bytes, inline and heap.
+    pub fn family_weighed<K, V>(&self, weigh: fn(&V) -> usize) -> Arc<LocalCaches<K, V>>
+    where
+        K: Hash + Eq + Send + Sync + Clone + From<String> + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
+        self.register(LocalCaches::new(&self.inner.prefix, self.inner.ttl, Limit::Bytes(self.inner.budget_bytes), weigh))
+    }
+
+    fn register<K, V>(&self, family: LocalCaches<K, V>) -> Arc<LocalCaches<K, V>>
+    where
+        K: Hash + Eq + Send + Sync + Clone + From<String> + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
+        let f = Arc::new(family);
         self.inner
             .families
             .write()
@@ -148,6 +249,48 @@ impl CacheService {
         f
     }
 
+    /// Every family's usage now.
+    pub fn usage(&self) -> Vec<FamilyUsage> {
+        let families: Vec<Arc<dyn Evictable>> =
+            self.inner.families.read().expect("cache registry poisoned").clone();
+        families.iter().map(|f| f.usage()).collect()
+    }
+
+    #[cfg(test)]
+    fn report(&self) {
+        report(self.usage());
+    }
+}
+
+/// The services built by [`CacheService::configured`] in this process, reported together.
+static CONFIGURED: std::sync::Mutex<Vec<std::sync::Weak<Inner>>> = std::sync::Mutex::new(Vec::new());
+
+/// Sets the cache gauges. Two families of one value type share a `family` label, so everything
+/// is summed per label first.
+fn report(usage: impl IntoIterator<Item = FamilyUsage>) {
+    let mut by_family: std::collections::BTreeMap<(String, &'static str), (u64, u64)> = Default::default();
+    let mut by_label: std::collections::BTreeMap<(String, String), (u64, u64)> = Default::default();
+    for u in usage {
+        let f = by_family.entry((u.family.clone(), u.limit.unit())).or_default();
+        f.0 += u.used;
+        f.1 += u.limit.value();
+        for (label, entries, bytes) in u.by_label {
+            let l = by_label.entry((u.family.clone(), label)).or_default();
+            l.0 += entries;
+            l.1 += bytes;
+        }
+    }
+    for ((family, unit), (used, limit)) in by_family {
+        metrics::gauge!(CACHE_FAMILY_USED, "family" => family.clone(), "unit" => unit).set(used as f64);
+        metrics::gauge!(CACHE_FAMILY_LIMIT, "family" => family, "unit" => unit).set(limit as f64);
+    }
+    for ((family, cache), (entries, bytes)) in by_label {
+        metrics::gauge!(CACHE_SIZE, "family" => family.clone(), "cache" => cache.clone()).set(entries as f64);
+        metrics::gauge!(CACHE_BYTES, "family" => family, "cache" => cache).set(bytes as f64);
+    }
+}
+
+impl CacheService {
     async fn dispatch(&self, message: &str) {
         let Some(colon) = message.find(':') else { return };
         let (name, key) = (&message[..colon], &message[colon + 1..]);
@@ -371,13 +514,28 @@ impl CacheService {
     }
 }
 
-/// Caches of one value type, one Moka cache per Java cache name.
+/// Estimated bytes Moka keeps per entry besides the key and the value: its node, its places in
+/// the access-order and write-order queues, and its share of the frequency sketch.
+const ENTRY_OVERHEAD: usize = 128;
+
+/// Caches of one value type: one Moka cache for the whole family, keyed by the full Java cache
+/// name and the key, holding at most the family's [`Limit`].
+///
+/// Java keeps one Caffeine cache per NAME, capped at 10,000 entries. Names carry the app, page
+/// or client (`PageCache_<app>_<page>`), so there the total grows with every page served. Here
+/// the family's total is bounded by estimated size, and evictions by name still work: a `:*`
+/// eviction is an invalidation predicate on the name, and Moka never returns an entry a
+/// predicate matches, even before its maintenance has removed it.
 pub struct LocalCaches<K, V> {
     prefix: String,
-    caches: DashMap<String, Cache<K, V>>,
-    counters: DashMap<String, Arc<Counters>>,
-    ttl: Duration,
-    max_entries: u64,
+    /// The value type, without module paths: the `family` label of the family's metrics.
+    family: String,
+    cache: Cache<(String, K), V>,
+    /// Every full cache name this family has loaded or stored a value under, with its counters.
+    /// A name is listed from then on, as Java lists a Caffeine cache once it exists.
+    names: Arc<DashMap<String, Arc<Counters>>>,
+    limit: Limit,
+    weigh: fn(&V) -> usize,
 }
 
 #[derive(Default)]
@@ -385,6 +543,43 @@ struct Counters {
     hits: AtomicU64,
     misses: AtomicU64,
     evictions: AtomicU64,
+    /// Entries and estimated bytes held under the name: added on insert, taken off when Moka
+    /// reports the entry gone for any reason (replaced, invalidated, expired, over budget).
+    entries: AtomicI64,
+    bytes: AtomicI64,
+}
+
+/// What one family holds now, for the metrics.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FamilyUsage {
+    pub family: String,
+    pub limit: Limit,
+    /// Held now, in the limit's unit.
+    pub used: u64,
+    /// By cache label ([`cache_label`]): entries and estimated bytes.
+    pub by_label: Vec<(String, u64, u64)>,
+}
+
+/// Estimated bytes of a list of strings, inline and heap, for [`CacheService::family_weighed`].
+pub fn strings_bytes(v: &[String]) -> usize {
+    std::mem::size_of_val(v) + v.iter().map(String::capacity).sum::<usize>()
+}
+
+/// `alloc::sync::Arc<overridable::store::Resolved>` -> `Arc<Resolved>`.
+fn short_type_name(full: &str) -> String {
+    let mut out = String::with_capacity(full.len());
+    let mut segment = String::new();
+    for c in full.chars() {
+        if c.is_alphanumeric() || c == '_' || c == ':' {
+            segment.push(c);
+        } else {
+            out.push_str(segment.rsplit("::").next().unwrap_or(""));
+            segment.clear();
+            out.push(c);
+        }
+    }
+    out.push_str(segment.rsplit("::").next().unwrap_or(""));
+    out
 }
 
 impl<K, V> LocalCaches<K, V>
@@ -392,29 +587,60 @@ where
     K: Hash + Eq + Send + Sync + Clone + From<String> + 'static,
     V: Clone + Send + Sync + 'static,
 {
-    fn cache(&self, cache_name: &str) -> Cache<K, V> {
-        let full = format!("{}-{}", self.prefix, cache_name);
-        let counters = self.counters(&full);
-        self.caches
-            .entry(full)
-            .or_insert_with(|| {
-                let label = cache_label(cache_name);
-                Cache::builder()
-                    .max_capacity(self.max_entries)
-                    .time_to_live(self.ttl)
-                    .eviction_listener(move |_k, _v, cause| {
-                        if matches!(cause, moka::notification::RemovalCause::Expired | moka::notification::RemovalCause::Size) {
-                            counters.evictions.fetch_add(1, Ordering::Relaxed);
-                            metrics::counter!(CACHE_EVICTIONS, "cache" => label.clone()).increment(1);
-                        }
-                    })
-                    .build()
+    fn new(prefix: &str, ttl: Duration, limit: Limit, weigh: fn(&V) -> usize) -> Self {
+        let names: Arc<DashMap<String, Arc<Counters>>> = Arc::default();
+        let gone = names.clone();
+        let strip = format!("{prefix}-");
+        let entry_bytes = move |name: &str, v: &V| ENTRY_OVERHEAD + std::mem::size_of::<(String, K)>() + name.len() + weigh(v);
+        let cache = Cache::builder()
+            .max_capacity(limit.value())
+            .weigher(move |k: &(String, K), v: &V| match limit {
+                Limit::Entries(_) => 1,
+                Limit::Bytes(_) => u32::try_from(entry_bytes(&k.0, v)).unwrap_or(u32::MAX),
             })
-            .clone()
+            .time_to_live(ttl)
+            .support_invalidation_closures()
+            .eviction_listener(move |k: Arc<(String, K)>, v: V, cause| {
+                if let Some(c) = gone.get(&k.0) {
+                    c.entries.fetch_sub(1, Ordering::Relaxed);
+                    c.bytes.fetch_sub(entry_bytes(&k.0, &v) as i64, Ordering::Relaxed);
+                    if matches!(cause, moka::notification::RemovalCause::Expired | moka::notification::RemovalCause::Size) {
+                        c.evictions.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                if matches!(cause, moka::notification::RemovalCause::Expired | moka::notification::RemovalCause::Size) {
+                    let name = k.0.strip_prefix(&strip).unwrap_or(&k.0);
+                    metrics::counter!(CACHE_EVICTIONS, "cache" => cache_label(name)).increment(1);
+                }
+            })
+            .build();
+        Self {
+            prefix: prefix.to_string(),
+            family: short_type_name(std::any::type_name::<V>()),
+            cache,
+            names,
+            limit,
+            weigh,
+        }
+    }
+
+    fn full_name(&self, cache_name: &str) -> String {
+        format!("{}-{}", self.prefix, cache_name)
+    }
+
+    async fn store(&self, full: String, key: K, value: V) {
+        let c = self.counters(&full);
+        c.entries.fetch_add(1, Ordering::Relaxed);
+        let bytes = ENTRY_OVERHEAD + std::mem::size_of::<(String, K)>() + full.len() + (self.weigh)(&value);
+        c.bytes.fetch_add(bytes as i64, Ordering::Relaxed);
+        self.cache.insert((full, key), value).await;
     }
 
     fn counters(&self, full: &str) -> Arc<Counters> {
-        self.counters.entry(full.to_string()).or_default().clone()
+        if let Some(c) = self.names.get(full) {
+            return c.clone();
+        }
+        self.names.entry(full.to_string()).or_default().clone()
     }
 
     fn count(&self, full: &str, hit: bool) {
@@ -435,26 +661,30 @@ where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Option<V>, E>>,
     {
-        let cache = self.cache(cache_name);
-        let full = format!("{}-{}", self.prefix, cache_name);
-        if let Some(v) = cache.get(&key).await {
-            self.count(&full, true);
+        let full = self.full_name(cache_name);
+        let k = (full, key);
+        if let Some(v) = self.cache.get(&k).await {
+            self.count(&k.0, true);
             return Ok(Some(v));
         }
-        self.count(&full, false);
+        self.count(&k.0, false);
         let v = load().await?;
         if let Some(v) = &v {
-            cache.insert(key, v.clone()).await;
+            let (full, key) = k;
+            self.store(full, key, v.clone()).await;
         }
         Ok(v)
     }
 
     /// Java `cacheService.get(name, key)`, L1 only: the cached value, if any.
     pub async fn get(&self, cache_name: &str, key: &K) -> Option<V> {
-        let full = format!("{}-{}", self.prefix, cache_name);
-        let cache = self.caches.get(&full).map(|c| c.clone())?;
-        let v = cache.get(key).await;
-        self.count(&full, v.is_some());
+        let full = self.full_name(cache_name);
+        if !self.names.contains_key(&full) {
+            return None;
+        }
+        let k = (full, key.clone());
+        let v = self.cache.get(&k).await;
+        self.count(&k.0, v.is_some());
         v
     }
 
@@ -462,7 +692,13 @@ where
     /// lookup (a token that turns out to be one-time must not be cached), where
     /// [`Self::get_or_load`] does not fit.
     pub async fn insert(&self, cache_name: &str, key: K, value: V) {
-        self.cache(cache_name).insert(key, value).await;
+        self.store(self.full_name(cache_name), key, value).await;
+    }
+
+    /// Runs Moka's pending maintenance (expiry, budget evictions, removal notifications) now
+    /// rather than on a later read or write.
+    pub async fn run_pending_tasks(&self) {
+        self.cache.run_pending_tasks().await;
     }
 }
 
@@ -473,41 +709,60 @@ where
 {
     fn evict<'a>(&'a self, full_cache_name: &'a str, key: &'a str) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let Some(cache) = self.caches.get(full_cache_name).map(|c| c.clone()) else {
+            if !self.names.contains_key(full_cache_name) {
                 return;
-            };
+            }
             if key == "*" {
-                cache.invalidate_all();
+                let name = full_cache_name.to_string();
+                if let Err(e) = self.cache.invalidate_entries_if(move |k, _| k.0 == name) {
+                    // Only possible without support_invalidation_closures, which new() sets.
+                    tracing::error!(cache = full_cache_name, error = %e, "cache not cleared; clearing the whole family");
+                    self.cache.invalidate_all();
+                }
             } else {
-                cache.invalidate(&K::from(key.to_string())).await;
+                self.cache.invalidate(&(full_cache_name.to_string(), K::from(key.to_string()))).await;
             }
         })
     }
 
     fn clear_all(&self) {
-        for c in self.caches.iter() {
-            c.invalidate_all();
-        }
+        self.cache.invalidate_all();
     }
 
     fn cache_names(&self) -> Vec<(String, u64)> {
-        self.caches.iter().map(|c| (c.key().clone(), c.value().entry_count())).collect()
+        self.names.iter().map(|c| (c.key().clone(), c.entries.load(Ordering::Relaxed).max(0) as u64)).collect()
     }
 
     fn cache_stats(&self) -> Vec<(String, CacheStats)> {
-        self.caches
+        self.names
             .iter()
             .map(|c| {
-                let k = self.counters(c.key());
                 let stats = CacheStats {
-                    entries: c.value().entry_count(),
-                    hits: k.hits.load(Ordering::Relaxed),
-                    misses: k.misses.load(Ordering::Relaxed),
-                    evictions: k.evictions.load(Ordering::Relaxed),
+                    entries: c.entries.load(Ordering::Relaxed).max(0) as u64,
+                    hits: c.hits.load(Ordering::Relaxed),
+                    misses: c.misses.load(Ordering::Relaxed),
+                    evictions: c.evictions.load(Ordering::Relaxed),
                 };
                 (c.key().clone(), stats)
             })
             .collect()
+    }
+
+    fn usage(&self) -> FamilyUsage {
+        let strip = format!("{}-", self.prefix);
+        let mut by_label: std::collections::BTreeMap<String, (u64, u64)> = Default::default();
+        for c in self.names.iter() {
+            let name = c.key().strip_prefix(&strip).unwrap_or(c.key());
+            let e = by_label.entry(cache_label(name)).or_default();
+            e.0 += c.entries.load(Ordering::Relaxed).max(0) as u64;
+            e.1 += c.bytes.load(Ordering::Relaxed).max(0) as u64;
+        }
+        FamilyUsage {
+            family: self.family.clone(),
+            limit: self.limit,
+            used: self.cache.weighted_size(),
+            by_label: by_label.into_iter().map(|(l, (e, b))| (l, e, b)).collect(),
+        }
     }
 }
 
@@ -540,17 +795,12 @@ mod tests {
             svc.evict_all_everywhere("UIFunctionCache_a_x").await;
             assert!(!svc.publish("ch", "m").await);
 
-            let small: LocalCaches<String, u32> = LocalCaches {
-                prefix: "cmn".into(),
-                caches: DashMap::new(),
-                counters: DashMap::new(),
-                ttl: Duration::from_secs(60),
-                max_entries: 2,
-            };
+            // Room for about two entries.
+            let small: LocalCaches<String, u32> = LocalCaches::new("cmn", Duration::from_secs(60), Limit::Entries(2), |_| 4);
             for i in 0..10u32 {
                 small.insert("pageCache_app", i.to_string(), i).await;
             }
-            small.cache("pageCache_app").run_pending_tasks().await;
+            small.run_pending_tasks().await;
         });
         let gets = |result: &str| crate::meter::sample(&text, CACHE_GETS, &[("cache", "UIFunctionCache"), ("result", result)]);
         assert_eq!((gets("hit"), gets("miss")), (Some(1.0), Some(2.0)));
@@ -700,6 +950,99 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(v, Some(1));
+    }
+
+    #[tokio::test]
+    async fn the_family_stays_within_its_budget_across_names() {
+        // 100 names of 10 KB pages each against a 200 KB budget: Java's per-name cap would
+        // have kept all of them.
+        let svc = CacheService::build("cmn", "evictionChannel", None, Duration::from_secs(60), 200 * 1024, 10).unwrap();
+        let fam = svc.family_weighed::<String, Arc<String>>(|v| v.len());
+        for i in 0..100 {
+            fam.insert(&format!("PageCache_app_p{i}"), "CLIENT".into(), Arc::new("x".repeat(10 * 1024))).await;
+        }
+        fam.run_pending_tasks().await;
+        let u = &svc.usage()[0];
+        assert_eq!(u.family, "Arc<String>");
+        assert_eq!(u.limit, Limit::Bytes(200 * 1024));
+        assert!(u.used <= 200 * 1024, "{u:?}");
+        let (entries, bytes) = u.by_label.iter().fold((0, 0), |a, (_, e, b)| (a.0 + e, a.1 + b));
+        assert!((1..=20).contains(&entries), "{u:?}");
+        assert_eq!(bytes, u.used, "the per-name accounting matches Moka's weighted size");
+    }
+
+    #[tokio::test]
+    async fn a_name_eviction_leaves_the_other_names() {
+        let svc = CacheService::new("cmn", "evictionChannel", None).unwrap();
+        let fam = svc.family::<String, u32>();
+        fam.insert("PageCache_a_x", "c1".into(), 1).await;
+        fam.insert("PageCache_a_x", "c2".into(), 2).await;
+        fam.insert("PageCache_a_y", "c1".into(), 3).await;
+        svc.dispatch("cmn-PageCache_a_x:*").await;
+        assert_eq!(fam.get("PageCache_a_x", &"c1".to_string()).await, None, "gone before maintenance runs");
+        assert_eq!(fam.get("PageCache_a_x", &"c2".to_string()).await, None);
+        assert_eq!(fam.get("PageCache_a_y", &"c1".to_string()).await, Some(3));
+        fam.run_pending_tasks().await;
+        let names: std::collections::HashMap<String, u64> = svc.local_cache_names().into_iter().collect();
+        assert_eq!(names.get("PageCache_a_x"), Some(&0), "still listed, as an emptied Caffeine cache is");
+        assert_eq!(names.get("PageCache_a_y"), Some(&1));
+        // A value loaded after the eviction is kept.
+        fam.insert("PageCache_a_x", "c1".into(), 4).await;
+        assert_eq!(fam.get("PageCache_a_x", &"c1".to_string()).await, Some(4));
+    }
+
+    #[tokio::test]
+    async fn replacing_and_clearing_return_the_accounting_to_zero() {
+        let svc = CacheService::new("cmn", "evictionChannel", None).unwrap();
+        let fam = svc.family_weighed::<String, Arc<String>>(|v| v.len());
+        fam.insert("c", "k".into(), Arc::new("a".repeat(1000))).await;
+        fam.insert("c", "k".into(), Arc::new("b".repeat(5000))).await;
+        fam.run_pending_tasks().await;
+        let u = &svc.usage()[0];
+        assert_eq!((u.by_label[0].1, u.by_label[0].2), (1, u.used), "{u:?}");
+        svc.clear_local();
+        fam.run_pending_tasks().await;
+        let u = &svc.usage()[0];
+        assert_eq!((u.used, u.by_label[0].1, u.by_label[0].2), (0, 0, 0), "{u:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unweighed_family_is_bounded_by_entries() {
+        let svc = CacheService::build("cmn", "evictionChannel", None, Duration::from_secs(60), 1 << 30, 50).unwrap();
+        let fam = svc.family::<String, Arc<String>>();
+        for i in 0..500 {
+            fam.insert(&format!("profileAuthsById_{i}"), "k".into(), Arc::new("x".repeat(4096))).await;
+        }
+        fam.run_pending_tasks().await;
+        let u = &svc.usage()[0];
+        assert_eq!(u.limit, Limit::Entries(50));
+        assert!(u.used <= 50, "{u:?}");
+        assert_eq!(u.by_label.iter().map(|l| l.1).sum::<u64>(), u.used);
+    }
+
+    #[test]
+    fn family_names_drop_module_paths() {
+        assert_eq!(short_type_name("alloc::sync::Arc<overridable::store::Resolved>"), "Arc<Resolved>");
+        assert_eq!(short_type_name("core::option::Option<alloc::sync::Arc<a::B>>"), "Option<Arc<B>>");
+        assert_eq!(short_type_name("(alloc::string::String, u32)"), "(String, u32)");
+        assert_eq!(short_type_name("bool"), "bool");
+    }
+
+    #[test]
+    fn the_gauges_are_set_per_family_and_label() {
+        let ((), text) = crate::meter::capture_async(async {
+            let svc = CacheService::new("cmn", "evictionChannel", None).unwrap();
+            let fam = svc.family_weighed::<String, Arc<String>>(|v| v.len());
+            fam.insert("PageCache_app_home", "C".into(), Arc::new("x".repeat(100))).await;
+            fam.run_pending_tasks().await;
+            svc.report();
+        });
+        let s = |name: &str, labels: &[(&str, &str)]| crate::meter::sample(&text, name, labels);
+        assert_eq!(s(CACHE_SIZE, &[("family", "Arc<String>"), ("cache", "PageCache")]), Some(1.0), "{text}");
+        assert!(s(CACHE_BYTES, &[("family", "Arc<String>"), ("cache", "PageCache")]).is_some_and(|b| b >= 100.0));
+        let fam = |unit| [("family", "Arc<String>"), ("unit", unit)];
+        assert_eq!(s(CACHE_FAMILY_LIMIT, &fam("bytes")), Some(DEFAULT_BUDGET_BYTES as f64));
+        assert!(s(CACHE_FAMILY_USED, &fam("bytes")).is_some_and(|b| b >= 100.0));
     }
 }
 

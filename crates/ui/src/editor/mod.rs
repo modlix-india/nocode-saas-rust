@@ -68,7 +68,7 @@ pub async fn run() -> Result<()> {
     overridable::pojo::set_java_zone_offset_seconds(cfg.ui.zone_offset_seconds()?);
 
     let db = platform::db::mongo_database(&cfg.mongo).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
         Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {

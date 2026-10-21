@@ -261,11 +261,19 @@ pub struct ServerConfig {
     pub port: u16,
     /// How long to keep serving after leaving discovery, so requests already on their way land.
     pub shutdown_grace_seconds: u64,
+    /// The largest request body a handler reads into memory (`Bytes`, `String`, `Json`, forms);
+    /// a larger one is answered 413. Java's codecs held 50 MB (`AbstractBaseConfiguration
+    /// .getInMemorySize`); axum's own default is 2 MiB, too small for big page and function
+    /// definitions. A route can still set its own `DefaultBodyLimit` (files disables it).
+    pub max_body_bytes: usize,
 }
+
+/// [`ServerConfig::max_body_bytes`]'s default: Java's 50 MB.
+pub const DEFAULT_MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self { port: 8080, shutdown_grace_seconds: 5 }
+        Self { port: 8080, shutdown_grace_seconds: 5, max_body_bytes: DEFAULT_MAX_BODY_BYTES }
     }
 }
 
@@ -349,6 +357,15 @@ pub struct RedisConfig {
     /// (`fil`, `ui`, `cor`...). Must match while Java instances still write the same data.
     pub cache_prefix: String,
     pub eviction_channel: String,
+    /// The most each family of local caches (one value type: resolved pages, app properties,
+    /// tokens...) may hold, in MB of estimated size. Java caps every cache NAME at 10,000 entries
+    /// instead, which leaves the total unbounded: names carry the app and page.
+    pub cache_budget_mb: u64,
+    /// The most entries each family of small values (tokens, flags, ids) may hold: their size
+    /// cannot be estimated behind an `Arc`, so they are counted instead.
+    pub cache_max_entries: u64,
+    /// How long a cached value lives after it was loaded (Caffeine's expire-after-write).
+    pub cache_ttl_secs: u64,
 }
 
 impl Default for RedisConfig {
@@ -357,6 +374,9 @@ impl Default for RedisConfig {
             url: String::new(),
             cache_prefix: "cmn".into(),
             eviction_channel: "evictionChannel".into(),
+            cache_budget_mb: 128,
+            cache_max_entries: 20_000,
+            cache_ttl_secs: 60 * 60,
         }
     }
 }

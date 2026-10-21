@@ -50,7 +50,7 @@ pub async fn run() -> Result<()> {
 
     let db = platform::db::mongo_database(&cfg.mongo).await?;
 
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
         Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
@@ -74,10 +74,10 @@ pub async fn run() -> Result<()> {
     let state = AppState::new(Inner {
         store,
         security,
-        properties: cache.family(),
-        fillers: cache.family(),
+        properties: cache.family_weighed(|v: &std::sync::Arc<overridable::JMap>| overridable::json::map_heap_bytes(v)),
+        fillers: cache.family_weighed(|v: &std::sync::Arc<Option<std::sync::Arc<overridable::Resolved>>>| v.as_ref().as_ref().map_or(0, |r| r.approx_bytes())),
         app_status: cache.family(),
-        app_dependencies: cache.family(),
+        app_dependencies: cache.family_weighed(|v: &std::sync::Arc<Vec<String>>| platform::cache::strings_bytes(v)),
         cache: cache.clone(),
         config: cfg.clone(),
     });

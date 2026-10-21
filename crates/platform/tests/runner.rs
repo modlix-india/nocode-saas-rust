@@ -105,7 +105,7 @@ async fn serves_observes_and_shuts_down() {
     .unwrap();
     let service = Service {
         name: "runner-test".into(),
-        server: ServerConfig { port, shutdown_grace_seconds: 0 },
+        server: ServerConfig { port, shutdown_grace_seconds: 0, ..ServerConfig::default() },
         telemetry,
         health,
         registry: Some(registry),

@@ -182,12 +182,18 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   `debugMessage` is Feign's exception text (method, URL, the downstream body), core-exec's is
   the message, or, for a coded refusal from a Rust security unit (passed on with its code), that
   unit's own detail, which starts with Java's text (`Access Denied: needs Authorities.User_READ`).
-- **D31 `TemplateToPdf`'s renderer.** openhtmltopdf (CSS layout, images, SVG, colours, fonts,
-  bidi) is replaced by `crate::pdf`: the HTML's text and structure (headings, emphasis, lists,
-  tables side by side, `pre`, breaks, alignment, page breaks) in Helvetica / Courier on A4.
-  Characters outside WinAnsi print as `?`; images are not drawn, so nothing is fetched from
-  files. Everything around it (template, language, parts, file name, the files upload, the
-  output) is Java's.
+- **D31 `TemplateToPdf`'s renderer.** openhtmltopdf is replaced by the pdf-render sidecar
+  (`deploy/pdf-render`, WeasyPrint: CSS with `<style>` and `@page`, tables, borders, colours,
+  fonts, running headers, images) when `[pdf] upstream` is set (`crate::pdf_render`). The sidecar
+  reads images only from the files service (any host's `/api/files/{static,secured}/file/...`)
+  and `data:` URLs, plus `https` hosts listed in its `ALLOWED_HOSTS`; Java fetched any URL, so
+  web fonts (Google Fonts) and other external images are left out (the image's own fonts stand
+  in). WeasyPrint is not openhtmltopdf: a few CSS details lay out differently, and CSS 3 layout
+  (flex) it supports where openhtmltopdf did not. Without `[pdf] upstream`, or when the sidecar
+  fails and `[pdf] fallback_on_error` is on, `crate::pdf` makes the PDF: the HTML's text and
+  structure (headings, emphasis, lists, tables side by side, `pre`, breaks, alignment, page
+  breaks) in Helvetica / Courier on A4, characters outside WinAnsi as `?`, no images. Everything
+  around it (template, language, parts, file name, the files upload, the output) is Java's.
 - **D32 the definition marker's value.** Java's message, file, e-mail, AI, notification and event
   functions compare `DefinitionFunction.CONTEXT_KEY` with `"true"`; core-exec only knows whether
   a definition is running, so "present but not true" (which core never sets) is unreachable.
@@ -436,7 +442,7 @@ the evictions each write publishes included. Tags are the parity script's case n
   service order; Java reads the services concurrently and writes them as they finish.
 - **E10 template previews** render with the FreeMarker subset `crates/connections` implements
   (`process_lenient`: an element that fails is skipped, as `IGNORE_HANDLER` does), and the PDF
-  with core's text renderer (as `CoreServices.File.TemplateToPdf`).
+  with the same renderer as `CoreServices.File.TemplateToPdf` (D31).
 - **E11 the schedule zones** are chrono-tz's IANA regions; Java lists its JDK's tz database. The
   two lists match locally; a tz release can add or rename a region on one side first.
 - **E12 a refused anonymous caller.** Anything outside core's permitted paths answers an
