@@ -112,11 +112,12 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 80);
+        assert_eq!(core.names().len(), 81);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
-        // The platform family comes last, after the 72 Java has and SendDataNotification.
+        // The platform family comes last, after the 72 Java has, SendDataNotification and
+        // Storage.GetFields.
         assert_eq!(
-            core.names()[73..],
+            core.names()[74..],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",
@@ -127,7 +128,7 @@ mod tests {
                 "CoreServices.Platform.CleanupEventRuns",
             ]
         );
-        assert!(core.names()[..73].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
+        assert!(core.names()[..74].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
         let notification: Vec<&String> = core.names().iter().filter(|n| n.starts_with("CoreServices.Notification.")).collect();
         assert_eq!(notification, ["CoreServices.Notification.SendNotification", "CoreServices.Notification.SendDataNotification"]);
         assert_eq!(core.filter("SendDataNotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);
@@ -152,6 +153,7 @@ mod tests {
             "CoreServices.Storage.GetVersionDetails",
             "CoreServices.Storage.ClearDraft",
             "CoreServices.Storage.CopyToDraft",
+            "CoreServices.Storage.GetFields",
             "CoreServices.Notification.SendDataNotification",
         ] {
             let (ns, name) = full.rsplit_once('.').unwrap();

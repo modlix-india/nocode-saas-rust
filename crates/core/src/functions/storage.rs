@@ -268,6 +268,7 @@ storage_function!(Aggregate);
 storage_function!(GetVersionDetails);
 storage_function!(ClearDraft);
 storage_function!(CopyToDraft);
+storage_function!(GetFields);
 
 fn sort_order(with_case: bool) -> Schema {
     let mut props = vec![
@@ -956,6 +957,33 @@ impl CoreFunction for CopyToDraft {
     }
 }
 
+impl GetFields {
+    fn make_signature() -> FunctionSignature {
+        signature(
+            "GetFields",
+            vec![p("storageName", Schema::of_string("storageName")), code("appCode"), code("clientCode")],
+            Schema::of_object("result"),
+        )
+    }
+}
+
+/// Rust only: the storage's fields, each name to its schema as defined (the Gson form a schema
+/// is served in, `details` included), for the storage as the client resolves it on the current
+/// surface, its `ref` followed. Read's storage gate applies; no rows are read.
+#[async_trait]
+impl CoreFunction for GetFields {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let fields = self.service.storage_fields(app.as_deref(), client.as_deref(), &storage).await?;
+        Ok(output("result", Value::Object(fields)))
+    }
+}
+
 /// Every storage function, in the order `makeStorageFunctions` registers them.
 pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Function>> {
     use super::Core;
@@ -972,6 +1000,8 @@ pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Functi
         Arc::new(Core(Aggregate::new(service.clone()))),
         Arc::new(Core(UpdateMany::new(service.clone()))),
         Arc::new(Core(GetVersionDetails::new(service.clone()))),
+        // Rust only, after every function Java has.
+        Arc::new(Core(GetFields::new(service.clone()))),
     ]
 }
 
@@ -1180,6 +1210,94 @@ mod tests {
         .await;
     }
 
+    /// `GetFields`: inline properties, a ref followed to the app schema (`details` kept), a
+    /// client's own schema copy for that client, inline properties over the ref, no relation
+    /// fields, and Read's gate (readAuth, onlyThruKIRun) and missing storage refusal.
+    #[tokio::test]
+    async fn get_fields() {
+        let base = security_stub(&[("SYSTEM", "FIN2")], &["app"]).await;
+        let deal = json!({"ref": "LeadZumpV2.Deal"});
+        let catalog = MemoryCatalog::with(vec![
+            st(json!({"name": "inline", "appCode": "app", "clientCode": "SYSTEM",
+                      "schema": {"type": "OBJECT", "properties": {"title": {"type": "STRING", "maxLength": 50, "pattern": "^[A-Z]"}}}})),
+            st(json!({"name": "deal", "appCode": "app", "clientCode": "SYSTEM", "schema": deal,
+                      "relations": {"ownerId": {"storageName": "users", "relationType": "TO_ONE"}}})),
+            st(json!({"name": "deal", "appCode": "app", "clientCode": "FIN2", "schema": deal})),
+            st(json!({"name": "mixed", "appCode": "app", "clientCode": "SYSTEM",
+                      "schema": {"ref": "LeadZumpV2.Deal", "properties": {"stage": {"type": "STRING"}, "extra": {"type": "INTEGER", "minimum": 1}}}})),
+            st(json!({"name": "noSchema", "appCode": "app", "clientCode": "SYSTEM"})),
+            st(json!({"name": "broken", "appCode": "app", "clientCode": "SYSTEM", "schema": {"ref": "LeadZumpV2.Missing"}})),
+            st(json!({"name": "guarded", "appCode": "app", "clientCode": "SYSTEM", "readAuth": "Authorities.Nope",
+                      "schema": {"type": "OBJECT", "properties": {"a": {"type": "STRING"}}}})),
+            st(json!({"name": "kirunOnly", "appCode": "app", "clientCode": "SYSTEM", "onlyThruKIRun": true,
+                      "schema": {"type": "OBJECT", "properties": {"a": {"type": "STRING"}}}})),
+        ]);
+        let system_deal = json!({"namespace": "LeadZumpV2", "name": "Deal", "type": "OBJECT", "properties": {
+            "name": {"type": "STRING", "maxLength": 120,
+                     "details": {"label": "Deal name", "order": 1, "preferredComponent": "TextBox"}},
+            "stage": {"type": "STRING", "enums": ["OPEN", "WON"], "defaultValue": "OPEN"}}});
+        let mut fin2_deal = system_deal.clone();
+        fin2_deal["properties"]["region"] = json!({"type": "STRING", "format": "EMAIL",
+            "details": {"label": "Region", "order": 10, "properties": {"customField": true, "mandatory": false}}});
+        *catalog.schemas.lock() = vec![("SYSTEM".into(), system_deal), ("FIN2".into(), fin2_deal)];
+        let svc = Arc::new(policy(catalog, Arc::new(MemoryEngine::default()), &base, Arc::new(RecordingEvents::default())));
+        let ctx = request(
+            auth(json!({"user": {"id": 1, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true,
+                        "clientCode": "SYSTEM"}), Some("SYSTEM"), Some("app")),
+            false,
+            None,
+        );
+        context::with_request(ctx, async {
+            let all = all(&svc);
+            let f = all.iter().find(|f| f.get_signature().get_name() == "GetFields").unwrap().clone();
+            let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+
+            let (name, inline) = run(f.as_ref(), json!({"storageName": "inline"})).await.unwrap();
+            assert_eq!(name, "output");
+            assert_eq!(keys(&inline), ["title"]);
+            assert_eq!(inline["title"]["type"], json!("STRING"));
+            assert_eq!(inline["title"]["maxLength"], json!(50));
+            assert_eq!(inline["title"]["pattern"], json!("^[A-Z]"));
+
+            let (_, sys) = run(f.as_ref(), json!({"storageName": "deal"})).await.unwrap();
+            assert_eq!(keys(&sys), ["name", "stage"], "the app schema's fields, no relation field");
+            assert_eq!(sys["name"]["maxLength"], json!(120));
+            assert_eq!(sys["name"]["details"], json!({"preferredComponent": "TextBox", "order": 1, "label": "Deal name"}));
+            assert_eq!(sys["stage"]["enums"], json!(["OPEN", "WON"]));
+            assert_eq!(sys["stage"]["defaultValue"], json!("OPEN"));
+
+            let (_, fin2) = run(f.as_ref(), json!({"storageName": "deal", "clientCode": "FIN2"})).await.unwrap();
+            assert_eq!(keys(&fin2), ["name", "stage", "region"], "FIN2's own copy of the schema");
+            assert_eq!(fin2["region"]["format"], json!("EMAIL"));
+            assert_eq!(fin2["region"]["details"]["properties"], json!({"customField": true, "mandatory": false}));
+            assert_eq!(fin2["region"]["details"]["order"], json!(10));
+
+            let (_, mixed) = run(f.as_ref(), json!({"storageName": "mixed"})).await.unwrap();
+            assert_eq!(keys(&mixed), ["name", "stage", "extra"]);
+            assert!(mixed["stage"].get("enums").is_none(), "written beside the ref, it wins");
+            assert_eq!(mixed["extra"]["minimum"], json!(1));
+
+            let (_, none) = run(f.as_ref(), json!({"storageName": "noSchema"})).await.unwrap();
+            assert_eq!(none, json!({}));
+
+            let broken = run(f.as_ref(), json!({"storageName": "broken"})).await.unwrap_err();
+            assert!(broken.contains("LeadZumpV2.Missing"), "{broken}");
+            let guarded = run(f.as_ref(), json!({"storageName": "guarded"})).await.unwrap_err();
+            let read_guarded = run(read_fn(&all).as_ref(), json!({"storageName": "guarded", "dataObjectId": "1"})).await.unwrap_err();
+            assert_eq!(guarded, read_guarded, "Read's readAuth refusal");
+            let only = run(f.as_ref(), json!({"storageName": "kirunOnly"})).await.unwrap_err();
+            let read_only = run(read_fn(&all).as_ref(), json!({"storageName": "kirunOnly", "dataObjectId": "1"})).await.unwrap_err();
+            assert_eq!(only, read_only, "Read's onlyThruKIRun refusal");
+            assert!(run(f.as_ref(), json!({"storageName": "missing"})).await.is_err());
+            assert!(run(f.as_ref(), json!({})).await.is_err(), "storageName is required");
+        })
+        .await;
+    }
+
+    fn read_fn(all: &[Arc<dyn Function>]) -> Arc<dyn Function> {
+        all.iter().find(|f| f.get_signature().get_name() == "Read").unwrap().clone()
+    }
+
     #[test]
     fn filters_and_arguments() {
         let f = draft_copy_filters(&json!({"a": null, "b": {"follow": null}, "c": {"follow": [{"field": "x", "storage": "y", "refField": "z"}]}})).unwrap();
@@ -1233,6 +1351,7 @@ mod tests {
             GetVersionDetails::make_signature(),
             ClearDraft::make_signature(),
             CopyToDraft::make_signature(),
+            GetFields::make_signature(),
         ]
         .iter()
         .map(|s| (s.get_full_name(), s.get_parameters().len()))
@@ -1252,6 +1371,7 @@ mod tests {
                 ("CoreServices.Storage.GetVersionDetails".into(), 9),
                 ("CoreServices.Storage.ClearDraft".into(), 2),
                 ("CoreServices.Storage.CopyToDraft".into(), 3),
+                ("CoreServices.Storage.GetFields".into(), 3),
             ]
         );
     }

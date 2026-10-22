@@ -175,6 +175,9 @@ mod doubles {
         pub events: Mutex<HashMap<String, JMap>>,
         pub lookups: Mutex<Vec<String>>,
         pub fail_storage: Mutex<Option<CoreError>>,
+        /// The app's schemas by client: `(clientCode, definition)`, the definition as stored
+        /// (`namespace`, `name`, ...). A client reads its own copy, else SYSTEM's.
+        pub schemas: Mutex<Vec<(String, serde_json::Value)>>,
     }
 
     impl MemoryCatalog {
@@ -187,11 +190,17 @@ mod doubles {
 
     #[async_trait]
     impl Catalog for MemoryCatalog {
-        async fn storage(&self, name: &str, _app: &str, _client: &str) -> Result<Option<Storage>, CoreError> {
+        async fn storage(&self, name: &str, _app: &str, client: &str) -> Result<Option<Storage>, CoreError> {
             if let Some(e) = self.fail_storage.lock().clone() {
                 return Err(e);
             }
-            Ok(self.storages.lock().iter().find(|s| s.name == name).cloned())
+            let storages = self.storages.lock();
+            // A client's own copy first, as the overridable read prefers it.
+            Ok(storages
+                .iter()
+                .find(|s| s.name == name && s.client_code == client)
+                .or_else(|| storages.iter().find(|s| s.name == name))
+                .cloned())
         }
         async fn connection(&self, _: &str, _: &str, _: &str, _: &str) -> Result<Option<Connection>, CoreError> {
             Ok(self.connection.lock().clone())
@@ -224,8 +233,37 @@ mod doubles {
             self.lookups.lock().push(format!("{app}/{client}/{name}"));
             Ok(self.events.lock().get(name).cloned())
         }
-        async fn schema_source(&self, _: &str, _: &str) -> Result<Arc<dyn SchemaSource>, CoreError> {
-            Ok(crate::state::Builtins::core_schemas())
+        async fn schema_source(&self, _: &str, client: &str) -> Result<Arc<dyn SchemaSource>, CoreError> {
+            let schemas = self.schemas.lock().clone();
+            if schemas.is_empty() {
+                return Ok(crate::state::Builtins::core_schemas());
+            }
+            let app: Arc<dyn SchemaSource> = Arc::new(MemorySchemas { client: client.to_string(), schemas });
+            Ok(Arc::new(crate::repos::Hybrid::new(vec![crate::state::Builtins::core_schemas(), app])))
+        }
+    }
+
+    /// One client's view of [`MemoryCatalog::schemas`].
+    struct MemorySchemas {
+        client: String,
+        schemas: Vec<(String, serde_json::Value)>,
+    }
+
+    #[async_trait]
+    impl SchemaSource for MemorySchemas {
+        async fn find(&self, namespace: Option<&str>, name: &str) -> Result<Option<Arc<crate::repos::FoundSchema>>, CoreError> {
+            let named = |d: &serde_json::Value| {
+                d.get("namespace").and_then(serde_json::Value::as_str) == namespace && d.get("name").and_then(serde_json::Value::as_str) == Some(name)
+            };
+            let pick = |client: &str| self.schemas.iter().find(|(c, d)| c == client && named(d)).map(|(_, d)| d.clone());
+            let Some(definition) = pick(&self.client).or_else(|| pick("SYSTEM")) else { return Ok(None) };
+            let json = crate::java_model::gson_schema(&definition).unwrap_or_default();
+            let schema = kirun::json::schema::Schema::from_value(&json).map_err(CoreError::from)?.unwrap_or_default();
+            Ok(Some(Arc::new(crate::repos::FoundSchema { schema: Arc::new(schema), json })))
+        }
+
+        async fn filter(&self, _: &str) -> Result<Vec<String>, CoreError> {
+            Ok(Vec::new())
         }
     }
 
