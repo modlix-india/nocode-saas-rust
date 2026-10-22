@@ -86,7 +86,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
     let send = Arc::new(SendService {
         core,
         directory: directory.clone(),
-        email: Arc::new(EmailService::new(&cfg.email.sendgrid_url)?),
+        email: Arc::new(EmailService { block_private_targets: cfg.email.block_private_targets, ..EmailService::new(&cfg.email.sendgrid_url)? }),
         in_app: Arc::new(InAppService { dao: dao.clone(), hub: hub.clone() }),
     });
     let state = Arc::new(AppState {

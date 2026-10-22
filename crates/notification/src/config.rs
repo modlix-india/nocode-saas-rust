@@ -165,11 +165,13 @@ pub struct EmailSection {
     /// Where SendGrid mail is posted (Java: the fixed `https://api.sendgrid.com/v3/mail/send`).
     /// Only tests point it elsewhere.
     pub sendgrid_url: String,
+    /// An SMTP host must resolve only to public addresses (core's `blockPrivateTargets`).
+    pub block_private_targets: bool,
 }
 
 impl Default for EmailSection {
     fn default() -> Self {
-        Self { sendgrid_url: "https://api.sendgrid.com/v3/mail/send".into() }
+        Self { sendgrid_url: "https://api.sendgrid.com/v3/mail/send".into(), block_private_targets: true }
     }
 }
 
@@ -202,6 +204,7 @@ mod tests {
         assert_eq!(c.sse.heartbeat_seconds, 15);
         assert_eq!(c.core.timeout_seconds, 60);
         assert_eq!(c.email.sendgrid_url, "https://api.sendgrid.com/v3/mail/send");
+        assert!(c.email.block_private_targets);
 
         let mut mq = MqSection::default();
         assert_eq!(mq.amqp_uri(), None);

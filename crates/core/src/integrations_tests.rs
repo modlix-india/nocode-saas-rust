@@ -369,7 +369,9 @@ async fn publishers() {
 fn all(i: &Arc<Integrations>, catalog: Arc<dyn crate::storage::defs::Catalog>) -> Vec<Arc<dyn Function>> {
     use crate::functions::integration_fns as f;
     let mut v = f::rest(i);
-    v.extend(f::email(i));
+    // A files service nobody answers on: only the attachment test reads files.
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&["http://127.0.0.1:1"])).unwrap());
+    v.extend(f::email(i, &files));
     v.extend(f::create_event(i, &catalog));
     v.extend(f::notification(i));
     v.extend(f::ai(i));
@@ -441,7 +443,7 @@ async fn send_email_and_chat() {
         jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
                     "fromExpression": "from@x.com", "toExpression": "${email}"})),
     );
-    // A default language without an expression fails, as Java renders the null expression.
+    // A default language without an expression is the language (Java failed on it).
     s.docs.templates.lock().insert(
         "nolang".into(),
         jmap(json!({"name": "nolang", "templateParts": {"en": {"subject": "S"}}, "defaultLanguage": "en", "toExpression": "${email}"})),
@@ -455,7 +457,7 @@ async fn send_email_and_chat() {
     let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
     assert!(sent.contains("a@x.com") && sent.contains("Hi Asha"), "{sent}");
     let r = run(send.as_ref(), json!({"connectionName": "mail", "templateName": "nolang", "templateData": {"email": "a@x.com"}}), fin(), true, true).await;
-    assert_eq!(r.unwrap_err().text(), "Cannot invoke \"String.length()\" because \"s\" is null");
+    assert_eq!(r.unwrap()["sent"], json!(true));
     // An unknown template is the template's 404.
     let r = run(send.as_ref(), json!({"connectionName": "mail", "templateName": "none"}), fin(), true, true).await;
     assert_eq!(r.unwrap_err().status(), StatusCode::NOT_FOUND);
@@ -470,6 +472,69 @@ async fn send_email_and_chat() {
     let r = run(chat.as_ref(), json!({"connectionName": "none", "prompt": "hi"}), fin(), true, true).await.unwrap();
     assert_eq!(r["error"], "Connection details missing none");
     assert_eq!(run(chat.as_ref(), json!({"connectionName": "ai", "prompt": "hi"}), fin(), false, true).await.unwrap_err().status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// A files service holding one secured PDF for FIN, recording who read what.
+async fn attachment_files() -> (String, Arc<Mutex<Vec<String>>>) {
+    let reads: Arc<Mutex<Vec<String>>> = Default::default();
+    let r = reads.clone();
+    let router = Router::new().route(
+        "/api/files/internal/{resourceType}/convertToBase64",
+        get(move |Path(kind): Path<String>, axum::extract::RawQuery(q): axum::extract::RawQuery| {
+            let r = r.clone();
+            async move {
+                let q = q.unwrap_or_default();
+                r.lock().push(format!("{kind} {q}"));
+                if kind == "secured" && q.contains("url=%2Fapi%2Ffiles%2Fsecured%2Ffile%2FFIN%2Finvoices%2FMay.pdf") {
+                    "data:application/pdf;name:May.pdf;base64,JVBERi0x".into_response()
+                } else {
+                    StatusCode::OK.into_response()
+                }
+            }
+        }),
+    );
+    (serve(router).await, reads)
+}
+
+#[tokio::test]
+async fn send_email_with_attachments() {
+    let s = setup().await;
+    let (files_base, reads) = attachment_files().await;
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&[&files_base])).unwrap());
+    let fns = crate::functions::integration_fns::email(&s.integrations, &files);
+    s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL",
+                                 "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "k"}}));
+    s.docs.templates.lock().insert(
+        "welcome".into(),
+        jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
+                    "fromExpression": "from@x.com", "toExpression": "${email}"})),
+    );
+    let send = find(&fns, "SendEmail");
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "Asha", "email": "a@x.com"},
+                      "attachments": ["/api/files/secured/file/FIN/invoices/May.pdf", {"content": "aGk=", "name": "notes.txt"}]});
+    let r = run(send.as_ref(), args, fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    // Read as the caller's client, with the metadata.
+    let read = reads.lock().clone();
+    assert_eq!(read.len(), 1);
+    assert!(read[0].starts_with("secured clientCode=FIN&") && read[0].ends_with("&metadataRequired=true"), "{read:?}");
+    let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
+    assert!(
+        sent.ends_with(r#""attachments":[{"content":"JVBERi0x","type":"application/pdf","filename":"May.pdf","disposition":"attachment"},{"content":"aGk=","type":"text/plain","filename":"notes.txt","disposition":"attachment"}]}"#),
+        "{sent}"
+    );
+    // A file the files service does not give is the send's error; nothing more is posted.
+    let before = s.seen.lock().len();
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"},
+                      "attachments": ["/api/files/secured/file/OTHER/x.pdf"]});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.text(), "Unable to send the email: Attachment not found: /api/files/secured/file/OTHER/x.pdf");
+    assert_eq!(s.seen.lock().len(), before);
+    // Not a stored file.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"email": "a@x.com"},
+                      "attachments": ["https://example.com/x.pdf"]});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.text(), "Unable to send the email: Attachment is not a stored file: https://example.com/x.pdf");
 }
 
 #[tokio::test]

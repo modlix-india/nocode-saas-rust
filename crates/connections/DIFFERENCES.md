@@ -71,7 +71,9 @@ Everything in those runs is the same except what is listed here.
    socket read timeout. lettre has no such setting, so the same duration bounds each command
    and its reply (connect, STARTTLS, AUTH, MAIL, RCPT, DATA, the message, QUIT), and an expiry
    reads `Read timed out`. `mail.smtp.connectiontimeout` is lettre's connect timeout, as in
-   JavaMail. Neither is set by default, as in JavaMail.
+   JavaMail. When `mailProps` set neither (or a value of 0 or less), both are 60 seconds
+   (2026-10-22; JavaMail waits forever). The message itself may take one more second for every
+   100 KiB it carries, so large attachments are not cut off by the per-command timeout.
 
 ## Same shape, different text or bytes
 
@@ -149,6 +151,32 @@ Everything in those runs is the same except what is listed here.
     client), every call mints a new token.
 24. **Only `OPENAI` AI connections work.** `GEMINI`, `CLAUDE`, `GROK` and `DEEP_SEEK` are refused
     as `Connection details missing <subtype>`, as Java has no service registered for them.
+25. **`SendEmail` takes attachments** (Rust only, 2026-10-22; Java sends none). Each value of
+    the `attachments` argument is a stored file's URL (`/api/files/{static|secured}/file/...`),
+    a `data:` URL, or an object with `url` or `content` (base64 or a `data:` URL) and optionally
+    `name` and `contentType`, so a files `FileDetail` such as `TemplateToPdf`'s `fileData` can
+    be passed as it is. Stored files are read through the files service's `convertToBase64` as
+    the caller's client (else the URL's), as `FileToBase64` reads them; the files service checks
+    that this client manages the file's client. They are read only after the connection and
+    the template are found and rendered. A file that cannot be read, a URL that is not a stored
+    file, or more than 20 MB of attachments in all fails the send (`Unable to send the email:
+    ...`). SMTP sends `multipart/mixed` (the HTML body, then each attachment). SendGrid gets
+    `attachments` after `content`, and only when there are some. The event action
+    (`SendEmailTask`) and the notification service still send none.
+26. **A template's language always resolves** (2026-10-22). The rendered `languageExpression`,
+    else `defaultLanguage`, else `en`. Java failed on a `defaultLanguage` without an
+    expression (it rendered the null expression), and had no language when the expression
+    rendered blank without a default. The part set is found in any case (`EN` finds `en`)
+    before falling back to the first set. This covers `SendEmail`, the event email action and
+    `TemplateToPdf`.
+27. **SMTP hosts follow the private-target guard** (2026-10-22; Java connects anywhere). With
+    `core.rest.blockPrivateTargets` on (the default), an SMTP host must not be a blocked name
+    (`localhost`, metadata hosts, `.internal`, `.local`, ...) and every address it resolves to
+    must be public; the connection then goes to exactly the addresses checked, so a second DNS
+    answer cannot rebind it. A refusal is `CORE.PRIVATE_TARGET_REFUSED` (`Refusing to call
+    "smtp://host:port": ...`). The notification service applies the same rule
+    (`email.blockPrivateTargets`, on by default), where, as with any SMTP failure there, it is
+    logged and the mail is not delivered.
 
 ## Error codes (2026-10-17)
 

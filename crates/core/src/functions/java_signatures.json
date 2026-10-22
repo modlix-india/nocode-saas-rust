@@ -114,6 +114,21 @@
     "variableArgument": true,
     "type": "EXPRESSION"
    },
+   "attachments": {
+    "schema": {
+     "namespace": "_",
+     "name": "attachments",
+     "version": 1,
+     "type": [
+      "STRING",
+      "OBJECT",
+      "NULL"
+     ]
+    },
+    "parameterName": "attachments",
+    "variableArgument": true,
+    "type": "EXPRESSION"
+   },
    "appCode": {
     "schema": {
      "namespace": "_",

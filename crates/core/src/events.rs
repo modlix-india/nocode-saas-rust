@@ -334,6 +334,7 @@ impl TaskExecutor for SendEmailTask {
             templates: i.templates.as_ref(),
             http: &i.connections.provider_http,
             sendgrid_url: &i.connections.config.sendgrid_url,
+            block_private_targets: i.connections.config.block_private_targets,
         };
         let sent = connections::email::send_email(
             &ctx,

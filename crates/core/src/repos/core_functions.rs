@@ -59,7 +59,7 @@ impl CoreFunctions {
         ]);
         functions.extend(crate::functions::security_fns::all(&deps.security));
         functions.extend(crate::functions::caller_security::all(&deps.security));
-        functions.extend(crate::functions::integration_fns::email(&deps.integrations));
+        functions.extend(crate::functions::integration_fns::email(&deps.integrations, &deps.files));
         functions.extend(crate::functions::integration_fns::create_event(&deps.integrations, deps.storage.catalog()));
         functions.extend(crate::functions::schedule::all(deps));
         functions.extend(crate::functions::file::all(deps));
