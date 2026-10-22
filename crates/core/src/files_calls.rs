@@ -6,12 +6,26 @@
 //! raw bytes with no `Content-Type` (WebClient's `ByteBufferEncoder` sets none) and their
 //! `Content-Length`, which is what files reads (`request.getInputStream()`).
 
+use anyhow::anyhow;
 use platform::upstream::Upstream;
 use serde_json::{Map, Value};
 
 use crate::clients::{client, text, PATH_SEGMENT};
 use crate::error::CoreError;
-use crate::message_calls::as_map;
+
+/// A `Mono<Map<String, Object>>` answer: an empty body (or JSON null) is no value; anything but
+/// an object is Jackson's decoding error.
+pub(crate) fn as_map(body: Option<String>) -> Result<Option<Map<String, Value>>, CoreError> {
+    let Some(text) = body else { return Ok(None) };
+    match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Null) => Ok(None),
+        Ok(Value::Object(m)) => Ok(Some(m)),
+        Ok(other) => Err(CoreError::from(anyhow!(
+            "JSON decoding error: Cannot deserialize value of type `java.util.LinkedHashMap<java.lang.String,java.lang.Object>`: {other}"
+        ))),
+        Err(e) => Err(CoreError::from(anyhow!("JSON decoding error: {e}"))),
+    }
+}
 
 pub struct FilesCalls {
     upstream: Upstream,
@@ -76,6 +90,15 @@ impl FilesCalls {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::Arc;
+
+    #[test]
+    fn map_answers_as_jackson_reads_them() {
+        assert_eq!(super::as_map(None).unwrap(), None);
+        assert_eq!(super::as_map(Some("null".into())).unwrap(), None);
+        assert_eq!(super::as_map(Some(r#"{"a":1}"#.into())).unwrap().unwrap()["a"], 1);
+        assert!(super::as_map(Some("[1]".into())).unwrap_err().text().contains("LinkedHashMap"));
+        assert!(super::as_map(Some("{".into())).unwrap_err().text().starts_with("JSON decoding error"));
+    }
 
     use axum::body::Bytes;
     use axum::extract::RawQuery;

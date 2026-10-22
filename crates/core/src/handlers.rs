@@ -1,7 +1,8 @@
 //! core-exec's routes: `FunctionExecutionController` and the `repositoryFind` /
 //! `repositoryFilter` routes of `FunctionController` and `SchemaController`. All of them are
 //! open (`CoreConfiguration` lists them as unauthenticated), but the caller is still asked of
-//! security, as `JWTTokenFilter` does for every request.
+//! security, as `JWTTokenFilter` does for every request. The internal webhook route (Rust only)
+//! is in [`webhook`].
 
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ use crate::repos::app::{app_function_repository, app_schema_repository};
 use crate::repos::{signature_json, FunctionSource, Hybrid, SchemaSource};
 use crate::state::AppState;
 
+mod webhook;
+
 pub fn router(state: AppState) -> Router {
     crate::unmapped::without_allow_header(routes(state))
 }
@@ -40,6 +43,7 @@ fn routes(state: AppState) -> Router {
         .merge(crate::data_routes::router())
         .merge(crate::connection_routes::router())
         .merge(crate::event_routes::router())
+        .merge(webhook::router())
         // Unmapped paths and methods: Spring Security's verdict first (`crate::unmapped`).
         .method_not_allowed_fallback(crate::unmapped::exec_method_not_allowed)
         .fallback(crate::unmapped::exec_not_found)

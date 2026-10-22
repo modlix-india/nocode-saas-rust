@@ -254,7 +254,7 @@ async fn upstream_headers(
     }
 
     let (scheme, host, port) = scheme_host_port(incoming);
-    let resolved = match gw.resolver.resolve(&scheme, &host, &port, split.codes_part, supplied_client, supplied_app).await {
+    let resolved = match gw.resolver.resolve(&scheme, &host, &port, split.codes_part, split.codes_unverified, supplied_client, supplied_app).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!(host, error = %e, "host resolution failed");

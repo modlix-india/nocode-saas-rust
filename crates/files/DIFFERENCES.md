@@ -84,6 +84,10 @@ split. A missing file's empty 404 stays empty.
 
 - An unknown `downloadFileByKey` key is a 404 `invalid_key`; Java dereferences the missing row
   and answers 500.
+- A file whose row exists but whose object is gone from the bucket (S3 `NoSuchKey`, as after
+  a database copy without the bucket) is a 404 `object_not_found` ("File with id <path> not
+  found"); it was a 500. The FileBrowser fetched secured thumbnails of such files and every 500
+  broke the page (local, 2026-10-22).
 - A bad query value (an unknown `fit`/`gravity`/`format`, a non-number `width`) is a 400; Java
   answers its catch-all 500.
 - An unsatisfiable `Range` is a 416 with `Content-Range: bytes */<len>`; Java's 416 is eaten by

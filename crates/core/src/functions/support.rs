@@ -127,6 +127,16 @@ pub fn ids_json(ids: &[Id]) -> Value {
     Value::Array(ids.iter().map(|i| Value::from(*i)).collect())
 }
 
+/// `gson.toJsonTree(value)` of what Jackson read from another service: members whose value is
+/// null are left out at every depth, nulls inside lists stay.
+pub(crate) fn gson_tree(v: Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(m.into_iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k, gson_tree(v))).collect()),
+        Value::Array(a) => Value::Array(a.into_iter().map(gson_tree).collect()),
+        other => other,
+    }
+}
+
 /// `ca.getUser() != null`: security sent a user.
 pub fn has_user(auth: &Authentication) -> bool {
     auth.raw.get("user").is_some_and(|u| !u.is_null())
@@ -353,6 +363,11 @@ mod tests {
     use axum::Router;
     use platform::upstream::Upstream;
     use serde_json::json;
+
+    #[test]
+    fn gson_tree_drops_null_members() {
+        assert_eq!(gson_tree(serde_json::json!({"a": null, "b": [null, {"c": null, "d": 1}]})), serde_json::json!({"b": [null, {"d": 1}]}));
+    }
 
     #[test]
     fn ids_as_java_reads_them() {

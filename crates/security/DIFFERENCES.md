@@ -116,6 +116,15 @@ Kept so both implementations answer alike while both run; each is a candidate fi
 | `getLastUpdated` with certificates but no client URL at all | `NullPointerException` (500) | the certificate's time | Unreachable: a certificate always belongs to a URL. |
 | `isUserClientManageClient` / `doesClientManageClient` without their ids | `NullPointerException` (500) | the same 500, Java's message | Kept. |
 
+- **`users/internal/notification` takes `filterAuthorization`** (Rust only, 2026-10-22). When
+  the request has a non-blank one, only the users whose authorities in the request's app
+  (`getUserAuthorities`, as their own context would hold them) meet the expression are
+  answered. The notification service sends it for every notification, the stored (bell and
+  email) ones and the data ones (Kiran, 2026-10-22; crates/notification/DIFFERENCES.md N15), so
+  a notification to a client with a filter reaches only the users holding it. Java's
+  `UsersListRequest` has no such field and Java's notification service never applied the
+  filter, so a Java security would answer every user.
+
 ## security-internal: Java behaviour kept as it is
 
 - An anonymous caller on a tenant's host (or a signed-in non-SYSTEM user) gets the DAO

@@ -39,7 +39,6 @@ pub mod gson;
 pub mod handlers;
 pub mod integrations;
 pub mod java_model;
-pub mod message_calls;
 pub mod pdf;
 pub mod pdf_render;
 pub mod platform_calls;
@@ -110,8 +109,8 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let security_upstream = platform::security::security_upstream(&cfg.security, registry.as_ref())?;
     let security = SecurityClient::from_config(&cfg.security, registry.as_ref())?;
     let store = Store::new(mongo.clone(), security.clone(), &cache);
-    // entity-processor retired and message is stopped (2026-10-18): a unit configured without
-    // them still starts, and only the calls that need them fail ("upstream has no addresses").
+    // entity-processor retired (2026-10-18): a unit configured without it still starts, and
+    // only the calls that need it fail ("upstream has no addresses").
     let retired = |what: &str, c: &platform::config::UpstreamConfig| {
         Upstream::from_config(c, registry.as_ref()).unwrap_or_else(|e| {
             tracing::warn!(upstream = what, error = %e, "not configured: the calls that need it will fail");
@@ -120,7 +119,6 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     };
     let ep = Arc::new(EntityProcessor::new(retired("entity-processor", &cfg.entity_processor.upstream))?);
     let security_calls = Arc::new(SecurityCalls::new(security_upstream.clone())?);
-    let message = Arc::new(message_calls::MessageCalls::new(retired("message", &cfg.message.upstream))?);
     let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, registry.as_ref())?)?);
     pdf_render::install(&cfg.pdf, registry.as_ref())?;
     let platform = Arc::new(make_platform_calls(cfg, registry.as_ref(), &security_upstream)?);
@@ -164,7 +162,6 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         mongo: mongo.clone(),
         cache: cache.clone(),
         integrations: integrations.clone(),
-        message,
         files,
         scheduler: cfg.core.scheduler.clone(),
         platform,

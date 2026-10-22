@@ -124,7 +124,6 @@ pub async fn offline_deps(security_base: &str, storage: Arc<crate::storage::serv
         )
         .expect("integrations"),
     );
-    let message = Arc::new(crate::message_calls::MessageCalls::new(Upstream::fixed(&["http://127.0.0.1:1"])).expect("message"));
     let platform = Arc::new(
         crate::platform_calls::PlatformCalls::new(crate::platform_calls::Upstreams::all(Upstream::fixed(&["http://127.0.0.1:1"])))
             .expect("platform"),
@@ -136,7 +135,6 @@ pub async fn offline_deps(security_base: &str, storage: Arc<crate::storage::serv
         mongo,
         cache,
         integrations,
-        message,
         files,
         scheduler: Default::default(),
         platform,

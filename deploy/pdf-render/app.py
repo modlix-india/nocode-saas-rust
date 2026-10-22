@@ -8,6 +8,10 @@ network). It never fetches what a template names on its own:
   `/api/files/secured/file/<path>`, on any host, relative or absolute) is read from the files
   service's internal route (`FILES_URL` + `/api/files/internal/<static|secured>/file?filePath=`),
   as Java's FileServerStreamFactory did for secured files; the host in the template is ignored;
+- web fonts: `https` URLs on the hosts in `FONT_HOSTS` (default `fonts.googleapis.com` and
+  `fonts.gstatic.com`) are fetched as is, with no redirects, so a template can name any Google
+  font (`<link href="https://fonts.googleapis.com/css2?family=...">`); answers are kept in memory
+  (`FONT_CACHE_BYTES`, 64 MiB) so a font is downloaded once, not on every render;
 - an `https` URL on a host listed in `ALLOWED_HOSTS` (exact names, empty by default) is fetched
   as is, with no redirects;
 - anything else (`file:`, other hosts, IP addresses, metadata endpoints) is refused, and
@@ -17,6 +21,7 @@ Every fetch has a timeout and a size cap. Endpoints: `POST /render` (the HTML as
 UTF-8) answers `application/pdf`; `GET /healthz` answers `ok`.
 
 Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `ALLOWED_HOSTS`,
+`FONT_HOSTS` (fonts.googleapis.com,fonts.gstatic.com; empty turns web fonts off), `FONT_CACHE_BYTES`,
 `MAX_BODY_BYTES` (50 MiB), `FETCH_TIMEOUT_SECONDS` (10), `FETCH_MAX_BYTES` (20 MiB),
 `MAX_CONCURRENT` (2), `LOG_LEVEL` (INFO).
 """
@@ -33,6 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = logging.getLogger("pdf-render")
 
+DEFAULT_FONT_HOSTS = "fonts.googleapis.com,fonts.gstatic.com"
 FILES_PATH = re.compile(r"^/api/files/(static|secured)/file/(.+)$")
 # Relative URLs in a template resolve against this, so `/api/files/...` matches FILES_PATH.
 BASE_URL = "https://pdf-render.invalid/"
@@ -51,11 +57,19 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 class Policy:
-    def __init__(self, files_url="", allowed_hosts=(), timeout=10.0, max_bytes=20 * 1024 * 1024):
+    def __init__(self, files_url="", allowed_hosts=(), timeout=10.0, max_bytes=20 * 1024 * 1024,
+                 font_hosts=DEFAULT_FONT_HOSTS.split(","), font_cache_bytes=64 * 1024 * 1024):
         self.files_url = files_url.rstrip("/")
         self.allowed_hosts = {h.strip().lower() for h in allowed_hosts if h.strip()}
+        self.font_hosts = {h.strip().lower() for h in font_hosts if h.strip()}
         self.timeout = timeout
         self.max_bytes = max_bytes
+        # Web font answers (CSS and font files) by URL: they do not change, and fetching them on
+        # every render would make each PDF wait on Google. Oldest out first past the byte budget.
+        self.font_cache = {}
+        self.font_cache_bytes = font_cache_bytes
+        self._font_cache_size = 0
+        self._font_lock = threading.Lock()
 
     @classmethod
     def from_env(cls):
@@ -64,6 +78,8 @@ class Policy:
             allowed_hosts=os.environ.get("ALLOWED_HOSTS", "").split(","),
             timeout=float(os.environ.get("FETCH_TIMEOUT_SECONDS", "10")),
             max_bytes=int(os.environ.get("FETCH_MAX_BYTES", str(20 * 1024 * 1024))),
+            font_hosts=os.environ.get("FONT_HOSTS", DEFAULT_FONT_HOSTS).split(","),
+            font_cache_bytes=int(os.environ.get("FONT_CACHE_BYTES", str(64 * 1024 * 1024))),
         )
 
     def target(self, url):
@@ -81,7 +97,7 @@ class Policy:
             query = urllib.parse.urlencode([("filePath", rest)] + urllib.parse.parse_qsl(u.query))
             return f"{self.files_url}/api/files/internal/{kind}/file?{query}"
         host = (u.hostname or "").lower()
-        if u.scheme == "https" and host in self.allowed_hosts and u.port in (None, 443):
+        if u.scheme == "https" and host in (self.allowed_hosts | self.font_hosts) and u.port in (None, 443):
             return url
         raise Refused(f"host {host or '(none)'} refused")
 
@@ -92,6 +108,12 @@ class Policy:
             from weasyprint.urls import default_url_fetcher
 
             return default_url_fetcher(url)
+        font = urllib.parse.urlsplit(target).hostname in self.font_hosts
+        if font:
+            with self._font_lock:
+                hit = self.font_cache.get(target)
+            if hit:
+                return dict(hit)
         req = urllib.request.Request(target, headers={"User-Agent": "modlix-pdf-render"})
         try:
             with _OPENER.open(req, timeout=self.timeout) as resp:
@@ -105,7 +127,22 @@ class Policy:
         result = {"string": body, "mime_type": mime, "redirected_url": url}
         if charset:
             result["encoding"] = charset
+        if font:
+            self._remember_font(target, result)
         return result
+
+    def _remember_font(self, url, result):
+        size = len(result["string"])
+        if size > self.font_cache_bytes:
+            return
+        with self._font_lock:
+            if url in self.font_cache:
+                return
+            while self.font_cache and self._font_cache_size + size > self.font_cache_bytes:
+                old = self.font_cache.pop(next(iter(self.font_cache)))
+                self._font_cache_size -= len(old["string"])
+            self.font_cache[url] = dict(result)
+            self._font_cache_size += size
 
 
 _PATCHED = False

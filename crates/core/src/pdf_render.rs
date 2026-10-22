@@ -3,8 +3,9 @@
 //! With `[pdf] upstream` set (the pdf-render sidecar, `deploy/pdf-render`: WeasyPrint, CSS with
 //! `<style>` blocks and `@page`, tables, borders, colours, fonts, images from the files
 //! service), the HTML is posted to `<base>/render` and its PDF returned. Without it, or when the
-//! sidecar fails and `[pdf] fallback_on_error` is on (the default), [`crate::pdf`]'s text
-//! renderer makes the PDF, as before (DIFFERENCES D31).
+//! sidecar fails and `[pdf] fallback_on_error` is on, [`crate::pdf`]'s text renderer makes the PDF,
+//! as before (DIFFERENCES D31). It is off by default (Kiran, 2026-10-22): a sidecar failure fails the
+//! call, so nobody is handed a plain-text cost sheet without knowing why.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -29,7 +30,7 @@ pub struct PdfConfig {
 
 impl Default for PdfConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::default(), timeout_seconds: 60, fallback_on_error: true }
+        Self { upstream: UpstreamConfig::default(), timeout_seconds: 60, fallback_on_error: false }
     }
 }
 
@@ -202,7 +203,7 @@ mod tests {
     fn config_defaults_and_shape() {
         let c: PdfConfig = serde_json::from_value(serde_json::json!({"upstream": "http://pdf-render:8120"})).unwrap();
         assert_eq!(c.upstream.entries(), ["http://pdf-render:8120"]);
-        assert_eq!((c.timeout_seconds, c.fallback_on_error), (60, true));
+        assert_eq!((c.timeout_seconds, c.fallback_on_error), (60, false));
         assert!(PdfConfig::default().upstream.entries().is_empty());
     }
 }

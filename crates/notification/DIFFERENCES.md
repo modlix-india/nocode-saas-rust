@@ -100,16 +100,18 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
 
 ## Different on purpose
 
-- **N1. In-app streams with several instances (same as Java, documented).** The open streams live
-  in the process, in both implementations. A notification is consumed by one instance (one of the
-  three queues, one consumer each), and that instance pushes it only to streams open on itself;
-  a user whose stream is on another instance sees it only on the next list or count read. Two
-  Java instances behave the same way today. Proposed fix (not built): after storing the rows, the
-  consuming instance publishes `{key, frame}` on a Redis channel (e.g. `notificationInApp`), every
-  instance subscribes and delivers to its own streams, and the local delivery is dropped in favour
-  of the published one. The Redis connection already exists for cache evictions; message loss
-  while an instance is disconnected only delays the event to the next read, which is no worse
-  than today.
+- **N1. In-app streams with several instances: resolved (2026-10-22).** The open streams live
+  in each process, in both implementations, and a notification is consumed by one instance.
+  Java pushed it only to the streams open on that instance; a user whose stream was on another
+  saw it only on the next list or count read. Now, with `[redis] url` set, the consuming
+  instance publishes `{"keys": ["<userId>-<appCode>", ...], "frame": "<the SSE frame>"}` on the
+  Redis channel `[sse] push_channel` (`notificationPush`, no cache prefix, like
+  `evictionChannel`), and every instance, the publisher included, hands the frame to its own
+  streams when it hears it (`push.rs`, over `CacheService::spawn_listener`). The publisher never
+  also delivers locally, so each stream gets a frame once. Without Redis, or when the publish
+  fails, the frame goes to this instance's streams only, as before. A message published while
+  an instance is not subscribed is lost for its streams (the in-app row is still in the list
+  and the count). Counted in `notification_push_total{via="redis"|"local"}`.
 - **N2. Error bodies**: `stackTrace` is empty, the body is coded (N14), and the JSON is
   compact (all Rust units). Java sends its server stack and the exception's own text to any
   caller.
@@ -165,6 +167,35 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   looks like our fault). `tools/parity_notification.py` compares the bodies by code
   (`tools/error_parity.py`) and lists these cases as EXPECTED. Not yet run against Java with
   these changes: Java notification was not running on the local stack when they were made.
+- **N15. `filterAuthorization` narrows a normal notification too** (Kiran, 2026-10-22). Java
+  carried `filterAuthorization` on the queue message but never applied it: a notification to a
+  client reached every user of it. Now the recipients request to security's
+  `users/internal/notification` carries it for every notification, so a notification sent to a
+  client (or a user) with a filter reaches only the users whose authorities in the app meet
+  that expression, on both channels: the emails go only to them and only they get a
+  `notification_inapp` row and the bell entry. A blank or absent filter changes nothing. A
+  filter nobody meets ends the run as "no recipients" (logged, nothing sent).
+
+## Data notifications (Rust only, 2026-10-22)
+
+`CoreServices.Notification.SendDataNotification` (crates/core/DIFFERENCES.md D42) publishes a
+`NotificationQueObject` with `kind: DATA`, `eventName`, `data` (any JSON) and `expiresAt` (epoch
+milliseconds) on the same exchange. The listener reads those properties too (a message without
+`kind` is a normal notification; any other `kind` fails the run, acked):
+
+- No connection, definition, template or database: nothing is read from core and no
+  `notification_inapp` row is written, so there is no bell entry and no count.
+- A message past its `expiresAt` is dropped (logged at debug, counted as
+  `notification_failed_total{reason="expired"}`).
+- The recipients come from the same `users/internal/notification` call as a normal
+  notification's, with the same request per target type, plus `filterAuthorization` when the
+  message has one: security (Rust only) then keeps the users whose authorities in the app meet
+  that expression. A normal notification applies it the same way (N15).
+- One frame goes to each recipient's streams for the app (each user once, on every instance:
+  N1): `event:<eventName>`, `data:{"event":..,"data":..,"id":"<uuid>","sentAt":<millis>}`
+  (compact JSON, one line), `id:<the same uuid>`, `retry:5000`.
+- The message is acked at once and never retried: a user who is not online misses it.
+  Counted as `notification_sent_total{channel="data"}`.
 
 ## Found along the way (Java, worth knowing)
 

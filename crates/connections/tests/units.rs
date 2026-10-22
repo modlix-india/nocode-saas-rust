@@ -299,16 +299,16 @@ async fn smtp_options() {
         }
         Connection::from_json(json!({"name": "m", "connectionDetails": {"mailProps": p, "username": "u", "password": "pw"}})).unwrap()
     };
-    let d = ProcessedEmail { to: vec!["a@x.com".into()], from: "f@x.com".into(), subject: "s".into(), body: "b".into() };
-    let sent = email::smtp_send(&conn(json!({"mail.smtp.auth": "true", "mail.smtp.starttls.enable": "true", "mail.smtp.from": "bounce@x.com"})), &d).await.unwrap();
+    let d = ProcessedEmail { to: vec!["a@x.com".into()], from: "f@x.com".into(), subject: "s".into(), body: "b".into(), ..Default::default() };
+    let sent = email::smtp_send(&conn(json!({"mail.smtp.auth": "true", "mail.smtp.starttls.enable": "true", "mail.smtp.from": "bounce@x.com"})), &d, false).await.unwrap();
     assert!(sent);
     let lines = seen.lock().clone();
     assert!(lines.iter().any(|l| l.starts_with("AUTH PLAIN")));
     assert!(lines.iter().any(|l| l.contains("MAIL FROM:<bounce@x.com>")));
-    let e = email::smtp_send(&conn(json!({"mail.smtp.starttls.enable": true, "mail.smtp.starttls.required": "true"})), &d).await.unwrap_err();
+    let e = email::smtp_send(&conn(json!({"mail.smtp.starttls.enable": true, "mail.smtp.starttls.required": "true"})), &d, false).await.unwrap_err();
     assert!(e.message().contains("STARTTLS is required"));
-    assert!(email::smtp_send(&conn(json!({"mail.smtp.ssl.enable": "true", "mail.smtp.connectiontimeout": "2000"})), &d).await.is_err());
-    assert!(email::smtp_send(&conn(json!({"mail.smtp.from": "not an address"})), &d).await.is_err());
+    assert!(email::smtp_send(&conn(json!({"mail.smtp.ssl.enable": "true", "mail.smtp.connectiontimeout": "2000"})), &d, false).await.is_err());
+    assert!(email::smtp_send(&conn(json!({"mail.smtp.from": "not an address"})), &d, false).await.is_err());
 }
 
 #[tokio::test]
@@ -330,7 +330,7 @@ async fn send_email_paths() {
     ]);
     let http = connections::rest::http::HttpClient { block_private_targets: false };
     let url = format!("http://127.0.0.1:{port}/v3/mail/send");
-    let ctx = EmailContext { connections: &store, templates: &T, http: &http, sendgrid_url: &url };
+    let ctx = EmailContext { connections: &store, templates: &T, http: &http, sendgrid_url: &url, block_private_targets: false };
     let c = caller();
     let d = Map::new();
     let to = vec!["a@x.com".to_string()];
@@ -346,7 +346,7 @@ async fn send_email_paths() {
     assert_eq!(email::send_email(&ctx, &c, None, None, &to, "t", None, &d).await.unwrap_err().message(), "Connection details missing null");
     // SendEmail with explicit codes and no caller: the second, raw-codes attempt is the one that runs.
     let anon = Caller { in_kirun: true, ..Default::default() };
-    assert_eq!(email::send_email_function(&ctx, &anon, "app", "SYSTEM", Some("sg"), "t", None, &json!({"x": 1}).as_object().unwrap().clone()).await.unwrap_err().message(), "Unable to send the email: No Send Addresses Found.");
+    assert_eq!(email::send_email_function(&ctx, &anon, "app", "SYSTEM", Some("sg"), "t", None, &json!({"x": 1}).as_object().unwrap().clone(), &Default::default()).await.unwrap_err().message(), "Unable to send the email: No Send Addresses Found.");
 }
 
 #[test]

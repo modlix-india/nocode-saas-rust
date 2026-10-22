@@ -13,7 +13,7 @@ use connections::connection::{self, Connection, ConnectionType};
 use connections::controller;
 use connections::error::{ConnError, ConnResult};
 use connections::mq::{prepare_event, EventMessage, Route};
-use connections::notification::{prepare, HierarchyChecks, NotificationRequest};
+use connections::notification::{check_data_size, check_event_name, prepare, prepare_data, DataNotificationRequest, HierarchyChecks, NotificationRequest};
 use connections::rest::auth::{self, EventResult};
 use connections::rest::call::{self, CallArgs, DownloadSink};
 use connections::rest::{do_call, RestData, RestRequest};
@@ -340,4 +340,63 @@ async fn notification_access_rules() {
     assert_eq!(key, "events2");
     assert!(body.contains("\"draft\" : true") && body.contains("\"xdebug\" : \"d\""));
     let _ = ConnError::other("unused");
+}
+
+#[tokio::test]
+async fn data_notifications_are_checked_then_prepared_as_notifications_are() {
+    let route = Route::notifications();
+    let mut c = caller();
+    c.url_client_code = Some("FIN".into());
+    let req = |event: &str, data: Value| DataNotificationRequest {
+        target_type: "User Id".into(),
+        target_id: Some(7),
+        filter_authorization: Some("Authorities.Calls".into()),
+        event_name: event.into(),
+        data,
+        ttl_seconds: 60,
+        ..Default::default()
+    };
+    let (key, m) = prepare_data(&route, &Checks(true), &c, req("incomingCall", json!({"from": "+91", "n": [1, 2]})), 1_000).await.unwrap().unwrap();
+    assert_eq!(key, "notifications2");
+    assert_eq!((m.kind.as_deref(), m.event_name.as_deref(), m.expires_at), (Some("DATA"), Some("incomingCall"), Some(61_000)));
+    assert_eq!(m.filter_authorization.as_deref(), Some("Authorities.Calls"));
+    assert!(m.notification_name.is_none() && m.connection_name.is_none() && m.payload.is_none());
+    let body: Value = serde_json::from_str(&m.to_json()).unwrap();
+    assert_eq!(body["kind"], "DATA");
+    assert_eq!(body["eventName"], "incomingCall");
+    assert_eq!(body["data"], json!({"from": "+91", "n": [1, 2]}));
+    assert_eq!(body["expiresAt"], 61_000);
+    assert_eq!(body["targetId"], 7);
+    // Null data still goes as a property; a normal notification carries none of these.
+    let (_, m) = prepare_data(&route, &Checks(true), &c, req("x", Value::Null), 0).await.unwrap().unwrap();
+    let body: Value = serde_json::from_str(&m.to_json()).unwrap();
+    assert!(body.as_object().unwrap().contains_key("data") && body["data"].is_null());
+    let (_, plain) = prepare(&route, &Checks(true), &c, NotificationRequest { target_type: "User Id".into(), target_id: Some(7), ..Default::default() })
+        .await
+        .unwrap()
+        .unwrap();
+    let body: Value = serde_json::from_str(&plain.to_json()).unwrap();
+    assert!(["kind", "eventName", "data", "expiresAt"].iter().all(|k| body.get(k).is_none()), "{body}");
+    // The same access rules: refused targets are not sent.
+    assert!(prepare_data(&route, &Checks(false), &c, req("x", json!(1)), 0).await.unwrap().is_none());
+
+    // Event names: 1 to 64 of letters, digits, _ . -, and not the stream's own.
+    for good in ["a", "incoming.call", "task-changed_2", &"x".repeat(64)] {
+        assert!(check_event_name(good).is_ok(), "{good}");
+    }
+    for bad in ["", "has space", "emoji\u{1F600}", "a/b", &"x".repeat(65)] {
+        let e = check_event_name(bad).unwrap_err();
+        assert_eq!(e.code().map(|c| c.code.to_string()).as_deref(), Some("CORE.DATA_NOTIFICATION_EVENT_INVALID"), "{bad}");
+        assert_eq!(e.status(), http::StatusCode::BAD_REQUEST);
+    }
+    for reserved in ["init", "notification", "Notification"] {
+        let e = prepare_data(&route, &Checks(true), &c, req(reserved, json!(1)), 0).await.unwrap_err();
+        assert_eq!(e.code().map(|c| c.code.to_string()).as_deref(), Some("CORE.DATA_NOTIFICATION_EVENT_RESERVED"), "{reserved}");
+    }
+    // At most 64 KB of data, serialised.
+    let fits = json!("x".repeat(64 * 1024 - 2));
+    assert!(check_data_size(&fits).is_ok());
+    let e = prepare_data(&route, &Checks(true), &c, req("big", json!("x".repeat(64 * 1024 - 1))), 0).await.unwrap_err();
+    assert_eq!(e.code().map(|c| c.code.to_string()).as_deref(), Some("CORE.DATA_NOTIFICATION_TOO_LARGE"));
+    assert!(e.message().contains("65537 bytes"), "{}", e.message());
 }

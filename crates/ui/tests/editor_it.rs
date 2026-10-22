@@ -559,6 +559,18 @@ async fn uri_paths_are_named_validated_and_clear_the_pattern_cache() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert_eq!(str_field(&r.obj(), "pathString"), Some("/api/x/2"));
     assert!(!e.is_warm("URIPatternCache", "testapp-SYSTEM").await);
+    // The webhook flag (Rust only): kept on create, set by an update, a boolean or nothing.
+    assert!(m.get("webhook").is_none_or(JValue::is_null));
+    let mut body = r.obj();
+    body.insert("webhook".into(), JValue::Bool(true));
+    let r = e.call("PUT", &format!("/api/ui/uripaths/{}", made.id()), &to_compact(&JValue::Object(body))).await;
+    assert_eq!(r.obj().get("webhook"), Some(&JValue::Bool(true)), "{}", r.text());
+    let mut body = r.obj();
+    body.insert("webhook".into(), s("yes"));
+    let r = e.call("PUT", &format!("/api/ui/uripaths/{}", made.id()), &to_compact(&JValue::Object(body))).await;
+    assert!(r.obj().get("webhook").is_none_or(JValue::is_null), "not a boolean: not a webhook");
+    let hook = post(format!(r#"{{"name":"/api/hook","appCode":"testapp","clientCode":"SYSTEM","pathString":"/api/hook","webhook":true,"pathDefinitions":{KIRUN_GET}}}"#)).await;
+    assert_eq!(hook.obj().get("webhook"), Some(&JValue::Bool(true)), "{}", hook.text());
 
     e.warm("URIPatternCache", "testapp-SYSTEM").await;
     let d = e.call("DELETE", &format!("/api/ui/uripaths/{}", made.id()), "").await;

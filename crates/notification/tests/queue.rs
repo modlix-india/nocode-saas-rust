@@ -19,7 +19,9 @@ use notification::email::EmailSink;
 use notification::inapp::InAppSink;
 use notification::model::{CoreNotification, MailConnection, NotificationUser};
 use notification::queue::{consume_forever, handle, ConsumerState, Settle};
+use notification::push::Push;
 use notification::send::{Outcome, SendService};
+use notification::sse::Hub;
 use parking_lot::Mutex;
 use platform::upstream::Upstream;
 use serde_json::{json, Map, Value};
@@ -54,6 +56,7 @@ async fn service() -> (Arc<SendService>, Arc<Fake>, Arc<Seen>) {
         directory: DirectoryClient::new(Upstream::fixed(&[&base]), t).unwrap(),
         email: seen.clone(),
         in_app: seen.clone(),
+        push: Push::local(Hub::new(8)),
     };
     (Arc::new(s), fake, seen)
 }

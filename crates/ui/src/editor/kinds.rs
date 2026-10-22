@@ -493,7 +493,8 @@ impl Kind for UiKind {
                 }
                 copy(existing, incoming, &["definition", "permission"]);
             }
-            UiObject::UriPath => copy(existing, incoming, &["pathString", "pathDefinitions"]),
+            // `webhook` is Rust only (DIFFERENCES.md): an update sets it as it sets the definitions.
+            UiObject::UriPath => copy(existing, incoming, &["pathString", "pathDefinitions", "webhook"]),
         }
         Ok(())
     }

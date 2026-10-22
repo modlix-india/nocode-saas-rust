@@ -76,6 +76,8 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Registry>)> {
     // Security's evictions of the host cache reach us on the shared channel.
     let cache = CacheService::configured(&cfg.redis)?;
     let hosts = cache.family();
+    // Whether URL codes in front of `/api/` name a real app and client (`resolve`).
+    let access = cache.family();
     cache.spawn_eviction_listener();
 
     let resolver = Resolver::new(
@@ -84,6 +86,7 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Registry>)> {
         // before it can route anything, so going through itself would loop.
         platform::security::security_upstream(&cfg.security, registry.as_ref())?,
         hosts,
+        access,
         cfg.resolution.draft_trust_seconds,
     )?;
 
