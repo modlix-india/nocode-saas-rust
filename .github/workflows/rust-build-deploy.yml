@@ -1,11 +1,14 @@
-# Builds the 15 Rust units' images and Lighthouse's, and deploys them to one environment's host. Called by
-# rust-dev-ci.yml, rust-stage-ci.yml and rust-prod-ci.yml, which name the environment, the
-# secrets and whether the deploy runs.
+# Builds the 15 Rust units' images, Lighthouse's and pdf-render's, and deploys them to one
+# environment's host. Called by rust-dev-ci.yml, rust-stage-ci.yml and rust-prod-ci.yml, which
+# name the environment, the secrets and whether the deploy runs.
 #
 # build (GitHub-hosted): compiles the workspace ONCE in release (in rust:1.94-bookworm, the image
 # deploy/Dockerfile builds in, so the binaries match the distroless runtime's glibc), with the
 # cargo registry and the dependencies' build output cached; packages each binary into its own
 # image with deploy/Dockerfile.prebuilt; pushes <env>-<unit>:<sha> and :latest to OCIR.
+# pdf-render (deploy/pdf-render: WeasyPrint, Python) is no cargo binary: its image is built from
+# its own Dockerfile and its tests run in it before anything is pushed; a push that changes only
+# it compiles nothing.
 #
 # deploy (self-hosted, the runner the Java workflows use): one SSH per unit running
 # `keepup-rust.sh --env <env> deploy <unit> <image>` on the host, gateway-rust last, stopping at
@@ -34,7 +37,7 @@ on:
         type: string
         default: release
       units:
-        description: Space-separated units to build and deploy; empty builds and deploys the units the push changed (all 16 when it cannot tell)
+        description: Space-separated units to build and deploy; empty builds and deploys the units the push changed (all 17 when it cannot tell)
         required: false
         type: string
         default: ''
@@ -62,15 +65,19 @@ env:
   OCIR_NAMESPACE: ocir.us-ashburn-1.oci.oraclecloud.com/idfmutpuhiky
   RUST_IMAGE: rust:1.94-bookworm
   # Every unit, in deploy order: Lighthouse first (every other unit reads its configuration from
-  # it), then security (every other unit calls it), gateway-rust last.
+  # it), then security (every other unit calls it), pdf-render before core (which calls it),
+  # gateway-rust last.
   UNITS: >-
     lighthouse
     security-auth security-internal security-admin
+    pdf-render
     core-editor core-exec core-events core-scheduler
     ui-editor ui-engine ui-shell
     files-manage files-serve
     multi notification
     gateway-rust
+  # The units that are no cargo binary: each image is built from deploy/<unit>/Dockerfile.
+  IMAGE_UNITS: pdf-render
   # The workspace packages, whose build output is left out of the cache (it changes every run).
   WORKSPACE_PACKAGES: platform gateway files overridable ui core appdata connections multi security notification lighthouse lighthouse-client
 
@@ -115,12 +122,18 @@ jobs:
           fi
           read -ra picked <<< "$selected"
           selected="${picked[*]}"
+          # The ones cargo compiles: every selected unit but the IMAGE_UNITS.
+          cargo_units=""
+          for unit in $selected; do case " $IMAGE_UNITS " in *" $unit "*) ;; *) cargo_units="$cargo_units $unit" ;; esac; done
+          read -ra picked <<< "$cargo_units"
+          cargo_units="${picked[*]}"
           echo "units=$selected" >> "$GITHUB_OUTPUT"
-          echo "Units to build and deploy: ${selected:-none}"
+          echo "cargo_units=$cargo_units" >> "$GITHUB_OUTPUT"
+          echo "Units to build and deploy: ${selected:-none} (compiled by cargo: ${cargo_units:-none})"
 
       - name: Restore the cargo cache
         id: cache
-        if: steps.units.outputs.units != ''
+        if: steps.units.outputs.cargo_units != ''
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -135,15 +148,15 @@ jobs:
       # A cold build needs more room than the runner leaves free; with a cache restored there is
       # enough, and this takes a minute and a half.
       - name: Free disk space
-        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-matched-key == ''
+        if: steps.units.outputs.cargo_units != '' && steps.cache.outputs.cache-matched-key == ''
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
       - name: Compile the binaries in one cargo run
-        if: steps.units.outputs.units != ''
+        if: steps.units.outputs.cargo_units != ''
         env:
-          SELECTED: ${{ steps.units.outputs.units }}
+          SELECTED: ${{ steps.units.outputs.cargo_units }}
           PROFILE: ${{ inputs.profile }}
         run: |
           mkdir -p .ci/cargo/registry .ci/cargo/git target
@@ -161,9 +174,9 @@ jobs:
             cargo build --profile "$PROFILE" --locked "${bins[@]}"
 
       - name: Stage each binary as its own image context
-        if: steps.units.outputs.units != ''
+        if: steps.units.outputs.cargo_units != ''
         env:
-          SELECTED: ${{ steps.units.outputs.units }}
+          SELECTED: ${{ steps.units.outputs.cargo_units }}
           PROFILE: ${{ inputs.profile }}
         run: |
           for unit in $SELECTED; do
@@ -173,7 +186,7 @@ jobs:
           ls -l dist/*/app
 
       - name: Trim the cache to the dependencies
-        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-hit != 'true'
+        if: steps.units.outputs.cargo_units != '' && steps.cache.outputs.cache-hit != 'true'
         env:
           PROFILE: ${{ inputs.profile }}
         run: |
@@ -191,7 +204,7 @@ jobs:
           du -sh target .ci/cargo || true
 
       - name: Save the cargo cache
-        if: steps.units.outputs.units != '' && steps.cache.outputs.cache-hit != 'true'
+        if: steps.units.outputs.cargo_units != '' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -210,12 +223,26 @@ jobs:
         run: |
           for unit in $SELECTED; do
             repo="$OCIR_NAMESPACE/$ENV_NAME-$unit"
-            docker build -f deploy/Dockerfile.prebuilt \
+            # A cargo binary staged in dist/<unit>; an IMAGE_UNITS one from its own directory.
+            case " $IMAGE_UNITS " in
+              *" $unit "*) dockerfile="deploy/$unit/Dockerfile"; context="deploy/$unit" ;;
+              *) dockerfile=deploy/Dockerfile.prebuilt; context="dist/$unit" ;;
+            esac
+            docker build -f "$dockerfile" \
               --label "org.opencontainers.image.revision=$TAG" \
               --label "org.opencontainers.image.title=$unit" \
               -t "$repo:$TAG" -t "$repo:latest" \
-              "dist/$unit"
+              "$context"
           done
+
+      # pdf-render's own tests (its URL policy and real WeasyPrint renders with the image's fonts),
+      # in the image just built: a failure stops the run before anything is pushed.
+      - name: Test the pdf-render image
+        if: contains(format(' {0} ', steps.units.outputs.units), ' pdf-render ')
+        env:
+          ENV_NAME: ${{ inputs.environment }}
+          TAG: ${{ github.sha }}
+        run: docker run --rm --entrypoint python "$OCIR_NAMESPACE/$ENV_NAME-pdf-render:$TAG" -m unittest -v test_app
 
       - name: Log in to OCIR
         if: steps.units.outputs.units != ''
