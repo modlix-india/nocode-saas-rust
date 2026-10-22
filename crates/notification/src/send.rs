@@ -5,22 +5,30 @@
 //! 2. The channels: email when the connection names a MAIL connection and the notification has
 //!    an `email` template; in-app when the connection allows it and there is an `inapp`
 //!    template. Neither: nothing is sent.
-//! 3. The recipients from security's real user directory (never the draft surface).
+//! 3. The recipients from security's real user directory (never the draft surface), only those
+//!    holding `filterAuthorization` when the message names one (Rust only).
 //! 4. Email to each recipient, then in-app to all of them.
 //!
 //! A missing definition or no recipients ends the run quietly (logged). Anything that fails
 //! ends it with an error, which the listener logs; the message is acked either way. User
 //! preferences play no part: Java reads none when sending.
+//!
+//! A data notification (`kind: DATA`, Rust only) skips steps 1, 2 and 4: once it is found not
+//! expired, the recipients come from the same security call, and one frame, `event:<eventName>` with
+//! `{"event","data","id","sentAt"}`, goes to their open streams. Nothing is stored, and it is
+//! never retried: a user who is not online misses it.
 
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::calls::{CoreClient, DefinitionRead, DirectoryClient};
 use crate::email::{EmailSink, EMAIL_TEMPLATE_NAME};
 use crate::inapp::{InAppSink, INAPP_TEMPLATE_NAME};
 use crate::model::{CoreNotification, NotificationConnection, NotificationUser, QueueMessage, UsersListRequest};
+use crate::push::Push;
+use crate::sse::{event_frame, key};
 
 pub const USER_ID: &str = "User Id";
 pub const CLIENT_ID: &str = "Client Id";
@@ -36,6 +44,10 @@ pub enum Outcome {
     /// Mails attempted (each `false` or `true` as the email service answered), and whether the
     /// in-app channel ran.
     Sent { emails: usize, in_app: bool },
+    /// A data notification handed to the open streams of this many recipients.
+    Pushed { users: usize },
+    /// A data notification that arrived after its `expiresAt`: dropped.
+    Expired,
 }
 
 pub struct SendService {
@@ -43,10 +55,29 @@ pub struct SendService {
     pub directory: DirectoryClient,
     pub email: Arc<dyn EmailSink>,
     pub in_app: Arc<dyn InAppSink>,
+    /// Where data notifications go.
+    pub push: Arc<Push>,
+}
+
+/// Now, in epoch milliseconds.
+fn now_millis() -> i128 {
+    i128::from(chrono::Utc::now().timestamp_millis())
+}
+
+/// A data notification's frame: `event:<eventName>` with `{"event","data","id","sentAt"}`.
+pub fn data_frame(event_name: &str, data: &Value, id: &str, sent_at: i128) -> bytes::Bytes {
+    let body = json!({"event": event_name, "data": data, "id": id, "sentAt": sent_at as i64});
+    event_frame(event_name, &body.to_string(), id, 5000)
 }
 
 impl SendService {
     pub async fn send(&self, qob: &QueueMessage) -> Result<Outcome> {
+        if qob.is_data() {
+            return self.send_data(qob, now_millis()).await;
+        }
+        if let Some(kind) = &qob.kind {
+            return Err(anyhow!("Unknown notification kind: {kind}"));
+        }
         // Definition lookups follow the surface the notification was raised on; recipient
         // resolution below deliberately does not.
         let draft = qob.draft.then_some("true");
@@ -83,31 +114,7 @@ impl SendService {
             return Ok(Outcome::NoChannel);
         }
 
-        let target_type = qob
-            .target_type
-            .as_deref()
-            .ok_or_else(|| anyhow!("Cannot invoke \"String.equals(Object)\" because the target type is null"))?;
-        let target_long = || {
-            qob.target_id
-                .map(|t| t as i64)
-                .ok_or_else(|| anyhow!("Cannot invoke \"java.math.BigInteger.longValue()\" because the target id is null"))
-        };
-        let mut request = UsersListRequest { app_code: qob.app_code.clone(), ..Default::default() };
-        match target_type {
-            USER_ID => request.user_ids = Some(vec![target_long()?]),
-            CLIENT_ID => request.client_id = Some(target_long()?),
-            CLIENT_CODE => request.client_code = qob.target_code.clone(),
-            _ => {}
-        }
-        let users = self
-            .directory
-            .users_for_notification(&request, qob.x_debug.as_deref())
-            .await?
-            .ok_or_else(|| anyhow!("Cannot invoke \"java.util.List.isEmpty()\" because \"users\" is null"))?;
-        let users: Vec<NotificationUser> = match users {
-            Value::Array(a) => a.iter().map(NotificationUser::from_json).collect::<Result<_, _>>().map_err(|e| anyhow!(e.0))?,
-            _ => return Err(anyhow!("Error while extracting response for type [java.util.List<NotificationUser>]")),
-        };
+        let users = self.recipients(qob).await?;
         if users.is_empty() {
             tracing::error!("Users not found: {}", qob.describe());
             return Ok(Outcome::NoUsers);
@@ -130,5 +137,67 @@ impl SendService {
             .send_in_app(&users, &notification, qob.app_code.as_deref(), qob.notification_category.as_deref(), payload)
             .await?;
         Ok(Outcome::Sent { emails, in_app: true })
+    }
+
+    /// The recipients from security's user directory, as Java's `UsersListRequest` per target
+    /// type asks for them, narrowed to the users holding the message's `filterAuthorization`
+    /// when it has one (Rust only: Java's stored notifications ignored it, DIFFERENCES N15).
+    async fn recipients(&self, qob: &QueueMessage) -> Result<Vec<NotificationUser>> {
+        let target_type = qob
+            .target_type
+            .as_deref()
+            .ok_or_else(|| anyhow!("Cannot invoke \"String.equals(Object)\" because the target type is null"))?;
+        let target_long = || {
+            qob.target_id
+                .map(|t| t as i64)
+                .ok_or_else(|| anyhow!("Cannot invoke \"java.math.BigInteger.longValue()\" because the target id is null"))
+        };
+        let mut request = UsersListRequest {
+            app_code: qob.app_code.clone(),
+            filter_authorization: qob.filter_authorization.clone(),
+            ..Default::default()
+        };
+        match target_type {
+            USER_ID => request.user_ids = Some(vec![target_long()?]),
+            CLIENT_ID => request.client_id = Some(target_long()?),
+            CLIENT_CODE => request.client_code = qob.target_code.clone(),
+            _ => {}
+        }
+        let users = self
+            .directory
+            .users_for_notification(&request, qob.x_debug.as_deref())
+            .await?
+            .ok_or_else(|| anyhow!("Cannot invoke \"java.util.List.isEmpty()\" because \"users\" is null"))?;
+        match users {
+            Value::Array(a) => a.iter().map(NotificationUser::from_json).collect::<Result<_, _>>().map_err(|e| anyhow!(e.0)),
+            _ => Err(anyhow!("Error while extracting response for type [java.util.List<NotificationUser>]")),
+        }
+    }
+
+    /// A data notification at `now` (epoch milliseconds): no connection, definition, template
+    /// or row; the recipients' open streams only.
+    pub async fn send_data(&self, qob: &QueueMessage, now: i128) -> Result<Outcome> {
+        if qob.expires_at.is_some_and(|e| e < now) {
+            tracing::debug!("Data notification expired before delivery: {}", qob.describe());
+            return Ok(Outcome::Expired);
+        }
+        let event = qob.event_name.as_deref().filter(|e| !e.is_empty()).ok_or_else(|| anyhow!("A data notification without an event name"))?;
+        let app = qob.app_code.as_deref().filter(|a| !a.is_empty()).ok_or_else(|| anyhow!("A data notification without an app code"))?;
+        let users = self.recipients(qob).await?;
+        let mut keys: Vec<String> = Vec::with_capacity(users.len());
+        for id in users.iter().filter_map(|u| u.id) {
+            let k = key(id, app);
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+        if keys.is_empty() {
+            tracing::debug!("Data notification has no recipients: {}", qob.describe());
+            return Ok(Outcome::NoUsers);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let frame = data_frame(event, qob.data.as_ref().unwrap_or(&Value::Null), &id, now);
+        self.push.deliver(&keys, &frame).await;
+        Ok(Outcome::Pushed { users: keys.len() })
     }
 }

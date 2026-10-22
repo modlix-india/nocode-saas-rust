@@ -18,8 +18,7 @@ use kirun::model::FunctionOutput;
 use kirun::{Map, Value};
 use overridable::{JMap, JValue};
 
-use super::message::gson_tree;
-use super::support::{empty_result, event_output, require_context_key, Java, JavaFunction};
+use super::support::{empty_result, event_output, gson_tree, require_context_key, Java, JavaFunction};
 use super::{arg_string, output};
 use crate::context;
 use crate::error::CoreError;

@@ -247,7 +247,19 @@ pub struct NotificationMessage {
     pub x_debug: Option<String>,
     pub draft: bool,
     pub payload: Option<Map<String, Value>>,
+    /// `DATA` for a data notification (Rust only): pushed to the open streams, never stored.
+    /// Absent for a normal notification.
+    pub kind: Option<String>,
+    /// A data notification's SSE event name.
+    pub event_name: Option<String>,
+    /// A data notification's data, any JSON, sent as given.
+    pub data: Option<Value>,
+    /// When a data notification stops being worth delivering, in epoch milliseconds.
+    pub expires_at: Option<i64>,
 }
+
+/// [`NotificationMessage::kind`] of a data notification.
+pub const KIND_DATA: &str = "DATA";
 
 impl Default for NotificationMessage {
     fn default() -> Self {
@@ -267,6 +279,10 @@ impl Default for NotificationMessage {
             x_debug: None,
             draft: false,
             payload: None,
+            kind: None,
+            event_name: None,
+            data: None,
+            expires_at: None,
         }
     }
 }
@@ -289,6 +305,13 @@ impl NotificationMessage {
         m.insert("draft".into(), Value::Bool(self.draft));
         let payload = self.payload.clone().map(|d| java::hash_map_order_deep(Value::Object(d))).unwrap_or(Value::Null);
         put_non_empty(&mut m, "payload", payload);
+        if let Some(kind) = &self.kind {
+            // A data notification's own properties; `data` goes as given, null included.
+            m.insert("kind".into(), Value::String(kind.clone()));
+            put_non_empty(&mut m, "eventName", opt_str(&self.event_name));
+            m.insert("data".into(), self.data.clone().unwrap_or(Value::Null));
+            put_non_empty(&mut m, "expiresAt", self.expires_at.map(Value::from).unwrap_or(Value::Null));
+        }
         put_non_empty(&mut m, "xdebug", opt_str(&self.x_debug));
         json::jackson_pretty(&Value::Object(m))
     }

@@ -86,9 +86,25 @@ pub struct QueueMessage {
     pub x_debug: Option<String>,
     pub draft: bool,
     pub payload: Option<Map<String, Value>>,
+    /// `DATA` for a data notification (Rust only): pushed to open streams, never stored.
+    pub kind: Option<String>,
+    /// A data notification's SSE event name.
+    pub event_name: Option<String>,
+    /// A data notification's data, any JSON (`None` when absent or null).
+    pub data: Option<Value>,
+    /// When a data notification stops being worth delivering, in epoch milliseconds.
+    pub expires_at: Option<i128>,
 }
 
+/// [`QueueMessage::kind`] of a data notification.
+pub const KIND_DATA: &str = "DATA";
+
 impl QueueMessage {
+    /// A data notification rather than a stored one.
+    pub fn is_data(&self) -> bool {
+        self.kind.as_deref() == Some(KIND_DATA)
+    }
+
     /// `Jackson2JsonMessageConverter` into `NotificationQueObject` with the services'
     /// `ObjectMapper` (unknown properties ignored). A body that is not a JSON object, or a
     /// property Jackson cannot bind, is a conversion error, which Spring rejects for good.
@@ -118,15 +134,29 @@ impl QueueMessage {
             x_debug: string_field(&m, "xdebug")?,
             draft: boolean_field(&m, "draft")?,
             payload,
+            kind: string_field(&m, "kind")?,
+            event_name: string_field(&m, "eventName")?,
+            data: m.get("data").filter(|d| !d.is_null()).cloned(),
+            expires_at: big_integer_field(&m, "expiresAt")?,
         })
     }
 
-    /// Lombok's `toString()`, for the log lines Java writes.
+    /// Lombok's `toString()`, for the log lines Java writes; a data notification adds its own
+    /// properties, with the data's size rather than the data.
     pub fn describe(&self) -> String {
         let s = |v: &Option<String>| v.clone().unwrap_or_else(|| "null".into());
         let n = |v: &Option<i128>| v.map(|x| x.to_string()).unwrap_or_else(|| "null".into());
+        let data = match &self.kind {
+            None => String::new(),
+            Some(kind) => format!(
+                ", kind={kind}, eventName={}, expiresAt={}, data={} bytes",
+                s(&self.event_name),
+                n(&self.expires_at),
+                self.data.as_ref().map(|d| d.to_string().len()).unwrap_or(0)
+            ),
+        };
         format!(
-            "NotificationQueObject(id={}, appCode={}, clientCode={}, urlClientCode={}, triggeredUserId={}, targetId={}, targetType={}, targetCode={}, filterAuthorization={}, notificationName={}, notificationCategory={}, connectionName={}, xDebug={}, draft={}, payload={})",
+            "NotificationQueObject(id={}, appCode={}, clientCode={}, urlClientCode={}, triggeredUserId={}, targetId={}, targetType={}, targetCode={}, filterAuthorization={}, notificationName={}, notificationCategory={}, connectionName={}, xDebug={}, draft={}, payload={}{data})",
             s(&self.id),
             s(&self.app_code),
             s(&self.client_code),
@@ -310,6 +340,9 @@ pub struct UsersListRequest {
     pub client_code: Option<String>,
     pub client_id: Option<i64>,
     pub app_code: Option<String>,
+    /// Only the users holding this authority expression (Rust only; sent for data
+    /// notifications).
+    pub filter_authorization: Option<String>,
 }
 
 impl UsersListRequest {
@@ -326,6 +359,9 @@ impl UsersListRequest {
         }
         if let Some(a) = self.app_code.as_ref().filter(|a| !a.is_empty()) {
             m.insert("appCode".into(), Value::from(a.clone()));
+        }
+        if let Some(f) = self.filter_authorization.as_ref().filter(|f| !f.trim().is_empty()) {
+            m.insert("filterAuthorization".into(), Value::from(f.clone()));
         }
         Value::Object(m)
     }
@@ -361,6 +397,26 @@ mod tests {
         assert_eq!(q.x_debug.as_deref(), Some("dbg-1"));
         assert_eq!(q.payload.as_ref().unwrap().keys().collect::<Vec<_>>(), ["b", "a"], "payload keeps its order");
         assert!(q.describe().contains("targetType=User Id") && q.describe().contains("xDebug=dbg-1"));
+    }
+
+    #[test]
+    fn reads_a_data_notification() {
+        let body = br#"{"id":"1","appCode":"leadzumptwo","targetType":"Client Id","targetId":3,"filterAuthorization":"Authorities.Calls",
+            "draft":false,"kind":"DATA","eventName":"incomingCall","data":{"from":"+91","n":[1]},"expiresAt":1792634021000}"#;
+        let q = QueueMessage::parse(body).unwrap();
+        assert!(q.is_data());
+        assert_eq!(q.event_name.as_deref(), Some("incomingCall"));
+        assert_eq!(q.data, Some(json!({"from": "+91", "n": [1]})));
+        assert_eq!(q.expires_at, Some(1792634021000));
+        let d = q.describe();
+        assert!(d.ends_with(", kind=DATA, eventName=incomingCall, expiresAt=1792634021000, data=22 bytes)"), "{d}");
+        let plain = QueueMessage::parse(br#"{"data":null,"kind":null}"#).unwrap();
+        assert!(!plain.is_data() && plain.data.is_none());
+        assert!(!plain.describe().contains("kind="));
+        assert!(QueueMessage::parse(br#"{"kind":"data"}"#).map(|q| !q.is_data()).unwrap(), "the kind is exact");
+        assert!(QueueMessage::parse(br#"{"expiresAt":"soon"}"#).is_err());
+        assert!(QueueMessage::parse(br#"{"eventName":{"a":1}}"#).is_err());
+        assert!(QueueMessage { kind: Some("DATA".into()), ..Default::default() }.describe().contains("data=0 bytes"));
     }
 
     #[test]
@@ -453,5 +509,9 @@ mod tests {
         assert_eq!(r.to_json(), json!({"userIds": [142], "appCode": "app"}));
         let r = UsersListRequest { client_code: Some("C".into()), client_id: Some(4), ..Default::default() };
         assert_eq!(r.to_json(), json!({"clientCode": "C", "clientId": 4}));
+        let r = UsersListRequest { client_id: Some(4), filter_authorization: Some("Authorities.Calls".into()), ..Default::default() };
+        assert_eq!(r.to_json(), json!({"clientId": 4, "filterAuthorization": "Authorities.Calls"}));
+        let r = UsersListRequest { client_id: Some(4), filter_authorization: Some(" ".into()), ..Default::default() };
+        assert_eq!(r.to_json(), json!({"clientId": 4}));
     }
 }

@@ -5,7 +5,7 @@
 //! Every request first asks security who the caller is, as the Java `JWTTokenFilter` does for
 //! every path, so a refused token is refused here too before anything else runs.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ use axum::routing::{delete, get, post, MethodFilter, MethodRouter};
 use axum::Router;
 use overridable::json::{to_jackson_pretty, JValue};
 use overridable::pojo::{map_field, str_field};
-use overridable::JMap;
+use overridable::{JMap, Resolved};
 use percent_encoding::percent_decode_str;
 use platform::cache::LocalCaches;
 use platform::error::AppError;
@@ -33,6 +33,7 @@ use crate::shell::gson::{self, G};
 use crate::shell::index::{index_html, IndexPage, CACHE_NAME_INDEX};
 use crate::shell::javautil::{absolute_http_uri, client_facing_host, decide_redirect_without_lookup, js_string, md5_unique_id};
 use crate::shell::uripath::{self, answer, first_match, get_params, query_string, RouteAnswer, RouteRequest, UriPathDoc};
+use crate::shell::{ipfilter, webhook};
 use crate::state::{AppState, Caller};
 
 /// A file served from `ui.jsURL`, as `JSService` caches it.
@@ -278,14 +279,19 @@ fn gateway_headers(h: &HeaderMap) -> Result<Gateway<'_>, Fail> {
 async fn universal_get(st: &ShellState, req: Request) -> R {
     let (parts, _) = req.into_parts();
     let h = &parts.headers;
-    let caller = caller(st, h).await?;
+    let api = parts.uri.path().contains("/api/");
+    let (caller, refused) = route_caller(st, h, api).await?;
     let g = gateway_headers(h)?;
     let etag = header(h, "if-none-match");
-    if parts.uri.path().contains("/api/") {
-        let route_cc = if caller.authenticated() { caller.ca.client_code().to_string() } else { g.client.to_string() };
+    if api {
         let rr = route_request(&parts.method, &parts.uri, h);
-        if let Some(resp) = run_route(st, &caller, &rr, h, None, g.app, &route_cc, &g).await? {
-            return Ok(resp);
+        let route_cc = route_client(&caller, &g);
+        let found = admit(find_route(st, &caller, &rr, g.app, &route_cc).await?, refused)?;
+        if let Some(doc) = found {
+            let input = RouteInput { body: None, raw: &[], peer: peer(&parts.extensions) };
+            if let Some(resp) = run_route(st, &caller, &rr, h, &doc, input, g.app, &route_cc, &g).await? {
+                return Ok(resp);
+            }
         }
     }
     index_page(st, &caller, g.app, g.client, etag).await
@@ -294,29 +300,65 @@ async fn universal_get(st: &ShellState, req: Request) -> R {
 async fn universal_body(st: &ShellState, req: Request) -> R {
     let (parts, body) = req.into_parts();
     let h = &parts.headers;
-    let caller = caller(st, h).await?;
+    let (caller, refused) = route_caller(st, h, true).await?;
     let g = gateway_headers(h)?;
-    let content_type = header(h, "content-type").unwrap_or("").to_ascii_lowercase();
-    if content_type.split(';').next().map(str::trim) == Some("application/x-www-form-urlencoded") {
-        return Err(unknown(StatusCode::UNSUPPORTED_MEDIA_TYPE, "415 UNSUPPORTED_MEDIA_TYPE"));
-    }
-    let bytes = to_bytes(body, 64 * 1024 * 1024)
+    let bytes = to_bytes(body, webhook::BODY_LIMIT)
         .await
         .map_err(|e| unknown(StatusCode::BAD_REQUEST, &format!("400 BAD_REQUEST \"{e}\"")))?;
-    if bytes.is_empty() {
-        return Err(unknown(StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"No request body\""));
-    }
-    let text = String::from_utf8_lossy(&bytes);
-    let json = if text.trim().is_empty() {
-        G::Obj(Vec::new())
-    } else {
-        gson::parse_object(&text).map_err(|m| unknown(StatusCode::INTERNAL_SERVER_ERROR, &m))?
-    };
-    let route_cc = if caller.authenticated() { caller.ca.client_code().to_string() } else { g.client.to_string() };
+    let route_cc = route_client(&caller, &g);
     let rr = route_request(&parts.method, &parts.uri, h);
-    match run_route(st, &caller, &rr, h, Some(&json), g.app, &route_cc, &g).await? {
+    let found = admit(find_route(st, &caller, &rr, g.app, &route_cc).await?, refused)?;
+    let content_type = header(h, "content-type").unwrap_or("");
+    let json = if found.as_deref().is_some_and(|d| webhook::is_webhook(&d.entity)) {
+        // A provider's body that does not read still reaches the function, as rawBody.
+        webhook::parse_body(content_type, &bytes).await.unwrap_or_else(|_| G::Obj(Vec::new()))
+    } else {
+        if bytes.is_empty() {
+            return Err(unknown(StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"No request body\""));
+        }
+        webhook::parse_body(content_type, &bytes).await.map_err(|(status, m)| unknown(status, &m))?
+    };
+    let Some(doc) = found else { return Ok(StatusCode::BAD_REQUEST.into_response()) };
+    let input = RouteInput { body: Some(&json), raw: &bytes, peer: peer(&parts.extensions) };
+    match run_route(st, &caller, &rr, h, &doc, input, g.app, &route_cc, &g).await? {
         Some(resp) => Ok(resp),
         None => Ok(StatusCode::BAD_REQUEST.into_response()),
+    }
+}
+
+/// The client whose routes the request looks up: a signed-in caller's own, else the URL's.
+fn route_client(caller: &Caller, g: &Gateway<'_>) -> String {
+    if caller.authenticated() {
+        caller.ca.client_code().to_string()
+    } else {
+        g.client.to_string()
+    }
+}
+
+/// The caller, and the refusal of a credential security turned down: a request that may reach a
+/// route is then looked at as an anonymous one, since a webhook provider may send an
+/// `Authorization` of its own (its function checks it); any other route still answers with the
+/// refusal ([`admit`]).
+async fn route_caller(st: &ShellState, h: &HeaderMap, routes: bool) -> Result<(Caller, Option<Fail>), Fail> {
+    match st.inner.ui.caller(h).await {
+        Ok(c) => Ok((c, None)),
+        Err(e) if routes && h.contains_key(header::AUTHORIZATION) => {
+            let mut anonymous = h.clone();
+            anonymous.remove(header::AUTHORIZATION);
+            match st.inner.ui.caller(&anonymous).await {
+                Ok(c) => Ok((c, Some(e.into()))),
+                Err(_) => Err(e.into()),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// A route found for a caller whose credential was refused goes on only when it is a webhook.
+fn admit(found: Option<Arc<Resolved>>, refused: Option<Fail>) -> Result<Option<Arc<Resolved>>, Fail> {
+    match refused {
+        Some(f) if !found.as_deref().is_some_and(|d| webhook::is_webhook(&d.entity)) => Err(f),
+        _ => Ok(found),
     }
 }
 
@@ -384,18 +426,10 @@ async fn patterns(st: &ShellState, app: &str, client: &str) -> Result<Arc<Vec<St
     Ok(v.unwrap_or_default())
 }
 
-/// `URIPathService.getResponse`: `None` when no route answers (a GET then serves the page).
-#[allow(clippy::too_many_arguments)]
-async fn run_route(
-    st: &ShellState,
-    caller: &Caller,
-    req: &RouteRequest,
-    h: &HeaderMap,
-    body: Option<&G>,
-    app: &str,
-    client: &str,
-    g: &Gateway<'_>,
-) -> Result<Option<Response>, Fail> {
+/// The route the request names: the first pattern, in the client's inheritance order, that
+/// matches the path, read for the client (a client with no copy of its own is served the one it
+/// inherits).
+async fn find_route(st: &ShellState, caller: &Caller, req: &RouteRequest, app: &str, client: &str) -> Result<Option<Arc<Resolved>>, Fail> {
     let order = st.inner.ui.store().inheritance_order(app, client, client).await.map_err(relay)?;
     let mut matched = None;
     for cc in order.iter() {
@@ -406,14 +440,46 @@ async fn run_route(
         }
     }
     let Some(name) = matched else { return Ok(None) };
-    let Some(doc) = Engine::new(&st.inner.ui, caller).read_def(&UriPathDoc, &name, app, client).await? else {
-        return Ok(None);
-    };
+    Ok(Engine::new(&st.inner.ui, caller).read_def(&UriPathDoc, &name, app, client).await?)
+}
+
+/// What a route gets of the request body: the parsed arguments and the bytes as they came; and
+/// the connection's peer, the caller's address of last resort (`ipfilter::caller_ip`).
+struct RouteInput<'a> {
+    body: Option<&'a G>,
+    raw: &'a [u8],
+    peer: Option<IpAddr>,
+}
+
+fn peer(ext: &axum::http::Extensions) -> Option<IpAddr> {
+    ext.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip())
+}
+
+/// `URIPathService.getResponse` on the route found: `None` when it answers nothing (a GET then
+/// serves the page).
+#[allow(clippy::too_many_arguments)]
+async fn run_route(
+    st: &ShellState,
+    caller: &Caller,
+    req: &RouteRequest,
+    h: &HeaderMap,
+    doc: &Resolved,
+    input: RouteInput<'_>,
+    app: &str,
+    client: &str,
+    g: &Gateway<'_>,
+) -> Result<Option<Response>, Fail> {
     let uri_path = &doc.entity;
-    uripath::access_check(uri_path, caller.authorities(), caller.authenticated())?;
+    let is_webhook = webhook::is_webhook(uri_path);
+    if !is_webhook {
+        uripath::access_check(uri_path, caller.authorities(), caller.authenticated())?;
+    }
     let Some(def) = map_field(uri_path, "pathDefinitions").and_then(|m| m.get(&req.method)).and_then(JValue::as_object) else {
         return Err(unknown(StatusCode::INTERNAL_SERVER_ERROR, "value"));
     };
+    // The definition's whitelist and blacklist (Rust only), for every kind of route.
+    let route_name = str_field(uri_path, "name").unwrap_or("");
+    ipfilter::check(def, route_name, &req.method, ipfilter::caller_ip(h, input.peer))?;
     match str_field(def, "uriType") {
         Some("KIRUN_FUNCTION") => {}
         Some(_) => return Ok(None),
@@ -429,15 +495,12 @@ async fn run_route(
     };
     let path_string = str_field(uri_path, "pathString");
     let fx_app = str_field(uri_path, "appCode").unwrap_or(app);
-    let (query, json) = if req.method == "GET" {
-        let q = query_string(&get_params(req, path_string, fx)).map_err(|m| unknown(StatusCode::INTERNAL_SERVER_ERROR, &m))?;
-        (Some(q), None)
-    } else if ["POST", "PUT", "PATCH", "DELETE"].contains(&req.method.as_str()) {
-        (None, Some(gson::to_string(&uripath::with_mapped_params(body, req, path_string, fx))))
-    } else {
+    let body_method = ["POST", "PUT", "PATCH", "DELETE"].contains(&req.method.as_str());
+    if req.method != "GET" && !body_method {
         return Ok(None);
-    };
-    let call = CoreCall {
+    }
+    let mut call = CoreCall {
+        route: CoreRoute::Execute,
         namespace: str_field(fx, "namespace").unwrap_or("null"),
         name: str_field(fx, "name").unwrap_or("null"),
         authorization: header(h, "authorization"),
@@ -448,8 +511,27 @@ async fn run_route(
         debug: header(h, "x-debug"),
         draft: caller.draft,
     };
-    let text = execute_function(st, &call, query.as_deref(), json).await?;
     let content_type = if req.method == "GET" { "text/plain;charset=UTF-8" } else { "application/json;charset=UTF-8" };
+    let text = if is_webhook {
+        // The URL's client, whoever calls: the function runs as that client's webhook user.
+        call.route = CoreRoute::Webhook;
+        call.authorization = None;
+        call.client_code = g.client;
+        let raw = webhook::raw_request(input.raw, h, &req.query);
+        let args = webhook::webhook_arguments(input.body, raw);
+        let json = gson::to_string(&uripath::with_mapped_params(Some(&args), req, path_string, fx));
+        let text = execute_function(st, &call, None, Some(json)).await?;
+        if let Some(resp) = webhook::reply(text.as_deref(), fx)? {
+            return Ok(Some(resp));
+        }
+        text
+    } else if req.method == "GET" {
+        let q = query_string(&get_params(req, path_string, fx)).map_err(|m| unknown(StatusCode::INTERNAL_SERVER_ERROR, &m))?;
+        execute_function(st, &call, Some(&q), None).await?
+    } else {
+        let json = gson::to_string(&uripath::with_mapped_params(input.body, req, path_string, fx));
+        execute_function(st, &call, None, Some(json)).await?
+    };
     match answer(text.as_deref(), fx) {
         Ok(None) => Ok(None),
         Ok(Some(RouteAnswer::Body(status, b))) => Ok(Some(uripath::text_response(status, b, content_type))),
@@ -459,7 +541,17 @@ async fn run_route(
     }
 }
 
+/// Which core route runs a route's function.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CoreRoute {
+    /// The open `execute` route, as the caller.
+    Execute,
+    /// The internal webhook route: as the client's webhook user.
+    Webhook,
+}
+
 struct CoreCall<'a> {
+    route: CoreRoute,
     namespace: &'a str,
     name: &'a str,
     authorization: Option<&'a str>,
@@ -484,10 +576,15 @@ fn path_segment(s: &str) -> String {
     out
 }
 
-/// `IFeignCoreService.executeWith`: the function's output text, `None` for an empty body.
+/// `IFeignCoreService.executeWith` (or the webhook route): the function's output text, `None`
+/// for an empty body.
 async fn execute_function(st: &ShellState, c: &CoreCall<'_>, query: Option<&str>, json: Option<String>) -> Result<Option<String>, Fail> {
     let base = st.inner.core.base().await.map_err(|e| unknown(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e:#}")))?;
-    let mut url = format!("{base}/api/core/function/execute/{}/{}", path_segment(c.namespace), path_segment(c.name));
+    let (route, feign) = match c.route {
+        CoreRoute::Execute => ("execute", "executeWith"),
+        CoreRoute::Webhook => ("internal/webhook", "webhook"),
+    };
+    let mut url = format!("{base}/api/core/function/{route}/{}/{}", path_segment(c.namespace), path_segment(c.name));
     if let Some(q) = query.filter(|q| !q.is_empty()) {
         url.push('?');
         url.push_str(q);
@@ -521,7 +618,7 @@ async fn execute_function(st: &ShellState, c: &CoreCall<'_>, query: Option<&str>
     let bytes = resp.bytes().await.map_err(|e| unknown(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e}")))?;
     if !status.is_success() {
         let detail = format!(
-            "[{} {}] during [{method}] to [{url}] [IFeignCoreService#executeWith]: [{}]",
+            "[{} {}] during [{method}] to [{url}] [IFeignCoreService#{feign}]: [{}]",
             status.as_u16(),
             status.canonical_reason().unwrap_or(""),
             String::from_utf8_lossy(&bytes)

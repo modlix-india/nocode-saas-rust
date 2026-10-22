@@ -24,6 +24,9 @@ overridable = { path = "../overridable" }
 
 anyhow.workspace = true
 async-trait.workspace = true
+base64 = "0.22"
+form_urlencoded = "1"
+multer = "3"
 rand.workspace = true
 ring = "0.17"
 rsa = { version = "0.9", features = ["sha2"] }

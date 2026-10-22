@@ -400,6 +400,12 @@ async fn user_routes() {
     let by_id = l.json("POST", "/users/internal/notification", &[], Some(json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142]}))).await;
     assert_eq!(by_id[0]["id"], 142);
     assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(json!({"clientId": 1}))).await, json!([]));
+    // filterAuthorization (Rust only): only the users holding it.
+    let all = |f: &str| json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142], "filterAuthorization": f});
+    let held = l.json("POST", "/users/internal/notification", &[], Some(all("Authorities.Logged_IN"))).await;
+    assert_eq!(held[0]["id"], 142);
+    assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(all("Authorities.RUSTTEST_None"))).await, json!([]));
+    assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(all(" "))).await[0]["id"], 142, "a blank filter is none");
     let proc = l.json("POST", "/users/internal/processor", &[], Some(json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142]}))).await;
     assert_eq!(proc[0]["id"], 142);
     assert!(proc[0]["profileIds"].as_array().is_some());

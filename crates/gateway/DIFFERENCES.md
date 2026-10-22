@@ -6,9 +6,10 @@ stripping).
 
 ## Same on purpose (reproduced, including quirks)
 
-- Path: the codes prefix before `/api/` is dropped and never read as codes; codes come from
-  the URL only for `/page/` and `/manifest/` paths (`/<appCode>/<clientCode>/page/...`).
-  A trailing `/` is removed.
+- Path: the codes prefix before `/api/` is dropped from the forwarded path; codes come from
+  the URL, unchecked, for `/page/` and `/manifest/` paths (`/<appCode>/<clientCode>/page/...`,
+  also `/<appCode>/<clientCode>/page/api/...`). A trailing `/` is removed. Codes in front of
+  `/api/` with no `/page/` before it are the one difference (below).
 - Host resolution: `getClientNAppCodeNType(scheme, host, port)`, with the port `-1` when the
   Host header has none, exactly as `URI.getPort()` reports it to the Java filter.
 - `appCode` / `clientCode` headers filled in only when the caller sent none (caller-overridable,
@@ -25,6 +26,23 @@ stripping).
   with `Cache-Control: no-cache, no-store, must-revalidate` and `X-Accel-Buffering: no`.
 
 ## Different on purpose
+
+- **URL codes in front of `/api/`** (Kiran, 2026-10-22; `path.rs` `split`, `resolve.rs`). Java
+  (since 2022) never read the codes in `/<appCode>/<clientCode>/api/...`: the host decided. Now
+  they count when they name a real app and client: the client owns the app or has access to it,
+  as security's `GET /api/security/applications/internal/hasReadAccess?appCode=&clientCode=`
+  answers (an unknown app or client is `false`). Otherwise the host decides exactly as before,
+  so a relative URL's junk prefix (`/x/y/api/ui/application`) still resolves by host. Codes that
+  can not be real (one segment, a blank segment, a character other than letters, digits, `_`
+  and `-`, more than 64) are not asked about. The answer is cached in the gateway under
+  security's own cache name and key (`appReadAccess`, `<appCode>:<clientCode>`, true and false
+  alike, for the `[redis]` TTL), so security's evictions when an app's access changes, or an
+  app is created or deleted, clear it here too; a failed lookup is not cached and resolves by
+  host. Draft token hosts keep Java's rule (only codes after a `/page/`). A caller's own
+  `clientCode` / `appCode` headers still win, and internal calls naming their codes still pass
+  straight through. This is what makes a tenant's webhook address
+  `https://<host>/<appCode>/<CLIENTCODE>/api/webhooks/<provider>` (ui DIFFERENCES.md item 39)
+  run for that tenant.
 
 - **Load balancing** is the gateway's own: round robin over instances that pass active health
   checks (every 5 s, configurable path), with an instance ejected on a connect failure. Spring

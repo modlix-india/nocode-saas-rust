@@ -111,6 +111,7 @@ fn users_list_body(bytes: &[u8]) -> AuthResult<UsersListRequest> {
         client_code: opt_text(v.get("clientCode"))?,
         client_id: opt_i64(v.get("clientId"))?,
         app_code: opt_text(v.get("appCode"))?,
+        filter_authorization: opt_text(v.get("filterAuthorization"))?.filter(|f| !f.trim().is_empty()),
     })
 }
 

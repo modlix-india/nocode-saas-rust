@@ -18,6 +18,7 @@ use notification::calls::DirectoryClient;
 use notification::dao::Dao;
 use notification::handlers::{router, AppState};
 use notification::inapp::{InAppService, InAppSink};
+use notification::push::Push;
 use notification::model::{CoreNotification, NotificationUser};
 use notification::preference::PreferenceService;
 use notification::sse::Hub;
@@ -45,7 +46,7 @@ async fn rig(pool: MySqlPool) -> Rig {
     let dao = Dao::new(pool.clone());
     let st = Arc::new(AppState {
         security: SecurityClient::new(Upstream::fixed(&[&base]), 0).unwrap(),
-        inapp: InAppService { dao: dao.clone(), hub: hub.clone() },
+        inapp: InAppService { dao: dao.clone(), push: Push::local(hub.clone()) },
         prefs: PreferenceService {
             dao: dao.clone(),
             directory: DirectoryClient::new(Upstream::fixed(&[&base]), Duration::from_secs(5)).unwrap(),
@@ -54,7 +55,7 @@ async fn rig(pool: MySqlPool) -> Rig {
         hub: hub.clone(),
         server_port: 8114,
     });
-    Rig { app: with_scope(router(st)), security, hub: hub.clone(), inapp: InAppService { dao, hub }, pool }
+    Rig { app: with_scope(router(st)), security, hub: hub.clone(), inapp: InAppService { dao, push: Push::local(hub) }, pool }
 }
 
 /// The routes with the message scope the service runs them in (`platform::app::Service`).
@@ -214,7 +215,7 @@ async fn the_security_gate_and_spring_answers() {
         // Security unreachable: a 500.
         let dead = Arc::new(AppState {
             security: SecurityClient::new(Upstream::fixed(&["http://127.0.0.1:1"]), 0).unwrap(),
-            inapp: InAppService { dao: Dao::new(r.pool.clone()), hub: r.hub.clone() },
+            inapp: InAppService { dao: Dao::new(r.pool.clone()), push: Push::local(r.hub.clone()) },
             prefs: PreferenceService {
                 dao: Dao::new(r.pool.clone()),
                 directory: DirectoryClient::new(Upstream::fixed(&["http://127.0.0.1:1"]), Duration::from_secs(1)).unwrap(),

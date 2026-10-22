@@ -79,8 +79,9 @@ is started once by `run_exec`.
    `username` (and `MODLIX__MQ__PASSWORD`), or one `MODLIX__MQ__URI`. The URI and password are
    never logged (`MqSection`'s `Debug` hides them). `events_exchange` / `events_routing_keys` and
    the notification pair default to Java's.
-2. **The message and files services**: `[message] upstream` and `[files] upstream` default to
-   `lighthouse:MESSAGE` and `lighthouse:FILES`.
+2. **The files service**: `[files] upstream` defaults to `lighthouse:FILES`. The message
+   service is retired and core no longer calls it (`[message]` is gone; a leftover section is
+   ignored).
 3. **The scheduler's one-off settings**: `[core.scheduler]` defaults to Java's
    `EventSchedulerSettings`.
 4. **The platform functions' services** (`CoreServices.Platform.*`, for core-events):

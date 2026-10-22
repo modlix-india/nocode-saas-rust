@@ -25,10 +25,12 @@ use crate::send::{Outcome, SendService};
 
 /// Deliveries taken off the notification queues.
 pub const CONSUMED: &str = "notification_consumed_total";
-/// Notifications sent, by `channel` (`email`: each mail attempted, `in_app`).
+/// Notifications sent, by `channel` (`email`: each mail attempted, `in_app`, `data`: each
+/// data notification pushed).
 pub const SENT: &str = "notification_sent_total";
 /// Deliveries that sent nothing, by `reason`: `unreadable`, `no_connection`, `no_notification`,
-/// `no_channel`, `no_users`, `error` (the send failed) or `panic`.
+/// `no_channel`, `no_users`, `expired` (a data notification too late), `error` (the send
+/// failed) or `panic`.
 pub const FAILED: &str = "notification_failed_total";
 
 /// The descriptions of the counters above, for `/metrics`.
@@ -36,6 +38,7 @@ pub fn describe_metrics() {
     metrics::describe_counter!(CONSUMED, metrics::Unit::Count, "Deliveries taken off the notification queues.");
     metrics::describe_counter!(SENT, metrics::Unit::Count, "Notifications sent, by channel (email: each mail attempted; in_app).");
     metrics::describe_counter!(FAILED, metrics::Unit::Count, "Deliveries that sent nothing, by reason.");
+    metrics::describe_counter!(crate::push::PUSHED, metrics::Unit::Count, "Frames handed to the open streams, by via (redis: every instance; local).");
 }
 
 fn failed(reason: &'static str) {
@@ -55,6 +58,8 @@ fn count(outcome: &Outcome) {
         Outcome::NoNotification => failed("no_notification"),
         Outcome::NoChannel => failed("no_channel"),
         Outcome::NoUsers => failed("no_users"),
+        Outcome::Pushed { .. } => metrics::counter!(SENT, "channel" => "data").increment(1),
+        Outcome::Expired => failed("expired"),
     }
 }
 
@@ -241,12 +246,15 @@ mod tests {
             count(&Outcome::NoNotification);
             count(&Outcome::NoChannel);
             count(&Outcome::NoUsers);
+            count(&Outcome::Pushed { users: 2 });
+            count(&Outcome::Expired);
             describe_metrics();
         });
         let n = |name: &str, labels: &[(&str, &str)]| platform::meter::sample(&text, name, labels);
         assert_eq!(n(SENT, &[("channel", "email")]), Some(2.0));
         assert_eq!(n(SENT, &[("channel", "in_app")]), None, "nothing went in-app");
-        for reason in ["no_notification", "no_channel", "no_users"] {
+        assert_eq!(n(SENT, &[("channel", "data")]), Some(1.0));
+        for reason in ["no_notification", "no_channel", "no_users", "expired"] {
             assert_eq!(n(FAILED, &[("reason", reason)]), Some(1.0), "{reason}");
         }
         assert!(text.contains(&format!("# HELP {FAILED}")));

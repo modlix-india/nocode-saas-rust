@@ -1,11 +1,14 @@
 //! `CoreServices.Crypto`: `Signer` and `SignatureValidator` (HMAC; the RSA branch of the Java
-//! code has no implementation and is not offered by the signature's `alg` enum).
+//! code has no implementation and is not offered by the signature's `alg` enum). HmacSHA1 is Rust
+//! only (some calling and SMS providers sign their webhooks with it; DIFFERENCES.md), and a
+//! signature is compared in constant time.
 
 use async_trait::async_trait;
 use hmac::{Hmac, Mac};
 use kirun::json::schema::Schema;
 use kirun::model::{Event, FunctionOutput, FunctionSignature, Parameter};
 use kirun::{Map, Value};
+use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 
 use super::{arg, arg_string, output, CoreFunction};
@@ -16,15 +19,17 @@ const NAMESPACE: &str = "CoreServices.Crypto";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HmacAlgo {
+    Hs1,
     Hs256,
     Hs384,
     Hs512,
 }
 
 impl HmacAlgo {
-    /// `SignatureAlgo.getByJcaName`, for the three the signature allows.
+    /// `SignatureAlgo.getByJcaName`, for the ones the signature allows.
     pub fn by_jca_name(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
+            "hmacsha1" => Some(Self::Hs1),
             "hmacsha256" => Some(Self::Hs256),
             "hmacsha384" => Some(Self::Hs384),
             "hmacsha512" => Some(Self::Hs512),
@@ -34,14 +39,17 @@ impl HmacAlgo {
 
     fn value(self) -> &'static str {
         match self {
+            Self::Hs1 => "HS1",
             Self::Hs256 => "HS256",
             Self::Hs384 => "HS384",
             Self::Hs512 => "HS512",
         }
     }
 
+    /// The digest's size: a shorter key is refused, as Java's `MacSigner` refuses one.
     fn min_key_bits(self) -> usize {
         match self {
+            Self::Hs1 => 160,
             Self::Hs256 => 256,
             Self::Hs384 => 384,
             Self::Hs512 => 512,
@@ -80,11 +88,22 @@ impl HmacAlgo {
             }
         }
         match self {
+            Self::Hs1 => run::<Hmac<Sha1>>(key, data),
             Self::Hs256 => run::<Hmac<Sha256>>(key, data),
             Self::Hs384 => run::<Hmac<Sha384>>(key, data),
             Self::Hs512 => run::<Hmac<Sha512>>(key, data),
         }
     }
+}
+
+/// Whether two signatures are the same, in time that does not depend on where they differ (a
+/// webhook's signature is checked against what anyone may send).
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let diff = a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    std::hint::black_box(diff) == 0
 }
 
 /// The charsets the signature offers, as `String.getBytes(charset)` encodes: an unmappable
@@ -216,6 +235,7 @@ fn data_bytes(data: &Value, charset: &str) -> Result<Vec<u8>, CoreError> {
 
 fn algorithms() -> Schema {
     Schema::of_string("alg").set_enums(vec![
+        Value::from("HmacSHA1"),
         Value::from("HmacSHA256"),
         Value::from("HmacSHA384"),
         Value::from("HmacSHA512"),
@@ -350,7 +370,7 @@ impl CoreFunction for SignatureValidator {
         }
         let given = c.encoder.decode(&signature)?;
         let signed = algo.sign(&c.key, &data_bytes(data, &c.charset)?);
-        Ok(output("isValid", Value::Bool(signed == given)))
+        Ok(output("isValid", Value::Bool(constant_time_eq(&signed, &given))))
     }
 }
 
@@ -383,6 +403,65 @@ mod tests {
             HmacAlgo::Hs256.check_key(b"short", true).unwrap_err().text(),
             "The signing key's size is 40 bits which is not secure enough for the HS256 algorithm."
         );
+    }
+
+    #[test]
+    fn hmac_sha1_and_the_constant_time_compare() {
+        // RFC 2202 test case 7's data with a 20-byte key (case 1's).
+        let key = [0x0bu8; 20];
+        assert_eq!(hex::encode(HmacAlgo::Hs1.sign(&key, b"Hi There")), "b617318655057264e28bc0b6fb378c8ef146be00");
+        assert_eq!(HmacAlgo::by_jca_name("HmacSHA1"), Some(HmacAlgo::Hs1));
+        assert!(HmacAlgo::Hs1.check_key(&key, false).is_ok());
+        assert_eq!(
+            HmacAlgo::Hs1.check_key(&key[..19], false).unwrap_err().text(),
+            "The verification key's size is 152 bits which is not secure enough for the HS1 algorithm."
+        );
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    fn args(pairs: &[(&str, Value)]) -> Map<Value> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    /// A provider's webhook: an HMAC-SHA256 over the exact body, hex, as Meta's
+    /// `X-Hub-Signature-256` carries it; and an HmacSHA1 one in base64.
+    #[tokio::test]
+    async fn a_webhook_signature_over_the_raw_body() {
+        let secret = "0123456789abcdef0123456789abcdef";
+        let raw = r#"{"object":"whatsapp_business_account",  "entry":[{"id":"1"}]}"#;
+        let expected = hex::encode(HmacAlgo::Hs256.sign(secret.as_bytes(), raw.as_bytes()));
+        let common = |alg: &str, enc: &str| {
+            vec![
+                ("alg", Value::from(alg)),
+                ("charset", Value::from("UTF-8")),
+                ("secretKey", Value::from(secret)),
+                ("data", Value::from(raw)),
+                ("signatureEncoder", Value::from(enc)),
+            ]
+        };
+        let mut signed = Signer::new().internal_execute(&args(&common("HmacSHA256", "Hex"))).await.unwrap();
+        assert_eq!(signed.next().unwrap().get_result()["result"], Value::from(expected.clone()));
+        let check = |sig: &str, alg: &str, enc: &str| {
+            let mut a = common(alg, enc);
+            a.push(("signature", Value::from(sig)));
+            args(&a)
+        };
+        let valid = |mut out: FunctionOutput| out.next().unwrap().get_result()["isValid"].clone();
+        let v = SignatureValidator::new();
+        assert_eq!(valid(v.internal_execute(&check(&expected, "HmacSHA256", "Hex")).await.unwrap()), Value::Bool(true));
+        let mut tampered = expected.clone();
+        tampered.replace_range(0..1, if expected.starts_with('0') { "1" } else { "0" });
+        assert_eq!(valid(v.internal_execute(&check(&tampered, "HmacSHA256", "Hex")).await.unwrap()), Value::Bool(false));
+        // One space more in the body is another signature.
+        let mut spaced = check(&expected, "HmacSHA256", "Hex");
+        spaced.insert("data".into(), Value::from(raw.replacen("  ", " ", 1)));
+        assert_eq!(valid(v.internal_execute(&spaced).await.unwrap()), Value::Bool(false));
+        let sha1 = StringEncoder::Base64.encode(&HmacAlgo::Hs1.sign(secret.as_bytes(), raw.as_bytes()));
+        assert_eq!(valid(v.internal_execute(&check(&sha1, "HmacSHA1", "base64")).await.unwrap()), Value::Bool(true));
+        assert!(Signer::new().signature().get_parameters()["alg"].get_schema().get_enums().unwrap().contains(&Value::from("HmacSHA1")));
     }
 
     #[test]

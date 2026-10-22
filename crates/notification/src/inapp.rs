@@ -10,8 +10,9 @@ use serde_json::{Map, Value};
 
 use crate::dao::{Dao, InAppFilter, InAppRow, NewInApp};
 use crate::model::{CoreNotification, NotificationUser};
+use crate::push::Push;
 use crate::spring::{page_json, Pageable};
-use crate::sse::{event_frame, key, Hub};
+use crate::sse::{event_frame, key};
 use crate::template::{language, processed_template};
 
 pub const INAPP_TEMPLATE_NAME: &str = "inapp";
@@ -80,7 +81,8 @@ fn not_blank(s: Option<&str>) -> Option<&str> {
 
 pub struct InAppService {
     pub dao: Dao,
-    pub hub: Arc<Hub>,
+    /// To the recipients' open streams, on every instance ([`Push`]).
+    pub push: Arc<Push>,
 }
 
 impl InAppService {
@@ -117,7 +119,8 @@ impl InAppService {
 #[async_trait]
 impl InAppSink for InAppService {
     /// `sendInApp`: renders the `inapp` template once, stores a row per recipient, then sends
-    /// each stored row to that recipient's open streams for the app.
+    /// each stored row to that recipient's open streams for the app, on whichever instance they
+    /// are open (Java reached only the consuming instance's).
     async fn send_in_app(
         &self,
         users: &[NotificationUser],
@@ -162,7 +165,7 @@ impl InAppSink for InAppService {
         for row in &stored {
             let k = key(row.user_id, app);
             let frame = event_frame("notification", &event_json(row), &uuid::Uuid::new_v4().to_string(), 5000);
-            self.hub.send(&k, &frame);
+            self.push.deliver(&[k], &frame).await;
         }
         Ok(())
     }

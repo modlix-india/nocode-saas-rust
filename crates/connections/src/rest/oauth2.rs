@@ -7,8 +7,10 @@ use chrono::{Duration as ChronoDuration, NaiveDateTime};
 use http::StatusCode;
 use serde_json::{Map, Value};
 
-use super::basic;
-use super::http::{retrieve_json, JsonTarget};
+use base64::Engine;
+
+use super::http::{retrieve_json_with, JsonTarget};
+use super::{basic, body};
 use super::spring_uri;
 use super::{RestRequest, RestResponse};
 use crate::connection::{self, Connection, ConnectionType, GRANT_AUTHORIZATION_CODE};
@@ -181,10 +183,83 @@ fn query_params(block: &Map<String, Value>) -> Vec<(String, String)> {
 /// A token endpoint stored in the connection: Java fetches it without the call-time guard;
 /// here it is guarded like every other outbound call (see DIFFERENCES.md).
 async fn fetch_token(svc: &Connections, method: &str, uri: &str, target: JsonTarget) -> ConnResult<Option<Value>> {
+    fetch_token_with(svc, method, uri, TokenRequest::default(), target).await
+}
+
+async fn fetch_token_with(svc: &Connections, method: &str, uri: &str, request: TokenRequest, target: JsonTarget) -> ConnResult<Option<Value>> {
     if svc.config.block_private_targets {
         outbound::guard_target(uri).await?;
     }
-    retrieve_json(&svc.http, method, uri, target).await
+    retrieve_json_with(&svc.http, method, uri, request.headers, request.body, target).await
+}
+
+/// The headers and body of a client-credentials token request (Rust only; Java sends neither).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TokenRequest {
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
+/// `tokenDetails.clientAuthentication: "basic"`: the client's id and secret in
+/// `Authorization: Basic` (RFC 6749 2.3.1, each form-encoded first). They are read from
+/// `tokenDetails` (`clientId`, `clientSecret`), then the connection details, then the
+/// `client_id` / `client_secret` query parameters where the stored connections keep them.
+fn basic_client_authentication(details: &Map<String, Value>, token_details: &Map<String, Value>) -> ConnResult<String> {
+    let query = token_details.get("queryParams").and_then(Value::as_object);
+    let find = |camel: &str, snake: &str| -> Option<String> {
+        [token_details.get(camel), details.get(camel), query.and_then(|q| q.get(snake))]
+            .into_iter()
+            .flatten()
+            .find(|v| !java::safe_is_blank(Some(v)))
+            .map(java::to_java_string)
+    };
+    let (Some(id), Some(secret)) = (find("clientId", "client_id"), find("clientSecret", "client_secret")) else {
+        return Err(ConnError::coded(
+            StatusCode::BAD_REQUEST,
+            "CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING",
+            "Basic client authentication needs clientId and clientSecret in the connection's tokenDetails",
+        ));
+    };
+    let pair = format!("{}:{}", spring_uri::url_encode_form(&id), spring_uri::url_encode_form(&secret));
+    Ok(format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(pair)))
+}
+
+/// What the client-credentials request carries besides its query parameters: an optional
+/// `tokenDetails.body` (an object, form-encoded unless `bodyType` is `json`) and optional Basic
+/// client authentication (`clientAuthentication: "basic"`).
+pub fn token_request(details: &Map<String, Value>, token_details: &Map<String, Value>) -> ConnResult<TokenRequest> {
+    let mut request = TokenRequest::default();
+    match token_details.get("body") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(b)) => {
+            let json_body = token_details.get("bodyType").and_then(Value::as_str).is_some_and(|t| t.eq_ignore_ascii_case("json"));
+            let payload = Value::Object(b.clone());
+            if json_body {
+                request.headers.push(("Content-Type".into(), "application/json".into()));
+                request.body = Some(serde_json::to_vec(&payload).unwrap_or_default());
+            } else {
+                request.headers.push(("Content-Type".into(), "application/x-www-form-urlencoded".into()));
+                request.body = Some(body::form_body(&payload));
+            }
+        }
+        Some(_) => {
+            return Err(ConnError::coded(
+                StatusCode::BAD_REQUEST,
+                "CORE.CONNECTION_TOKEN_BODY_INVALID",
+                "The connection's tokenDetails.body must be an object of the values to send",
+            ))
+        }
+    }
+    match token_details.get("clientAuthentication").and_then(Value::as_str) {
+        Some(a) if a.eq_ignore_ascii_case("basic") => {
+            request.headers.push(("Authorization".into(), basic_client_authentication(details, token_details)?));
+        }
+        _ => {}
+    }
+    if !request.headers.is_empty() {
+        request.headers.push(("Accept".into(), "application/json".into()));
+    }
+    Ok(request)
 }
 
 /// `refreshAccessToken`: revoke the access tokens, take the active refresh token, ask the
@@ -238,6 +313,8 @@ pub async fn refresh_access_token(
 
 /// `createClientCredentialsToken`: POST to `tokenDetails.url` with its query parameters and
 /// store the token the response names. The row carries the connection's client and app.
+/// The request may also carry a body and Basic client authentication ([`token_request`]); a
+/// connection with neither must have `queryParams`, as in Java.
 pub async fn create_client_credentials_token(svc: &Connections, caller: &Caller, conn: &Connection) -> ConnResult<Option<String>> {
     if !caller.present {
         return Ok(None);
@@ -245,11 +322,12 @@ pub async fn create_client_credentials_token(svc: &Connections, caller: &Caller,
     let details = conn.details().cloned().unwrap_or_default();
     let token_details = details.get("tokenDetails").and_then(Value::as_object).ok_or_else(|| npe("java.util.Map.get(Object)"))?;
     let url = token_details.get("url").and_then(Value::as_str).unwrap_or("");
-    if !token_details.get("queryParams").is_some_and(Value::is_object) {
+    let request = token_request(&details, token_details)?;
+    if request.headers.is_empty() && !token_details.get("queryParams").is_some_and(Value::is_object) {
         return Err(npe("java.util.Map.forEach(java.util.function.BiConsumer)"));
     }
     let uri = spring_uri::build_to_uri(url, &query_params(token_details))?;
-    let Some(response) = fetch_token(svc, "POST", &uri, JsonTarget::JsonNode).await? else { return Ok(None) };
+    let Some(response) = fetch_token_with(svc, "POST", &uri, request, JsonTarget::JsonNode).await? else { return Ok(None) };
     let response = response.as_object().cloned().unwrap_or_default();
 
     let as_text = |key_detail: &str| -> ConnResult<String> {

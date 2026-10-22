@@ -19,7 +19,7 @@ use connections::context::Caller;
 use connections::email::{EmailTemplate, TemplateStore};
 use connections::error::{ConnError, ConnResult};
 use connections::mq::{EventMessage, Route, EVENT_TYPE_ID, NOTIFICATION_TYPE_ID};
-use connections::notification::{HierarchyChecks, NotificationRequest};
+use connections::notification::{DataNotificationRequest, HierarchyChecks, NotificationRequest};
 use connections::rest::auth::{AuthTokenFunction, EventResult};
 use connections::rest::call::DownloadSink;
 use connections::tokens::{JavaClock, TokenDao, TokenStore};
@@ -342,6 +342,22 @@ impl Mq {
         let (key, body) = connections::mq::prepare_event(&self.events, caller, event);
         self.publisher.publish(&self.events.exchange, &key, &body, EVENT_TYPE_ID).await?;
         Ok(true)
+    }
+
+    /// `SendDataNotification` (Rust only): the same checks as a notification, then a `DATA`
+    /// message on the same exchange. `None` where a notification would not be sent.
+    pub async fn send_data_notification(
+        &self,
+        checks: &dyn HierarchyChecks,
+        caller: &Caller,
+        req: DataNotificationRequest,
+    ) -> Result<Option<bool>, CoreError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let Some((key, message)) = connections::notification::prepare_data(&self.notifications, checks, caller, req, now).await.map_err(core_error)? else {
+            return Ok(None);
+        };
+        self.publisher.publish(&self.notifications.exchange, &key, &message.to_json(), NOTIFICATION_TYPE_ID).await?;
+        Ok(Some(true))
     }
 
     /// `NotificationService.processAndSendNotification`.

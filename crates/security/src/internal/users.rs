@@ -279,12 +279,22 @@ impl Internal {
         })
     }
 
-    /// `UserService.getUsersForNotification`.
+    /// `UserService.getUsersForNotification`; with `filterAuthorization` (Rust only), only the
+    /// users whose authorities in the app meet it, read as the caller's context reads them
+    /// (`getUserAuthorities`).
     pub async fn users_for_notification(&self, r: &UsersListRequest) -> AuthResult<Vec<Value>> {
-        Ok(self
-            .db
-            .users_for_notification(r)
-            .await?
+        let mut users = self.db.users_for_notification(r).await?;
+        if let Some(filter) = r.filter_authorization.as_deref().filter(|f| !f.trim().is_empty()) {
+            let mut kept = Vec::with_capacity(users.len());
+            for u in users {
+                let authorities = self.dir().user_authorities(r.app_code.as_deref(), u.1, u.0).await?;
+                if has_authority(Some(filter), &authorities) {
+                    kept.push(u);
+                }
+            }
+            users = kept;
+        }
+        Ok(users
             .into_iter()
             .map(|(id, client_id, email)| {
                 Obj::new().put("id", id).put("clientId", client_id).put("emailId", crate::jackson::opt(email)).build()

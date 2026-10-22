@@ -269,6 +269,40 @@ async fn check_client_host(url: &str, name: &str, ip: Option<IpAddr>) -> ConnRes
     Ok(())
 }
 
+/// The same rules for a server no URL names (an SMTP host): the blocked names and suffixes,
+/// then every address the host resolves to (`target` only names it in the refusal). The
+/// addresses are returned so the connection goes to exactly the ones judged, with no second
+/// lookup to rebind.
+pub async fn guard_host(target: &str, host: &str) -> ConnResult<Vec<IpAddr>> {
+    let name = normalize_host(Some(host));
+    if name.is_empty() {
+        return Err(refuse_call(target, "the address has no readable host name"));
+    }
+    if let Ok(ip) = name.parse::<IpAddr>() {
+        if is_private_address(&canonical(JavaInet::from_ip(ip))) {
+            return Err(refuse_call(target, &format!("'{name}' is a private or internal address")));
+        }
+        return Ok(vec![ip]);
+    }
+    if BLOCKED_NAMES.contains(&name.as_str()) {
+        return Err(refuse_call(target, &format!("'{name}' is this server, not an outside address")));
+    }
+    if BLOCKED_SUFFIXES.iter().any(|s| name.ends_with(s)) {
+        return Err(refuse_call(target, &format!("'{name}' is an internal address")));
+    }
+    let addresses = resolve(&name).await.map_err(|_| refuse_call(target, &format!("'{name}' does not resolve to any address")))?;
+    for a in &addresses {
+        let a = canonical(*a);
+        if is_private_address(&a) {
+            return Err(refuse_call(
+                target,
+                &format!("'{name}' resolves to {}, which is a private or internal address", a.host_address()),
+            ));
+        }
+    }
+    Ok(addresses.iter().map(JavaInet::ip).collect())
+}
+
 /// An IPv4-mapped IPv6 address judged as the IPv4 address it carries.
 pub fn canonical(a: JavaInet) -> JavaInet {
     match a {

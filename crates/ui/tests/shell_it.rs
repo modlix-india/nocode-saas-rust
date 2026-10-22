@@ -165,8 +165,34 @@ fn fake_core(calls: Arc<Calls>) -> Router {
             _ => (StatusCode::INTERNAL_SERVER_ERROR, "boom").into_response(),
         }
     }
+    /// The internal webhook route: answers by the function name, from the arguments it got.
+    async fn webhook(State(calls): State<Arc<Calls>>, Path((ns, name)): Path<(String, String)>, h: HeaderMap, body: Bytes) -> Response {
+        let hv = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("-").to_string();
+        calls.push(format!(
+            "WEBHOOK {ns}.{name} | auth={} host={} app={} cc={} draft={} | {}",
+            hv("authorization"),
+            hv("x-forwarded-host"),
+            hv("appcode"),
+            hv("clientcode"),
+            hv("x-draft"),
+            String::from_utf8_lossy(&body)
+        ));
+        let args: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let out = |result: serde_json::Value| axum::Json(serde_json::json!([{"name": "output", "result": result}])).into_response();
+        match name.as_str() {
+            "echo" => out(serde_json::json!({"args": args})),
+            "challenge" => out(serde_json::json!({"body": args["query"]["hub.challenge"]})),
+            "json" => out(serde_json::json!({"reply": {"status": 201, "headers": {"X-Call": "c1"}, "body": {"select": args["From"]}}})),
+            "empty" => out(serde_json::json!({"status": 200})),
+            "plain" => out(serde_json::json!({"ok": 1})),
+            "badstatus" => out(serde_json::json!({"status": "abc"})),
+            "refused" => axum::Json(serde_json::json!([{"name": "error", "result": {"status": 401, "body": "bad signature"}}])).into_response(),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "boom").into_response(),
+        }
+    }
     Router::new()
         .route("/api/core/function/execute/{ns}/{name}", get(execute).post(execute))
+        .route("/api/core/function/internal/webhook/{ns}/{name}", post(webhook))
         .with_state(calls)
 }
 
@@ -336,6 +362,56 @@ async fn seed(s: &Shell) {
         d.extend(extra);
         s.env.insert("uri_path", d).await;
     }
+    // Webhook routes (Rust only): the permission does not stop a provider.
+    for (name, output, param) in [
+        ("echo", None, None),
+        ("challenge", Some("output"), None),
+        ("json", Some("output"), Some("result.reply")),
+        ("empty", Some("output"), None),
+        ("plain", Some("output"), None),
+        ("badstatus", Some("output"), None),
+        ("refused", Some("output"), None),
+        ("crash", Some("output"), None),
+    ] {
+        let mut fx = doc! {"namespace": "hooks", "name": name, "errorEventName": "error",
+            "queryParamMapping": {"mapped": "mappedArg"}};
+        if let Some(o) = output {
+            fx.insert("outputEventName", o);
+        }
+        if let Some(p) = param {
+            fx.insert("outputEventParamName", p);
+        }
+        let def = doc! {"uriType": "KIRUN_FUNCTION", "kiRunFxDefinition": fx};
+        s.env
+            .insert(
+                "uri_path",
+                doc! {"name": format!("/api/hook/{name}"), "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32,
+                "pathString": format!("/api/hook/{name}"), "webhook": true, "permission": "Authorities.ROLE_Owner",
+                "pathDefinitions": {"GET": def.clone(), "POST": def}},
+            )
+            .await;
+    }
+    // Address lists (Rust only), per method: a webhook route that takes POSTs from one network,
+    // and an ordinary route that refuses another.
+    let hook = doc! {"uriType": "KIRUN_FUNCTION", "kiRunFxDefinition": {"namespace": "hooks", "name": "echo"}};
+    let mut guarded_post = hook.clone();
+    guarded_post.insert("whitelist", vec!["203.0.113.0/24", "2001:db8::/32", "not an address"]);
+    guarded_post.insert("blacklist", "203.0.113.66");
+    s.env
+        .insert(
+            "uri_path",
+            doc! {"name": "/api/hook/guarded", "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32,
+            "pathString": "/api/hook/guarded", "webhook": true, "pathDefinitions": {"GET": hook, "POST": guarded_post}},
+        )
+        .await;
+    s.env
+        .insert(
+            "uri_path",
+            doc! {"name": "/api/guarded", "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32, "pathString": "/api/guarded",
+            "pathDefinitions": {"GET": {"uriType": "KIRUN_FUNCTION", "kiRunFxDefinition": {"namespace": "ns", "name": "echo"},
+                "blacklist": ["10.0.0.0/8", ""]}}},
+        )
+        .await;
     for name in ["empty", "blank", "missing", "nomessage", "numbermessage", "badjson", "crash"] {
         s.env
             .insert(
@@ -597,10 +673,10 @@ async fn uri_path_routes_run_kirun_functions_on_core() {
     // Bodies.
     let body_cases: [(Option<&str>, Option<&str>, StatusCode, &str); 5] = [
         (None, None, StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"No request body\""),
-        (Some("application/x-www-form-urlencoded; charset=UTF-8"), Some("a=b"), StatusCode::UNSUPPORTED_MEDIA_TYPE, "415 UNSUPPORTED_MEDIA_TYPE"),
+        (Some("multipart/form-data"), Some("a=b"), StatusCode::BAD_REQUEST, "400 BAD_REQUEST \"Failed to read HTTP message: the multipart boundary is missing\""),
         (Some("application/json"), Some("[1]"), StatusCode::INTERNAL_SERVER_ERROR, "Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $"),
         (Some("application/json"), Some("null"), StatusCode::INTERNAL_SERVER_ERROR, "Expected a com.google.gson.JsonObject but was com.google.gson.JsonNull; at path $"),
-        (Some("text/plain"), Some("x"), StatusCode::INTERNAL_SERVER_ERROR, "Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $"),
+        (None, Some("x"), StatusCode::INTERNAL_SERVER_ERROR, "Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $"),
     ];
     for (ct, body, status, debug) in body_cases {
         let mut r = gw("/api/route/x").method("POST");
@@ -614,6 +690,21 @@ async fn uri_path_routes_run_kirun_functions_on_core() {
         assert_eq!(a.status, status, "{body:?}");
         assert_eq!(a.obj()["debugMessage"], common::s(debug));
     }
+    // A form, multipart text fields and text are read too (Java answered 415 and 500).
+    let form = s.call(gw("/api/route/F1").method("POST").header("Content-Type", "application/x-www-form-urlencoded").body("a=1&a=2&b=x+y")).await;
+    assert_eq!(form.status, StatusCode::OK, "{}", form.text());
+    assert_eq!(form.text(), r#"{"arg":{"a":["1","2"],"b":"x y","code":"F1","host":"testapp.example"},"n":1.5}"#);
+    let text = s.call(gw("/api/route/T1").method("POST").header("Content-Type", "text/plain").body("x")).await;
+    assert_eq!(text.text(), r#"{"arg":{"body":"x","code":"T1","host":"testapp.example"},"n":1.5}"#);
+    let multipart = s
+        .call(
+            gw("/api/route/M1")
+                .method("POST")
+                .header("Content-Type", "multipart/form-data; boundary=B")
+                .body("--B\r\nContent-Disposition: form-data; name=\"k\"\r\n\r\nv\r\n--B--\r\n"),
+        )
+        .await;
+    assert_eq!(multipart.text(), r#"{"arg":{"k":"v","code":"M1","host":"testapp.example"},"n":1.5}"#);
     let blank_body = s.call(gw("/api/route/x").method("DELETE").body("  ")).await;
     assert_eq!(blank_body.status, StatusCode::INTERNAL_SERVER_ERROR, "no DELETE definition");
     // A signed-in caller's routes are looked up in its own client.
@@ -644,6 +735,154 @@ async fn uri_path_routes_run_kirun_functions_on_core() {
     let down = Shell { router: router(state_down.clone()), env: s.env, calls: s.calls, state: state_down };
     assert_eq!(down.call(gw("/api/route/x?q=1")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
     down.done().await;
+}
+
+fn webhook_args(answer: &common::Answer) -> serde_json::Value {
+    let v: serde_json::Value = serde_json::from_slice(&answer.body).unwrap_or(serde_json::Value::Null);
+    v[0]["result"]["args"].clone()
+}
+
+#[tokio::test]
+#[ignore = "needs the local MongoDB (MODLIX__MONGO__URI)"]
+async fn webhook_routes_run_as_the_url_client() {
+    let Some(s) = shell().await else { return };
+    seed(&s).await;
+    // A form from a provider: anonymous though the route names a permission; the URL's client,
+    // no Authorization passed on, the request as it came next to the parsed body.
+    let form = "From=%2B9198&tag=a&tag=b&rawBody=spoofed";
+    let r = s
+        .call(gw("/api/hook/echo?mapped=m1&k=1&k=2").method("POST").header("Content-Type", "application/x-www-form-urlencoded").header("X-Exotel-Signature", "s1").body(form))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let args = webhook_args(&r);
+    assert_eq!(args["From"], "+9198");
+    assert_eq!(args["tag"], serde_json::json!(["a", "b"]));
+    assert_eq!(args["rawBody"], form, "the raw body wins over a field of that name");
+    assert_eq!(args["rawBodyEncoding"], "utf8");
+    assert_eq!(args["headers"]["x-exotel-signature"], "s1");
+    assert_eq!(args["headers"]["content-type"], "application/x-www-form-urlencoded");
+    assert_eq!(args["query"], serde_json::json!({"mapped": "m1", "k": ["1", "2"]}));
+    assert_eq!(args["mappedArg"], "m1");
+    let call = calls_matching(&s, "WEBHOOK").pop().unwrap();
+    assert!(call.starts_with("WEBHOOK hooks.echo | auth=- host=testapp.example app=testapp cc=SYSTEM draft=- | "), "{call}");
+
+    // A tenant with no copy of its own is served the app owner's route, and its function runs
+    // for the tenant.
+    s.env.chain("TEN", &["SYSTEM", "TEN"]);
+    let tenant = s.call(gw("/api/hook/echo").client("TEN").method("POST").body("{}")).await;
+    assert_eq!(tenant.status, StatusCode::OK, "{}", tenant.text());
+    assert!(calls_matching(&s, "WEBHOOK").pop().unwrap().contains("app=testapp cc=TEN"));
+    // A signed-in caller (or a refused credential) still runs as the URL's client.
+    s.env.chain("OTHER", &["SYSTEM", "OTHER"]);
+    let signed = s.call(gw("/api/hook/echo").method("POST").header("Authorization", "user OTHER Authorities.Logged_IN").body("{}")).await;
+    assert_eq!(signed.status, StatusCode::OK, "{}", signed.text());
+    assert!(calls_matching(&s, "WEBHOOK").pop().unwrap().contains("auth=- host=testapp.example app=testapp cc=SYSTEM"));
+    let refused = s.call(gw("/api/hook/echo").method("POST").header("Authorization", "refuse").header("Content-Type", "application/json").body(r#"{"a":1}"#)).await;
+    assert_eq!(refused.status, StatusCode::OK, "{}", refused.text());
+    assert_eq!(webhook_args(&refused)["a"], 1);
+    // Any other route still answers with the refusal, and so does no route.
+    assert_eq!(s.call(gw("/api/route/x").method("POST").header("Authorization", "refuse").body("{}")).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(s.call(gw("/api/nothing/here").method("POST").header("Authorization", "refuse").body("{}")).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(s.call(gw("/api/route/x?q=1").header("Authorization", "refuse")).await.status, StatusCode::UNAUTHORIZED);
+    let broken = s.call(gw("/api/hook/echo").method("POST").header("Authorization", "broken").body("{}")).await;
+    assert_eq!(broken.status, StatusCode::OK, "a credential security can not read is left out too");
+
+    // Bodies: JSON, text, XML, multipart, none, and one that does not read.
+    let json = r#"{ "entry" : [ {"id":"1"} ],"object":"page" }"#;
+    let j = webhook_args(&s.call(gw("/api/hook/echo").method("POST").header("Content-Type", "application/json").body(json)).await);
+    assert_eq!((j["object"].clone(), j["rawBody"].clone()), (serde_json::json!("page"), serde_json::json!(json)));
+    let t = webhook_args(&s.call(gw("/api/hook/echo").method("POST").header("Content-Type", "text/plain; charset=utf-8").body("hello  there")).await);
+    assert_eq!((t["body"].clone(), t["rawBody"].clone()), (serde_json::json!("hello  there"), serde_json::json!("hello  there")));
+    let x = webhook_args(&s.call(gw("/api/hook/echo").method("POST").header("Content-Type", "application/xml").body("<Call><Sid>1</Sid></Call>")).await);
+    assert_eq!(x["body"], "<Call><Sid>1</Sid></Call>");
+    let m = webhook_args(
+        &s.call(
+            gw("/api/hook/echo")
+                .method("POST")
+                .header("Content-Type", "multipart/form-data; boundary=B")
+                .body("--B\r\nContent-Disposition: form-data; name=\"CallSid\"\r\n\r\nc9\r\n--B--\r\n"),
+        )
+        .await,
+    );
+    assert_eq!(m["CallSid"], "c9");
+    let none = s.call(gw("/api/hook/echo").method("POST")).await;
+    assert_eq!(none.status, StatusCode::OK, "a webhook may come without a body: {}", none.text());
+    assert_eq!(webhook_args(&none)["rawBody"], "");
+    let bad = webhook_args(&s.call(gw("/api/hook/echo").method("POST").header("Content-Type", "application/json").body("[1, 2")).await);
+    assert_eq!((bad["rawBody"].clone(), bad.get("0").is_none()), (serde_json::json!("[1, 2"), true), "a body that does not read is still raw");
+
+    // Replies the function sets.
+    let challenge = s.call(gw("/api/hook/challenge?hub.mode=subscribe&hub.challenge=1158201444&hub.verify_token=t")).await;
+    assert_eq!((challenge.status, challenge.text()), (StatusCode::OK, "1158201444".to_string()));
+    assert_eq!(challenge.header("content-type").as_deref(), Some("text/plain;charset=UTF-8"));
+    let j = s.call(gw("/api/hook/json").method("POST").header("Content-Type", "application/x-www-form-urlencoded").body("From=0981")).await;
+    assert_eq!((j.status, j.text()), (StatusCode::CREATED, r#"{"select":"0981"}"#.to_string()));
+    assert_eq!((j.header("content-type").as_deref(), j.header("x-call").as_deref()), (Some("application/json;charset=UTF-8"), Some("c1")));
+    let empty = s.call(gw("/api/hook/empty").method("POST").body("x=1")).await;
+    assert_eq!((empty.status, empty.body.len(), empty.header("content-type")), (StatusCode::OK, 0, None));
+    let plain = s.call(gw("/api/hook/plain").method("POST").body("{}")).await;
+    assert_eq!((plain.status, plain.text()), (StatusCode::OK, r#"{"ok":1}"#.to_string()), "no reply keys: the usual answer");
+    let refused = s.call(gw("/api/hook/refused").method("POST").body("{}")).await;
+    assert_eq!((refused.status, refused.text()), (StatusCode::UNAUTHORIZED, "bad signature".to_string()), "the error event as before");
+    let badstatus = s.call(gw("/api/hook/badstatus").method("POST").body("{}")).await;
+    assert_eq!((badstatus.status, badstatus.coded().0), (StatusCode::INTERNAL_SERVER_ERROR, "UI.WEBHOOK_REPLY_STATUS_INVALID".to_string()));
+    let crash = s.call(gw("/api/hook/crash").method("POST").body("{}")).await;
+    assert_eq!(crash.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(crash.obj()["debugMessage"].java_to_string().contains("IFeignCoreService#webhook"), "{}", crash.text());
+    // Anonymous non-webhook routes are unchanged: the permission still stops them.
+    assert_eq!(s.call(gw("/api/secret")).await.coded().0, "UI.SIGN_IN_REQUIRED");
+    assert!(calls_matching(&s, "WEBHOOK").iter().all(|c| c.contains("auth=-")));
+    s.done().await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MongoDB (MODLIX__MONGO__URI)"]
+async fn address_lists_guard_uri_path_routes() {
+    let Some(s) = shell().await else { return };
+    seed(&s).await;
+    let post = |ip: Option<&str>| {
+        let r = gw("/api/hook/guarded").method("POST").header("Content-Type", "application/json").body(r#"{"a":1}"#);
+        match ip {
+            Some(ip) => r.header("X-Real-IP", ip),
+            None => r,
+        }
+    };
+    let hooks = || calls_matching(&s, "WEBHOOK hooks.echo").len();
+
+    // On the whitelist (IPv4 and IPv6): the function runs.
+    for ip in ["203.0.113.5", "2001:db8::7"] {
+        let ok = s.call(post(Some(ip))).await;
+        assert_eq!(ok.status, StatusCode::OK, "{ip}: {}", ok.text());
+        assert_eq!(webhook_args(&ok)["a"], 1);
+    }
+    let before = hooks();
+    // On the blacklist, though inside the whitelist's range: refused before the function runs.
+    let blocked = s.call(post(Some("203.0.113.66"))).await;
+    assert_eq!(blocked.status, StatusCode::FORBIDDEN);
+    assert_eq!(blocked.coded().0, "UI.URI_PATH_ADDRESS_BLOCKED");
+    assert!(blocked.text().contains("203.0.113.66"), "{}", blocked.text());
+    // Outside the whitelist, or with no address at all.
+    let outside = s.call(post(Some("198.51.100.1"))).await;
+    assert_eq!((outside.status, outside.coded().0), (StatusCode::FORBIDDEN, "UI.URI_PATH_ADDRESS_NOT_ALLOWED".to_string()));
+    assert_eq!(s.call(post(None)).await.coded().0, "UI.URI_PATH_ADDRESS_NOT_ALLOWED");
+    assert_eq!(hooks(), before, "no refused call reached core");
+    // X-Real-IP is nginx's; without it, the gateway's own hop (the last X-Forwarded-For entry),
+    // never what the caller wrote in front of it.
+    let forwarded = s.call(post(None).header("X-Forwarded-For", "198.51.100.1, 203.0.113.9")).await;
+    assert_eq!(forwarded.status, StatusCode::OK, "{}", forwarded.text());
+    let spoofed = s.call(post(None).header("X-Forwarded-For", "203.0.113.9, 198.51.100.1")).await;
+    assert_eq!(spoofed.status, StatusCode::FORBIDDEN);
+    // Per method: GET has no lists.
+    let get = s.call(gw("/api/hook/guarded?x=1").header("X-Real-IP", "198.51.100.1")).await;
+    assert_eq!(get.status, StatusCode::OK, "{}", get.text());
+
+    // Not only webhooks: an ordinary route's blacklist.
+    let refused = s.call(gw("/api/guarded").header("X-Real-IP", "10.9.8.7")).await;
+    assert_eq!((refused.status, refused.coded().0), (StatusCode::FORBIDDEN, "UI.URI_PATH_ADDRESS_BLOCKED".to_string()));
+    let fine = s.call(gw("/api/guarded").header("X-Real-IP", "192.0.2.1")).await;
+    assert_eq!(fine.status, StatusCode::OK, "{}", fine.text());
+    assert!(calls_matching(&s, "GET ns.echo").len() == 1);
+    s.done().await;
 }
 
 #[tokio::test]

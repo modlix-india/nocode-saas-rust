@@ -20,8 +20,6 @@ pub struct CoreConfig {
     /// rest of core's tables.
     pub database: MySqlConfig,
     pub entity_processor: EntityProcessorConfig,
-    /// The message service, for `CoreServices.Message.*` (Feign name `message`).
-    pub message: MessageConfig,
     /// The files service, for `CoreServices.File.*` and REST downloads (Feign name `files`).
     pub files: FilesConfig,
     /// The ui service, for `CoreServices.Platform.CleanupTransports` (Feign name `ui`).
@@ -50,7 +48,6 @@ impl Default for CoreConfig {
             mongo: MongoConfig { database: "core".into(), ..Default::default() },
             database: MySqlConfig { database: "core".into(), ..Default::default() },
             entity_processor: EntityProcessorConfig::default(),
-            message: MessageConfig::default(),
             files: FilesConfig::default(),
             ui: UiConfig::default(),
             core: CoreSection::default(),
@@ -187,19 +184,6 @@ pub struct EntityProcessorConfig {
 impl Default for EntityProcessorConfig {
     fn default() -> Self {
         Self { upstream: UpstreamConfig::One("lighthouse:ENTITY-PROCESSOR".into()) }
-    }
-}
-
-/// Where the message service is (`IFeignMessageService`, Feign name `message`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MessageConfig {
-    pub upstream: UpstreamConfig,
-}
-
-impl Default for MessageConfig {
-    fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("lighthouse:MESSAGE".into()) }
     }
 }
 
@@ -382,7 +366,6 @@ mod tests {
         assert_eq!(c.mongo.database, "core");
         assert_eq!(c.database.database, "core");
         assert_eq!(c.entity_processor.upstream.entries(), ["lighthouse:ENTITY-PROCESSOR"]);
-        assert_eq!(c.message.upstream.entries(), ["lighthouse:MESSAGE"]);
         assert_eq!(c.files.upstream.entries(), ["lighthouse:FILES"]);
         assert_eq!(c.ui.upstream.entries(), ["lighthouse:UI"]);
         assert_eq!(c.core.upstream.entries(), ["lighthouse:CORE"]);

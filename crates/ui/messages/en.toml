@@ -134,6 +134,33 @@ java = "uri_invalid_method"
 when = "Saving a URI path whose definitions name none of the supported methods."
 audience = "signed-in"
 
+[UI.WEBHOOK_REPLY_STATUS_INVALID]
+status = 500
+params = ["status"]
+text = "[The function behind this webhook address answered with the status {status}, which is not an HTTP status.|The function behind this webhook address answered with a status that is not an HTTP status.]"
+action = "Set the reply's status in the function to a whole number from 100 to 599."
+java_text = "Reply status $ is not an HTTP status"
+when = "A webhook URI path's function sets a reply status that is not a whole number from 100 to 599."
+audience = "anyone"
+
+[UI.URI_PATH_ADDRESS_BLOCKED]
+status = 403
+params = ["address"]
+text = "[Calls from the network address {address} are blocked for this link.|Calls from your network are blocked for this link.]"
+action = "Call from another network, or ask the app's owner to take your address off the link's blocked list."
+java_text = "Address $ is on the blacklist of the route"
+when = "A URI path route is called from an address on the blacklist of its definition for that method."
+audience = "anyone"
+
+[UI.URI_PATH_ADDRESS_NOT_ALLOWED]
+status = 403
+params = ["address"]
+text = "[Calls from the network address {address} are not allowed for this link.|Calls from your network are not allowed for this link.]"
+action = "Call from a network the app allows, or ask the app's owner to add your address to the link's allowed list."
+java_text = "Address $ is not on the whitelist of the route"
+when = "A URI path route whose definition for that method has a whitelist is called from an address not on it."
+audience = "anyone"
+
 # ---- Mobile apps (ui-editor) ----
 
 [UI.APP_PERMISSION_REQUIRED]

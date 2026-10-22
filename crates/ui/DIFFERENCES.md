@@ -173,7 +173,8 @@ headers for a control character in a query parameter name); and no `WWW-Authenti
 23. **Route candidates are tried in inheritance order** (root client first). Java merges the
     clients' pattern lists concurrently and takes the first match to arrive, so when two clients
     both have a matching pattern either can win there.
-24. **A request body that is not JSON at all** is a 500 in both; Gson's `debugMessage` (line,
+24. **A request body that is not JSON at all** (sent as JSON or with no content type; forms,
+    multipart and text are read by their type since item 38) is a 500 in both; Gson's `debugMessage` (line,
     column, path, troubleshooting link) is not reproduced. A body that is JSON but not an object
     (an array, `null`, a string) gets Gson's exact message, and Gson's lenient forms (unquoted
     names and strings, single quotes, `=`/`=>`, `;`, comments, `)]}'`) are read as Gson reads
@@ -261,3 +262,104 @@ The write path is the `overridable` crate's, so its differences hold here too
     difference extraction would see as changed, storing every component instead of the one
     changed; Java compares beans, where the two are equal. The `forbiddenPage` and permission
     rules of `applyChange` are applied to the seed as Java applies them.
+
+## URI path bodies, webhook routes and address lists (Rust only, 2026-10-22)
+
+38. **Request bodies are read by their content type** (every URI path, `crates/ui/src/shell/webhook.rs`).
+    Java took JSON only: a form was a 415 and any other text a 500.
+    - JSON, or no content type: as before (item 24).
+    - `application/x-www-form-urlencoded`: an object of the decoded fields; a repeated name
+      becomes a list of its values (`a=1&a=2` is `{"a": ["1", "2"]}`), a name without a value is
+      `""`.
+    - `multipart/form-data`: its text fields, the same way; file parts are left out; a body
+      without a boundary or that does not parse is a 400 (`COMMON.BODY_UNREADABLE`).
+    - `text/*`, `application/xml` and `*+xml`: the `body` argument with the text. A text body
+      that is a JSON object stays the object (what a text body could carry before); a blank one
+      is `{}`.
+    The parsed fields are the function's arguments as a JSON body's are; mapped path, query and
+    header values still go over them.
+
+39. **Webhook routes: `webhook: true` on a URI path.** For a provider (WhatsApp Cloud API,
+    Exotel, TeleCMI, ...) calling an app for one tenant.
+    - **URL.** `https://<app host>/<appCode>/<CLIENTCODE>/api/webhooks/<provider>`: the gateway
+      takes the codes in front of `/api/` when they name a real app and client (the client owns
+      the app or has access to it; gateway DIFFERENCES.md, "URL codes in front of `/api/`");
+      codes that do not are ignored and the host decides, as before. The older
+      `/<appCode>/<CLIENTCODE>/page/api/webhooks/<provider>` also works (codes after a `/page/`
+      count unchecked, as in Java). The codes are not checked against the host: anyone can post
+      to any tenant's URL, so **the function must verify the provider's signature before it
+      acts** (or the route's definition names the provider's addresses, item 41).
+    - **Lookup.** The route is found in the URL client's inheritance order, so a tenant with no
+      copy of its own is served the app owner's (item 23); the URI path is read for that client.
+    - **Who runs it.** Any caller, whatever the route's `permission`; a signed-in caller's token
+      is not passed on, and an `Authorization` header that security refuses does not stop a
+      webhook route (it stops every other route as before; the function sees the header).
+      ui-shell calls core's internal `POST /api/core/function/internal/webhook/{ns}/{name}`
+      (`crates/core/src/handlers/webhook.rs`) with the URL's `appCode` and `clientCode`; core
+      runs the function as that client's anonymous user (`_Anonymous`, URL codes the given
+      ones) with the authorities `Authorities._Anonymous` and `Authorities._Webhook`. Only
+      that route grants `_Webhook`: a browser's anonymous call through `execute` has
+      `_Anonymous` alone, and core-events' anonymous runner has `_Event_Runner` instead. A
+      tenant storage that takes webhook data sets `createAuth` (and `updateAuth` if it updates)
+      to `Authorities._Webhook`; a function only for webhooks sets it as its `executeAuth`.
+    - **Arguments.** The body's fields (item 38; a body that does not read gives none, and no
+      body is allowed), then, over any field of the same name:
+      - `rawBody`: the body's exact bytes as UTF-8 text (spaces, order and escapes as sent), or
+        base64 when they are not UTF-8;
+      - `rawBodyEncoding`: `utf8` or `base64`;
+      - `headers`: every request header, names lower case, repeated ones joined by `, `;
+      - `query`: every query parameter, a repeated one as a list (`Arguments.query["hub.challenge"]`).
+      The route's path, query and header mappings go over these. The body limit is the shell's
+      64 MB.
+    - **Reply control.** When the output event (the route's `outputEventName`, at its
+      `outputEventParamName` if set) is an object with any of `status`, `contentType`, `headers`,
+      `body`, the route answers with them: `status` a whole number from 100 to 599 (200 when
+      absent; anything else is a 500, `UI.WEBHOOK_REPLY_STATUS_INVALID`); `body` a string as
+      text (`text/plain;charset=UTF-8` unless a type is given), anything else as JSON
+      (`application/json;charset=UTF-8`), absent or null an empty body; `headers` an object of
+      names and values (`Content-Length`, `Transfer-Encoding` and `Connection` are the
+      server's); `contentType` over everything. Meta's `hub.challenge` is
+      `{"body": Arguments.query["hub.challenge"]}`, an Exotel connect applet a JSON body, a
+      provider that wants an empty 200 `{"status": 200}`. Without those keys the answer is
+      today's; error events answer as before.
+    - **Durability.** A webhook function should verify the signature (`CoreServices.Crypto.
+      SignatureValidator` over `rawBody`: Meta's `X-Hub-Signature-256` is `HmacSHA256`, hex,
+      after `sha256=`; HmacSHA1 is there for providers that sign with it), write the raw event to
+      the tenant's storage (`createAuth: "Authorities._Webhook"`), schedule its processing with
+      `CoreServices.Event.ScheduleEvent` (saved, retried with backoff) and answer at once:
+      providers retry or give up on slow answers, and the processing then never runs inside the
+      provider's request.
+    - **Internal route.** `/api/core/function/internal/...` is refused from outside by nginx's
+      `location ~/internal { deny all; }` (every app server block), as every other internal
+      route; the gateway passes `/internal` paths that name their codes straight to the unit.
+      Nothing else guards it: a caller inside the network can run any app's function as any
+      client's webhook user.
+
+40. **The editor keeps `webhook`.** `webhook` is a field of the URI path document (a boolean;
+    anything else reads as not set), saved on create and update and inherited by a client copy
+    that does not set it.
+
+41. **A path definition's `whitelist` and `blacklist` are enforced** (every URI path, webhook or
+    not; `crates/ui/src/shell/ipfilter.rs`). Java stored both on each method's definition and
+    never read them.
+    - **Entries.** IPv4 or IPv6 addresses and CIDR ranges (`203.0.113.0/24`, `2001:db8::/32`),
+      as a JSON array of strings or one string (a string may hold several, separated by commas
+      or spaces). A blank entry is nothing. An entry that does not read, or is not a string, is
+      logged (`not an IP address or CIDR range, skipped`) and never matches; the rest of the list
+      still counts. An IPv4 address written as IPv6 (`::ffff:10.0.0.1`) is that IPv4 address.
+    - **Rule**, before the route runs (after its `permission` check): an address on the
+      `blacklist` is refused (`UI.URI_PATH_ADDRESS_BLOCKED`, 403); a `whitelist` that names
+      anything (even only entries that do not read) lets in only the addresses on it
+      (`UI.URI_PATH_ADDRESS_NOT_ALLOWED`, 403). The blacklist wins over the whitelist. A caller
+      whose address is unknown matches no list, so a whitelist refuses it. Each method's
+      definition has its own lists (a `GET` without lists stays open while `POST` is guarded).
+    - **The caller's address** is `X-Real-IP`: every app server block of the load balancer's
+      nginx sets it to `$remote_addr`, replacing anything the visitor sent, and `$remote_addr`
+      is the visitor's own address (behind Cloudflare through `real_ip`, trusting Cloudflare's
+      ranges only). `X-Forwarded-For` is not trusted for this: nginx passes on what the visitor
+      wrote there and the gateway appends its hop. Without `X-Real-IP` (no nginx in front, as on
+      a local stack) the last `X-Forwarded-For` entry, the address the gateway saw, then the
+      connection's peer. An `X-Real-IP` that does not read is an unknown address.
+    - The editor saves the lists as they come (they are inside `pathDefinitions`, which it
+      copies whole), so nothing changed there.
+

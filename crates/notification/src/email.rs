@@ -48,11 +48,17 @@ fn safe_is_blank(v: Option<&str>) -> bool {
 pub struct EmailService {
     pub sendgrid_url: String,
     pub http: reqwest::Client,
+    /// SMTP hosts must resolve only to public addresses.
+    pub block_private_targets: bool,
 }
 
 impl EmailService {
     pub fn new(sendgrid_url: &str) -> Result<Self> {
-        Ok(Self { sendgrid_url: sendgrid_url.to_string(), http: reqwest::Client::builder().timeout(Duration::from_secs(60)).build()? })
+        Ok(Self {
+            sendgrid_url: sendgrid_url.to_string(),
+            http: reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?,
+            block_private_targets: true,
+        })
     }
 
     /// The rendered `email` parts, `None` when they come out empty.
@@ -106,9 +112,10 @@ impl EmailService {
             from,
             subject: t.get("subject").cloned().unwrap_or_default(),
             body,
+            attachments: Vec::new(),
         };
         // Transport.send's MessagingException is logged, and the answer is still true.
-        if let Err(e) = connections::email::smtp_send(&conn, &details).await {
+        if let Err(e) = connections::email::smtp_send(&conn, &details, self.block_private_targets).await {
             tracing::error!("Error while adding : {email} {}", e.message());
         }
         Ok(true)

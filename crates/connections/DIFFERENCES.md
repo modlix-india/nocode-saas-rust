@@ -71,7 +71,9 @@ Everything in those runs is the same except what is listed here.
    socket read timeout. lettre has no such setting, so the same duration bounds each command
    and its reply (connect, STARTTLS, AUTH, MAIL, RCPT, DATA, the message, QUIT), and an expiry
    reads `Read timed out`. `mail.smtp.connectiontimeout` is lettre's connect timeout, as in
-   JavaMail. Neither is set by default, as in JavaMail.
+   JavaMail. When `mailProps` set neither (or a value of 0 or less), both are 60 seconds
+   (2026-10-22; JavaMail waits forever). The message itself may take one more second for every
+   100 KiB it carries, so large attachments are not cut off by the per-command timeout.
 
 ## Same shape, different text or bytes
 
@@ -138,8 +140,12 @@ Everything in those runs is the same except what is listed here.
 19. **A REST connection URL with a path-parameter template (`/x/{id}`) is refused when
     `block_private_targets` is on.** `validateResolved` runs on the template, and
     `java.net.URI` rejects `{`. Java's own output for this case is in the replay fixture.
-20. **`application/x-www-form-urlencoded` values are sent as their JSON text**, quotes included
-    (`grant_type=%22client+credentials%22`), as `getURLFormDataFromJson` does.
+20. **`application/x-www-form-urlencoded` values are sent plain** (2026-10-22; moved out of the
+    Java-parity list now that Java is retired). Java sent each value as its JSON text, quotes
+    included (`grant_type=%22client+credentials%22`), so a provider such as Exotel received
+    `From="+91..."`. Now a string goes as it is, a number or boolean as its text, null as an
+    empty value, and a nested object or array as its JSON text (`body::form_value`). The REST
+    parity test rewrites Java's recorded form bodies the same way before comparing.
 21. **Responses with an `application/*` type other than JSON** (`application/xml`,
     `application/pdf`, ...) come back as a byte array, which a KIRun step sees as an array of
     signed bytes, as Gson writes `byte[]`.
@@ -149,6 +155,68 @@ Everything in those runs is the same except what is listed here.
     client), every call mints a new token.
 24. **Only `OPENAI` AI connections work.** `GEMINI`, `CLAUDE`, `GROK` and `DEEP_SEEK` are refused
     as `Connection details missing <subtype>`, as Java has no service registered for them.
+25. **`SendEmail` takes attachments** (Rust only, 2026-10-22; Java sends none). Each value of
+    the `attachments` argument is a stored file's URL (`/api/files/{static|secured}/file/...`),
+    a `data:` URL, or an object with `url` or `content` (base64 or a `data:` URL) and optionally
+    `name` and `contentType`, so a files `FileDetail` such as `TemplateToPdf`'s `fileData` can
+    be passed as it is. Stored files are read through the files service's `convertToBase64` as
+    the caller's client (else the URL's), as `FileToBase64` reads them; the files service checks
+    that this client manages the file's client. They are read only after the connection and
+    the template are found and rendered. A file that cannot be read, a URL that is not a stored
+    file, or more than 20 MB of attachments in all fails the send (`Unable to send the email:
+    ...`). SMTP sends `multipart/mixed` (the HTML body, then each attachment). SendGrid gets
+    `attachments` after `content`, and only when there are some. The event action
+    (`SendEmailTask`) and the notification service still send none.
+26. **A template's language always resolves** (2026-10-22). The rendered `languageExpression`,
+    else `defaultLanguage`, else `en`. Java failed on a `defaultLanguage` without an
+    expression (it rendered the null expression), and had no language when the expression
+    rendered blank without a default. The part set is found in any case (`EN` finds `en`)
+    before falling back to the first set. This covers `SendEmail`, the event email action and
+    `TemplateToPdf`.
+27. **SMTP hosts follow the private-target guard** (2026-10-22; Java connects anywhere). With
+    `core.rest.blockPrivateTargets` on (the default), an SMTP host must not be a blocked name
+    (`localhost`, metadata hosts, `.internal`, `.local`, ...) and every address it resolves to
+    must be public; the connection then goes to exactly the addresses checked, so a second DNS
+    answer cannot rebind it. A refusal is `CORE.PRIVATE_TARGET_REFUSED` (`Refusing to call
+    "smtp://host:port": ...`). The notification service applies the same rule
+    (`email.blockPrivateTargets`, on by default), where, as with any SMTP failure there, it is
+    logged and the mail is not delivered.
+
+28. **A client-credentials token request can carry a body and Basic client authentication**
+    (2026-10-22; Java posts with no body and no headers). In `tokenDetails`: `body` (an object,
+    form-encoded unless `bodyType` is `json`) and `clientAuthentication: "basic"`, which sends
+    `Authorization: Basic` with the client id and secret (RFC 6749 2.3.1: each form-encoded
+    first), read from `tokenDetails.clientId` / `clientSecret`, else the connection details'
+    `clientId` / `clientSecret`, else the `client_id` / `client_secret` query parameters where
+    the stored connections keep them. Either adds `Accept: application/json`. The
+    query-parameter form is unchanged, and a connection with neither still needs `queryParams`
+    (Java's null-pointer text otherwise). Refusals: `CORE.CONNECTION_TOKEN_BODY_INVALID` (a body
+    that is not an object), `CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING` (Basic without an id
+    or secret).
+29. **Data notifications** (2026-10-22, Rust only): `notification::prepare_data` checks the
+    event name (1 to 64 letters, digits, `_ . -`; not `init` or `notification`, in any case:
+    `CORE.DATA_NOTIFICATION_EVENT_INVALID`, `CORE.DATA_NOTIFICATION_EVENT_RESERVED`) and the
+    data's size (64 KB as JSON: `CORE.DATA_NOTIFICATION_TOO_LARGE`), then runs `prepare`'s
+    caller and hierarchy checks unchanged, and marks the message `kind: DATA` with `eventName`,
+    `data` (as given, null included) and `expiresAt` (epoch milliseconds). A normal
+    notification's message carries none of these properties.
+30. **Webhook and event runs store downloads** (2026-10-22, Rust only; Java stores a
+    `downloadAsAFile` response only for a signed-in caller and answers nothing otherwise).
+    A caller holding `Authorities._Webhook` (core's webhook run) or `Authorities._Event_Runner`
+    (core's anonymous event run) is anonymous but acts for the run's own client, so a
+    provider's call recording or a WhatsApp media file can be kept. For those runs the file
+    goes to the run's client (`clientCode` of the context), or to `fileClientCode` only when
+    the run's client manages it (security's `doesClientManageClientCode`, asked with the run's
+    client instead of the URL client a signed-in caller is checked by; refused:
+    `Client code is invalid`), and it is always a **secured** file whatever `fileType` says,
+    because nobody signed in asked for it and a recording must not become public by URL.
+    The files service's internal create route takes the client code as given, so nothing
+    changed there. A browser's anonymous caller still gets nothing (`rest::call::Downloader`).
+31. **A download's extension reads `Content-Type` in any case** (2026-10-22, Rust only). The
+    port looked the header up by the exact key `Content-Type`, so a provider answering
+    `content-type` (most HTTP/2 servers) fell through to "the URL after its first dot", which
+    for an absolute URL is the host's dot (`fileU.com/a`). Header names now ignore case, as
+    HTTP says they do, so a recording served as `audio/mpeg` is stored as `.mpeg`.
 
 ## Error codes (2026-10-17)
 
