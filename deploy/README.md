@@ -145,7 +145,8 @@ ai|ssr <image>`, from nocode-ai's and nocode-ui's workflows).
 **What the retired services leave behind:**
 - **message** is stopped: `/api/message` has no route and falls through to ui-shell (a GET gets
   the index page, where Java answered 503 with message down); every `CoreServices.Message.*`
-  function answers 500; the WhatsApp bridges lose their control plane.
+  function fails at once with 410 `CORE.MESSAGE_SERVICE_RETIRED` (core no longer calls the
+  message service at all); the WhatsApp bridges lose their control plane.
 - **entity-processor / entity-collector**: their routes are gone the same way. Core still lists
   the apps in `core.core_remote_repositories`: for those, `repositoryFilter` and any function or
   schema name not found locally answer 500 instead of 404. Remove the rows (Kiran's call) or

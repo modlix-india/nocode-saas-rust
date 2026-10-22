@@ -72,7 +72,8 @@ class PolicyTest(unittest.TestCase):
             "file:///etc/passwd",
             "http://169.254.169.254/latest/meta-data/",
             "http://localhost:8080/api/security/internal/x",
-            "https://fonts.googleapis.com/css?family=Inter",
+            "http://fonts.googleapis.com/css?family=Inter",  # font host, but not https
+            "https://fonts.googleapis.com.evil.io/css",
             "http://cdn.example.com/a.png",  # allowed host, but not https
             "https://cdn.example.com:8443/a.png",  # allowed host, other port
             "https://cdn.example.com.evil.io/a.png",
@@ -85,6 +86,13 @@ class PolicyTest(unittest.TestCase):
     def test_allowed_hosts_and_data_urls(self):
         self.assertEqual(self.p.target("https://CDN.example.com/a.png"), "https://CDN.example.com/a.png")
         self.assertIsNone(self.p.target("data:image/png;base64,AAAA"))
+
+    def test_web_font_hosts_are_allowed_by_default(self):
+        for url in ["https://fonts.googleapis.com/css2?family=Poppins:wght@400;600",
+                    "https://fonts.gstatic.com/s/poppins/v22/pxiEyp8kv8JHgFVrJJfecg.woff2"]:
+            self.assertEqual(self.p.target(url), url)
+        with self.assertRaises(app.Refused):
+            app.Policy(font_hosts=[""]).target("https://fonts.googleapis.com/css2?family=Poppins")
 
     def test_no_files_url_refuses_files_too(self):
         with self.assertRaises(app.Refused):
@@ -109,6 +117,40 @@ class FetchTest(unittest.TestCase):
             p.fetch("https://h/api/files/static/file/SYSTEM/big.png")
         with self.assertRaises(app.Refused):
             p.fetch("https://h/api/files/static/file/SYSTEM/missing.png")
+
+    def test_web_fonts_are_fetched_once(self):
+        calls = []
+
+        class Resp:
+            headers = __import__("email.message").message.Message()
+
+            def __init__(self):
+                self.headers = __import__("email.message").message.Message()
+                self.headers["Content-Type"] = "font/woff2"
+
+            def read(self, n):
+                return b"FONT"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        real = app._OPENER.open
+        app._OPENER.open = lambda req, timeout: calls.append(req.full_url) or Resp()
+        try:
+            p = app.Policy(font_cache_bytes=6)
+            url = "https://fonts.gstatic.com/s/poppins/a.woff2"
+            for _ in range(3):
+                got = p.fetch(url)
+                self.assertEqual((got["string"], got["mime_type"]), (b"FONT", "font/woff2"))
+            self.assertEqual(calls, [url])
+            p.fetch("https://fonts.gstatic.com/s/poppins/b.woff2")  # over budget: a.woff2 goes
+            p.fetch(url)
+            self.assertEqual(len(calls), 3)
+        finally:
+            app._OPENER.open = real
 
     def test_redirects_are_not_followed(self):
         req = urllib.request.Request(self.base + "/redirect")

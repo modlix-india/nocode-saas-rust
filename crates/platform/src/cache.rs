@@ -472,46 +472,79 @@ impl CacheService {
 
     /// Listens on the eviction channel for the life of the process.
     pub fn spawn_eviction_listener(&self) -> Option<tokio::task::JoinHandle<()>> {
-        let client = self.inner.redis.clone()?;
         let this = self.clone();
+        let channel = self.inner.channel.clone();
+        self.spawn_listener(&channel, move |heard| {
+            let this = this.clone();
+            Box::pin(async move { this.eviction_heard(heard).await })
+        })
+    }
+
+    /// What the eviction listener does with what it hears.
+    async fn eviction_heard(&self, heard: Heard) {
+        match heard {
+            // Anything published while we were away was missed.
+            Heard::Resubscribed => self.clear_everything(),
+            Heard::Subscribed => {}
+            Heard::Message(payload) => self.dispatch(&payload).await,
+        }
+    }
+
+    /// Listens on any Redis channel for the life of the process: `handler` hears each
+    /// (re)subscription and every message. A dropped subscription is retried every 5 s.
+    /// `None` without Redis.
+    pub fn spawn_listener<F>(&self, channel: &str, handler: F) -> Option<tokio::task::JoinHandle<()>>
+    where
+        F: Fn(Heard) -> BoxFuture<'static, ()> + Send + Sync + 'static,
+    {
+        let client = self.inner.redis.clone()?;
+        let channel = channel.to_string();
         Some(tokio::spawn(async move {
             let mut first = true;
             loop {
                 match client.get_async_pubsub().await {
                     Ok(mut pubsub) => {
                         let subscribed = match Self::check_access(&client).await {
-                            Ok(()) => pubsub.subscribe(&this.inner.channel).await,
+                            Ok(()) => pubsub.subscribe(&channel).await,
                             Err(e) => Err(e),
                         };
                         if let Err(e) = subscribed {
                             crate::meter::redis_error("subscribe");
-                            tracing::warn!(error = %e, "eviction channel subscribe failed");
+                            tracing::warn!(channel, error = %e, "channel subscribe failed");
                         } else {
-                            if !first {
-                                // Anything published while we were away was missed.
-                                this.clear_everything();
-                            }
+                            handler(if first { Heard::Subscribed } else { Heard::Resubscribed }).await;
                             first = false;
-                            tracing::info!(channel = this.inner.channel, "listening for cache evictions");
+                            tracing::info!(channel, "listening");
                             let mut stream = pubsub.on_message();
                             while let Some(msg) = stream.next().await {
                                 if let Ok(payload) = msg.get_payload::<String>() {
-                                    this.dispatch(&payload).await;
+                                    handler(Heard::Message(payload)).await;
                                 }
                             }
                             crate::meter::redis_error("subscribe");
-                            tracing::warn!("eviction channel closed, reconnecting");
+                            tracing::warn!(channel, "channel closed, reconnecting");
                         }
                     }
                     Err(e) => {
                         crate::meter::redis_error("connect");
-                        tracing::warn!(error = %e, "redis unreachable for evictions");
+                        tracing::warn!(channel, error = %e, "redis unreachable for the channel");
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }))
     }
+}
+
+/// What a [`CacheService::spawn_listener`] handler hears.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Heard {
+    /// The first subscription succeeded.
+    Subscribed,
+    /// Subscribed again after the subscription dropped: messages published meanwhile were missed.
+    Resubscribed,
+    /// A message's payload.
+    Message(String),
 }
 
 /// Estimated bytes Moka keeps per entry besides the key and the value: its node, its places in
@@ -926,8 +959,21 @@ mod tests {
         svc.evict_all_everywhere("c").await;
         assert!(fam.get("c", &"k".to_string()).await.is_none());
         let listener = svc.spawn_eviction_listener().unwrap();
+        let other = svc.spawn_listener("notificationPush", |_| Box::pin(async {})).unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         listener.abort();
+        other.abort();
+        assert!(CacheService::new("x", "c", None).unwrap().spawn_listener("c", |_| Box::pin(async {})).is_none());
+
+        // What the eviction listener does with what it hears.
+        fam.insert("c", "k".into(), 1).await;
+        svc.eviction_heard(Heard::Subscribed).await;
+        assert!(fam.get("c", &"k".to_string()).await.is_some(), "the first subscription keeps the caches");
+        svc.eviction_heard(Heard::Message("x-c:k".into())).await;
+        assert!(fam.get("c", &"k".to_string()).await.is_none(), "a message evicts");
+        fam.insert("c", "k".into(), 1).await;
+        svc.eviction_heard(Heard::Resubscribed).await;
+        assert!(fam.get("c", &"k".to_string()).await.is_none(), "a resubscription clears everything");
 
         fam.insert("c", "k".into(), 1).await;
         fam.insert("d", "k".into(), 1).await;
@@ -1094,6 +1140,49 @@ mod live {
         lf.insert("c", "k".into(), 1).await;
         local.evict_all_everywhere("c").await;
         assert!(lf.get("c", &"k".to_string()).await.is_none());
+    }
+
+    /// `MODLIX__REDIS__URL=... cargo test -p platform -- --ignored live_listener_round_trip`: two
+    /// services on one channel each hear what either publishes.
+    #[tokio::test]
+    #[ignore]
+    async fn live_listener_round_trip() {
+        let Ok(url) = std::env::var("MODLIX__REDIS__URL") else { return };
+        let channel = format!("rusttest-listener-{}", std::process::id());
+        let heard = Arc::new(std::sync::Mutex::new(Vec::<(usize, Heard)>::new()));
+        let mut tasks = Vec::new();
+        let services: Vec<CacheService> = (0..2).map(|_| CacheService::new("rusttest", "evictionChannel", Some(&url)).unwrap()).collect();
+        for (i, svc) in services.iter().enumerate() {
+            let heard = heard.clone();
+            tasks.push(
+                svc.spawn_listener(&channel, move |h| {
+                    let heard = heard.clone();
+                    Box::pin(async move { heard.lock().unwrap().push((i, h)) })
+                })
+                .unwrap(),
+            );
+        }
+        for _ in 0..100 {
+            if heard.lock().unwrap().iter().filter(|(_, h)| *h == Heard::Subscribed).count() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(services[1].publish(&channel, "hello").await);
+        for _ in 0..100 {
+            if heard.lock().unwrap().iter().filter(|(_, h)| *h == Heard::Message("hello".into())).count() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        for t in tasks {
+            t.abort();
+        }
+        let got = heard.lock().unwrap().clone();
+        for i in 0..2 {
+            assert!(got.contains(&(i, Heard::Subscribed)), "{got:?}");
+            assert!(got.contains(&(i, Heard::Message("hello".into()))), "{got:?}");
+        }
     }
 
     /// Against a real Redis: `MODLIX__REDIS__URL=... cargo test -p platform -- --ignored live_pubsub`.

@@ -31,8 +31,6 @@ pub struct Deps {
     pub cache: platform::cache::CacheService,
     /// The connections library and the publishers.
     pub integrations: Arc<crate::integrations::Integrations>,
-    /// The message service (`IFeignMessageService`).
-    pub message: Arc<crate::message_calls::MessageCalls>,
     /// The files service (`IFeignFilesService`).
     pub files: Arc<crate::files_calls::FilesCalls>,
     /// `core.scheduler.*`, for the one-off functions.
@@ -70,7 +68,8 @@ impl CoreFunctions {
         ]);
         functions.extend(crate::functions::integration_fns::notification(&deps.integrations));
         functions.extend(crate::functions::integration_fns::ai(&deps.integrations));
-        functions.extend(crate::functions::message::all(deps));
+        // Retired: each fails at once (the message service is gone).
+        functions.extend(crate::functions::message::all());
         // Rust only (no Java counterpart): the platform app's jobs, guarded, after every
         // family Java has.
         functions.extend(crate::functions::platform::all(&deps.platform));
@@ -113,11 +112,11 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 79);
+        assert_eq!(core.names().len(), 80);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
-        // The platform family comes last, after the 72 Java has.
+        // The platform family comes last, after the 72 Java has and SendDataNotification.
         assert_eq!(
-            core.names()[72..],
+            core.names()[73..],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",
@@ -128,7 +127,11 @@ mod tests {
                 "CoreServices.Platform.CleanupEventRuns",
             ]
         );
-        assert!(core.names()[..72].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
+        assert!(core.names()[..73].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
+        let notification: Vec<&String> = core.names().iter().filter(|n| n.starts_with("CoreServices.Notification.")).collect();
+        assert_eq!(notification, ["CoreServices.Notification.SendNotification", "CoreServices.Notification.SendDataNotification"]);
+        assert_eq!(core.filter("SendDataNotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);
+        assert_eq!(core.names().iter().filter(|n| n.starts_with("CoreServices.Message.")).count(), 7, "retired, still registered");
         for full in [
             "CoreServices.SecurityContext.HasAuthority",
             "CoreServices.SecurityContext.GetAuthentication",
@@ -149,6 +152,7 @@ mod tests {
             "CoreServices.Storage.GetVersionDetails",
             "CoreServices.Storage.ClearDraft",
             "CoreServices.Storage.CopyToDraft",
+            "CoreServices.Notification.SendDataNotification",
         ] {
             let (ns, name) = full.rsplit_once('.').unwrap();
             assert!(core.find(Some(ns), name).await.unwrap().is_some(), "{full}");

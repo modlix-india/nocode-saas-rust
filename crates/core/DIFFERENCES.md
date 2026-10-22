@@ -188,11 +188,12 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   (`deploy/pdf-render`, WeasyPrint: CSS with `<style>` and `@page`, tables, borders, colours,
   fonts, running headers, images) when `[pdf] upstream` is set (`crate::pdf_render`). The sidecar
   reads images only from the files service (any host's `/api/files/{static,secured}/file/...`)
-  and `data:` URLs, plus `https` hosts listed in its `ALLOWED_HOSTS`; Java fetched any URL, so
-  web fonts (Google Fonts) and other external images are left out (the image's own fonts stand
-  in). WeasyPrint is not openhtmltopdf: a few CSS details lay out differently, and CSS 3 layout
+  and `data:` URLs, Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`: any family a
+  template links, kept in memory after the first fetch) and `https` hosts listed in its
+  `ALLOWED_HOSTS`; Java fetched any URL, so other external images are left out. WeasyPrint is not openhtmltopdf: a few CSS details lay out differently, and CSS 3 layout
   (flex) it supports where openhtmltopdf did not. Without `[pdf] upstream`, or when the sidecar
-  fails and `[pdf] fallback_on_error` is on, `crate::pdf` makes the PDF: the HTML's text and
+  fails and `[pdf] fallback_on_error` is on (off by default since 2026-10-22: a sidecar failure fails
+  the call), `crate::pdf` makes the PDF: the HTML's text and
   structure (headings, emphasis, lists, tables side by side, `pre`, breaks, alignment, page
   breaks) in Helvetica / Courier on A4, characters outside WinAnsi as `?`, no images. Everything
   around it (template, language, parts, file name, the files upload, the output) is Java's.
@@ -214,6 +215,38 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
 - **Not run by the live parity:** anything that would send (REST to a real target, e-mail,
   WhatsApp, calls, AI) or publish (events, notifications) on the Java side. Those are covered by
   the unit tests against in-process fakes.
+
+### Data notifications and the retired message functions (2026-10-22, Rust only)
+
+- **D42 `CoreServices.Notification.SendDataNotification`.** A push to the open browser tabs of
+  one user (`User Id`) or of a client's users (`Client Id`, `Client Code`), optionally only
+  those holding `filterAuthorization`, that is never stored (no `notification_inapp` row, no
+  bell entry). Arguments: `appCode`, `clientCode`, `targetType`, `targetId`, `targetCode`,
+  `filterAuthorization` (as `SendNotification`), `eventName`, `data` (any JSON) and
+  `ttlSeconds` (1 to 3600, default 60); output `{sent}`. The caller and hierarchy checks are
+  `SendNotification`'s (`connections::notification::prepare`), and only inside a server
+  function. The event name is 1 to 64 letters, digits, `_ . -`, not `init` or `notification`;
+  the data at most 64 KB as JSON (400s `CORE.DATA_NOTIFICATION_EVENT_INVALID`,
+  `CORE.DATA_NOTIFICATION_EVENT_RESERVED`, `CORE.DATA_NOTIFICATION_TOO_LARGE`). The message goes
+  on the notifications exchange with `kind: DATA`, `eventName`, `data` and `expiresAt`; the
+  notification service delivers it (crates/notification/DIFFERENCES.md). Its signature is
+  built in Rust (`data_notification_signature`), not captured from Java, and `repositoryFind` /
+  `repositoryFilter` list it after the 72 functions Java has.
+- **D43 `CoreServices.Message.*` fail at once.** The message service is retired. The seven
+  functions (`SendWhatsapp`, `MakeCall`, `LinkWhatsappNumber`, `ListWhatsappNumbers`,
+  `GetWhatsappPairingCode`, `RemoveWhatsappNumber`, `SetDefaultWhatsappNumber`) stay registered
+  under Java's signatures, because stored definitions still name them (on the local stack,
+  2026-10-22: eight leadzumptwo server functions), but each answers 410
+  `CORE.MESSAGE_SERVICE_RETIRED` before its arguments are even validated, and calls nothing.
+  The message client (`message_calls.rs`) and `[message] upstream` are removed;
+  `CORE.WHATSAPP_*` and `CORE.MESSAGE_*_FORBIDDEN` are no longer raised.
+- **D44 `CoreServices.REST.*` downloads in webhook and event runs.** With `downloadAsAFile`,
+  a run holding `Authorities._Webhook` (the internal webhook route) or
+  `Authorities._Event_Runner` (an event without its own authentication) stores the response
+  through files' internal create route as a **secured** file of the run's client (or of a
+  `fileClientCode` the run's client manages), where Java stored nothing for an anonymous
+  caller. The file's `url` is files' answer: `api/files/secured/file/<CLIENT>/<fileLocation>/<name>`.
+  Rules in crates/connections/DIFFERENCES.md (30).
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

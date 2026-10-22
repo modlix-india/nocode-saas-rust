@@ -23,7 +23,8 @@ blocks the library's tests; each item is needed before core can serve traffic wi
      `PatchRequest` and `DeleteRequest`
    - `CoreServices.Email.SendEmail`
    - `CoreServices.AI.Chat`
-   - `CoreServices.Notification.SendNotification`
+   - `CoreServices.Notification.SendNotification`, and the Rust-only
+     `CoreServices.Notification.SendDataNotification` (`notification::prepare_data`)
    - `CoreServices.Event.CreateEvent`
 
    Each wrapper builds a `context::Caller` from the request context (authentication,

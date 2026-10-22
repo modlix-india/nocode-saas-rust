@@ -36,6 +36,11 @@ pub const ANONYMOUS_AUTHORITY: &str = "Authorities._Anonymous";
 /// Held only by the anonymous context built here, so a server function meant to run only from
 /// an event sets `executeAuth = "Authorities._Event_Runner"`.
 pub const EVENT_RUNNER_AUTHORITY: &str = "Authorities._Event_Runner";
+/// Held only by the context of core's internal webhook route (a provider calling an app's
+/// webhook URI path through ui-shell), so a tenant storage that takes webhook data sets
+/// `createAuth = "Authorities._Webhook"` and a function meant only for webhooks sets it as its
+/// `executeAuth`.
+pub const WEBHOOK_AUTHORITY: &str = "Authorities._Webhook";
 
 /// Events another service hands to core so an app can own a channel; losing one loses a
 /// customer's message or call.
@@ -84,6 +89,16 @@ pub fn authentication_of(raw: &Value) -> Result<Authentication, CoreError> {
 /// `makeAnonymousContextAuth(appCode, clientCode, client)`: the user `_Anonymous` of the
 /// client, with the anonymous and event-runner authorities, the URL codes from the event.
 pub fn anonymous_authentication(app_code: Option<&str>, client_code: Option<&str>, client: &Value) -> Result<Authentication, CoreError> {
+    anonymous_with(app_code, client_code, client, &[ANONYMOUS_AUTHORITY, EVENT_RUNNER_AUTHORITY])
+}
+
+/// The same anonymous user of the client for a webhook: the anonymous and webhook authorities,
+/// never the event runner's.
+pub fn webhook_authentication(app_code: Option<&str>, client_code: Option<&str>, client: &Value) -> Result<Authentication, CoreError> {
+    anonymous_with(app_code, client_code, client, &[ANONYMOUS_AUTHORITY, WEBHOOK_AUTHORITY])
+}
+
+fn anonymous_with(app_code: Option<&str>, client_code: Option<&str>, client: &Value, authorities: &[&str]) -> Result<Authentication, CoreError> {
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.f").to_string();
     let id = client.get("id").cloned().unwrap_or(Value::Null);
     let code = client.get("code").cloned().unwrap_or(Value::Null);
@@ -93,7 +108,7 @@ pub fn anonymous_authentication(app_code: Option<&str>, client_code: Option<&str
             "clientId": id, "userName": "_Anonymous", "emailId": "nothing@nothing", "phoneNumber": "+910000000000",
             "firstName": "Anonymous", "lastName": "", "localeCode": "en", "password": "", "passwordHashed": false,
             "accountNonExpired": true, "accountNonLocked": true, "credentialsNonExpired": true, "noFailedAttempt": 0,
-            "stringAuthorities": [ANONYMOUS_AUTHORITY, EVENT_RUNNER_AUTHORITY],
+            "stringAuthorities": authorities,
         },
         "isAuthenticated": false,
         "authenticated": false,

@@ -6,7 +6,9 @@
 //! - Queue: [`queue`] consumes `notifications.queues` and runs [`send::SendService`] per message,
 //!   which reads the definitions from core ([`calls::CoreClient`]) and the recipients from
 //!   security ([`calls::DirectoryClient`]), then hands out email ([`email`]) and in-app
-//!   ([`inapp`]) notifications; in-app ones reach the open streams of this process ([`sse`]).
+//!   ([`inapp`]) notifications. A data notification (`kind: DATA`) skips the definitions and the
+//!   database and only reaches the recipients' open streams.
+//! - Streams: [`sse`] holds this process's; [`push`] reaches every instance's through Redis.
 
 pub mod calls;
 pub mod catalogue;
@@ -19,6 +21,7 @@ pub mod inapp;
 pub mod messages;
 pub mod model;
 pub mod preference;
+pub mod push;
 pub mod queue;
 pub mod send;
 pub mod spring;
@@ -43,6 +46,7 @@ use crate::email::EmailService;
 use crate::handlers::AppState;
 use crate::inapp::InAppService;
 use crate::preference::PreferenceService;
+use crate::push::Push;
 use crate::send::SendService;
 use crate::sse::Hub;
 
@@ -54,6 +58,8 @@ pub struct Built {
     pub state: Arc<AppState>,
     pub send: Arc<SendService>,
     pub hub: Arc<Hub>,
+    /// Delivery to every instance's streams.
+    pub push: Arc<Push>,
     pub registry: Option<Registry>,
     pub pool: sqlx::MySqlPool,
 }
@@ -81,13 +87,15 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
     };
     let core = CoreClient::with_connections(core_up, connections_up, timeout)?;
     let hub = Hub::new(cfg.sse.buffer);
+    let push = Push::new(hub.clone(), cache.clone(), &cfg.sse.push_channel);
 
-    let in_app = InAppService { dao: dao.clone(), hub: hub.clone() };
+    let in_app = InAppService { dao: dao.clone(), push: push.clone() };
     let send = Arc::new(SendService {
         core,
         directory: directory.clone(),
         email: Arc::new(EmailService { block_private_targets: cfg.email.block_private_targets, ..EmailService::new(&cfg.email.sendgrid_url)? }),
-        in_app: Arc::new(InAppService { dao: dao.clone(), hub: hub.clone() }),
+        in_app: Arc::new(InAppService { dao: dao.clone(), push: push.clone() }),
+        push: push.clone(),
     });
     let state = Arc::new(AppState {
         security: SecurityClient::from_config(&cfg.security, registry.as_ref())?,
@@ -96,7 +104,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         hub: hub.clone(),
         server_port: cfg.server.port,
     });
-    Ok(Built { state, send, hub, registry, pool })
+    Ok(Built { state, send, hub, push, registry, pool })
 }
 
 /// Loads configuration, connects everything, starts the queue consumer and the heartbeat, and
@@ -109,6 +117,9 @@ pub async fn run() -> Result<()> {
     let cfg = loaded.config;
     let built = build(&cfg).await?;
     built.hub.spawn_heartbeat(Duration::from_secs(cfg.sse.heartbeat_seconds.max(1)));
+    if built.push.spawn_listener().is_none() {
+        tracing::info!("no [redis] url: notifications reach the streams open on this instance only");
+    }
 
     let health = Health::new(telemetry.metrics.clone());
     {

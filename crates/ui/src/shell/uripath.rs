@@ -44,11 +44,16 @@ pub const URI_PATH: Pojo = Pojo {
             Field::new("pathString", K::Str, C::Copy),
             Field::new("shortCode", K::Str, C::Copy),
             Field::new("pathDefinitions", K::MapPojo(&PATH_DEFINITION), C::MapObject),
+            // Rust only: the route is a provider's webhook (`crate::shell::webhook`).
+            Field::new("webhook", K::BoxBool, C::Copy),
         ],
     ],
 };
 
 pub struct UriPathDoc;
+
+/// The URI path's own scalar fields: a client's copy keeps what it sets, the base fills the rest.
+const OWN_SCALARS: [&str; 3] = ["pathString", "shortCode", "webhook"];
 
 impl DocType for UriPathDoc {
     fn object_name(&self) -> &'static str {
@@ -70,7 +75,7 @@ impl DocType for UriPathDoc {
             path_definition_apply(o, b)
         });
         this.insert("pathDefinitions".into(), pd.map(JValue::Object).unwrap_or(JValue::Null));
-        for f in ["pathString", "shortCode"] {
+        for f in OWN_SCALARS {
             if this.get(f).is_none_or(JValue::is_null) {
                 this.insert(f.into(), base.get(f).cloned().unwrap_or(JValue::Null));
             }
@@ -83,7 +88,7 @@ impl DocType for UriPathDoc {
             path_definition_extract(existing, inc)
         });
         this.insert("pathDefinitions".into(), JValue::Object(pd));
-        for f in ["pathString", "shortCode"] {
+        for f in OWN_SCALARS {
             if this.get(f).is_some_and(|v| !v.is_null()) && this.get(f) == base.get(f) {
                 this.insert(f.into(), JValue::Null);
             }
@@ -570,22 +575,29 @@ pub fn arguments_value(result: &G, param: &str) -> Result<Option<G>, String> {
 const NPE_RESULT: &str = "Cannot invoke \"com.google.gson.JsonElement.toString()\" because the return value of \"com.google.gson.JsonObject.get(String)\" is null";
 const NPE_ARGUMENT: &str = "Cannot invoke \"com.google.gson.JsonElement.toString()\" because the return value of \"com.fincity.nocode.kirun.engine.runtime.tokenextractors.ArgumentsTokenValueExtractor.getValue(String)\" is null";
 
-/// `URIPathService.extractOutputEvent`: `Ok(None)` is the empty Mono.
-pub fn extract_output_event(response: &G, name: &str, param: Option<&str>) -> Result<Option<String>, String> {
+/// The value the output event answers with: its whole `result`, or the parameter named in it.
+/// `Ok(None)` is the empty Mono; `Err` the `NullPointerException` (or the expression error)
+/// Java fails with.
+pub fn output_value(response: &G, name: &str, param: Option<&str>) -> Result<Option<G>, String> {
     let Some(event) = named_event(response, name) else { return Ok(None) };
     match param.filter(|p| !p.trim().is_empty()) {
         None => match event.get("result") {
-            Some(r) => Ok(Some(gson::to_string(r))),
+            Some(r) => Ok(Some(r.clone())),
             None => Err(NPE_RESULT.into()),
         },
         Some(p) => match event.get("result") {
             Some(r @ G::Obj(_)) => match arguments_value(r, p)? {
-                Some(v) => Ok(Some(gson::to_string(&v))),
+                Some(v) => Ok(Some(v)),
                 None => Err(NPE_ARGUMENT.into()),
             },
             _ => Ok(None),
         },
     }
+}
+
+/// `URIPathService.extractOutputEvent`: `Ok(None)` is the empty Mono.
+pub fn extract_output_event(response: &G, name: &str, param: Option<&str>) -> Result<Option<String>, String> {
+    Ok(output_value(response, name, param)?.map(|v| gson::to_string(&v)))
 }
 
 /// The function's answer turned into the route's: `Ok(None)` is the empty Mono (a GET then

@@ -1,7 +1,8 @@
 //! The core functions over `crates/connections` and the publishers: `CoreServices.REST.*`
 //! (`CallRequest` and its five method-fixed forms), `CoreServices.Email.SendEmail`,
 //! `CoreServices.AI.Chat`, `CoreServices.Notification.SendNotification` and
-//! `CoreServices.Event.CreateEvent`.
+//! `CoreServices.Event.CreateEvent`, and the Rust-only
+//! `CoreServices.Notification.SendDataNotification`.
 //!
 //! Each reads its arguments as the Java class does, then hands the work to the library with
 //! the caller from the request context. Like the Java classes, all but the REST ones ask
@@ -14,15 +15,15 @@ use connections::ai::{chat_function, ChatOutcome};
 use connections::email::{attachment_sources, send_email_function, AttachmentFiles, Attachments, EmailContext};
 use connections::error::ConnResult;
 use connections::mq::{jackson_authentication, EventMessage};
-use connections::notification::NotificationRequest;
+use connections::notification::{DataNotificationRequest, NotificationRequest};
 use connections::rest::call::{self, CallArgs};
 use kirun::function::Function;
-use kirun::model::{EventResult, FunctionOutput};
+use kirun::model::{EventResult, FunctionOutput, FunctionSignature};
 use kirun::{Map as KMap, Value};
-use serde_json::Map;
+use serde_json::{json, Map};
 
-use super::arg_string;
 use super::support::{empty_result, output_map, require_context_key, Java, JavaFunction};
+use super::{arg_string, java_sig, Core, CoreFunction};
 use crate::context;
 use crate::error::CoreError;
 use crate::files_calls::FilesCalls;
@@ -54,7 +55,7 @@ pub fn create_event(integrations: &Arc<Integrations>, defs: &Arc<dyn Catalog>) -
 }
 
 pub fn notification(integrations: &Arc<Integrations>) -> Vec<Arc<dyn Function>> {
-    vec![Java::function(SendNotification(integrations.clone()))]
+    vec![Java::function(SendNotification(integrations.clone())), Arc::new(Core(SendDataNotification::new(integrations.clone())))]
 }
 
 pub fn ai(integrations: &Arc<Integrations>) -> Vec<Arc<dyn Function>> {
@@ -303,6 +304,92 @@ impl JavaFunction for SendNotification {
             payload: Some(payload),
         };
         let sent = self.0.mq.send_notification(self.0.checks.as_ref(), &caller(), req).await?;
+        Ok(output_map([("sent", Value::Bool(sent.unwrap_or(false)))]))
+    }
+}
+
+// --- CoreServices.Notification.SendDataNotification ----------------------------------------------
+
+/// A push to the open streams of the target's users (one user, or the users of a client,
+/// optionally only those holding `filterAuthorization`) that is never stored: no in-app row, no
+/// bell entry. Users who are not online miss it. Rust only; the target and access rules are
+/// `SendNotification`'s, and the notification service delivers it as an SSE event named
+/// `eventName` with `{event, data, id, sentAt}`.
+pub struct SendDataNotification {
+    integrations: Arc<Integrations>,
+    signature: FunctionSignature,
+}
+
+/// `SendDataNotification`'s signature, written as `repositoryFind` answers it.
+pub fn data_notification_signature() -> FunctionSignature {
+    let text = |name: &str, default: Value| {
+        json!({"schema": {"namespace": "_", "name": name, "version": 1, "type": "STRING", "defaultValue": default},
+               "parameterName": name, "variableArgument": false, "type": "EXPRESSION"})
+    };
+    let mut target_type = text("targetType", json!("User Id"));
+    target_type["schema"]["enums"] = json!(["User Id", "Client Id", "Client Code"]);
+    let mut event_name = text("eventName", Value::Null);
+    event_name["schema"].as_object_mut().map(|m| m.remove("defaultValue"));
+    let v = json!({
+        "namespace": "CoreServices.Notification",
+        "name": "SendDataNotification",
+        "parameters": {
+            "appCode": text("appCode", json!("")),
+            "clientCode": text("clientCode", json!("")),
+            "targetType": target_type,
+            "targetId": {"schema": {"namespace": "_", "name": "targetId", "version": 1, "type": ["FLOAT", "DOUBLE", "LONG", "INTEGER"], "defaultValue": 0},
+                         "parameterName": "targetId", "variableArgument": false, "type": "EXPRESSION"},
+            "targetCode": text("targetCode", json!("")),
+            "filterAuthorization": text("filterAuthorization", json!("")),
+            "eventName": event_name,
+            "data": {"schema": {"namespace": "_", "name": "data", "version": 1,
+                                "type": ["INTEGER", "LONG", "FLOAT", "DOUBLE", "STRING", "BOOLEAN", "ARRAY", "OBJECT", "NULL"]},
+                     "parameterName": "data", "variableArgument": false, "type": "EXPRESSION"},
+            "ttlSeconds": {"schema": {"namespace": "_", "name": "ttlSeconds", "version": 1, "type": "INTEGER", "defaultValue": 60,
+                                      "minimum": 1, "maximum": 3600},
+                           "parameterName": "ttlSeconds", "variableArgument": false, "type": "EXPRESSION"}
+        },
+        "events": {"output": {"name": "output", "parameters": {"sent": {"namespace": "_", "name": "sent", "version": 1, "type": "BOOLEAN"}}}}
+    });
+    java_sig::from_json(&v).expect("SendDataNotification's signature")
+}
+
+impl SendDataNotification {
+    pub fn new(integrations: Arc<Integrations>) -> Self {
+        Self { integrations, signature: data_notification_signature() }
+    }
+}
+
+#[async_trait]
+impl CoreFunction for SendDataNotification {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
+        let app_code = arg_string(args, "appCode")?;
+        let client_code = arg_string(args, "clientCode")?;
+        let target_id = big_integer(args, "targetId")?;
+        let target_code = arg_string(args, "targetCode")?;
+        let target_type = arg_string(args, "targetType")?;
+        let filter_authorization = arg_string(args, "filterAuthorization")?;
+        let event_name = arg_string(args, "eventName")?;
+        let data = args.get("data").cloned().unwrap_or(Value::Null);
+        let ttl_seconds = i64::from(int(args, "ttlSeconds")?);
+        require_context_key()?;
+        let req = DataNotificationRequest {
+            app_code: non_empty(app_code),
+            client_code: non_empty(client_code),
+            target_id: Some(target_id),
+            target_code: non_empty(target_code),
+            target_type,
+            filter_authorization: non_empty(filter_authorization),
+            event_name,
+            data,
+            ttl_seconds,
+        };
+        let i = &self.integrations;
+        let sent = i.mq.send_data_notification(i.checks.as_ref(), &caller(), req).await?;
         Ok(output_map([("sent", Value::Bool(sent.unwrap_or(false)))]))
     }
 }

@@ -15,7 +15,8 @@ pub struct NotificationConfig {
     /// The caller's context, recipients (`users/internal/notification`) and the user checks of
     /// the preference routes.
     pub security: SecurityConfig,
-    /// Publishes the `notificationPreference` eviction Java's preference writes publish.
+    /// Publishes the `notificationPreference` eviction Java's preference writes publish, and
+    /// carries the pushes to every instance's streams (`[sse] push_channel`).
     pub redis: RedisConfig,
     /// The `notification` schema (`notification_inapp`, `notification_preference`).
     pub database: MySqlConfig,
@@ -183,11 +184,14 @@ pub struct SseSection {
     /// Events held for a stream that is not reading; a stream that falls this far behind is
     /// dropped (Java blocks the sending thread on it instead).
     pub buffer: usize,
+    /// The Redis channel frames reach every instance's streams on (with `[redis] url`). Like
+    /// `evictionChannel`, it carries no cache prefix.
+    pub push_channel: String,
 }
 
 impl Default for SseSection {
     fn default() -> Self {
-        Self { heartbeat_seconds: 15, buffer: 256 }
+        Self { heartbeat_seconds: 15, buffer: 256, push_channel: "notificationPush".into() }
     }
 }
 
@@ -202,6 +206,7 @@ mod tests {
         assert_eq!(c.database.database, "notification");
         assert_eq!(c.notifications.names(), ["notifications1", "notifications2", "notifications3"]);
         assert_eq!(c.sse.heartbeat_seconds, 15);
+        assert_eq!(c.sse.push_channel, "notificationPush");
         assert_eq!(c.core.timeout_seconds, 60);
         assert_eq!(c.email.sendgrid_url, "https://api.sendgrid.com/v3/mail/send");
         assert!(c.email.block_private_targets);

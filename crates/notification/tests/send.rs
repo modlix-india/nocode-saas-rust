@@ -13,7 +13,9 @@ use notification::calls::{CoreClient, DirectoryClient};
 use notification::email::EmailSink;
 use notification::inapp::InAppSink;
 use notification::model::{CoreNotification, MailConnection, NotificationUser, QueueMessage};
+use notification::push::Push;
 use notification::send::{Outcome, SendService};
+use notification::sse::Hub;
 use parking_lot::Mutex;
 use platform::upstream::Upstream;
 use serde_json::{json, Map, Value};
@@ -69,6 +71,7 @@ async fn rig() -> Rig {
         directory: DirectoryClient::new(Upstream::fixed(&[&sec_base]), t).unwrap(),
         email: sinks.clone(),
         in_app: sinks.clone(),
+        push: Push::local(Hub::new(8)),
     };
     // Only the in-app channel: which channel fires is not what the draft tests are about.
     core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true})));
@@ -286,6 +289,39 @@ async fn targets_become_the_users_request() {
     assert_eq!(out.unwrap(), Outcome::NoUsers);
 }
 
+/// A normal (bell and email) notification asks security only for the users holding its
+/// `filterAuthorization` (DIFFERENCES N15), and both channels go to exactly those users.
+#[tokio::test]
+async fn the_authority_filter_narrows_a_normal_notification() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
+    // Security answers the users that meet the filter: one of the client's users.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 7}])));
+    let m = QueueMessage {
+        target_type: Some("Client Id".into()),
+        target_id: Some(3),
+        filter_authorization: Some("Authorities.Calls".into()),
+        ..message(false)
+    };
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true });
+    let asked = r.security.calls_to(USERS_PATH);
+    assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "testapp", "filterAuthorization": "Authorities.Calls"}));
+    assert_eq!(*r.sinks.emails.lock(), vec![(Some(7), Some("SMTP".into()))]);
+    assert_eq!(r.sinks.in_app.lock()[0].0, 1, "the in-app rows are for the filtered users only");
+
+    // A blank filter is no filter.
+    r.security.clear();
+    r.service.send(&QueueMessage { filter_authorization: Some("  ".into()), ..m.clone() }).await.unwrap();
+    assert_eq!(r.security.calls_to(USERS_PATH)[0].json(), json!({"clientId": 3, "appCode": "testapp"}));
+
+    // Nobody meets it: nothing more is sent.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([])));
+    let (emails, in_app) = (r.sinks.emails.lock().len(), r.sinks.in_app.lock().len());
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::NoUsers);
+    assert_eq!((r.sinks.emails.lock().len(), r.sinks.in_app.lock().len()), (emails, in_app));
+}
+
 #[tokio::test]
 async fn the_connection_read_can_have_its_own_upstream() {
     let r = rig().await;
@@ -309,4 +345,87 @@ async fn payload_reaches_the_sinks() {
     let m = QueueMessage { payload: Some(json!({"who": "Ann"}).as_object().unwrap().clone()), notification_category: None, ..message(false) };
     r.service.send(&m).await.unwrap();
     assert_eq!(r.sinks.in_app.lock()[0], (1, Some("testapp".into()), None, json!({"who": "Ann"})));
+}
+
+// ----------------------------------------------------------------- data notifications
+
+/// A data notification for the users of client 3 holding `Authorities.Calls`.
+fn data_message(expires_at: Option<i128>) -> QueueMessage {
+    QueueMessage {
+        app_code: Some("leadzumptwo".into()),
+        client_code: Some("FIN".into()),
+        target_type: Some("Client Id".into()),
+        target_id: Some(3),
+        filter_authorization: Some("Authorities.Calls".into()),
+        kind: Some("DATA".into()),
+        event_name: Some("incomingCall".into()),
+        data: Some(json!({"from": "+9180", "lead": {"id": 9}})),
+        expires_at,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_data_notification_reaches_the_open_streams_and_nothing_else() {
+    use futures::StreamExt;
+    let r = rig().await;
+    let hub = Hub::new(8);
+    let service = SendService { push: Push::local(hub.clone()), ..r.service };
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 142, "clientId": 3}, {"id": 143, "clientId": 3}, {"id": 142, "clientId": 3}, {"clientId": 3}])));
+    let mut a = hub.subscribe("142-leadzumptwo".into());
+    let mut b = hub.subscribe("143-leadzumptwo".into());
+    let mut other_app = hub.subscribe("142-leadzump".into());
+    for s in [&mut a, &mut b, &mut other_app] {
+        let _ = s.next().await;
+    }
+    let now = 1_792_634_021_000;
+    let outcome = service.send_data(&data_message(Some(now + 60_000)), now).await.unwrap();
+    assert_eq!(outcome, Outcome::Pushed { users: 2 }, "each user once");
+
+    let frame = String::from_utf8(a.next().await.unwrap().unwrap().to_vec()).unwrap();
+    assert!(frame.starts_with("event:incomingCall\ndata:{\"event\":\"incomingCall\",\"data\":{\"from\":\"+9180\",\"lead\":{\"id\":9}},\"id\":\""), "{frame}");
+    let data_line = frame.lines().nth(1).unwrap().strip_prefix("data:").unwrap();
+    let body: Value = serde_json::from_str(data_line).unwrap();
+    assert_eq!(body["sentAt"], json!(now as i64));
+    assert_eq!(frame.lines().nth(2).unwrap(), format!("id:{}", body["id"].as_str().unwrap()));
+    assert!(frame.ends_with("\nretry:5000\n\n"));
+    assert_eq!(String::from_utf8(b.next().await.unwrap().unwrap().to_vec()).unwrap(), frame);
+    assert!(tokio::time::timeout(Duration::from_millis(50), other_app.next()).await.is_err(), "another app's stream hears nothing");
+
+    // No definition was read, nothing went to email or in-app; recipients were asked for with
+    // the authority filter.
+    assert!(r.core.calls.lock().is_empty());
+    assert!(r.sinks.emails.lock().is_empty() && r.sinks.in_app.lock().is_empty());
+    let asked = r.security.calls_to(USERS_PATH);
+    assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "leadzumptwo", "filterAuthorization": "Authorities.Calls"}));
+
+    // Through `send`, as the queue runs it: the clock is the real one.
+    let far = i128::from(chrono::Utc::now().timestamp_millis()) + 60_000;
+    assert_eq!(service.send(&data_message(Some(far))).await.unwrap(), Outcome::Pushed { users: 2 });
+    assert_eq!(service.send(&data_message(None)).await.unwrap(), Outcome::Pushed { users: 2 }, "no expiry: delivered");
+}
+
+#[tokio::test]
+async fn data_notifications_that_end_early() {
+    let r = rig().await;
+    let service = SendService { push: Push::local(Hub::new(8)), ..r.service };
+    let now = 1_792_634_021_000;
+    // Expired: dropped before anyone is asked.
+    assert_eq!(service.send_data(&data_message(Some(now - 1)), now).await.unwrap(), Outcome::Expired);
+    assert!(r.security.calls_to(USERS_PATH).is_empty());
+    // Nobody to tell.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([])));
+    assert_eq!(service.send_data(&data_message(Some(now)), now).await.unwrap(), Outcome::NoUsers);
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"clientId": 3}])));
+    assert_eq!(service.send_data(&data_message(None), now).await.unwrap(), Outcome::NoUsers, "users without ids");
+    // Unusable messages fail (and are acked by the listener).
+    let no_event = QueueMessage { event_name: None, ..data_message(None) };
+    assert!(service.send_data(&no_event, now).await.unwrap_err().to_string().contains("event name"));
+    let no_app = QueueMessage { app_code: Some(String::new()), ..data_message(None) };
+    assert!(service.send_data(&no_app, now).await.unwrap_err().to_string().contains("app code"));
+    r.security.answer("POST", USERS_PATH, Answer::json(json!({"not": "a list"})));
+    assert!(service.send_data(&data_message(None), now).await.is_err());
+    let unknown = QueueMessage { kind: Some("LATER".into()), ..data_message(None) };
+    assert!(service.send(&unknown).await.unwrap_err().to_string().contains("Unknown notification kind: LATER"));
+    assert!(r.core.calls.lock().is_empty());
 }
