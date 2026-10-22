@@ -1003,6 +1003,35 @@ impl AppDataService {
         Ok((t.storage.expect("gated"), rows))
     }
 
+    // ------------------------------------------------------------------ fields
+
+    /// The fields of a storage (`CoreServices.Storage.GetFields`): each property's schema in
+    /// the Gson form a schema is served in. The storage resolves and is gated as a read is
+    /// (the app and client defaulted the same way, `onlyThruKIRun`, `readAuth`), on the
+    /// request's surface; no rows are read, so no connection or engine is picked. A top-level
+    /// `ref` is followed through the schemas the write validator checks rows against (core's,
+    /// then the app's as the storage's client resolves them, its own copy first); properties
+    /// written beside the ref win over the referenced ones, as `getResolvedSchema` merges them.
+    /// Relation fields are not part of the schema and are not added.
+    pub async fn storage_fields(&self, app_code: Option<&str>, client_code: Option<&str>, storage_name: &str)
+        -> CoreResult<serde_json::Map<String, serde_json::Value>> {
+        let app = Self::app_code(app_code);
+        let client = self.client_code(client_code).await?;
+        let storage = self.storage_with_kirun_validation(storage_name, &app, &client).await?;
+        let s = self.generic(storage.as_ref(), Gate::Read, |s| async move { Ok(s.clone()) }).await?;
+        let raw = s
+            .schema
+            .as_ref()
+            .and_then(|r| crate::java_model::gson_schema(&r.to_json()))
+            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+        let schemas = self.defs.schema_source(&s.app_code, &s.client_code).await?;
+        let resolved = follow_schema_ref(&raw, schemas.as_ref(), &s.name).await?;
+        Ok(match resolved.get("properties") {
+            Some(serde_json::Value::Object(p)) => p.clone(),
+            _ => serde_json::Map::new(),
+        })
+    }
+
     // ------------------------------------------------------------------ eager relations
 
     /// [`Self::fill_one`] for a row the Mongo engine just inserted. Its relation fields still
@@ -1569,6 +1598,96 @@ fn no_null_update(data: DataObject) -> CoreResult<DataObject> {
         ));
     }
     Ok(data)
+}
+
+/// A storage schema (Gson form) with its top-level `ref` chain followed, as
+/// `SchemaRefResolver` follows it (at most [`appdata::schema_refs::MAX_DEPTH`] hops, a repeat
+/// stops), and the properties written beside the ref merged over the referenced ones. A ref
+/// that names no schema is refused rather than read as a storage with no fields.
+async fn follow_schema_ref(
+    raw: &serde_json::Value,
+    schemas: &dyn crate::repos::SchemaSource,
+    storage: &str,
+) -> CoreResult<serde_json::Value> {
+    fn reference(s: &serde_json::Value) -> Option<String> {
+        s.get("ref").and_then(serde_json::Value::as_str).map(str::trim).filter(|r| !r.is_empty()).map(str::to_string)
+    }
+    let mut current = raw.clone();
+    let mut seen = IndexSet::new();
+    let mut depth = 0;
+    while let Some(r) = reference(&current) {
+        if depth >= appdata::schema_refs::MAX_DEPTH || !seen.insert(r.clone()) {
+            break;
+        }
+        let Some(resolved) = schema_json_from_ref(&current, schemas, &r).await? else {
+            return Err(CoreError::coded(
+                StatusCode::NOT_FOUND,
+                "CORE.STORAGE_SCHEMA_REF_NOT_FOUND",
+                format!("Schema {r} referenced by storage {storage} not found"),
+            )
+            .param("schema", &r)
+            .param("storage", storage));
+        };
+        let again = reference(&resolved).is_some() && resolved != current;
+        current = resolved;
+        if !again {
+            break;
+        }
+        depth += 1;
+    }
+    if current == *raw {
+        return Ok(current);
+    }
+    if let Some(serde_json::Value::Object(local)) = raw.get("properties").filter(|p| p.as_object().is_some_and(|p| !p.is_empty())) {
+        let mut merged = match current.get("properties") {
+            Some(serde_json::Value::Object(p)) => p.clone(),
+            _ => serde_json::Map::new(),
+        };
+        for (k, v) in local {
+            merged.insert(k.clone(), v.clone());
+        }
+        if let serde_json::Value::Object(c) = &mut current {
+            c.insert("properties".into(), serde_json::Value::Object(merged));
+        }
+    }
+    Ok(current)
+}
+
+/// `ReactiveSchemaUtil.getSchemaFromRef` on Gson-form JSON: `Namespace.Name` from the schemas
+/// (a `#` ref is the schema itself), then a `/` path through `$defs` and properties.
+async fn schema_json_from_ref(
+    current: &serde_json::Value,
+    schemas: &dyn crate::repos::SchemaSource,
+    reference: &str,
+) -> CoreResult<Option<serde_json::Value>> {
+    let parts: Vec<&str> = reference.split('/').collect();
+    let mut s = if reference.starts_with('#') {
+        current.clone()
+    } else {
+        let full = parts[0];
+        let Some(dot) = full.rfind('.') else { return Ok(None) };
+        let (ns, name) = (&full[..dot], &full[dot + 1..]);
+        if ns.is_empty() || name.is_empty() {
+            return Ok(None);
+        }
+        match schemas.find(Some(ns), name).await? {
+            Some(f) => f.json.clone(),
+            None => return Ok(None),
+        }
+    };
+    let mut i = 1;
+    while i < parts.len() {
+        let next = if parts[i] == "$defs" {
+            i += 1;
+            parts.get(i).and_then(|p| s.get("$defs")?.get(*p))
+        } else {
+            s.get("properties").and_then(|p| p.get(parts[i]))
+        };
+        let Some(next) = next.cloned() else { return Ok(None) };
+        s = next;
+        i += 1;
+    }
+    Ok(Some(s))
 }
 
 /// `gson.toJsonTree(row)`.

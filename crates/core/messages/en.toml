@@ -471,6 +471,14 @@ java = "forbidden_update_storage"
 when = "Changing a row of a MySQL storage that was deleted before the change was saved (Java answers it with the update refusal)."
 audience = "signed-in"
 
+[CORE.STORAGE_SCHEMA_REF_NOT_FOUND]
+status = 404
+params = ["schema", "storage"]
+text = "We couldn't find the schema[ {schema}] that the storage[ {storage}] takes its fields from."
+action = "Check the storage's schema reference, or create that schema in the app."
+when = "Reading the fields of a storage (CoreServices.Storage.GetFields) whose schema reference names no schema the client can read."
+audience = "signed-in"
+
 [CORE.STORAGE_BUILDER_ONLY]
 status = 403
 params = ["app"]

@@ -193,6 +193,12 @@ impl<K: Kind> OverridableService<K> {
 
     /// `findOneByNameAndAppCodeAndClientCode`.
     pub async fn find_one(&self, name: &str, app: &str, client: &str) -> AppResult<Option<JMap>> {
+        self.find_one_named(Some(name), app, client).await
+    }
+
+    /// `find_one` for a name that may be missing: `None` matches a stored `name: null`, as the
+    /// Java derived query does, and as `check_if_exists` filters.
+    pub async fn find_one_named(&self, name: Option<&str>, app: &str, client: &str) -> AppResult<Option<JMap>> {
         let d = self
             .commons()
             .backend()
