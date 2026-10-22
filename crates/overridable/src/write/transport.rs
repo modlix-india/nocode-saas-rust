@@ -499,7 +499,8 @@ impl Apply<'_> {
         e.insert("message".into(), JValue::Str(format!("From transport : {}", self.transport_name)));
         e.insert("version".into(), JValue::Int(1));
         let s = |k: &str| str_field(&e, k).unwrap_or("").to_string();
-        match service.read_to_transport(self.ca, &s("name"), &s("appCode"), &s("clientCode")).await? {
+        let name = str_field(&e, "name").map(str::to_string);
+        match service.read_to_transport(self.ca, name.as_deref(), &s("appCode"), &s("clientCode")).await? {
             Some((version, id)) => {
                 e.insert("version".into(), JValue::Int(version));
                 e.insert("id".into(), JValue::Str(id));

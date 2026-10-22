@@ -659,12 +659,16 @@ async fn transport_reads() {
     assert_eq!(named.len(), 1);
     assert_eq!(e.pages.read_for_transport(&sys, " ", SYSTEM, None).await.unwrap_err().status(), StatusCode::FORBIDDEN);
     assert_eq!(e.pages.read_for_transport(&anonymous(), APP, SYSTEM, None).await.unwrap_err().status(), StatusCode::FORBIDDEN);
-    let (v, id) = e.pages.read_to_transport(&sys, "x", APP, "LZCLA").await.unwrap().unwrap();
+    let (v, id) = e.pages.read_to_transport(&sys, Some("x"), APP, "LZCLA").await.unwrap().unwrap();
     assert_eq!(v, 3);
     assert!(!id.is_empty());
-    assert!(e.pages.read_to_transport(&sys, "nope", APP, SYSTEM).await.unwrap().is_none());
+    assert!(e.pages.read_to_transport(&sys, Some("nope"), APP, SYSTEM).await.unwrap().is_none());
+    // A nameless row is found as `name: null`, so an import updates it instead of 409ing.
+    assert!(e.pages.read_to_transport(&sys, None, APP, SYSTEM).await.unwrap().is_none());
+    e.page(&format!(r#"{{"name":null,"appCode":"{APP}","clientCode":"SYSTEM","version":5}}"#));
+    assert_eq!(e.pages.read_to_transport(&sys, None, APP, SYSTEM).await.unwrap().unwrap().0, 5);
     let reader = auth_for(SYSTEM, &["Authorities.Page_READ".into()]);
-    assert!(e.pages.read_to_transport(&reader, "x", APP, "LZCLA").await.unwrap().is_none());
+    assert!(e.pages.read_to_transport(&reader, Some("x"), APP, "LZCLA").await.unwrap().is_none());
     let bus = auth_for("LZCLA", &all_for("Page"));
     e.dir.chain(&[SYSTEM, "LZCLA"]);
     assert_eq!(e.pages.read_for_transport(&bus, APP, "LZCLA", None).await.unwrap().len(), 1);
