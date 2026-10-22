@@ -1,4 +1,4 @@
-# The Rust units for stage: on a push to oci-stage (or by hand), build the images of the units it changed (of 15 units and Lighthouse), push
+# The Rust units for stage: on a push to oci-stage (or by hand), build the images of the units it changed (of 15 units, Lighthouse and pdf-render), push
 # ocir.../idfmutpuhiky/stage-<unit>:<sha> and :latest, then deploy them to the stage host with
 # keepup-rust.sh. The work is in rust-build-deploy.yml.
 
@@ -13,6 +13,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'deploy/Dockerfile.prebuilt'
+      - 'deploy/pdf-render/**'
       - '.github/workflows/rust-build-deploy.yml'
       - '.github/workflows/rust-stage-ci.yml'
   workflow_dispatch:
