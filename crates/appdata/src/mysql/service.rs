@@ -1625,7 +1625,8 @@ impl AppDataEngine for MySqlAppDataService {
         let decoding = Decoding::of(&resolved, d.as_ref())?;
         let encoded = value_codec::encode(&row, &decoding.json, &decoding.dates, &decoding.decimals);
         let values: Vec<(String, Bind)> = encoded.iter().map(|(k, v)| Ok((k.clone(), write_bind(v)?))).collect::<AppDataResult<_>>()?;
-        execute(&pool, &sql::insert(&table(&db_name, storage), &values)).await?;
+        // A unique index that refuses the row is a 409 naming the storage (`CORE.DUPLICATE_KEY`).
+        execute(&pool, &sql::insert(&table(&db_name, storage), &values)).await.map_err(|e| e.in_storage(&storage.name))?;
 
         let saved = self
             .read_row(&pool, &db_name, storage, &resolved, &id)
@@ -1682,7 +1683,7 @@ impl AppDataEngine for MySqlAppDataService {
                 let field = resolved.field_names().get(&column).cloned().unwrap_or(column);
                 return Err(AppDataError::field_cannot_be_null(&field, &storage.name));
             }
-            return Err(e);
+            return Err(e.in_storage(&storage.name));
         }
         let saved = self.read_row(&pool, &db_name, storage, &resolved, &id).await?.ok_or(AppDataError::Empty)?;
         self.add_version(cx, &pool, &db_name, storage, &id, "UPDATE", &saved, data.message.as_deref()).await?;

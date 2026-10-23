@@ -422,7 +422,10 @@ impl Integrations {
         };
         let connection_docs = Arc::new(ConnectionDocs { source: docs.clone() });
         let auth_functions = Arc::new(AuthFunctions::default());
-        let connections = Arc::new(Connections::new(conn_cfg, connection_docs.clone(), tokens, cache, auth_functions.clone()));
+        let connections = Arc::new(
+            Connections::new(conn_cfg, connection_docs.clone(), tokens, cache, auth_functions.clone())
+                .with_authority_check(Arc::new(crate::authorities::KirunAuthorityCheck)),
+        );
         Ok(Self {
             connections,
             connection_docs,

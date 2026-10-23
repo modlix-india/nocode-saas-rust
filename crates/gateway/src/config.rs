@@ -249,4 +249,18 @@ pub struct RouteConfig {
     pub pool: String,
     /// Overrides `proxy.response_timeout_seconds` for this route.
     pub timeout_seconds: Option<u64>,
+    /// Rust only (DIFFERENCES.md): the matched `prefix` of the forwarded path is replaced by this
+    /// before the request goes out (`/api/entity/processor/entry/website` to
+    /// `/api/open/intake/website`; with `exact = false` what follows the prefix is kept).
+    pub rewrite: Option<String>,
+    /// Rust only: the request goes out for this app and this client (set both or neither),
+    /// whatever its host, its URL codes or its own `appCode` / `clientCode` headers say, and the
+    /// host is not resolved. For a public route that one app serves on every host (the website
+    /// lead intake every live site posts to on its own domain); the host still reaches the
+    /// service in `X-Forwarded-Host`.
+    pub app_code: Option<String>,
+    pub client_code: Option<String>,
+    /// Rust only: `Authorization` is not forwarded, so the service sees an anonymous caller (a
+    /// public intake must not depend on whoever happens to be signed in on the site).
+    pub anonymous: bool,
 }

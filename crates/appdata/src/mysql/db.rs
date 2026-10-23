@@ -344,6 +344,8 @@ fn base64(bytes: &[u8]) -> String {
 /// The SQLSTATE of a driver error, when it has one.
 pub fn sql_state(e: &AppDataError) -> Option<String> {
     match e {
+        // A duplicate key is answered as a 409 rather than the driver's error; its state stays 23000.
+        e if e.is_duplicate_key() => Some("23000".to_string()),
         AppDataError::Internal(inner) => inner
             .downcast_ref::<sqlx::Error>()
             .and_then(|s| s.as_database_error())

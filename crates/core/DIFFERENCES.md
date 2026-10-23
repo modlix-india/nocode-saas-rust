@@ -247,6 +247,23 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   `fileClientCode` the run's client manages), where Java stored nothing for an anonymous
   caller. The file's `url` is files' answer: `api/files/secured/file/<CLIENT>/<fileLocation>/<name>`.
   Rules in crates/connections/DIFFERENCES.md (30).
+- **D45 a connection's `consentAuth`** (2026-10-23, added; no Java equivalent). The Connection
+  document has an optional `consentAuth` (an authority expression, as a storage's `createAuth`),
+  read by core-exec and written by core-editor (E14). `POST /api/core/connections/oauth/evoke`
+  checks it against the caller with KIRun's evaluator (`authorities::KirunAuthorityCheck`, the
+  one storage gates use) before a state row or consent URL is made, and answers 403
+  `CORE.CONNECTION_CONSENT_FORBIDDEN` when the caller does not satisfy it. `GET
+  /api/core/connections/oauth/revoke` checks it too, before anything is revoked (403
+  `CORE.CONNECTION_REVOKE_FORBIDDEN`). Absent or blank: as before. The callback is not gated.
+  Rules in crates/connections/DIFFERENCES.md (32).
+- **D46 `CoreServices.Event.GetScheduleState`** (2026-10-23, Rust only). `eventName`,
+  `appCode` and `clientCode` in; `exists`, `enabled`, `cron`, `clientCode`, `ownCopy` out: the
+  schedule the caller's client runs on, from its effective definition (its own copy merged over
+  the base, else the base) on the live surface, also when called on the draft surface. Access
+  as `SetScheduleEnabled`: only inside a server function (else `exists` false), the app it runs
+  in and the caller's own client; another `appCode` or `clientCode` is 403
+  `CORE.SCHEDULE_STATE_FORBIDDEN`. `exists` is false for an event the app does not have or one
+  without a schedule.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
@@ -492,6 +509,30 @@ the evictions each write publishes included. Tags are the parity script's case n
   next (measured: the core restarted at 21:01 on 2026-10-15 flipped all three). Rust writes one
   fixed order, the one Java core showed when this was ported; the parity script reports these
   as expected.
+- **E14 connection saves** (2026-10-23, added; no Java equivalent). The editor keeps a
+  connection's `consentAuth` (D45) on create and update (an update without it clears it, as
+  every copied field), and its save-time address check follows `[connections]
+  block_private_targets` (default true: unchanged). Set to false, which only the local
+  `config/core-editor.toml` does, a connection may be saved pointing at a private, loopback or
+  internal host (a local SMTP sink); the scheme rules still refuse. Rules in
+  crates/connections/DIFFERENCES.md (33).
+- **E15 a connection's credentials never leave core-editor** (2026-10-23, Rust only). Java
+  answered a connection whole to a caller with `Connection_UPDATE` (the list's eager `data`,
+  its drafts and its version history to anyone who could read them). Here every reply that
+  carries a connection (`GET /{id}`, `?draft=true`, the eager list, create, update, draft
+  save, publish, fork, `createForClient`, `PATCH /{id}/blueprint`, `/api/core/versions/{id}`
+  and `/{id}/query`) has each secret in `connectionDetails` as `********`
+  (`editor::secrets`; the key rule is crates/connections/DIFFERENCES.md, 34). A secret
+  sent back absent from an object the save sends, null, empty or as `********` keeps the stored
+  one on update, on a draft save (from the draft it replaces, else the document) and so on
+  publish; a new value replaces it; on a create there is nothing to keep and such a secret is
+  left out. A save without `connectionDetails` replaces the details, as in Java. The version
+  rows keep the full object (publish's three-way merge reads them) and are masked when
+  answered; a list filter or sort, or a version query condition or sort, naming
+  `connectionDetails` answers an empty page. The code that opens connections reads the stored
+  document and is unchanged, and the `/api/core/connections/internal/*` routes (other units
+  sending mail and opening REST and app-data connections; nginx refuses every `/internal` path
+  from outside) still answer the full connection. Core's transports never carried connections.
 
 Java's own behaviour kept (not differences, listed so nobody "fixes" them by accident):
 `TransportService` exports and imports schemas, storages, functions, templates, event

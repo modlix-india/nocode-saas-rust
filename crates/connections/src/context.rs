@@ -60,6 +60,24 @@ impl Caller {
     }
 }
 
+/// Evaluates an authority expression (`Authorities.ROLE_Owner`,
+/// `Authorities.A or Authorities.B`) against the caller's authorities, the way a storage's
+/// `createAuth` and a function's `executeAuth` are evaluated. This crate has no expression
+/// evaluator of its own: the core crate supplies KIRun's (`authorities::KirunAuthorityCheck`).
+pub trait AuthorityCheck: Send + Sync {
+    fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool;
+}
+
+/// The check a [`crate::Connections`] starts with until a real one is supplied: a blank
+/// expression allows and any other refuses, so a gate that cannot be evaluated stays shut.
+pub struct NoEvaluator;
+
+impl AuthorityCheck for NoEvaluator {
+    fn has_authority(&self, expression: Option<&str>, _authorities: &[String]) -> bool {
+        expression.is_none_or(crate::java::is_blank)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +93,13 @@ mod tests {
         assert_eq!(c.resolve_app_and_client(Some("a"), Some("B")), (Some("a".into()), Some("B".into())));
         assert_eq!(c.resolve_app_and_client(Some(" "), None), (Some("leadzump".into()), Some("FIN".into())));
         assert_eq!(c.resolve_app_and_client(Some("x"), Some("")), (Some("x".into()), Some("FIN".into())));
+    }
+
+    #[test]
+    fn without_an_evaluator_only_a_blank_expression_allows() {
+        let owner = vec!["Authorities.ROLE_Owner".to_string()];
+        assert!(NoEvaluator.has_authority(None, &owner));
+        assert!(NoEvaluator.has_authority(Some(" "), &[]));
+        assert!(!NoEvaluator.has_authority(Some("Authorities.ROLE_Owner"), &owner));
     }
 }

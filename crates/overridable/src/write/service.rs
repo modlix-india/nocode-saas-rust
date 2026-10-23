@@ -56,6 +56,12 @@ impl Commons {
         Self { store, cache, messages: Arc::new(messages), drafts, versions }
     }
 
+    /// The commons whose version history replies hold back what `redactions` say.
+    pub fn with_version_redactions(mut self, redactions: &'static [crate::write::version::VersionRedaction]) -> Self {
+        self.versions = self.versions.with_redactions(redactions);
+        self
+    }
+
     pub fn backend(&self) -> &Arc<dyn Backend> {
         self.store.backend()
     }
@@ -327,6 +333,7 @@ impl<K: Kind> OverridableService<K> {
     /// `create`. The id is never taken from the body (see `DIFFERENCES.md`).
     pub async fn create(&self, ca: &ContextAuthentication, mut entity: JMap) -> AppResult<JMap> {
         let clock = Clock::now();
+        self.kind().keep_withheld(&mut entity, None);
         self.kind().before_create(self.commons(), ca, &mut entity).await?;
         entity.insert("id".into(), JValue::Null);
         if entity.get("clientCode").is_none_or(JValue::is_null) {
@@ -426,6 +433,7 @@ impl<K: Kind> OverridableService<K> {
         if !allowed {
             return Err(self.forbidden_permission(ca));
         }
+        self.kind().keep_withheld(&mut entity, Some(&stored));
         for f in ["appCode", "clientCode", "name", "baseClientCode"] {
             entity.insert(f.into(), stored.get(f).cloned().unwrap_or_default());
         }

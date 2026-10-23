@@ -8,6 +8,14 @@
 //! instead: each write remembers how to reverse itself, the journal is replayed backwards on a
 //! failure, and the result says `atomic: false`. Storage events raised inside a batch are sent
 //! only after it succeeds.
+//!
+//! `onConflict` says what a conflict does: a unique index refusing a write
+//! (`CORE.DUPLICATE_KEY`) or an `updateIf` whose `expected` no longer matches
+//! (`CORE.STORAGE_CONDITION_FAILED`). `throw` (the default) fails the batch as any other
+//! failure does. `report` rolls the batch back just the same and answers normally with
+//! `committed: false` and the `conflict`, so a function can try the next seat or tell the user
+//! politely. That is the "claim key" pattern: a nullable column under a unique index, written in
+//! the same batch as the main write, is how an app holds something only one row may hold.
 
 use std::sync::{Arc, Mutex};
 
@@ -70,13 +78,76 @@ pub struct NamedOp {
     pub name: Option<String>,
 }
 
+/// What a batch does when one of its operations meets a conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnConflict {
+    /// The batch fails with the conflict's error and leaves nothing written (as before
+    /// `onConflict` existed).
+    #[default]
+    Throw,
+    /// The batch is rolled back and answers normally: `committed: false` and the conflict.
+    Report,
+}
+
+impl OnConflict {
+    /// `onConflict`: `throw` or `report`, any case; absent, null or blank is `throw`.
+    pub fn parse(v: Option<&str>) -> Option<OnConflict> {
+        match v.map(str::trim).unwrap_or("") {
+            "" => Some(OnConflict::Throw),
+            t if t.eq_ignore_ascii_case("throw") => Some(OnConflict::Throw),
+            t if t.eq_ignore_ascii_case("report") => Some(OnConflict::Report),
+            _ => None,
+        }
+    }
+}
+
+/// Which kind of conflict stopped a batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictKind {
+    /// A unique index already holds the value (`CORE.DUPLICATE_KEY`).
+    Duplicate,
+    /// An `updateIf` found the row changed (`CORE.STORAGE_CONDITION_FAILED`).
+    Stale,
+}
+
+impl ConflictKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            ConflictKind::Duplicate => "DUPLICATE",
+            ConflictKind::Stale => "STALE",
+        }
+    }
+}
+
+/// The operation a reported conflict stopped, and why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchConflict {
+    /// The operation's place in `operations`.
+    pub index: usize,
+    /// Its `as` name, when it has one.
+    pub name: Option<String>,
+    /// Its `op`: create, update, updateIf, delete or nextSequence.
+    pub op: &'static str,
+    pub storage: String,
+    pub kind: ConflictKind,
+    /// The unique index that refused the write (none for a stale row).
+    pub key: Option<String>,
+    /// The conflict in plain words.
+    pub message: String,
+}
+
 /// What a batch answers with.
 #[derive(Debug, Clone)]
 pub struct BatchOutcome {
     /// One entry per operation: the written row, `{"deleted": bool}`, or `{"value": n}`.
+    /// Empty when a reported conflict rolled the batch back.
     pub results: Vec<Value>,
     /// Whether the run was one transaction (false: undone by the journal on failure).
     pub atomic: bool,
+    /// Whether the writes were kept: false only for a reported conflict.
+    pub committed: bool,
+    /// The conflict that rolled the batch back (`onConflict: report`).
+    pub conflict: Option<BatchConflict>,
 }
 
 /// What a compare-and-set answers with.
@@ -97,6 +168,40 @@ enum Undo {
 /// A failed batch: which operation and why.
 fn failed_at(index: usize, e: CoreError) -> CoreError {
     e.param("failedIndex", index)
+}
+
+/// The conflict an operation's error stands for, when it is one: a duplicate key or a stale
+/// `updateIf`. Any other failure is not a conflict and always fails the batch.
+pub fn conflict_of(e: &CoreError) -> Option<(ConflictKind, Option<String>, String)> {
+    let c = e.code()?;
+    let value = |name: &str| c.params.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).filter(|v| !v.is_empty());
+    if c.code == appdata::error::DUPLICATE_KEY {
+        Some((ConflictKind::Duplicate, value("index"), c.english().message))
+    } else if c.code == "CORE.STORAGE_CONDITION_FAILED" {
+        Some((ConflictKind::Stale, None, e.text()))
+    } else {
+        None
+    }
+}
+
+fn op_label(op: &BatchOp) -> &'static str {
+    match op {
+        BatchOp::Create { .. } => "create",
+        BatchOp::Update { .. } => "update",
+        BatchOp::UpdateIf { .. } => "updateIf",
+        BatchOp::Delete { .. } => "delete",
+        BatchOp::NextSequence { .. } => "nextSequence",
+    }
+}
+
+fn op_storage(op: &BatchOp) -> &str {
+    match op {
+        BatchOp::Create { storage, .. }
+        | BatchOp::Update { storage, .. }
+        | BatchOp::UpdateIf { storage, .. }
+        | BatchOp::Delete { storage, .. }
+        | BatchOp::NextSequence { storage, .. } => storage,
+    }
 }
 
 fn condition_failed(storage: &str, id: &str) -> CoreError {
@@ -185,12 +290,25 @@ fn resolve_text(s: &str, named: &[(String, Value)]) -> CoreResult<String> {
 }
 
 impl AppDataService {
-    /// `CoreServices.Storage.Batch`.
-    pub async fn batch(&self, app_code: Option<&str>, client_code: Option<&str>, ops: Vec<NamedOp>) -> CoreResult<BatchOutcome> {
+    /// `CoreServices.Storage.Batch`. With [`OnConflict::Report`], a conflict rolls the batch back
+    /// and answers `committed: false` with the conflict; a batch running inside another
+    /// transaction (a trigger's batch inside a batch) cannot roll back only its own part, so
+    /// there a conflict still fails it and the outer unit decides.
+    pub async fn batch(
+        &self,
+        app_code: Option<&str>,
+        client_code: Option<&str>,
+        ops: Vec<NamedOp>,
+        on_conflict: OnConflict,
+    ) -> CoreResult<BatchOutcome> {
         if ops.is_empty() {
-            return Ok(BatchOutcome { results: Vec::new(), atomic: true });
+            return Ok(BatchOutcome { results: Vec::new(), atomic: true, committed: true, conflict: None });
         }
         self.prepare_batch(app_code, client_code, &ops).await?;
+        let report = on_conflict == OnConflict::Report && !tx::active();
+        let labels: Vec<(&'static str, String, Option<String>)> =
+            ops.iter().map(|o| (op_label(&o.op), op_storage(&o.op).to_string(), o.name.clone())).collect();
+        let failed: Mutex<Option<usize>> = Mutex::new(None);
         let journal: Mutex<Vec<Undo>> = Mutex::new(Vec::new());
         let atomic = Mutex::new(true);
         let events: Arc<Mutex<Vec<DeferredEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -198,10 +316,12 @@ impl AppDataService {
             let mut named: Vec<(String, Value)> = Vec::new();
             let mut results = Vec::with_capacity(ops.len());
             for (i, op) in ops.into_iter().enumerate() {
-                let result = self
-                    .batch_op(app_code, client_code, op.op, &named, &journal, &atomic)
-                    .await
-                    .map_err(|e| failed_at(i, e))?;
+                let result = self.batch_op(app_code, client_code, op.op, &named, &journal, &atomic).await.map_err(|e| {
+                    if let Ok(mut f) = failed.lock() {
+                        *f = Some(i);
+                    }
+                    failed_at(i, e)
+                })?;
                 if let Some(n) = op.name {
                     named.push((n, result.clone()));
                 }
@@ -217,14 +337,22 @@ impl AppDataService {
                 for e in pending {
                     self.events.create_event(&e.app, &e.client, &e.name, e.event).await?;
                 }
-                Ok(BatchOutcome { results, atomic })
+                Ok(BatchOutcome { results, atomic, committed: true, conflict: None })
             }
             Err(e) => {
                 let undo = std::mem::take(&mut *journal.lock().map_err(|_| CoreError::unknown("batch journal poisoned"))?);
                 for u in undo.into_iter().rev() {
                     self.undo(u).await;
                 }
-                Err(e)
+                let at = failed.lock().ok().and_then(|f| *f);
+                match (report, at, conflict_of(&e)) {
+                    (true, Some(index), Some((kind, key, message))) => {
+                        let (op, storage, name) = labels[index].clone();
+                        let conflict = BatchConflict { index, name, op, storage, kind, key, message };
+                        Ok(BatchOutcome { results: Vec::new(), atomic, committed: false, conflict: Some(conflict) })
+                    }
+                    _ => Err(e),
+                }
             }
         }
     }
@@ -469,6 +597,29 @@ mod tests {
         assert!(!same_value(&Value::String("AVAILABLE".into()), Some(&Value::String("BLOCKED".into()))));
         assert!(matches(&doc(&[("status", Value::String("AVAILABLE".into())), ("version", Value::Int(3))]),
             &doc(&[("status", Value::String("AVAILABLE".into())), ("version", Value::Double(3.0)), ("other", Value::Int(9))])));
+    }
+
+    /// Only a duplicate key and a stale `updateIf` are conflicts a batch can report.
+    #[test]
+    fn conflicts_are_duplicates_and_stale_rows() {
+        assert_eq!(OnConflict::parse(None), Some(OnConflict::Throw));
+        assert_eq!(OnConflict::parse(Some(" ")), Some(OnConflict::Throw));
+        assert_eq!(OnConflict::parse(Some("THROW")), Some(OnConflict::Throw));
+        assert_eq!(OnConflict::parse(Some("report")), Some(OnConflict::Report));
+        assert_eq!(OnConflict::parse(Some("retry")), None);
+
+        let dup = CoreError::from(appdata::AppDataError::duplicate_key("claimKey_unique").in_storage("cxCase"));
+        let dup = failed_at(2, dup);
+        assert_eq!(
+            conflict_of(&dup),
+            Some((ConflictKind::Duplicate, Some("claimKey_unique".to_string()), "That is already taken (claimKey_unique).".to_string()))
+        );
+        let (kind, key, message) = conflict_of(&failed_at(0, condition_failed("cxDiscount", "D1"))).unwrap();
+        assert_eq!((kind.name(), key), ("STALE", None));
+        assert_eq!(message, "The row D1 of cxDiscount no longer matches what was expected.");
+        assert_eq!(conflict_of(&CoreError::from(appdata::AppDataError::object_not_found("s", "1"))), None);
+        assert_eq!(conflict_of(&CoreError::unknown("boom")), None);
+        assert_eq!(ConflictKind::Duplicate.name(), "DUPLICATE");
     }
 
     #[test]

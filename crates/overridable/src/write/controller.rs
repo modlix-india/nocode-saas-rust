@@ -213,8 +213,17 @@ pub fn int_param(params: &Params, name: &str) -> AppResult<Option<i64>> {
     }
 }
 
+/// A document as a route answers it: what the kind holds back from replies held back.
 fn entity_json<K: Kind>(svc: &OverridableService<K>, e: &JMap) -> JValue {
-    JValue::Object(to_jackson(svc.kind().pojo(), e))
+    JValue::Object(to_jackson(svc.kind().pojo(), &svc.kind().redact(e.clone())))
+}
+
+/// A draft row as a route answers it: its content as [`entity_json`] holds it back.
+fn draft_json<K: Kind>(svc: &OverridableService<K>, mut draft: JMap) -> JValue {
+    if let Some(JValue::Object(c)) = draft.get_mut("content") {
+        *c = svc.kind().redact(std::mem::take(c));
+    }
+    JValue::Object(to_jackson(&DRAFT, &draft))
 }
 
 // ── AbstractOverridableDataController ────────────────────────────────
@@ -248,7 +257,7 @@ pub async fn put<K: Kind>(svc: &OverridableService<K>, ca: &ContextAuthenticatio
             return Ok(Reply::empty(StatusCode::BAD_REQUEST));
         }
         let draft = svc.save_draft(ca, entity, int_param(params, "draftVersion")?).await?;
-        return Ok(Reply::json(JValue::Object(to_jackson(&DRAFT, &draft))));
+        return Ok(Reply::json(draft_json(svc, draft)));
     }
     Ok(Reply::json(entity_json(svc, &svc.update(ca, entity).await?)))
 }
@@ -263,7 +272,12 @@ pub async fn list<K: Kind>(svc: &OverridableService<K>, ca: &ContextAuthenticati
     let eager = bool_param(params, "eager", false)?;
     let client_only = bool_param(params, "clientOnly", false)?;
     let pageable = Pageable::from_params(params);
-    let page = svc.read_page_filter_lro(ca, eager, client_only, &pageable, params).await?;
+    let mut page = svc.read_page_filter_lro(ca, eager, client_only, &pageable, params).await?;
+    for row in &mut page.content {
+        if let Some(JValue::Object(d)) = row.get_mut("data") {
+            *d = svc.kind().redact(std::mem::take(d));
+        }
+    }
     Ok(Reply::json(page.to_json(&pageable)))
 }
 

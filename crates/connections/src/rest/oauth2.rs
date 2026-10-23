@@ -14,7 +14,7 @@ use super::{basic, body};
 use super::spring_uri;
 use super::{RestRequest, RestResponse};
 use crate::connection::{self, Connection, ConnectionType, GRANT_AUTHORIZATION_CODE};
-use crate::context::Caller;
+use crate::context::{AuthorityCheck, Caller};
 use crate::error::{messages, ConnError, ConnResult};
 use crate::java;
 use crate::tokens::{CoreToken, TokenType};
@@ -377,8 +377,35 @@ pub async fn access_token_for(
     access_token(svc, caller, Some(app), Some(client), &conn).await
 }
 
+/// Whether the caller may change the business's token for the connection: its `consentAuth`
+/// is absent or blank (as before the field existed), or the caller's authorities satisfy it.
+fn satisfies_consent_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> bool {
+    match conn.consent_auth.as_deref().filter(|e| !java::is_blank(e)) {
+        None => true,
+        Some(expression) => check.has_authority(Some(expression), &caller.authorities),
+    }
+}
+
+/// Rust only: the connection's `consentAuth` gate on starting a consent, which replaces the
+/// business's token for the connection. Absent or blank lets every caller through, as before
+/// the field existed; otherwise the caller's authorities must satisfy the expression, or the
+/// consent is refused (403) before a state row or a URL is made. The callback is not gated:
+/// it only completes a consent this check already let start.
+pub fn check_consent_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> ConnResult<()> {
+    if satisfies_consent_auth(check, caller, conn) {
+        return Ok(());
+    }
+    Err(ConnError::coded(
+        StatusCode::FORBIDDEN,
+        "CORE.CONNECTION_CONSENT_FORBIDDEN",
+        format!("Consent for the connection {} is not allowed: the caller does not satisfy its consentAuth", conn.name()),
+    )
+    .param("connection", conn.name()))
+}
+
 /// `evokeConsentAuth`: the provider's consent URL for an authorization-code connection, with
-/// a new state row to match the callback against. `None` when the connection is not visible.
+/// a new state row to match the callback against. `None` when the connection is not visible;
+/// refused when the caller does not satisfy its `consentAuth` ([`check_consent_auth`]).
 pub async fn evoke_consent(
     svc: &Connections,
     caller: &Caller,
@@ -395,6 +422,7 @@ pub async fn evoke_consent(
     let Some(conn) = connection::read(svc.store.as_ref(), caller, connection_name, app, url_client, ConnectionType::RestApi).await? else {
         return Ok(None);
     };
+    check_consent_auth(svc.authority_check.as_ref(), caller, &conn)?;
     if conn.detail_str(AUTH_GRANT_TYPE) != Some(GRANT_AUTHORIZATION_CODE) {
         return Err(ConnError::coded(StatusCode::BAD_REQUEST, "CORE.CONNECTION_GRANT_TYPE_INVALID", "Invalid Connection Grant Type."));
     }
@@ -541,8 +569,36 @@ async fn invalid_callback(svc: &Connections, caller: &Caller, state: Option<&str
     Ok(CallbackOutcome::Redirect(location))
 }
 
+/// Rust only: the `consentAuth` gate on revoking, which drops the business's token as a new
+/// consent replaces it. Absent or blank lets every caller through, as before; a refusal is 403
+/// `CORE.CONNECTION_REVOKE_FORBIDDEN`.
+pub fn check_revoke_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> ConnResult<()> {
+    if satisfies_consent_auth(check, caller, conn) {
+        return Ok(());
+    }
+    Err(ConnError::coded(
+        StatusCode::FORBIDDEN,
+        "CORE.CONNECTION_REVOKE_FORBIDDEN",
+        format!("Revoking the token of the connection {} is not allowed: the caller does not satisfy its consentAuth", conn.name()),
+    )
+    .param("connection", conn.name()))
+}
+
+/// The connection whose tokens a revoke drops, for its gate: read as the tokens' client resolves
+/// it, without the access or `onlyThruKIRun` checks, so hiding a connection from the caller
+/// cannot skip its gate. None found: no gate, as before.
+async fn gate_revoke(svc: &Connections, caller: &Caller, connection_name: &str, app: &str, client: &str) -> ConnResult<()> {
+    let url_client = caller.url_client_code.as_deref().unwrap_or(client);
+    match svc.store.read_internal(connection_name, app, url_client, client).await? {
+        Some(conn) => check_revoke_auth(svc.authority_check.as_ref(), caller, &conn),
+        None => Ok(()),
+    }
+}
+
 /// `revokeConnectionToken`: revokes the caller's tokens for the connection. Refused when the
-/// caller has no active access token for it.
+/// caller has no active access token for it, and (Rust only) when the caller does not satisfy
+/// the connection's `consentAuth` ([`check_revoke_auth`]), before anything is looked up or
+/// revoked.
 pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<bool> {
     let refuse = || ConnError::msg(StatusCode::BAD_REQUEST, messages::CANNOT_DELETE_TOKEN_WITH_CLIENT_CODE, &[connection_name]);
     if !caller.present {
@@ -551,6 +607,7 @@ pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connect
     let (Some(client), Some(app)) = (caller.client_code.as_deref(), caller.url_app_code.as_deref()) else {
         return Err(refuse());
     };
+    gate_revoke(svc, caller, connection_name, app, client).await?;
     let Some(token) = svc.tokens.active_token(client, app, connection_name, TokenType::Access).await? else {
         return Err(refuse());
     };
@@ -607,5 +664,67 @@ mod tests {
         assert_eq!(calculate_expiry(d, &Map::new(), TokenType::Access, now).unwrap(), None);
         let bad = json!({"expires_in": 1.5});
         assert!(calculate_expiry(d, bad.as_object().unwrap(), TokenType::Access, now).is_err());
+    }
+
+    /// Stands in for KIRun's evaluator: an expression is a list of authorities joined by
+    /// ` or `, and any one held allows.
+    struct AnyOf;
+
+    impl AuthorityCheck for AnyOf {
+        fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool {
+            expression.unwrap_or("").split(" or ").any(|want| authorities.iter().any(|a| a == want.trim()))
+        }
+    }
+
+    fn gated(consent_auth: Option<&str>) -> Connection {
+        let mut c = Connection { name: Some("META_API".into()), ..Default::default() };
+        c.consent_auth = consent_auth.map(str::to_string);
+        c
+    }
+
+    fn holding(authorities: &[&str]) -> Caller {
+        Caller { present: true, authorities: authorities.iter().map(|a| a.to_string()).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn no_consent_auth_lets_every_caller_start_a_consent() {
+        for c in [gated(None), gated(Some("")), gated(Some("   "))] {
+            assert!(check_consent_auth(&AnyOf, &holding(&[]), &c).is_ok());
+            assert!(check_consent_auth(&crate::context::NoEvaluator, &Caller::default(), &c).is_ok());
+        }
+    }
+
+    #[test]
+    fn consent_auth_needs_the_callers_authority() {
+        let c = gated(Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner"));
+        assert!(check_consent_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Account_MANAGE"]), &c).is_ok());
+        assert!(check_consent_auth(&AnyOf, &holding(&["Authorities.Logged_IN", "Authorities.ROLE_Owner"]), &c).is_ok());
+
+        let e = check_consent_auth(&AnyOf, &holding(&["Authorities.Logged_IN", "Authorities.ADZUMPTWO.ROLE_Report_READ"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+        assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_CONSENT_FORBIDDEN"));
+        assert_eq!(e.code().unwrap().params, vec![("connection".to_string(), "META_API".to_string())]);
+        assert!(e.message().contains("META_API"), "{}", e.message());
+        assert!(check_consent_auth(&AnyOf, &Caller::default(), &c).is_err(), "an anonymous caller holds nothing");
+    }
+
+    #[test]
+    fn revoke_uses_the_same_gate_with_its_own_code() {
+        let c = gated(Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner"));
+        assert!(check_revoke_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Account_MANAGE"]), &c).is_ok());
+        assert!(check_revoke_auth(&AnyOf, &holding(&[]), &gated(None)).is_ok());
+        assert!(check_revoke_auth(&AnyOf, &holding(&[]), &gated(Some(" "))).is_ok());
+        let e = check_revoke_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Report_READ"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+        assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+        assert_eq!(e.code().unwrap().params, vec![("connection".to_string(), "META_API".to_string())]);
+        assert!(check_revoke_auth(&crate::context::NoEvaluator, &holding(&["Authorities.ROLE_Owner"]), &c).is_err());
+    }
+
+    #[test]
+    fn an_unwired_check_keeps_a_gated_consent_shut() {
+        let c = gated(Some("Authorities.ROLE_Owner"));
+        let e = check_consent_auth(&crate::context::NoEvaluator, &holding(&["Authorities.ROLE_Owner"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
     }
 }

@@ -262,6 +262,78 @@ contains = ["/api/files/static/file/", "/api/files/secured/file/", "/api/files/s
 methods = ["GET", "HEAD"]
 pool = "files-serve"
 
+# Lead intake (W1, 2026-10-23; gateway DIFFERENCES.md "Routes with a rewrite and fixed codes").
+# Every live site posts its forms to its OWN domain (leadzump.generateLead / createLead and
+# LeadZumpV2.generateLead / createLead use relative URLs), and Meta / integrations post to the old
+# entity-processor addresses. entity-processor and entity-collector are retired, so these paths go to
+# leadzumptwo's URIPaths as leadzumptwo / SYSTEM, without the caller's token, on ANY host. The
+# functions find the tenant themselves (X-Forwarded-Host in the SYSTEM index intakeRoute, or the
+# request body), exactly as entity-processor did.
+[[routes]]
+id = "lead-intake"
+prefix = "/api/entity/processor/entry/website"
+exact = true
+methods = ["POST"]
+pool = "ui-shell"
+rewrite = "/api/open/intake/website"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
+[[routes]]
+id = "lead-intake"
+prefix = "/api/entity/collector/entry/website"
+exact = true
+methods = ["POST"]
+pool = "ui-shell"
+rewrite = "/api/open/intake/website"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
+[[routes]]
+id = "lead-intake"
+prefix = "/api/open/collector/entry/website"
+exact = true
+methods = ["POST"]
+pool = "ui-shell"
+rewrite = "/api/open/intake/website"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
+[[routes]]
+id = "lead-intake"
+prefix = "/api/entity/processor/open/tickets/req/website"
+methods = ["POST"]
+pool = "ui-shell"
+rewrite = "/api/open/tickets/req/website"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
+[[routes]]
+id = "lead-intake"
+prefix = "/api/entity/processor/open/tickets/req/campaigns"
+exact = true
+methods = ["POST"]
+pool = "ui-shell"
+rewrite = "/api/open/tickets/req/campaigns"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
+[[routes]]
+id = "lead-intake"
+prefix = "/api/entity/collector/entry/social/facebook"
+exact = true
+methods = ["GET", "POST"]
+pool = "ui-shell"
+rewrite = "/api/open/collector/entry/social/facebook"
+app_code = "leadzumptwo"
+client_code = "SYSTEM"
+anonymous = true
+
 [[routes]]
 id = "files"
 prefix = "/api/files"

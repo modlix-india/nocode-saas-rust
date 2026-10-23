@@ -190,6 +190,18 @@ async fn setup() -> (Router, F) {
         },
         route("dead", "/api/dead", "dead"),
         route("closer", "/api/closer", "closer"),
+        RouteConfig {
+            id: "website-intake".into(),
+            prefix: "/api/entity/processor/entry/website".into(),
+            exact: true,
+            methods: vec!["POST".into()],
+            pool: "echo".into(),
+            rewrite: Some("/api/open/intake/website".into()),
+            app_code: Some("leadzumptwo".into()),
+            client_code: Some("SYSTEM".into()),
+            anonymous: true,
+            ..Default::default()
+        },
         route("api", "/api", "echo"),
         route("sse", "/sse", "echo"),
     ];
@@ -276,6 +288,49 @@ async fn caller_codes_and_url_codes() {
     let (_, _, b) = call(&app, req("GET", "/leadzump/FIN2/page/api/x", &[("host", "h.example")], "")).await;
     let hd = &j(&b)["headers"];
     assert_eq!((hd["clientcode"].as_str(), hd["appcode"].as_str()), (Some("FIN2"), Some("leadzump")));
+}
+
+#[tokio::test]
+async fn a_fixed_codes_route_rewrites_and_serves_every_host_anonymously() {
+    let (app, fake) = setup().await;
+    fake.hosts.lock().unwrap().insert("site.example".into(), json!(["FIN", "somesite", "LIVE"]));
+    let before = fake.host_calls.load(Ordering::SeqCst);
+    // A live site posts its form to its own host, from a page with path parts, signed in or not.
+    let (s, _, b) = call(
+        &app,
+        req(
+            "POST",
+            "/page/home/api/entity/processor/entry/website?x=1",
+            &[
+                ("host", "site.example"),
+                ("x-forwarded-host", "site.example"),
+                ("authorization", "Bearer someone"),
+                ("clientcode", "FIN"),
+                ("appcode", "somesite"),
+                ("x-draft", "true"),
+                ("cookie", "_fbp=fb.1.2.3"),
+            ],
+            "{\"phone\":\"1\"}",
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let v = j(&b);
+    assert_eq!(v["path"], "/api/open/intake/website");
+    assert_eq!(v["query"], "x=1");
+    assert_eq!(v["body"], "{\"phone\":\"1\"}");
+    assert_eq!(codes_of(&b), ("leadzumptwo".to_string(), "SYSTEM".to_string()), "the route's codes beat the caller's");
+    let hd = &v["headers"];
+    assert!(hd.get("authorization").is_none(), "anonymous: the caller's token is not forwarded");
+    assert!(hd.get("x-draft").is_none());
+    assert_eq!(hd["cookie"], "_fbp=fb.1.2.3");
+    assert_eq!(hd["x-forwarded-host"], "site.example,site.example", "the site host reaches the service as for any route");
+    assert_eq!(fake.host_calls.load(Ordering::SeqCst), before, "the host is not resolved");
+
+    // The same path with another method is an ordinary request for the host's app.
+    let (_, _, b) = call(&app, req("GET", "/api/entity/processor/entry/website", &[("host", "site.example")], "")).await;
+    assert_eq!(j(&b)["path"], "/api/entity/processor/entry/website");
+    assert_eq!(codes_of(&b), ("somesite".to_string(), "FIN".to_string()));
 }
 
 fn codes_of(b: &[u8]) -> (String, String) {

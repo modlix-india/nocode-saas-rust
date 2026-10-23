@@ -217,6 +217,51 @@ Everything in those runs is the same except what is listed here.
     `content-type` (most HTTP/2 servers) fell through to "the URL after its first dot", which
     for an absolute URL is the host's dot (`fileU.com/a`). Header names now ignore case, as
     HTTP says they do, so a recording served as `audio/mpeg` is stored as `.mpeg`.
+32. **A connection can gate who starts its OAuth consent** (2026-10-23, added; no Java
+    equivalent). `Connection.consentAuth`, optional, is an authority expression in the syntax
+    of a storage's `createAuth` or a function's `executeAuth` (`Authorities.A or
+    Authorities.B`, `and`, `not`). `oauth2::evoke_consent` checks it right after the connection
+    is read and before the state row and the consent URL are made
+    (`oauth2::check_consent_auth`); a caller whose authorities do not satisfy it gets 403
+    `CORE.CONNECTION_CONSENT_FORBIDDEN` and nothing is stored. Absent or blank, any caller who
+    can read the connection may start a consent, as before (a consent replaces the business's
+    token for the connection). Revoking is gated the same way (2026-10-23, DECISIONS 31):
+    `oauth2::revoke_connection_token` reads the connection as the tokens' client resolves it
+    (no access or `onlyThruKIRun` checks, so hiding it cannot skip the gate) and, before the
+    active-token lookup, refuses a caller who does not satisfy `consentAuth` with 403
+    `CORE.CONNECTION_REVOKE_FORBIDDEN`, revoking nothing (`oauth2::check_revoke_auth`); no
+    connection found, or no gate, revokes as before. The callback and token reads are
+    unchanged. The
+    expression is evaluated by the `context::AuthorityCheck` the core crate supplies
+    (`Connections::with_authority_check`, KIRun's evaluator); a `Connections` without one
+    refuses every non-blank expression, so the gate never opens by accident. The field is left
+    out of the connection's JSON when absent.
+33. **The save-time address check can allow private hosts** (2026-10-23, added; no Java
+    equivalent). `outbound::validate_connection_details_with(details, block_private_targets)`:
+    with `true` it is exactly `validate_connection_details` (unchanged, and still what every
+    other caller uses); with `false` a host may be a blocked name (`localhost`, metadata
+    hosts), a blocked suffix (`.local`, `.internal`, ...) or a private, loopback or link-local
+    address, while the other rules still refuse (non-web schemes, `file:`/`gopher:`-style
+    values, an address with no readable host). core-editor passes `[connections]
+    block_private_targets` (default true), so only a stack configured off (the local one, for a
+    mailpit SMTP sink) saves such connections. The call-time guard (`validate_resolved`,
+    `guard_target`, `guard_host`) is unchanged and has its own setting per unit.
+34. **Which detail keys are credentials** (2026-10-23, Rust only). `is_secret_key` decides it
+    for core-editor's masking (core's DIFFERENCES.md, E15) and for `without_secrets`: the last
+    dotted segment of the key (`mail.password` is `password`), lowercased, is one of
+    `SECRET_KEYS` (`password`, `clientSecret`, `apiKey`, `apiToken`, `accessToken`,
+    `refreshToken`, `privateKey`, `authToken`, `Authorization`, `x-api-key`,
+    `developer-token`, `token`, `key`, `keySecret`, `appSecret` and their snake forms), or,
+    with everything but letters and digits removed, contains `password`, `passwd`,
+    `passphrase`, `secret` or `credential`, or ends in `token`, `authorization`, `apikey`,
+    `secretkey`, `privatekey`, `accesskey`, `authkey`, `signingkey`, `encryptionkey`,
+    `subscriptionkey`, `licensekey`, `masterkey` or `sessionkey`. Names of fields that hold
+    no secret stay readable: `tokenKey`, `refreshTokenKey`, `expireAtKey`, `tokenUrl`,
+    `tokenDetails`, `tokenConnection`, `client_id`, `accountSid`, `userName`. An address with
+    a password in its user part (`mysql://app:pw@db/x`, an APP_DATA `url`) has that part
+    masked (`mask_url_password`) and put back on a save (`restore_url_password`). Java's
+    `withoutSecrets` matched the first 15 names exactly; the rule is wider, so a caller
+    without `Connection_UPDATE` sees fewer keys than in Java.
 
 ## Error codes (2026-10-17)
 
