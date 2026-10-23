@@ -206,6 +206,16 @@ pub fn execute_on<'a>(conn: &'a mut sqlx::MySqlConnection, sql: &'a Sql) -> BoxF
     })
 }
 
+/// A bound SELECT on one pinned connection, decoded.
+pub fn fetch_on<'a>(conn: &'a mut sqlx::MySqlConnection, sql: &'a Sql) -> BoxFuture<'a, AppDataResult<Vec<Document>>> {
+    Box::pin(async move {
+        let (text, binds) = sql.render();
+        let q = bind_query(sqlx::query(&text), &binds);
+        let rows = sqlx::Executor::fetch_all(conn, q).await?;
+        rows.iter().map(decode_row).collect()
+    })
+}
+
 /// A text statement on one pinned connection.
 pub fn execute_raw_on<'a>(conn: &'a mut sqlx::MySqlConnection, sql: &'a str) -> BoxFuture<'a, AppDataResult<u64>> {
     Box::pin(async move { Ok(sqlx::Executor::execute(conn, sqlx::raw_sql(sql)).await?.rows_affected()) })

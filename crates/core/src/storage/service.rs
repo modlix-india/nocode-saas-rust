@@ -625,7 +625,9 @@ impl AppDataService {
         if let Some(e) = existing {
             event.insert(EXISTING_DATA_OBJECT_KEY.into(), Value::Object(e));
         }
-        self.events.create_event(app, client, &event_name, event).await?;
+        if let Some(event) = batch::defer(app, client, &event_name, event) {
+            self.events.create_event(app, client, &event_name, event).await?;
+        }
         Ok(data)
     }
 
@@ -1870,6 +1872,10 @@ pub fn draft_copy_order(storages: &IndexMap<String, Storage>, filters: &IndexMap
     }
     Ok(order)
 }
+
+#[path = "batch.rs"]
+mod batch;
+pub use batch::{BatchOp, BatchOutcome, NamedOp, UpdateIfOutcome};
 
 #[cfg(test)]
 #[path = "service_tests.rs"]

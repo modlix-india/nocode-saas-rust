@@ -39,6 +39,8 @@ const MESSAGE: &str = "message";
 const OPERATION: &str = "operation";
 const TEXT_INDEX_NAME: &str = "_textIndex";
 const DUPLICATE_ID_INDEX: &str = "index: _id_";
+/// The per-database collection that holds named counters (`Storage.NextSequence`).
+const SEQUENCE_COLLECTION: &str = "_mlx_sequence";
 const AGGREGATE_MAX_SECONDS: u64 = 30;
 const VERSION_PURGE_BATCH: usize = 1000;
 const COPY_BATCH_SIZE: usize = 500;
@@ -659,6 +661,48 @@ impl AppDataEngine for MongoAppDataService {
             Some(d) => Ok(convert_ids(storage, d, false)),
             None => Err(AppDataError::object_not_found(&storage.name, id)),
         }
+    }
+
+    /// `$inc` on the counter's document is atomic on any deployment, standalone included. The
+    /// first call inserts `start`; two first calls racing meet on the `_id` and the loser
+    /// increments instead.
+    async fn next_sequence(
+        &self,
+        cx: &Ctx,
+        client_code: &str,
+        conn: Option<&Connection>,
+        storage: &Storage,
+        key: &str,
+        start: i64,
+    ) -> AppDataResult<i64> {
+        use mongodb::options::ReturnDocument;
+        let tenant = cx.tenant(client_code, storage);
+        let coll = self
+            .client(conn)
+            .await?
+            .database(&database_name(&tenant, &storage.app_code, cx.draft))
+            .collection::<BsonDocument>(SEQUENCE_COLLECTION);
+        let name = format!("{}:{key}", storage.unique_name);
+        for _ in 0..3 {
+            let bumped = coll
+                .find_one_and_update(doc! { ID: &name }, doc! { "$inc": { "value": 1_i64 } })
+                .return_document(ReturnDocument::After)
+                .await?;
+            if let Some(d) = bumped {
+                return match d.get("value") {
+                    Some(Bson::Int64(v)) => Ok(*v),
+                    Some(Bson::Int32(v)) => Ok(i64::from(*v)),
+                    Some(Bson::Double(v)) => Ok(*v as i64),
+                    _ => Err(AppDataError::internal(format!("sequence {name} holds no number"))),
+                };
+            }
+            match coll.insert_one(doc! { ID: &name, "value": start }).await {
+                Ok(_) => return Ok(start),
+                Err(e) if is_duplicate_key(&e).is_some() => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(AppDataError::internal(format!("sequence {name}: could not be read or created")))
     }
 
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)

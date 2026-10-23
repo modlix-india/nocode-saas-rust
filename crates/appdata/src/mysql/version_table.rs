@@ -3,7 +3,7 @@
 
 use sqlx::MySqlPool;
 
-use super::db::{execute, fetch};
+use super::tx::{execute, fetch};
 use super::sql::{self, Bind, FieldOps, Select, Sql};
 use super::type_mapper::{ID_COLUMN, ID_TYPE};
 use crate::error::AppDataResult;
