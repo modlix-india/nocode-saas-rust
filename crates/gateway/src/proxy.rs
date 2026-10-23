@@ -9,6 +9,11 @@
 //!   app and client the request is for;
 //! - the path is the one after the codes prefix, without a trailing `/`; the query is untouched.
 //!
+//! Rust only: a route may rewrite its prefix and name fixed codes (`RouteConfig::rewrite`,
+//! `app_code`, `client_code`, `anonymous`). Such a request goes out for those codes whatever
+//! its host and headers say, without a host lookup, and without `Authorization` when anonymous;
+//! the forwarded headers are added as for any other request.
+//!
 //! Bodies stream both ways with no buffering, so uploads, downloads and server-sent events pass
 //! through at the pace the two ends set.
 //!
@@ -219,11 +224,12 @@ pub async fn handle(
         Err(resp) => return resp,
     };
 
-    let sse = wants_event_stream(&split.forward, &parts.headers);
+    let forward_path = route.forward_path(&split.forward);
+    let sse = wants_event_stream(&forward_path, &parts.headers);
     let timeout = route.timeout.unwrap_or(gw.default_timeout);
     let path_and_query = match &query {
-        Some(q) => format!("{}?{q}", split.forward),
-        None => split.forward.clone(),
+        Some(q) => format!("{forward_path}?{q}"),
+        None => forward_path.into_owned(),
     };
     // Only a request without a body can be sent a second time: a body is streamed to the first
     // instance as it arrives and is gone once handed over. The body itself says whether it has
@@ -247,6 +253,26 @@ async fn upstream_headers(
     let supplied_client = header_str(incoming, "clientcode");
     let supplied_app = header_str(incoming, "appcode");
     let mut headers = incoming.clone();
+    if let Some((app_code, client_code)) = &route.codes {
+        // Rust only: a route served by one app on every host. Its codes win over the caller's
+        // and the host is not resolved; everything else is as for any other request.
+        for (name, value) in [("appcode", app_code), ("clientcode", client_code)] {
+            if let Ok(v) = HeaderValue::from_str(value) {
+                headers.insert(name, v);
+            }
+        }
+        headers.remove("x-draft");
+        if route.anonymous {
+            headers.remove(header::AUTHORIZATION);
+        }
+        strip_hop_by_hop(&mut headers);
+        add_forwarding_headers(&mut headers, client);
+        platform::telemetry::inject_trace_headers(&mut headers);
+        return Ok(headers);
+    }
+    if route.anonymous {
+        headers.remove(header::AUTHORIZATION);
+    }
     if is_internal_call(&split.forward, supplied_client, supplied_app) {
         strip_hop_by_hop(&mut headers);
         platform::telemetry::inject_trace_headers(&mut headers);

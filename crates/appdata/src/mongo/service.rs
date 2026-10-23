@@ -570,7 +570,8 @@ impl AppDataEngine for MongoAppDataService {
                         return Err(AppDataError::storage_object_id_exists(&id.to_hex(), &storage.name));
                     }
                 }
-                return Err(e.into());
+                // Another unique index: a 409 naming the storage (`CORE.DUPLICATE_KEY`).
+                return Err(AppDataError::from(e).in_storage(&storage.name));
             }
         };
         let inserted = match result.inserted_id {
@@ -636,7 +637,7 @@ impl AppDataEngine for MongoAppDataService {
         let validated = self.hooks.validator.validate(&to_write, storage, schema.as_ref()).await?;
         let mut document = bson_util::from_validated(&relation_keys(storage), &validated)?;
         codec::encode(&mut document, storage.column_definitions.as_ref());
-        coll.replace_one(doc! { ID: object_id }, document).await?;
+        coll.replace_one(doc! { ID: object_id }, document).await.map_err(|e| AppDataError::from(e).in_storage(&storage.name))?;
 
         let mut doc = coll
             .find_one(doc! { ID: object_id })

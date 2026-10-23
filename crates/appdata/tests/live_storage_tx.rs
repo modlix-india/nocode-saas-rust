@@ -283,3 +283,82 @@ async fn mysql_history_trim_inside_a_scope_does_not_wait_on_its_own_locks() {
     )
     .await;
 }
+
+/// A storage holding a claim key: nullable, under a unique index (the `cxCallBooking` shape).
+fn claims_storage() -> Storage {
+    storage(
+        APP,
+        "claims",
+        r#"{"version":1,"schema":{"type":"OBJECT","properties":{"name":{"type":"STRING","maxLength":40},"claimKey":{"type":"STRING","maxLength":200}}},
+            "indexes":{"claimKey_unique":{"fields":[{"fieldName":"claimKey"}],"unique":true}}}"#,
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL"]
+async fn mysql_duplicate_key_is_a_409_naming_the_index_and_rolls_back_its_scope() {
+    let storages = Arc::new(Storages::default());
+    let e = mysql_engine(storages.clone());
+    let p = pool(&e).await;
+    wait_for_headroom(&p).await;
+    drop_schemas(&p, &[CLIENT], APP).await;
+    guarded(
+        async {
+            let s = claims_storage();
+            storages.put(&s).await;
+            let c = conn().await;
+            e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"first","claimKey":"P1|10:00|1"}"#)).await.unwrap();
+            // Many rows may leave the claim empty (MySQL allows many NULLs under a unique index).
+            e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"free1"}"#)).await.unwrap();
+            e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"free2","claimKey":null}"#)).await.unwrap();
+
+            let dup = e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"second","claimKey":"P1|10:00|1"}"#)).await.unwrap_err();
+            assert!(dup.is_duplicate_key(), "{dup:?}");
+            assert_eq!(dup.status(), http::StatusCode::CONFLICT);
+            let code = dup.code().unwrap();
+            assert!(code.params.contains(&("index".to_string(), "claimKey_unique".to_string())), "{:?}", code.params);
+            assert!(code.params.contains(&("storage".to_string(), "claims".to_string())), "{:?}", code.params);
+            assert!(!dup.message().contains("P1|10:00|1"), "the value stays out of the text");
+            assert!(appdata::mysql::db::is_integrity_violation(&dup));
+
+            // Inside a scope the earlier write goes with the refused one.
+            let r: Result<(), AppDataError> = tx::scope(async {
+                e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"inside","claimKey":"P1|10:00|2"}"#)).await?;
+                e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"clash","claimKey":"P1|10:00|1"}"#)).await?;
+                Ok(())
+            })
+            .await;
+            assert!(r.unwrap_err().is_duplicate_key());
+            assert_eq!(count_rows(&e, &c, &s).await, 3);
+
+            // An update onto a held claim is refused the same way.
+            let free = e.create(&cx(), CLIENT, Some(&c), &s, data(r#"{"name":"mover"}"#)).await.unwrap();
+            let mut patch = doc(r#"{"claimKey":"P1|10:00|1"}"#);
+            patch.insert("_id".into(), free.get("_id").unwrap().clone());
+            let upd = e.update(&cx(), CLIENT, Some(&c), &s, DataObject::of(patch), Some(false)).await.unwrap_err();
+            assert!(upd.is_duplicate_key(), "{upd:?}");
+        },
+        drop_schemas(&p, &[CLIENT], APP),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local Mongo"]
+async fn mongo_duplicate_key_is_a_409_naming_the_index() {
+    let e = Arc::new(mongo_engine());
+    drop_mongo_dbs(&[CLIENT], APP).await;
+    guarded(
+        async {
+            let s = claims_storage();
+            e.create(&cx(), CLIENT, None, &s, data(r#"{"name":"first","claimKey":"P1|10:00|1"}"#)).await.unwrap();
+            let dup = e.create(&cx(), CLIENT, None, &s, data(r#"{"name":"second","claimKey":"P1|10:00|1"}"#)).await.unwrap_err();
+            assert!(dup.is_duplicate_key(), "{dup:?}");
+            let code = dup.code().unwrap();
+            assert!(code.params.contains(&("index".to_string(), "claimKey_unique".to_string())), "{:?}", code.params);
+            assert!(code.params.contains(&("storage".to_string(), "claims".to_string())), "{:?}", code.params);
+        },
+        drop_mongo_dbs(&[CLIENT], APP),
+    )
+    .await;
+}

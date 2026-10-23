@@ -44,6 +44,21 @@ stripping).
   `https://<host>/<appCode>/<CLIENTCODE>/api/webhooks/<provider>` (ui DIFFERENCES.md item 39)
   run for that tenant.
 
+- **Routes with a rewrite and fixed codes** (2026-10-23, website lead intake; `routes.rs`,
+  `proxy.rs` `upstream_headers`). A route may set `rewrite` (its prefix in the forwarded path is
+  replaced, what follows is kept), `app_code` + `client_code` (both or neither) and `anonymous`.
+  With codes, the request goes out with exactly those `appCode` / `clientCode` headers, over
+  any the caller sent, the host is not resolved (no security call), `x-draft` is dropped, and
+  `X-Forwarded-*` / `Forwarded` are added as on any route, so the service still sees the site's
+  host. `anonymous` drops `Authorization`. Spring had no such route: every live real-estate site
+  posts its form to its own domain at `/api/entity/processor/entry/website` (or
+  `/api/entity/collector/entry/website`), which Spring sent to entity-processor / collector
+  whatever the host. Those services are retired; these routes send the same requests to
+  leadzumptwo's intake URIPath (`/api/open/intake/website`, app leadzumptwo, SYSTEM), which finds
+  the tenant from the host as entity-processor did. A route config that sets one code alone,
+  rewrites outside `/api/` or rewrites `/` is refused at startup. Without these keys a route is
+  exactly as before. Tests: `routes.rs` `rewrites_and_fixed_codes`, `tests/proxy.rs`
+  `a_fixed_codes_route_rewrites_and_serves_every_host_anonymously`.
 - **Load balancing** is the gateway's own: round robin over instances that pass active health
   checks (every 5 s, configurable path), with an instance ejected on a connect failure. Spring
   used the registry protocol's list as is. A pool whose instances all fail still routes to them (a wrong

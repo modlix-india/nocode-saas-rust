@@ -1,7 +1,8 @@
 //! `CoreServices.Event.ScheduleEvent`, `CancelScheduledEvent` and `SetScheduleEnabled`
-//! (`functions/events/*`), and `ScheduleTenant`: under which client a one-off is kept.
+//! (`functions/events/*`), `ScheduleTenant`: under which client a one-off is kept, and the
+//! Rust only `GetScheduleState`.
 //!
-//! All three act only inside a server function (outside one they answer false), take the app
+//! All of them act only inside a server function (outside one they answer false), take the app
 //! from the caller's context, and keep the draft surface's one-offs apart from live's.
 
 use std::sync::Arc;
@@ -9,18 +10,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use kirun::function::Function;
-use kirun::model::FunctionOutput;
+use kirun::json::schema::Schema;
+use kirun::model::{Event, FunctionOutput, FunctionSignature, Parameter};
 use kirun::{Map, Value};
 
 use super::support::{forbidden, is_self_or_direct_managing_client_code, output_map, required_argument, Java, JavaFunction};
-use super::arg_string;
+use super::{arg_string, Core, CoreFunction};
 use crate::auth::Authentication;
 use crate::clients::SecurityCalls;
 use crate::context;
 use crate::error::CoreError;
 use crate::repos::core_functions::Deps;
 use crate::scheduler::{
-    java_blank, java_trim, json_util_map, now_millis, EventDefinitionService, OneOffs, ScheduleRequest, ScheduleStore,
+    java_blank, java_trim, json_util_map, now_millis, EventDefinitionService, OneOffs, ScheduleRequest, ScheduleState, ScheduleStore,
     ScheduleSwitch, ScheduledEventService,
 };
 use crate::storage::defs::Catalog;
@@ -326,8 +328,83 @@ impl JavaFunction for SetScheduleEnabled {
     }
 }
 
+/// Rust only. `GetScheduleState(eventName, appCode, clientCode)`: the schedule the caller's
+/// own client runs on, read from the definition it sees (its own copy merged over the base,
+/// else the base) on the live surface, which is what the scheduler runs, also when called on
+/// the draft surface. Answers `{exists, enabled, cron, clientCode, ownCopy}`: `exists` is false
+/// for an event the app does not have or one without a schedule, `enabled` is false then.
+///
+/// The access rules are `SetScheduleEnabled`'s: only inside a server function (outside one, or
+/// without a caller or a name, `exists` is false), for the app it runs in and the caller's own
+/// client. `appCode` and `clientCode` may be left empty or name those; any other is refused.
+pub struct GetScheduleState {
+    signature: FunctionSignature,
+    definitions: Arc<dyn ScheduleSwitch>,
+}
+
+impl GetScheduleState {
+    pub const FULL_NAME: &'static str = "CoreServices.Event.GetScheduleState";
+
+    pub fn new(definitions: Arc<dyn ScheduleSwitch>) -> Self {
+        let text = |name: &str| Parameter::of_entry(name, Schema::of_string(name).set_default_value(Value::String(String::new())), false);
+        let outputs: Map<Schema> = [
+            ("exists", Schema::of_boolean("exists")),
+            ("enabled", Schema::of_boolean("enabled")),
+            ("cron", Schema::of_any("cron")),
+            ("clientCode", Schema::of_any("clientCode")),
+            ("ownCopy", Schema::of_boolean("ownCopy")),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        let signature = FunctionSignature::new("GetScheduleState")
+            .set_namespace("CoreServices.Event")
+            .set_parameters([Parameter::of_entry(EVENT_NAME, Schema::of_string(EVENT_NAME), false), text("appCode"), text(CLIENT_CODE)].into_iter().collect())
+            .set_events(Map::from([Event::output_event_map_entry(outputs)]));
+        Self { signature, definitions }
+    }
+
+    fn output(state: ScheduleState) -> FunctionOutput {
+        let text = |s: Option<String>| s.map(Value::String).unwrap_or(Value::Null);
+        output_map([
+            ("exists", Value::Bool(state.exists)),
+            ("enabled", Value::Bool(state.enabled)),
+            ("cron", text(state.cron)),
+            ("clientCode", text(Some(state.client_code).filter(|c| !c.is_empty()))),
+            ("ownCopy", Value::Bool(state.own_copy)),
+        ])
+    }
+}
+
+#[async_trait]
+impl CoreFunction for GetScheduleState {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let event_name = java_trim(&string_or_empty(args, EVENT_NAME)?).to_string();
+        let app_arg = java_trim(&string_or_empty(args, "appCode")?).to_string();
+        let client_arg = java_trim(&string_or_empty(args, CLIENT_CODE)?).to_string();
+        let (true, Some(ca)) = (context::in_kirun(), caller()) else { return Ok(Self::output(ScheduleState::default())) };
+        let app = ca.url_app_code().unwrap_or_default().to_string();
+        let client = ca.client_code().unwrap_or_default().to_string();
+        if (!app_arg.is_empty() && app_arg != app) || (!client_arg.is_empty() && client_arg != client) {
+            let (c, a) = (if client_arg.is_empty() { &client } else { &client_arg }, if app_arg.is_empty() { &app } else { &app_arg });
+            return Err(forbidden("CORE.SCHEDULE_STATE_FORBIDDEN", format!("Not allowed to read the schedule state for client {c} in app {a}"))
+                .param("client", c)
+                .param("app", a));
+        }
+        if event_name.is_empty() || app.is_empty() || client.is_empty() {
+            return Ok(Self::output(ScheduleState { client_code: client, ..Default::default() }));
+        }
+        Ok(Self::output(self.definitions.schedule_state(&event_name, &app, &client).await?))
+    }
+}
+
 /// `makeScheduledEventFunctions`, in its order: one store and one service shared by
-/// ScheduleEvent and CancelScheduledEvent, as Java's beans are.
+/// ScheduleEvent and CancelScheduledEvent, as Java's beans are. `GetScheduleState` (Rust only)
+/// after them.
 pub fn all(deps: &Deps) -> Vec<Arc<dyn Function>> {
     let store = Arc::new(ScheduleStore::new(deps.mongo.clone(), deps.scheduler.clone()));
     let one_offs: Arc<dyn OneOffs> = Arc::new(ScheduledEventService::new(store, deps.scheduler.clone()));
@@ -337,7 +414,8 @@ pub fn all(deps: &Deps) -> Vec<Arc<dyn Function>> {
     vec![
         Java::function(ScheduleEvent::new(one_offs.clone(), definitions, deps.security.clone())),
         Java::function(CancelScheduledEvent::new(one_offs, deps.security.clone())),
-        Java::function(SetScheduleEnabled::new(switch)),
+        Java::function(SetScheduleEnabled::new(switch.clone())),
+        Arc::new(Core(GetScheduleState::new(switch))),
     ]
 }
 
@@ -761,6 +839,8 @@ mod tests {
         backend: Arc<MemBackend>,
         directory: Arc<FakeDirectory>,
         function: Arc<dyn Function>,
+        /// `GetScheduleState` on the same definitions.
+        state: Arc<dyn Function>,
     }
 
     fn switch() -> Switch {
@@ -768,8 +848,10 @@ mod tests {
         let directory = Arc::new(FakeDirectory::new());
         let cache = platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap();
         let store = Store::with_parts(backend.clone(), directory.clone(), &cache).unwrap();
-        let function = Java::function(SetScheduleEnabled::new(Arc::new(EventDefinitionService::new(store, cache))));
-        Switch { backend, directory, function }
+        let definitions: Arc<dyn ScheduleSwitch> = Arc::new(EventDefinitionService::new(store, cache));
+        let function = Java::function(SetScheduleEnabled::new(definitions.clone()));
+        let state: Arc<dyn Function> = Arc::new(Core(GetScheduleState::new(definitions)));
+        Switch { backend, directory, function, state }
     }
 
     impl Switch {
@@ -905,6 +987,9 @@ mod tests {
                 self.0.lock().push(format!("{app} {client} {name} {enabled}"));
                 Ok(None)
             }
+            async fn schedule_state(&self, _name: &str, _app: &str, client: &str) -> Result<ScheduleState, CoreError> {
+                Ok(ScheduleState { client_code: client.to_string(), ..Default::default() })
+            }
         }
         let rec = Arc::new(Recorder::default());
         let f = SetScheduleEnabled::new(rec.clone());
@@ -922,6 +1007,81 @@ mod tests {
         assert_eq!(*rec.0.lock(), [format!("{APP} FIN x true"), format!("{APP} FIN y false"), format!("{APP} FIN z true"), format!("{APP} FIN n false")]);
     }
 
+    // ---------------------------------------------------------------- GetScheduleState
+
+    impl Switch {
+        async fn state_of(&self, args: serde_json::Value, client: &str, in_definition: bool, draft: bool) -> Result<Map<Value>, CoreError> {
+            run(self.state.as_ref(), args, Some(event_runner_for(client)), in_definition, draft).await
+        }
+    }
+
+    #[tokio::test]
+    async fn the_state_is_the_effective_definitions() {
+        let s = switch();
+        s.directory.set(|a| {
+            a.chains.insert("AKASH".into(), vec!["SYSTEM".into(), "FIN".into(), "AKASH".into()]);
+            a.chains.insert("BP1".into(), vec!["SYSTEM".into(), "BP1".into()]);
+        });
+        s.put(doc! {"name": EVENT, "appCode": APP, "clientCode": "SYSTEM", "schedule": base_schedule(None)});
+        s.put(doc! {"name": EVENT, "appCode": APP, "clientCode": "FIN", "baseClientCode": "SYSTEM", "schedule": {"enabled": false}});
+        let out = s.state_of(json!({"eventName": EVENT}), "BP1", true, false).await.unwrap();
+        assert_eq!(
+            Value::Object(out.into_iter().collect()),
+            json!({"exists": true, "enabled": true, "cron": "0 */15 * * * ?", "clientCode": "BP1", "ownCopy": false}),
+            "the base's, absent enabled is enabled"
+        );
+
+        // FIN's copy turns it off for AKASH, which has no copy of its own.
+        let out = s.state_of(json!({"eventName": EVENT}), "AKASH", true, false).await.unwrap();
+        assert_eq!((out["exists"].clone(), out["enabled"].clone(), out["ownCopy"].clone()), (json!(true), json!(false), json!(false)));
+        assert_eq!(out["cron"], json!("0 */15 * * * ?"), "the cron stays the base's");
+
+        // SetScheduleEnabled's copy is what the state reads next.
+        assert!(s.run(Some(true), "AKASH", true, false).await);
+        let out = s.state_of(json!({"eventName": EVENT, "appCode": APP, "clientCode": "AKASH"}), "AKASH", true, false).await.unwrap();
+        assert_eq!((out["enabled"].clone(), out["ownCopy"].clone()), (json!(true), json!(true)));
+        // On the draft surface it reads the live schedule, the one that runs.
+        let out = s.state_of(json!({"eventName": EVENT}), "AKASH", true, true).await.unwrap();
+        assert_eq!((out["enabled"].clone(), out["ownCopy"].clone()), (json!(true), json!(true)));
+        assert_eq!(s.saved("AKASH").len(), 1, "reading writes nothing");
+    }
+
+    #[tokio::test]
+    async fn no_schedule_no_event_no_definition_run_answers_it_does_not_exist() {
+        let s = switch();
+        s.put(doc! {"name": EVENT, "appCode": APP, "clientCode": "FIN"});
+        let out = s.state_of(json!({"eventName": EVENT}), "FIN", true, false).await.unwrap();
+        assert_eq!(
+            Value::Object(out.into_iter().collect()),
+            json!({"exists": false, "enabled": false, "cron": null, "clientCode": "FIN", "ownCopy": true}),
+            "an event without a schedule"
+        );
+        let out = s.state_of(json!({"eventName": "NOPE"}), "FIN", true, false).await.unwrap();
+        assert_eq!((out["exists"].clone(), out["ownCopy"].clone()), (json!(false), json!(false)));
+        let out = s.state_of(json!({"eventName": "  "}), "FIN", true, false).await.unwrap();
+        assert_eq!(out["exists"], json!(false));
+        let out = s.state_of(json!({"eventName": EVENT}), "FIN", false, false).await.unwrap();
+        assert_eq!((out["exists"].clone(), out["clientCode"].clone()), (json!(false), json!(null)), "outside a server function");
+        let out = run(s.state.as_ref(), json!({"eventName": EVENT}), None, true, false).await.unwrap();
+        assert_eq!(out["exists"], json!(false), "without a caller");
+    }
+
+    #[tokio::test]
+    async fn the_state_is_only_for_the_callers_own_client_and_app() {
+        let s = switch();
+        s.put(doc! {"name": EVENT, "appCode": APP, "clientCode": "FIN", "schedule": base_schedule(Some(false))});
+        s.put(doc! {"name": EVENT, "appCode": "otherapp", "clientCode": "FIN", "schedule": base_schedule(None)});
+        for args in [json!({"eventName": EVENT, "clientCode": "SYSTEM"}), json!({"eventName": EVENT, "appCode": "otherapp"})] {
+            let e = s.state_of(args.clone(), "FIN", true, false).await.unwrap_err();
+            assert_eq!(e.status(), StatusCode::FORBIDDEN, "{args}");
+            assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.SCHEDULE_STATE_FORBIDDEN"), "{args}");
+        }
+        let out = s.state_of(json!({"eventName": EVENT, "clientCode": " FIN ", "appCode": APP}), "FIN", true, false).await.unwrap();
+        assert_eq!((out["exists"].clone(), out["enabled"].clone()), (json!(true), json!(false)));
+        s.backend.fail("eventDefinition", true);
+        assert!(s.state_of(json!({"eventName": EVENT}), "FIN", true, false).await.is_err(), "a failed read passes up");
+    }
+
     // ---------------------------------------------------------------- registration
 
     #[tokio::test]
@@ -930,8 +1090,11 @@ mod tests {
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let all = all(&deps);
         let names: Vec<String> = all.iter().map(|f| f.get_signature().get_full_name()).collect();
-        assert_eq!(names, ["CoreServices.Event.ScheduleEvent", "CoreServices.Event.CancelScheduledEvent", "CoreServices.Event.SetScheduleEnabled"]);
-        for f in &all {
+        assert_eq!(
+            names,
+            ["CoreServices.Event.ScheduleEvent", "CoreServices.Event.CancelScheduledEvent", "CoreServices.Event.SetScheduleEnabled", GetScheduleState::FULL_NAME]
+        );
+        for f in all.iter().take(3) {
             let full = f.get_signature().get_full_name();
             let back = crate::java_model::gson_signature(&f.get_signature().to_json(), false);
             assert_eq!(back["parameters"].as_object().unwrap().len(), crate::functions::java_sig::json(&full)["parameters"].as_object().unwrap().len());

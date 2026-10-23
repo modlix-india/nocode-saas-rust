@@ -29,6 +29,7 @@ use chrono::NaiveDateTime;
 use platform::cache::{CacheService, LocalCaches};
 
 use crate::connection::ConnectionStore;
+use crate::context::{AuthorityCheck, NoEvaluator};
 use crate::rest::auth::AuthTokenFunction;
 use crate::rest::http::HttpClient;
 use crate::tokens::{CoreToken, JavaClock, TokenStore};
@@ -72,6 +73,10 @@ pub struct Connections {
     /// The fixed provider endpoints (SendGrid, OpenAI), which Java does not guard.
     pub provider_http: HttpClient,
     pub clock: JavaClock,
+    /// Evaluates a connection's `consentAuth`. [`NoEvaluator`] until
+    /// [`Connections::with_authority_check`] supplies one, so an unset check refuses every
+    /// non-blank expression.
+    pub authority_check: Arc<dyn AuthorityCheck>,
     pub(crate) oauth_cache: Arc<LocalCaches<String, CoreToken>>,
     pub(crate) auth_cache: Arc<LocalCaches<String, AuthTokenTuple>>,
 }
@@ -91,11 +96,18 @@ impl Connections {
             oauth_cache: cache.family(),
             auth_cache: cache.family(),
             clock,
+            authority_check: Arc::new(NoEvaluator),
             config,
             store,
             tokens,
             cache,
             auth_functions,
         }
+    }
+
+    /// Evaluates authority expressions (a connection's `consentAuth`) with `check`.
+    pub fn with_authority_check(mut self, check: Arc<dyn AuthorityCheck>) -> Self {
+        self.authority_check = check;
+        self
     }
 }

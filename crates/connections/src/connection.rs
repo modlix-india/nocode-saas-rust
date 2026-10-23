@@ -140,6 +140,11 @@ pub struct Connection {
     pub is_app_level: Option<bool>,
     #[serde(default, rename = "onlyThruKIRun")]
     pub only_thru_kirun: Option<bool>,
+    /// Rust only: who may start this connection's OAuth consent (`POST /oauth/evoke`), as an
+    /// authority expression like a storage's `createAuth`. Absent or blank, anyone who can
+    /// read the connection may, as before. Left out of the JSON when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent_auth: Option<String>,
     /// Everything else the document carries (`id`, `version`, `baseClientCode`, audit fields),
     /// kept so the core crate can answer the document whole.
     #[serde(flatten)]
@@ -320,14 +325,23 @@ pub async fn connection_of_type(
         .filter(|c| c.connection_type == Some(wanted)))
 }
 
-/// Keys whose values are credentials, matched case-insensitively at any depth of the details.
-pub const SECRET_KEYS: [&str; 15] = [
+/// What a credential reads as outside core: a connection read through the editor's routes
+/// carries this in place of every secret, and a save that sends it back keeps the stored value.
+pub const SECRET_MASK: &str = "********";
+
+/// Detail keys known to hold credentials, compared case-insensitively with the last dotted
+/// segment of the key (`mail.password` and `mail__d-o-t__password` are `password`). Taken from
+/// the code that opens connections (mail, REST basic and OAuth2, app data, AI, call) and from
+/// the stored connections' details.
+pub const SECRET_KEYS: [&str; 22] = [
     "password",
     "clientsecret",
     "client_secret",
     "secret",
     "apikey",
     "api_key",
+    "apitoken",
+    "api_token",
     "accesstoken",
     "access_token",
     "refreshtoken",
@@ -337,14 +351,83 @@ pub const SECRET_KEYS: [&str; 15] = [
     "authtoken",
     "authorization",
     "x-api-key",
+    "developer-token",
+    "token",
+    "key",
+    "keysecret",
+    "appsecret",
 ];
 
-/// `ConnectionService.withoutSecrets`: the details with every credential removed, nested maps
-/// included (lists are left as they are, as in Java).
+/// Name endings that mark a credential key on top of [`SECRET_KEYS`], matched on the key
+/// lowercased with everything but letters and digits removed. A key ending in `key` is a
+/// credential only with one of these endings: `tokenKey`, `refreshTokenKey` and `expireAtKey`
+/// name response fields, not secrets.
+const SECRET_KEY_ENDINGS: [&str; 13] = [
+    "token",
+    "authorization",
+    "apikey",
+    "secretkey",
+    "privatekey",
+    "accesskey",
+    "authkey",
+    "signingkey",
+    "encryptionkey",
+    "subscriptionkey",
+    "licensekey",
+    "masterkey",
+    "sessionkey",
+];
+
+/// Parts that mark a credential key anywhere in its name (same normalisation).
+const SECRET_KEY_PARTS: [&str; 5] = ["password", "passwd", "passphrase", "secret", "credential"];
+
+/// Whether a detail key holds a credential: one of [`SECRET_KEYS`], or a name that contains
+/// `password`, `passwd`, `passphrase`, `secret` or `credential`, or ends in `token`,
+/// `authorization` or one of the `...key` endings in `SECRET_KEY_ENDINGS`.
+pub fn is_secret_key(key: &str) -> bool {
+    let unescaped = key.replace("__d-o-t__", ".");
+    let last = unescaped.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if SECRET_KEYS.contains(&last.as_str()) {
+        return true;
+    }
+    let plain: String = last.chars().filter(char::is_ascii_alphanumeric).collect();
+    !plain.is_empty()
+        && (SECRET_KEY_PARTS.iter().any(|p| plain.contains(p)) || SECRET_KEY_ENDINGS.iter().any(|e| plain.ends_with(e)))
+}
+
+/// The byte range of the password in a `scheme://user:password@host` address, if it has one.
+fn url_password_range(s: &str) -> Option<(usize, usize)> {
+    let start = s.find("://")? + 3;
+    let authority_end = s[start..].find(['/', '?', '#']).map_or(s.len(), |i| start + i);
+    let at = s[start..authority_end].rfind('@')? + start;
+    let colon = s[start..at].find(':')? + start;
+    (colon + 1 < at).then_some((colon + 1, at))
+}
+
+/// The address with the password of its user part masked (`mysql://app:********@db/x`), or
+/// `None` when it carries no password.
+pub fn mask_url_password(s: &str) -> Option<String> {
+    let (from, to) = url_password_range(s)?;
+    (&s[from..to] != SECRET_MASK).then(|| format!("{}{SECRET_MASK}{}", &s[..from], &s[to..]))
+}
+
+/// `incoming` with the stored password back in place of a masked one, or `None` when
+/// `incoming` carries no masked password or `stored` has none to give.
+pub fn restore_url_password(incoming: &str, stored: &str) -> Option<String> {
+    let (from, to) = url_password_range(incoming)?;
+    if &incoming[from..to] != SECRET_MASK {
+        return None;
+    }
+    let (sf, st) = url_password_range(stored)?;
+    Some(format!("{}{}{}", &incoming[..from], &stored[sf..st], &incoming[to..]))
+}
+
+/// `ConnectionService.withoutSecrets`: the details with every credential ([`is_secret_key`])
+/// removed, nested maps included (lists are left as they are, as in Java).
 pub fn without_secrets(details: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
     for (k, v) in details {
-        if SECRET_KEYS.contains(&k.to_lowercase().as_str()) {
+        if is_secret_key(k) {
             continue;
         }
         let v = match v {
@@ -378,6 +461,16 @@ mod tests {
         assert!(c.is_app_level());
         assert_eq!(c.other.get("version"), Some(&json!(3)));
         assert_eq!(serde_json::to_value(&c).unwrap()["onlyThruKIRun"], json!(false));
+        assert_eq!(c.consent_auth, None);
+        assert!(serde_json::to_value(&c).unwrap().get("consentAuth").is_none(), "absent stays absent");
+    }
+
+    #[test]
+    fn reads_the_consent_gate() {
+        let c = conn(json!({"name": "META_API", "consentAuth": "Authorities.ROLE_Owner"}));
+        assert_eq!(c.consent_auth.as_deref(), Some("Authorities.ROLE_Owner"));
+        assert!(!c.other.contains_key("consentAuth"));
+        assert_eq!(serde_json::to_value(&c).unwrap()["consentAuth"], json!("Authorities.ROLE_Owner"));
     }
 
     #[test]
@@ -431,6 +524,41 @@ mod tests {
         assert!(o.contains_key("tokenUrl"), "a token URL is an address, not a secret");
         assert!(!o.contains_key("clientSecret"));
         assert!(details.contains_key("password"), "the stored connection is never touched");
+    }
+
+    #[test]
+    fn the_secret_key_rule() {
+        for k in [
+            "password", "Password", "mail.password", "mail__d-o-t__smtp__d-o-t__password", "clientSecret", "client_secret",
+            "apiKey", "API_KEY", "x-api-key", "apiToken", "accessToken", "refresh_token", "developer-token", "Authorization",
+            "Proxy-Authorization", "privateKey", "keySecret", "webhookSecret", "appSecret", "secretAccessKey", "key",
+            "subscriptionKey", "Ocp-Apim-Subscription-Key", "X-Auth-Token", "bearerToken", "token", "dbPasswd", "credentials",
+        ] {
+            assert!(is_secret_key(k), "{k} is a credential");
+        }
+        for k in [
+            "userName", "username", "mail.smtp.host", "mail.smtp.auth", "baseUrl", "tokenUrl", "tokenKey", "refreshTokenKey",
+            "expireAtKey", "refreshExpireAtKey", "tokenDetails", "tokenConnection", "authTokenFunctionName", "headerPrefix",
+            "authHeaderPrefix", "autherization", "client_id", "clientId", "accountSid", "callerId", "metaAppId", "grantType",
+            "keyId", "fromAddress", "url", "useDefaultConnection", "",
+        ] {
+            assert!(!is_secret_key(k), "{k} is not a credential");
+        }
+    }
+
+    #[test]
+    fn url_passwords_are_masked_and_restored() {
+        assert_eq!(mask_url_password("mysql://app:pw@db.example.com:3306/x").as_deref(), Some("mysql://app:********@db.example.com:3306/x"));
+        assert_eq!(mask_url_password("mongodb://u:p%40ss@h1,h2/db?x=1").as_deref(), Some("mongodb://u:********@h1,h2/db?x=1"));
+        assert_eq!(mask_url_password("https://example.com/a@b"), None, "an @ after the host is no user part");
+        assert_eq!(mask_url_password("mysql://app@db/x"), None);
+        assert_eq!(mask_url_password("mysql://app:@db/x"), None);
+        assert_eq!(mask_url_password("plain text"), None);
+        assert_eq!(mask_url_password("mysql://app:********@db/x"), None, "already masked");
+        let stored = "mysql://app:pw@db/x";
+        assert_eq!(restore_url_password("mysql://app:********@db2/y", stored).as_deref(), Some("mysql://app:pw@db2/y"));
+        assert_eq!(restore_url_password("mysql://app:new@db/x", stored), None, "a new password is taken as sent");
+        assert_eq!(restore_url_password("mysql://app:********@db/x", "mysql://db/x"), None);
     }
 
     #[test]

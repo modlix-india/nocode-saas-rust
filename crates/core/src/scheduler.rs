@@ -1029,13 +1029,32 @@ fn json_util_object(v: &serde_json::Value) -> Bson {
 
 // ------------------------------------------------------------------ event definitions
 
-/// What `CoreServices.Event.SetScheduleEnabled` calls.
+/// What `CoreServices.Event.GetScheduleState` answers: the schedule a client's runs follow.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScheduleState {
+    /// The app has the event and the client's effective definition has a schedule.
+    pub exists: bool,
+    /// The schedule runs for the client (absent `enabled` means enabled, as the scheduler
+    /// reads it); false when there is no schedule.
+    pub enabled: bool,
+    pub cron: Option<String>,
+    /// The client the state is for.
+    pub client_code: String,
+    /// The client has its own copy of the definition (what `SetScheduleEnabled` writes).
+    pub own_copy: bool,
+}
+
+/// What `CoreServices.Event.SetScheduleEnabled` and `GetScheduleState` call.
 #[async_trait]
 pub trait ScheduleSwitch: Send + Sync {
     /// `Some(true)` when the client's effective schedule changed, `Some(false)` when it already
     /// was so, `None` when the app has no such event with a schedule.
     async fn set_own_schedule_enabled(&self, name: &str, app_code: &str, client_code: &str, enabled: bool)
         -> Result<Option<bool>, CoreError>;
+
+    /// Rust only: the schedule `client_code` runs on, from the definition it sees (its own
+    /// copy merged over the base, else the base).
+    async fn schedule_state(&self, name: &str, app_code: &str, client_code: &str) -> Result<ScheduleState, CoreError>;
 }
 
 #[derive(Clone, Copy)]
@@ -1204,6 +1223,19 @@ impl ScheduleSwitch for EventDefinitionService {
         }
         self.evict_recursively(app_code, name).await;
         Ok(Some(true))
+    }
+
+    async fn schedule_state(&self, name: &str, app_code: &str, client_code: &str) -> Result<ScheduleState, CoreError> {
+        let own_copy = self.find_own(name, app_code, client_code).await?.is_some();
+        let effective = self.read_effective(name, app_code, client_code).await?;
+        let schedule = effective.as_ref().and_then(|e| e.get("schedule")).and_then(EventSchedule::from_j);
+        Ok(ScheduleState {
+            exists: schedule.is_some(),
+            enabled: schedule.as_ref().is_some_and(|s| s.enabled != Some(false)),
+            cron: schedule.and_then(|s| s.cron).filter(|c| !java_blank(c)),
+            client_code: client_code.to_string(),
+            own_copy,
+        })
     }
 }
 
