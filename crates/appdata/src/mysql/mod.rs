@@ -20,6 +20,7 @@ pub mod service;
 pub mod sql;
 pub mod subquery_planner;
 pub mod table_planner;
+pub mod tx;
 pub mod type_mapper;
 pub mod value_codec;
 pub mod version_table;

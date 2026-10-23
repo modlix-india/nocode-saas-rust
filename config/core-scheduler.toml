@@ -46,7 +46,10 @@ java_zone_offset = "+05:30"
 enabled = true
 
 [mq]
-# A scratch exchange: never the real `events` while Java core consumes it.
+# Local RabbitMQ (docker `rabbitmq`), same broker settings as core-events. Without a host, publishing
+# is off and every tick and one-off is dropped. Java core no longer consumes `events` locally.
+host = "localhost"
+username = "guest"
 events_exchange = "events"
 events_routing_keys = "events1,events2,events3"
 

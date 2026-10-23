@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::error::AppDataResult;
+use crate::error::{AppDataError, AppDataResult};
 use crate::model::{AggregateQuery, Connection, DataObject, DraftCopyFilter, Page, Query, Schema, Storage, StorageRelation};
 use crate::schema_refs::{HybridRepository, KirunSystemSchemas, SchemaRepository};
 use crate::value::Document;
@@ -193,6 +193,45 @@ pub trait AppDataEngine: Send + Sync {
 
     async fn read(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
         -> AppDataResult<Document>;
+
+    /// Rust only. Creates everything a write to the storage needs (table, version table, counters)
+    /// ahead of time, so a transaction that writes it never meets DDL midway (MySQL 1412 "Table
+    /// definition has changed" when a table is created after the transaction began).
+    async fn prepare(&self, _cx: &Ctx, _client_code: &str, _conn: Option<&Connection>, _storage: &Storage) -> AppDataResult<()> {
+        Ok(())
+    }
+
+    /// Rust only. Whether this engine can run a batch as one transaction in this deployment;
+    /// when it cannot, a batch undoes its own writes on failure and says it was not atomic.
+    async fn transactional(&self, _conn: Option<&Connection>) -> bool {
+        false
+    }
+
+    /// Rust only. The row read for a compare-and-set: locked until the surrounding transaction
+    /// ends where the engine has one (MySQL `SELECT ... FOR UPDATE`), a plain read otherwise.
+    /// `None` when there is no such row.
+    async fn lock_row(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
+        -> AppDataResult<Option<Document>> {
+        match self.read(cx, client_code, conn, storage, id).await {
+            Ok(row) => Ok(Some(row)),
+            Err(e) if e.is_object_not_found() => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Rust only. The next value of the counter `key` kept beside the storage's rows (same
+    /// tenant and surface): `start` the first time, then one more each call, atomically.
+    async fn next_sequence(
+        &self,
+        _cx: &Ctx,
+        _client_code: &str,
+        _conn: Option<&Connection>,
+        _storage: &Storage,
+        _key: &str,
+        _start: i64,
+    ) -> AppDataResult<i64> {
+        Err(AppDataError::unsupported_on_backend("sequences", self.backend()))
+    }
 
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)
         -> AppDataResult<Page<Document>>;

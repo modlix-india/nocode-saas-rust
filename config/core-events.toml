@@ -65,3 +65,7 @@ upstream = "http://localhost:8107"
 register = true
 register_as = "CORE-EVENTS"
 zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]
+
+[connections]
+# LOCAL only (owner decision 2026-10-22, AdZump v2 B2+B3): KIRun may reach local nocode-ai and a local SMTP sink.
+block_private_targets = false

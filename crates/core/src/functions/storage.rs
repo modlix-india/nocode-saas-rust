@@ -18,7 +18,7 @@ use kirun::{Map, Value};
 
 use super::{arg, arg_string, output, CoreFunction};
 use crate::error::CoreError;
-use crate::storage::service::AppDataService;
+use crate::storage::service::{AppDataService, BatchOp, NamedOp};
 use crate::storage::values::{gson_object, gson_tree, storage_document, storage_value};
 
 pub const NAMESPACE: &str = "CoreServices.Storage";
@@ -269,6 +269,9 @@ storage_function!(GetVersionDetails);
 storage_function!(ClearDraft);
 storage_function!(CopyToDraft);
 storage_function!(GetFields);
+storage_function!(Batch);
+storage_function!(UpdateIf);
+storage_function!(NextSequence);
 
 fn sort_order(with_case: bool) -> Schema {
     let mut props = vec![
@@ -984,6 +987,215 @@ impl CoreFunction for GetFields {
     }
 }
 
+/// The `result` and `updated` events of `UpdateIf`, and the `value` one of `NextSequence`.
+fn events_of(outputs: Vec<(&str, Schema)>) -> Map<Event> {
+    Map::from([
+        Event::output_event_map_entry(outputs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+        Event::event_map_entry(Event::ERROR, Map::from([("result".to_string(), Schema::of_any("result"))])),
+    ])
+}
+
+/// An operation's text field: a string, or a number written as text; absent is empty.
+fn op_text(o: &serde_json::Map<String, Value>, key: &str) -> String {
+    match o.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => crate::gson::number_to_java_string(n),
+        Some(Value::Bool(b)) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn op_doc(o: &serde_json::Map<String, Value>, key: &str) -> Document {
+    match o.get(key).map(storage_value) {
+        Some(DataValue::Object(d)) => d,
+        _ => Document::new(),
+    }
+}
+
+fn op_flag(o: &serde_json::Map<String, Value>, key: &str, default: bool) -> bool {
+    match o.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => default,
+    }
+}
+
+/// `operations[i]` as a batch operation; a missing storage, id or unknown `op` is a 400 that
+/// names the index.
+pub fn batch_ops(v: &Value) -> Result<Vec<NamedOp>, CoreError> {
+    let Value::Array(items) = v else { return Ok(Vec::new()) };
+    let bad = |i: usize, why: &str| {
+        CoreError::new(axum::http::StatusCode::BAD_REQUEST, format!("operations[{i}]: {why}"))
+            .with_code("CORE.STORAGE_BATCH_INVALID")
+            .param("index", i)
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let Value::Object(o) = item else { return Err(bad(i, "an operation is an object")) };
+        let storage = op_text(o, "storageName");
+        if storage.trim().is_empty() {
+            return Err(bad(i, "storageName is required"));
+        }
+        let id = op_text(o, "dataObjectId");
+        let need_id = |i: usize| if id.trim().is_empty() { Err(bad(i, "dataObjectId is required")) } else { Ok(id.clone()) };
+        let op = match op_text(o, "op").to_ascii_lowercase().as_str() {
+            "create" => BatchOp::Create { storage, data: op_doc(o, "dataObject") },
+            "update" => BatchOp::Update { storage, id: need_id(i)?, data: op_doc(o, "dataObject"), partial: op_flag(o, "isPartial", true) },
+            "updateif" => BatchOp::UpdateIf {
+                storage,
+                id: need_id(i)?,
+                expected: op_doc(o, "expected"),
+                data: op_doc(o, "dataObject"),
+                partial: op_flag(o, "isPartial", true),
+            },
+            "delete" => BatchOp::Delete { storage, id: need_id(i)? },
+            "nextsequence" => BatchOp::NextSequence {
+                storage,
+                key: op_text(o, "key"),
+                start: o.get("start").and_then(Value::as_i64).unwrap_or(1),
+            },
+            other => return Err(bad(i, &format!("unknown op '{other}' (create, update, updateIf, delete, nextSequence)"))),
+        };
+        let name = Some(op_text(o, "as")).filter(|n| !n.trim().is_empty());
+        out.push(NamedOp { op, name });
+    }
+    Ok(out)
+}
+
+impl Batch {
+    fn make_signature() -> FunctionSignature {
+        signature(
+            "Batch",
+            vec![
+                list_of("operations", Schema::of_object("operation")),
+                code("appCode"),
+                code("clientCode"),
+            ],
+            Schema::of_object("result"),
+        )
+    }
+}
+
+/// Rust only. Several writes as one unit: `operations` is a list of
+/// `{op: create|update|updateIf|delete|nextSequence, storageName, dataObject, dataObjectId,
+/// isPartial (default true), expected, key, start, as}`. A later operation uses an earlier
+/// result through `{"$ref": "<as>.<path>"}` in its data, or `"$ref:<as>.<path>"` as its id or key.
+/// On MySQL the batch is one transaction; `result` is `{results, atomic}`. A failure names the
+/// operation in `failedIndex` and leaves nothing written.
+#[async_trait]
+impl CoreFunction for Batch {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let ops = batch_ops(arg(args, "operations"))?;
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let outcome = self.service.batch(app.as_deref(), client.as_deref(), ops).await?;
+        let results = outcome.results.iter().map(gson).collect::<Result<Vec<_>, _>>()?;
+        let mut m = serde_json::Map::new();
+        m.insert("results".into(), Value::Array(results));
+        m.insert("atomic".into(), Value::Bool(outcome.atomic));
+        Ok(output("result", Value::Object(m)))
+    }
+}
+
+impl UpdateIf {
+    fn make_signature() -> FunctionSignature {
+        FunctionSignature::new("UpdateIf")
+            .set_namespace(NAMESPACE)
+            .set_parameters(
+                vec![
+                    p("storageName", Schema::of_string("storageName")),
+                    p("dataObjectId", Schema::of_string("dataObjectId")),
+                    object("expected"),
+                    p("dataObject", Schema::of_object("dataObject")),
+                    flag("isPartial", true),
+                    code("appCode"),
+                    code("clientCode"),
+                ]
+                .into_iter()
+                .collect(),
+            )
+            .set_events(events_of(vec![("updated", Schema::of_boolean("updated")), ("result", Schema::of_any("result"))]))
+    }
+}
+
+/// Rust only. Compare-and-set: updates the row only when every field in `expected` still has
+/// that value (`{"version": 3}`, `{"status": "AVAILABLE"}`). `updated` says whether it did;
+/// `result` is the updated row, or the row as it stands when it did not. On MySQL the row is
+/// locked from the comparison to the write.
+#[async_trait]
+impl CoreFunction for UpdateIf {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let id = arg_string(args, "dataObjectId")?;
+        let expected = match storage_value(arg(args, "expected")) {
+            DataValue::Object(o) => o,
+            _ => Document::new(),
+        };
+        let data = match storage_value(arg(args, "dataObject")) {
+            DataValue::Object(o) => o,
+            _ => Document::new(),
+        };
+        let partial = bool_arg(args, "isPartial");
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let out = self
+            .service
+            .update_if(app.as_deref(), client.as_deref(), &storage, &id, &expected, data, partial)
+            .await?;
+        let mut m = Map::new();
+        m.insert("updated".into(), Value::Bool(out.updated));
+        m.insert("result".into(), Value::Object(gson_object(&out.row)?.into_iter().collect()));
+        Ok(FunctionOutput::new(vec![EventResult::output_of(m)]))
+    }
+}
+
+impl NextSequence {
+    fn make_signature() -> FunctionSignature {
+        FunctionSignature::new("NextSequence")
+            .set_namespace(NAMESPACE)
+            .set_parameters(
+                vec![
+                    p("storageName", Schema::of_string("storageName")),
+                    p("key", Schema::of_string("key").set_default_value(s(""))),
+                    int("start", 1),
+                    code("appCode"),
+                    code("clientCode"),
+                ]
+                .into_iter()
+                .collect(),
+            )
+            .set_events(events_of(vec![("value", Schema::of_long("value"))]))
+    }
+}
+
+/// Rust only. The next number of the counter `key`, kept beside the storage's rows in the same
+/// tenant: `start` the first time, then one more each call, atomically (receipt and case
+/// numbers). Inside a `Batch` the number is handed out only if the batch commits.
+#[async_trait]
+impl CoreFunction for NextSequence {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let key = match args.get("key") {
+            Some(Value::Null) | None => String::new(),
+            Some(_) => arg_string(args, "key")?,
+        };
+        let start = args.get("start").and_then(Value::as_i64).unwrap_or(1);
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let value = self.service.next_sequence(app.as_deref(), client.as_deref(), &storage, &key, start).await?;
+        Ok(output("value", Value::from(value)))
+    }
+}
+
 /// Every storage function, in the order `makeStorageFunctions` registers them.
 pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Function>> {
     use super::Core;
@@ -1002,6 +1214,9 @@ pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Functi
         Arc::new(Core(GetVersionDetails::new(service.clone()))),
         // Rust only, after every function Java has.
         Arc::new(Core(GetFields::new(service.clone()))),
+        Arc::new(Core(Batch::new(service.clone()))),
+        Arc::new(Core(UpdateIf::new(service.clone()))),
+        Arc::new(Core(NextSequence::new(service.clone()))),
     ]
 }
 
@@ -1352,6 +1567,9 @@ mod tests {
             ClearDraft::make_signature(),
             CopyToDraft::make_signature(),
             GetFields::make_signature(),
+            Batch::make_signature(),
+            UpdateIf::make_signature(),
+            NextSequence::make_signature(),
         ]
         .iter()
         .map(|s| (s.get_full_name(), s.get_parameters().len()))
@@ -1372,6 +1590,9 @@ mod tests {
                 ("CoreServices.Storage.ClearDraft".into(), 2),
                 ("CoreServices.Storage.CopyToDraft".into(), 3),
                 ("CoreServices.Storage.GetFields".into(), 3),
+                ("CoreServices.Storage.Batch".into(), 3),
+                ("CoreServices.Storage.UpdateIf".into(), 7),
+                ("CoreServices.Storage.NextSequence".into(), 5),
             ]
         );
     }
