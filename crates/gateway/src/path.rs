@@ -22,8 +22,16 @@ pub struct SplitPath<'a> {
 /// their prefix is the codes.
 pub fn split(path: &str) -> SplitPath<'_> {
     let (codes_part, codes_unverified, modified) = if let Some(api) = path.find("/api/") {
-        let page_first = path.find("/page/").is_some_and(|p| p <= api);
-        (&path[..api], !page_first, &path[api..])
+        let page_at = path.find("/page/").filter(|p| *p <= api);
+        if page_at == Some(0) {
+            // Rust only: `/page/<name>/<id>/api/...` is a page with path parts calling a relative
+            // `api/...` on the app's own host. Nothing in front of `/page/` names an app or a
+            // client, so the host decides (the codes part would otherwise read `/page/<name>` as
+            // app `page`, client `<name>`: "unknown client" on every call of such a page).
+            ("", false, &path[api..])
+        } else {
+            (&path[..api], page_at.is_none(), &path[api..])
+        }
     } else if let Some(m) = path.find("/manifest/") {
         (&path[..m], false, &path[m..])
     } else if let Some(p) = path.find("/page/") {
@@ -114,6 +122,16 @@ mod tests {
         assert_eq!(s("/leadzump/SYSTEM/page/api/x"), ("/leadzump/SYSTEM/page".into(), "/api/x".into()));
         assert!(!unverified("/leadzump/SYSTEM/page/api/x"));
         assert_eq!(codes_from_url("/leadzump/SYSTEM/page"), Some(("SYSTEM".into(), "leadzump".into())));
+    }
+
+    #[test]
+    fn a_page_with_path_parts_on_the_apps_own_host_resolves_by_host() {
+        assert_eq!(s("/page/booking/01ABC/api/core/function/execute/CxZump/caseGet"), ("".into(), "/api/core/function/execute/CxZump/caseGet".into()));
+        assert!(!unverified("/page/booking/01ABC/api/core/function/execute/CxZump/caseGet"));
+        assert_eq!(codes_from_url(split("/page/booking/01ABC/api/x").codes_part), None);
+        // Codes in front of `/page/` still count.
+        assert_eq!(s("/cxzump/SASIC/page/booking/01ABC/api/x"), ("/cxzump/SASIC/page/booking/01ABC".into(), "/api/x".into()));
+        assert_eq!(codes_from_url("/cxzump/SASIC/page/booking/01ABC"), Some(("SASIC".into(), "cxzump".into())));
     }
 
     #[test]

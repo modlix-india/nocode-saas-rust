@@ -13,7 +13,8 @@ use tokio::sync::Mutex;
 
 use super::column::MySqlColumn;
 use super::column_names::{self, PhysicalSchema};
-use super::db::{self, count, count_raw, execute, execute_raw, fetch, Credentials};
+use super::db::{self, count_raw, execute_raw, Credentials};
+use super::tx::{self, count, execute, fetch};
 use super::drift::{self, DriftRepair, Report};
 use super::field_resolver::FieldResolver;
 use super::filter_builder::{self, bind_of, FilterError};
@@ -1696,6 +1697,45 @@ impl AppDataEngine for MySqlAppDataService {
         self.read_row(&pool, &db_name, storage, &schema, id)
             .await?
             .ok_or_else(|| AppDataError::object_not_found(&storage.name, id))
+    }
+
+    async fn transactional(&self, _conn: Option<&Connection>) -> bool {
+        true
+    }
+
+    async fn prepare(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage) -> AppDataResult<()> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        self.ensure_version_table(&pool, &db_name, storage).await?;
+        tx::ensure_sequence_table(&pool, &db_name).await
+    }
+
+    async fn lock_row(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
+        -> AppDataResult<Option<Document>> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        let schema = self.physical_schema(storage, cx.draft).await;
+        let decoding = Decoding::of(&schema, defs(storage).as_ref())?;
+        let select = Select::star(table(&db_name, storage))
+            .filter(id_field().equal(Sql::param(Bind::Text(id.into()))))
+            .to_sql()
+            .then(" FOR UPDATE");
+        let rows = fetch(&pool, &select).await?;
+        Ok(rows.into_iter().next().map(|r| decoding.row(r, &schema)))
+    }
+
+    async fn next_sequence(
+        &self,
+        cx: &Ctx,
+        client_code: &str,
+        conn: Option<&Connection>,
+        storage: &Storage,
+        key: &str,
+        start: i64,
+    ) -> AppDataResult<i64> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        tx::next_sequence(&pool, &db_name, &format!("{}:{key}", storage.unique_name), start).await
     }
 
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)
