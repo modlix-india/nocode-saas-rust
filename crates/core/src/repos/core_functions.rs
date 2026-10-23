@@ -112,12 +112,13 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 84);
+        assert_eq!(core.names().len(), 85);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
-        // Storage.GetFields and Storage.Batch / UpdateIf / NextSequence.
+        // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence and Event.GetScheduleState.
+        assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[77..],
+            core.names()[78..],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",

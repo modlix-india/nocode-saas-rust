@@ -18,7 +18,7 @@ use kirun::{Map, Value};
 
 use super::{arg, arg_string, output, CoreFunction};
 use crate::error::CoreError;
-use crate::storage::service::{AppDataService, BatchOp, NamedOp};
+use crate::storage::service::{AppDataService, BatchOp, BatchOutcome, NamedOp, OnConflict};
 use crate::storage::values::{gson_object, gson_tree, storage_document, storage_value};
 
 pub const NAMESPACE: &str = "CoreServices.Storage";
@@ -1062,6 +1062,43 @@ pub fn batch_ops(v: &Value) -> Result<Vec<NamedOp>, CoreError> {
     Ok(out)
 }
 
+/// `onConflict`: `throw` (the default; also absent, null or blank) or `report`, any case;
+/// anything else is a 400 naming the parameter.
+pub fn on_conflict(v: &Value) -> Result<OnConflict, CoreError> {
+    let parsed = match v {
+        Value::Null => Some(OnConflict::Throw),
+        Value::String(t) => OnConflict::parse(Some(t)),
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        CoreError::new(axum::http::StatusCode::BAD_REQUEST, "onConflict: throw or report")
+            .with_code("CORE.STORAGE_BATCH_INVALID")
+            .param("parameter", "onConflict")
+    })
+}
+
+/// A batch's `result`: `{committed, atomic, results}`, and `conflict` when a reported conflict
+/// rolled it back.
+pub fn batch_result(outcome: &BatchOutcome) -> Result<Value, CoreError> {
+    let results = outcome.results.iter().map(gson).collect::<Result<Vec<_>, _>>()?;
+    let mut m = serde_json::Map::new();
+    m.insert("committed".into(), Value::Bool(outcome.committed));
+    m.insert("results".into(), Value::Array(results));
+    m.insert("atomic".into(), Value::Bool(outcome.atomic));
+    if let Some(c) = &outcome.conflict {
+        let mut o = serde_json::Map::new();
+        o.insert("index".into(), Value::from(c.index));
+        o.insert("as".into(), c.name.clone().map(Value::String).unwrap_or(Value::Null));
+        o.insert("op".into(), s(c.op));
+        o.insert("storageName".into(), s(&c.storage));
+        o.insert("kind".into(), s(c.kind.name()));
+        o.insert("key".into(), c.key.clone().map(Value::String).unwrap_or(Value::Null));
+        o.insert("message".into(), s(&c.message));
+        m.insert("conflict".into(), Value::Object(o));
+    }
+    Ok(Value::Object(m))
+}
+
 impl Batch {
     fn make_signature() -> FunctionSignature {
         signature(
@@ -1070,6 +1107,7 @@ impl Batch {
                 list_of("operations", Schema::of_object("operation")),
                 code("appCode"),
                 code("clientCode"),
+                p("onConflict", Schema::of_string("onConflict").set_enums(enums(&["throw", "report"])).set_default_value(s("throw"))),
             ],
             Schema::of_object("result"),
         )
@@ -1080,8 +1118,13 @@ impl Batch {
 /// `{op: create|update|updateIf|delete|nextSequence, storageName, dataObject, dataObjectId,
 /// isPartial (default true), expected, key, start, as}`. A later operation uses an earlier
 /// result through `{"$ref": "<as>.<path>"}` in its data, or `"$ref:<as>.<path>"` as its id or key.
-/// On MySQL the batch is one transaction; `result` is `{results, atomic}`. A failure names the
-/// operation in `failedIndex` and leaves nothing written.
+/// On MySQL the batch is one transaction; `result` is `{committed: true, results, atomic}`. A
+/// failure names the operation in `failedIndex` and leaves nothing written.
+///
+/// `onConflict: "report"`: a duplicate key (a unique index already holds the value) or an
+/// `updateIf` whose `expected` no longer matches rolls the batch back the same way, but the step
+/// completes normally with `{committed: false, atomic, results: [], conflict: {index, as, op,
+/// storageName, kind: DUPLICATE|STALE, key, message}}`. Every other failure still fails the step.
 #[async_trait]
 impl CoreFunction for Batch {
     fn signature(&self) -> &FunctionSignature {
@@ -1090,13 +1133,10 @@ impl CoreFunction for Batch {
 
     async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
         let ops = batch_ops(arg(args, "operations"))?;
+        let mode = on_conflict(arg(args, "onConflict"))?;
         let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
-        let outcome = self.service.batch(app.as_deref(), client.as_deref(), ops).await?;
-        let results = outcome.results.iter().map(gson).collect::<Result<Vec<_>, _>>()?;
-        let mut m = serde_json::Map::new();
-        m.insert("results".into(), Value::Array(results));
-        m.insert("atomic".into(), Value::Bool(outcome.atomic));
-        Ok(output("result", Value::Object(m)))
+        let outcome = self.service.batch(app.as_deref(), client.as_deref(), ops, mode).await?;
+        Ok(output("result", batch_result(&outcome)?))
     }
 }
 
@@ -1425,6 +1465,135 @@ mod tests {
         .await;
     }
 
+    /// `onConflict`: throw by default, report on request, anything else refused as a 400.
+    #[test]
+    fn on_conflict_is_throw_unless_report() {
+        assert_eq!(on_conflict(&Value::Null).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!("")).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!("throw")).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!(" Report ")).unwrap(), OnConflict::Report);
+        for bad in [json!("ignore"), json!(true), json!(1), json!({"x": 1})] {
+            let e = on_conflict(&bad).unwrap_err();
+            assert_eq!(e.status(), axum::http::StatusCode::BAD_REQUEST, "{bad}");
+            assert_eq!(e.code().unwrap().code, "CORE.STORAGE_BATCH_INVALID");
+        }
+    }
+
+    /// Two storages for the claim key pattern: `seat` holds `claimKey` under a unique index,
+    /// `log` has none.
+    async fn claim_functions() -> (Arc<AppDataService>, Arc<MemoryEngine>) {
+        let base = security_stub(&[], &["app"]).await;
+        let catalog = MemoryCatalog::with(vec![
+            st(json!({"name": "seat", "appCode": "app", "clientCode": "SYSTEM",
+                      "indexes": {"claimKey_unique": {"fields": [{"fieldName": "claimKey"}], "unique": true}}})),
+            st(json!({"name": "log", "appCode": "app", "clientCode": "SYSTEM"})),
+        ]);
+        let engine = Arc::new(MemoryEngine::default());
+        let svc = Arc::new(policy(catalog, engine.clone(), &base, Arc::new(RecordingEvents::default())));
+        (svc, engine)
+    }
+
+    /// A duplicate key or a stale `updateIf` inside a batch: `throw` fails the step as before,
+    /// `report` answers `committed: false` with the conflict; either way nothing stays written.
+    /// A claim released to null is free again (many nulls are allowed).
+    #[tokio::test]
+    async fn batch_conflicts_throw_or_report() {
+        let (svc, engine) = claim_functions().await;
+        let ctx = request(
+            auth(json!({"user": {"id": 1, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true,
+                        "clientCode": "SYSTEM"}), Some("SYSTEM"), Some("app")),
+            false,
+            None,
+        );
+        context::with_request(ctx, async {
+            let all = all(&svc);
+            let f = |n: &str| all.iter().find(|f| f.get_signature().get_name() == n).unwrap().clone();
+            let batch = f("Batch");
+            let take = |seat: i64| json!([
+                {"op": "create", "storageName": "log", "dataObject": {"what": "booking"}, "as": "entry"},
+                {"op": "create", "storageName": "seat", "dataObject": {"claimKey": format!("P1|10:00|{seat}"), "status": "BOOKED"}, "as": "seat"},
+            ]);
+
+            // The first claim of seat 1 commits.
+            let (_, ok) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(ok["committed"], json!(true));
+            assert!(ok.get("conflict").is_none());
+            assert_eq!(ok["results"].as_array().unwrap().len(), 2);
+            let held = ok["results"][1]["_id"].as_str().unwrap().to_string();
+            assert_eq!((engine.count("log"), engine.count("seat")), (1, 1));
+
+            // A second claim of seat 1, reported: rolled back (the log row undone), told why.
+            let (name, r) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(name, "output");
+            assert_eq!(r["committed"], json!(false));
+            assert_eq!(r["results"], json!([]));
+            assert_eq!(r["atomic"], json!(false));
+            assert_eq!(
+                r["conflict"],
+                json!({"index": 1, "as": "seat", "op": "create", "storageName": "seat", "kind": "DUPLICATE",
+                       "key": "claimKey_unique", "message": "That is already taken (claimKey_unique)."})
+            );
+            assert_eq!((engine.count("log"), engine.count("seat")), (1, 1));
+
+            // The next seat is free.
+            let (_, r) = run(batch.as_ref(), json!({"operations": take(2), "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+
+            // Thrown (the default): the step fails and nothing of the batch stays.
+            let thrown = run(batch.as_ref(), json!({"operations": take(1)})).await.unwrap_err();
+            assert!(thrown.contains("claimKey_unique"), "{thrown}");
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+            let ops = batch_ops(&take(1)).unwrap();
+            let e = svc.batch(Some("app"), None, ops, OnConflict::Throw).await.unwrap_err();
+            assert_eq!(e.status(), axum::http::StatusCode::CONFLICT);
+            let c = e.code().unwrap();
+            assert_eq!(c.code, "CORE.DUPLICATE_KEY");
+            let param = |n: &str| c.params.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+            assert_eq!((param("index"), param("storage"), param("failedIndex")), (Some("claimKey_unique".into()), Some("seat".into()), Some("1".into())));
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+
+            // A stale updateIf, reported: STALE, no key, nothing written.
+            let stale = json!([
+                {"op": "create", "storageName": "log", "dataObject": {"what": "cancel"}},
+                {"op": "updateIf", "storageName": "seat", "dataObjectId": held, "expected": {"status": "CANCELLED"},
+                 "dataObject": {"status": "CANCELLED", "claimKey": null}},
+            ]);
+            let (_, r) = run(batch.as_ref(), json!({"operations": stale, "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(false));
+            assert_eq!(r["conflict"]["kind"], json!("STALE"));
+            assert_eq!(r["conflict"]["key"], json!(null));
+            assert_eq!(r["conflict"]["as"], json!(null));
+            assert_eq!((r["conflict"]["index"].clone(), r["conflict"]["op"].clone()), (json!(1), json!("updateIf")));
+            assert!(r["conflict"]["message"].as_str().unwrap().contains("no longer matches"));
+            assert_eq!(engine.count("log"), 2);
+            // Thrown, the stale row fails the step with today's 409.
+            let e = svc.batch(Some("app"), None, batch_ops(&stale).unwrap(), OnConflict::Throw).await.unwrap_err();
+            assert_eq!(e.code().unwrap().code, "CORE.STORAGE_CONDITION_FAILED");
+
+            // Releasing the claim (null) frees seat 1 for the next booking; nulls never collide.
+            let release = json!([{"op": "updateIf", "storageName": "seat", "dataObjectId": held, "expected": {"status": "BOOKED"},
+                                  "dataObject": {"status": "CANCELLED", "claimKey": null}}]);
+            let (_, r) = run(batch.as_ref(), json!({"operations": release, "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+            let (_, r) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+
+            // Any other failure is not a conflict: it still fails the step.
+            let missing = json!([{"op": "update", "storageName": "seat", "dataObjectId": "nope", "dataObject": {"x": 1}}]);
+            assert!(run(batch.as_ref(), json!({"operations": missing, "onConflict": "report"})).await.is_err());
+            assert!(run(batch.as_ref(), json!({"operations": [], "onConflict": "sometimes"})).await.is_err());
+
+            // A plain Create meets the same 409 (no longer an unknown error).
+            let e = svc
+                .create(Some("app"), None, "seat", appdata::model::DataObject::of(storage_document(json!({"claimKey": "P1|10:00|2"}).as_object().unwrap())), Some(false), None)
+                .await
+                .unwrap_err();
+            assert_eq!((e.status(), e.code().unwrap().code.to_string()), (axum::http::StatusCode::CONFLICT, "CORE.DUPLICATE_KEY".to_string()));
+        })
+        .await;
+    }
+
     /// `GetFields`: inline properties, a ref followed to the app schema (`details` kept), a
     /// client's own schema copy for that client, inline properties over the ref, no relation
     /// fields, and Read's gate (readAuth, onlyThruKIRun) and missing storage refusal.
@@ -1590,7 +1759,7 @@ mod tests {
                 ("CoreServices.Storage.ClearDraft".into(), 2),
                 ("CoreServices.Storage.CopyToDraft".into(), 3),
                 ("CoreServices.Storage.GetFields".into(), 3),
-                ("CoreServices.Storage.Batch".into(), 3),
+                ("CoreServices.Storage.Batch".into(), 4),
                 ("CoreServices.Storage.UpdateIf".into(), 7),
                 ("CoreServices.Storage.NextSequence".into(), 5),
             ]

@@ -354,6 +354,71 @@ async fn consent_callback_and_revoke() {
     let _ = Value::Null;
 }
 
+/// Only an authority named in the expression passes, as KIRun's `or` reads it for these.
+struct Named;
+
+impl connections::context::AuthorityCheck for Named {
+    fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool {
+        expression.unwrap_or("").split(" or ").any(|want| authorities.iter().any(|a| a == want.trim()))
+    }
+}
+
+#[tokio::test]
+async fn consent_auth_gates_the_consent_and_not_the_callback() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let mut conn = connection(port, "AUTHORIZATION_CODE");
+    conn.consent_auth = Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner".into());
+    let (svc, tokens) = setup(conn);
+    let svc = svc.with_authority_check(Arc::new(Named));
+    let mut viewer = caller();
+    viewer.url_app_code = Some("marketingai".into());
+    viewer.authorities = vec!["Authorities.Logged_IN".into(), "Authorities.ADZUMPTWO.ROLE_Report_READ".into()];
+
+    let e = oauth2::evoke_consent(&svc, &viewer, "META_API", Some("app.example.com")).await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 403);
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_CONSENT_FORBIDDEN"));
+    assert!(tokens.rows.lock().is_empty(), "a refused consent writes no state row");
+
+    let mut manager = viewer.clone();
+    manager.authorities.push("Authorities.ADZUMPTWO.ROLE_Account_MANAGE".into());
+    let url = oauth2::evoke_consent(&svc, &manager, "META_API", Some("app.example.com")).await.unwrap().unwrap();
+    assert!(url.starts_with("https://www.facebook.com/v21.0/dialog/oauth?client_id=123"), "{url}");
+    let state = tokens.rows.lock()[0].state.clone().unwrap();
+
+    // The callback completes the consent whoever the browser's caller is.
+    let out = oauth2::oauth2_callback(&svc, &viewer, Some("the-code"), Some(&state), Some("app.example.com"), "/api/core/connections/oauth/callback")
+        .await
+        .unwrap();
+    assert_eq!(out, CallbackOutcome::Redirect("https://app.example.com/settings/integrations?META_API=success".into()));
+
+    // Revoking the token is gated the same way: the viewer is refused and nothing is revoked.
+    let active = |rows: &[CoreToken]| rows.iter().filter(|t| t.is_revoked != Some(true)).count();
+    let before = active(&tokens.rows.lock());
+    assert!(before > 0);
+    let e = oauth2::revoke_connection_token(&svc, &viewer, "META_API").await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 403);
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+    assert_eq!(active(&tokens.rows.lock()), before, "a refused revoke revokes nothing");
+    assert!(oauth2::revoke_connection_token(&svc, &manager, "META_API").await.unwrap());
+    assert_eq!(active(&tokens.rows.lock()), 0);
+    let again = oauth2::revoke_connection_token(&svc, &manager, "META_API").await.unwrap_err();
+    assert_eq!(again.message(), "No active token found to revoke for connection META_API", "then the normal path");
+
+    // Without a supplied evaluator the gated consent stays shut, even for an owner.
+    let (unwired, _) = setup(connection(port, "AUTHORIZATION_CODE"));
+    let mut gated = connection(port, "AUTHORIZATION_CODE");
+    gated.consent_auth = Some("Authorities.ROLE_Owner".into());
+    let (unwired_gated, _) = setup(gated);
+    let mut owner = manager.clone();
+    owner.authorities = vec!["Authorities.ROLE_Owner".into()];
+    assert_eq!(oauth2::evoke_consent(&unwired_gated, &owner, "META_API", Some("h")).await.unwrap_err().status().as_u16(), 403);
+    assert!(oauth2::evoke_consent(&unwired, &viewer, "META_API", Some("h")).await.unwrap().is_some(), "no consentAuth: as before");
+    assert_eq!(oauth2::revoke_connection_token(&unwired_gated, &owner, "META_API").await.unwrap_err().status().as_u16(), 403);
+    let e = oauth2::revoke_connection_token(&unwired, &viewer, "META_API").await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 400, "no consentAuth: the normal path ({})", e.message());
+}
+
 type Seen = Arc<Mutex<Vec<(String, Vec<(String, String)>, String)>>>;
 
 /// A token endpoint that keeps each request's target, headers and body.

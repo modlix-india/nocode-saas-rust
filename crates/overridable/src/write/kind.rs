@@ -147,6 +147,25 @@ pub trait Kind: DocType {
         Ok(entity)
     }
 
+    /// Rust only: the document as a reply carries it, which may hold back what never leaves
+    /// the service (a connection's credentials, masked). Every route that answers a document
+    /// of the kind (the object, its draft, the eager list's `data`) answers this; reads inside
+    /// the service still see the stored document.
+    fn redact(&self, entity: JMap) -> JMap {
+        entity
+    }
+
+    /// Rust only: what a save sends back held back (as [`Kind::redact`] answered it) put back
+    /// from `current`, the stored document or the draft being replaced, before the save is
+    /// applied. `None` on a create, which has nothing stored to keep.
+    fn keep_withheld(&self, _incoming: &mut JMap, _current: Option<&JMap>) {}
+
+    /// Rust only: whether a list request may filter or sort on `field` (a field
+    /// [`Kind::redact`] holds back could be matched against a guess).
+    fn filterable(&self, _field: &str) -> bool {
+        true
+    }
+
     /// `getTransportDependencies`: same-type names to import first.
     fn transport_dependencies(&self, _entity: &JMap) -> Vec<String> {
         Vec::new()

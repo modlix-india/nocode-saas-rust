@@ -143,6 +143,21 @@ impl Condition {
         Condition::Complex { and: true, conditions: conditions.into_iter().map(Some).collect(), negate: false }
     }
 
+    /// Every field the condition compares, its field expressions' included.
+    pub fn fields(&self) -> Vec<&str> {
+        match self {
+            Condition::Filter(fc) => {
+                let mut out: Vec<&str> = fc.field.as_deref().into_iter().collect();
+                if let Some(fe) = &fc.field_expr {
+                    out.extend(fe.fields.iter().map(String::as_str));
+                }
+                out
+            }
+            Condition::Complex { conditions, .. } => conditions.iter().flatten().flat_map(Condition::fields).collect(),
+            Condition::Unsupported(_) => Vec::new(),
+        }
+    }
+
     /// `AbstractConditionDeserializer`.
     pub fn from_json(v: &JValue) -> Result<Option<Condition>, AppError> {
         let m = match v {

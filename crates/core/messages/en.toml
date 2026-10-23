@@ -406,6 +406,15 @@ java_text = "Not allowed to schedule events for client $"
 when = "A CoreServices.Schedule function for a client the caller's client does not manage."
 audience = "signed-in"
 
+[CORE.SCHEDULE_STATE_FORBIDDEN]
+status = 403
+params = ["client", "app"]
+text = "You can read a schedule only for your own organisation, in the app the function runs in[, not for {client}][, not in {app}]."
+action = "Leave clientCode and appCode empty to read your own organisation's schedule."
+java_text = "Not allowed to read the schedule state for client $ in app $"
+when = "CoreServices.Event.GetScheduleState with a clientCode other than the caller's own client, or an appCode other than the app it runs in. Rust only."
+audience = "signed-in"
+
 # ---- Storage: who may read and write ----
 
 [CORE.STORAGE_NOT_FOUND]
@@ -551,6 +560,14 @@ text = "A row with [id {id}|this id] already exists[ in {storage}]."
 action = "Leave out _id to add a new row, or update the existing row instead."
 java = "storage_object_id_exists"
 when = "Adding a row whose _id is already taken."
+audience = "anyone"
+
+[CORE.DUPLICATE_KEY]
+status = 409
+params = ["storage", "index"]
+text = "That is already taken[ ({index})]."
+action = "Choose another value, or change the row that already holds it[ in {storage}]."
+when = "Adding or changing a row whose value is already held by another row under a unique index (MySQL error 1062, Mongo E11000). Rust only: Java let the driver's error escape as a 500. Storage.Batch with onConflict report answers it as a conflict instead."
 audience = "anyone"
 
 [CORE.ROW_ID_REQUIRED]
@@ -806,6 +823,24 @@ text = "The connection has no authorization address for its consent page."
 action = "Add the authorization URL to the connection's consent details."
 java_text = "Authorization URL is required"
 when = "Starting the OAuth consent flow for a connection without an authorization URL."
+audience = "signed-in"
+
+[CORE.CONNECTION_CONSENT_FORBIDDEN]
+status = 403
+params = ["connection"]
+text = "You can't connect {connection|this connection} for your business: your account is not allowed to."
+action = "Ask someone who manages your business's connected accounts to connect it, or to give your account that permission."
+java_text = "Consent for the connection $ is not allowed: the caller does not satisfy its consentAuth"
+when = "Starting the OAuth consent flow for a connection whose consentAuth the caller's authorities do not satisfy. Rust only: Java had no consentAuth."
+audience = "signed-in"
+
+[CORE.CONNECTION_REVOKE_FORBIDDEN]
+status = 403
+params = ["connection"]
+text = "You can't disconnect {connection|this connection} for your business: your account is not allowed to."
+action = "Ask someone who manages your business's connected accounts to disconnect it, or to give your account that permission."
+java_text = "Revoking the token of the connection $ is not allowed: the caller does not satisfy its consentAuth"
+when = "Revoking the OAuth token (GET /api/core/connections/oauth/revoke) of a connection whose consentAuth the caller's authorities do not satisfy. Rust only: Java had no consentAuth."
 audience = "signed-in"
 
 [CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING]

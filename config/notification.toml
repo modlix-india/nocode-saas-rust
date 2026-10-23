@@ -62,3 +62,8 @@ heartbeat_seconds = 15
 register = true
 register_as = "NOTIFICATION"
 zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]
+
+[email]
+# LOCAL only (owner decision 2026-10-23, AdZump v2 stream RS): the notification email sender may reach
+# a private or loopback SMTP host (the local mailpit sink). Default true = refuse.
+block_private_targets = false

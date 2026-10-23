@@ -327,6 +327,23 @@ mod doubles {
             self.rows.lock().get(storage).map(IndexMap::len).unwrap_or(0)
         }
 
+        /// The storage's unique indexes, as MySQL keeps them: a row whose fields of a unique
+        /// index are all set may not repeat another row's values (a null or missing field is
+        /// never a duplicate, as MySQL allows many NULLs). Answers the engines' 409.
+        fn check_unique(&self, rows: &IndexMap<String, Document>, storage: &Storage, id: &str, row: &Document) -> AppDataResult<()> {
+            let values = |r: &Document, fields: &[String]| -> Option<Vec<String>> {
+                fields.iter().map(|f| r.get(f).filter(|v| !v.is_null()).map(Value::java_string)).collect()
+            };
+            for (name, index) in storage.indexes.iter().flatten().filter(|(_, i)| i.unique) {
+                let fields: Vec<String> = index.fields.iter().filter_map(|f| f.field_name.clone()).collect();
+                let Some(mine) = values(row, &fields) else { continue };
+                if rows.iter().any(|(other, r)| other != id && values(r, &fields).as_ref() == Some(&mine)) {
+                    return Err(AppDataError::duplicate_key(name).in_storage(&storage.name));
+                }
+            }
+            Ok(())
+        }
+
         fn page(&self, storage: &str, query: &Query) -> AppDataResult<Page<Document>> {
             let rows = self.list(storage, query);
             let total = rows.len() as i64;
@@ -378,7 +395,10 @@ mod doubles {
                 }
             };
             row.insert("_id".into(), Value::String(id.clone()));
-            self.rows.lock().entry(key(cx, storage)).or_default().insert(id, row.clone());
+            let mut all = self.rows.lock();
+            let rows = all.entry(key(cx, storage)).or_default();
+            self.check_unique(rows, storage, &id, &row)?;
+            rows.insert(id, row.clone());
             Ok(row)
         }
 
@@ -395,20 +415,25 @@ mod doubles {
             self.updates.lock().push((row.clone(), override_));
             let id = row.get("_id").map(Value::java_string).unwrap_or_default();
             let mut all = self.rows.lock();
-            let Some(existing) = all.entry(key(cx, storage)).or_default().get_mut(&id) else {
+            let rows = all.entry(key(cx, storage)).or_default();
+            let Some(existing) = rows.get(&id) else {
                 if *self.empty_update.lock() {
                     return Err(AppDataError::Empty);
                 }
                 return Err(AppDataError::object_not_found_to_update(&storage.name, &id));
             };
-            if override_ == Some(true) {
-                *existing = row.clone();
+            let next = if override_ == Some(true) {
+                row.clone()
             } else {
+                let mut merged = existing.clone();
                 for (k, v) in row {
-                    existing.insert(k, v);
+                    merged.insert(k, v);
                 }
-            }
-            Ok(existing.clone())
+                merged
+            };
+            self.check_unique(rows, storage, &id, &next)?;
+            rows.insert(id, next.clone());
+            Ok(next)
         }
 
         async fn read(&self, cx: &Ctx, _: &str, _: Option<&Connection>, storage: &Storage, id: &str) -> AppDataResult<Document> {

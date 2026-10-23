@@ -752,6 +752,103 @@ async fn connection_routes() {
     assert_eq!(r.status().as_u16(), 400);
 }
 
+/// The consent gate on `POST /oauth/evoke`, through the route and KIRun's evaluator.
+#[tokio::test]
+async fn oauth_evoke_honours_consent_auth() {
+    let s = setup().await;
+    let signed_in = |authorities: &[&str]| {
+        json!({"user": {"id": 110, "clientId": 7, "stringAuthorities": authorities}, "authenticated": true, "clientCode": "FIN"}).to_string()
+    };
+    let oauth = |name: &str, gate: Option<&str>| {
+        let mut c = json!({"name": name, "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                           "connectionSubType": "REST_API_OAUTH2",
+                           "connectionDetails": {"grantType": "AUTHORIZATION_CODE",
+                                                 "consentDetails": {"url": "https://provider.example.com/oauth", "queryParams": {"client_id": "1"}}}});
+        if let Some(g) = gate {
+            c["consentAuth"] = json!(g);
+        }
+        c
+    };
+    s.docs.add_connection(oauth("gated", Some("Authorities.LEADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner")));
+    s.docs.add_connection(oauth("open", None));
+    s.docs.add_connection(oauth("blank", Some("  ")));
+    let base = routes(&s).await;
+    let evoke = |name: &str| {
+        reqwest::Client::new()
+            .post(format!("{base}/api/core/connections/oauth/evoke?connectionName={name}"))
+            .header("appCode", "leadzumptwo")
+            .header("clientCode", "FIN")
+            .header("X-Forwarded-Host", "app.local")
+            .header("Authorization", "Basic dXNlcg==")
+            .send()
+    };
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN"]));
+    let r = evoke("gated").await.unwrap();
+    assert_eq!(r.status().as_u16(), 403);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["code"], json!("CORE.CONNECTION_CONSENT_FORBIDDEN"), "{body}");
+    assert!(s.tokens.rows.lock().is_empty(), "nothing stored for a refused consent");
+    for open in ["open", "blank"] {
+        let r = evoke(open).await.unwrap();
+        assert_eq!(r.status().as_u16(), 200, "{open}");
+        assert!(r.text().await.unwrap().starts_with("https://provider.example.com/oauth?client_id=1&redirect_uri="), "{open}");
+    }
+
+    for holder in ["Authorities.LEADZUMPTWO.ROLE_Account_MANAGE", "Authorities.ROLE_Owner"] {
+        s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN", holder]));
+        let r = evoke("gated").await.unwrap();
+        assert_eq!(r.status().as_u16(), 200, "{holder}");
+        let url = r.text().await.unwrap();
+        assert!(url.starts_with("https://provider.example.com/oauth?client_id=1&redirect_uri=https://app.local/api/core/connections/oauth/callback&state="), "{url}");
+    }
+}
+
+/// `GET /oauth/revoke` honours the same `consentAuth`, before anything is looked up or revoked.
+#[tokio::test]
+async fn oauth_revoke_honours_consent_auth() {
+    let s = setup().await;
+    let signed_in = |authorities: &[&str]| {
+        json!({"user": {"id": 110, "clientId": 7, "stringAuthorities": authorities}, "authenticated": true, "clientCode": "FIN"}).to_string()
+    };
+    for (name, gate) in [("gated", Some("Authorities.LEADZUMPTWO.ROLE_Account_MANAGE")), ("open", None)] {
+        let mut c = json!({"name": name, "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                           "connectionSubType": "REST_API_OAUTH2", "connectionDetails": {"grantType": "AUTHORIZATION_CODE"}});
+        if let Some(g) = gate {
+            c["consentAuth"] = json!(g);
+        }
+        s.docs.add_connection(c);
+    }
+    s.tokens.rows.lock().push(CoreToken {
+        id: Some(1),
+        client_code: Some("FIN".into()),
+        app_code: Some("leadzumptwo".into()),
+        connection_name: Some("gated".into()),
+        token_type: Some(TokenType::Access),
+        token: Some("live".into()),
+        is_revoked: Some(false),
+        ..Default::default()
+    });
+    let base = routes(&s).await;
+    let revoked = || s.tokens.rows.lock()[0].is_revoked;
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN"]));
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!(st, 403, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["code"], json!("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+    assert_eq!(revoked(), Some(false), "a refused revoke revokes nothing");
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=open", true).await;
+    assert_eq!(st, 400, "no consentAuth: the normal path ({body})");
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200,
+                   &signed_in(&["Authorities.Logged_IN", "Authorities.LEADZUMPTWO.ROLE_Account_MANAGE"]));
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!((st, body.as_str()), (200, "true"));
+    assert_eq!(revoked(), Some(true));
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!(st, 400, "nothing left to revoke");
+}
+
 // --- DraftEventPropagationTest / DraftNotificationPropagationTest ------------------------------
 
 async fn on_surface<F: std::future::Future>(draft: bool, fut: F) -> F::Output {

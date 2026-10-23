@@ -1875,7 +1875,7 @@ pub fn draft_copy_order(storages: &IndexMap<String, Storage>, filters: &IndexMap
 
 #[path = "batch.rs"]
 mod batch;
-pub use batch::{BatchOp, BatchOutcome, NamedOp, UpdateIfOutcome};
+pub use batch::{conflict_of, BatchConflict, BatchOp, BatchOutcome, ConflictKind, NamedOp, OnConflict, UpdateIfOutcome};
 
 #[cfg(test)]
 #[path = "service_tests.rs"]

@@ -139,6 +139,9 @@ impl<K: Kind> OverridableService<K> {
             if IGNORED.contains(&k) {
                 continue;
             }
+            if !self.kind().filterable(k) {
+                return Ok(None);
+            }
             let values = params.all(k);
             conditions.push(Condition::Filter(match values.as_slice() {
                 [one] => FilterCondition::new(k, Operator::StringLooseEqual, JValue::Str(one.to_string())),
@@ -150,6 +153,9 @@ impl<K: Kind> OverridableService<K> {
 
     async fn compute_lro(&self, ca: &ContextAuthentication, eager: bool, client_only: bool, pageable: &Pageable, params: &Params, app: &str) -> AppResult<LroPage> {
         let listed = self.list_access(ca, app, params.first("clientCode"), false).await?;
+        if pageable.sort.0.iter().any(|o| !self.kind().filterable(&o.property)) {
+            return Ok(LroPage { content: Vec::new(), total: 0 });
+        }
         let Some((condition, inheritance)) = self.param_to_condition_lro(ca, params, app).await? else {
             return Ok(LroPage { content: Vec::new(), total: 0 });
         };

@@ -18,6 +18,7 @@ pub mod preview;
 pub mod recovery;
 pub mod routes;
 pub mod schedules;
+pub mod secrets;
 pub mod storage;
 
 #[cfg(test)]
@@ -66,13 +67,19 @@ pub struct Parts {
     pub billing: Arc<dyn BillingSecurity>,
     pub redis: Option<redis::Client>,
     pub eviction_channel: String,
+    /// `[connections] block_private_targets`: whether a saved connection may point at a
+    /// private, loopback or internal address (refused while on, the default).
+    pub block_private_targets: bool,
 }
 
 /// The editor's state on a store.
 pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, parts: Parts) -> Arc<CoreEditor> {
-    let cx = Commons::new(store, cache.clone(), core_messages(), EDITOR_AUTH_NAMES);
+    let cx = Commons::new(store, cache.clone(), core_messages(), EDITOR_AUTH_NAMES).with_version_redactions(&secrets::HISTORY);
     let ops = Arc::new(StorageOps::new(parts.catalog, parts.kirun_schemas, parts.core_schemas, parts.data.clone(), parts.triggers));
-    let svc = |o: CoreObject| OverridableService::new(CoreKind::new(o, ops.clone()), cx.clone());
+    let block_private_targets = parts.block_private_targets;
+    let svc = |o: CoreObject| {
+        OverridableService::new(CoreKind::new(o, ops.clone()).with_block_private_targets(block_private_targets), cx.clone())
+    };
     let functions = svc(CoreObject::Function);
     let schemas = svc(CoreObject::Schema);
     let storages = svc(CoreObject::Storage);
@@ -340,6 +347,7 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         billing: Arc::new(security.clone()),
         redis,
         eviction_channel: cfg.redis.eviction_channel.clone(),
+        block_private_targets: cfg.connections.block_private_targets,
     };
     let security_callers = SecurityCallers { security: security.clone(), server_port: cfg.server.port };
     let callers: Arc<dyn CallerSource> = Arc::new(caller::EditorCallers { inner: Arc::new(SecurityCallers { security, server_port: cfg.server.port }) });

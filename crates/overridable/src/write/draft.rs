@@ -203,6 +203,7 @@ impl<K: Kind> OverridableService<K> {
     /// client override `create` stores only the difference from the base).
     pub async fn create_unpublished(&self, ca: &ContextAuthentication, mut entity: JMap) -> AppResult<JMap> {
         self.require_draftable()?;
+        self.kind().keep_withheld(&mut entity, None);
         entity.insert("published".into(), JValue::Bool(false));
         let mut content = entity.clone();
         let message = str_field(&entity, "message").map(str::to_string);
@@ -232,22 +233,27 @@ impl<K: Kind> OverridableService<K> {
     /// belongs on (forking the caller an override when that is what it may do), leaving live
     /// alone. `expected_version` is the `X-Draft-Version` the caller last saw; `None` skips the
     /// check.
-    pub async fn save_draft(&self, ca: &ContextAuthentication, entity: JMap, expected_version: Option<i64>) -> AppResult<JMap> {
+    pub async fn save_draft(&self, ca: &ContextAuthentication, mut entity: JMap, expected_version: Option<i64>) -> AppResult<JMap> {
         self.require_draftable()?;
         let id = str_field(&entity, "id").map(str::to_string).ok_or_else(|| self.forbidden(ca))?;
         let stored = self.find_by_id(&id).await?.ok_or_else(|| self.forbidden(ca))?;
         let target = self.resolve_draft_target(ca, &stored).await?.ok_or_else(|| self.forbidden(ca))?;
         let (app, name, client) = (jstr(str_field(&target, "appCode")), jstr(str_field(&target, "name")), jstr(str_field(&target, "clientCode")));
         let drafts = &self.commons().drafts;
+        let prior = drafts.find(&self.object_type(), app, name, client).await?.map(|d| DraftStore::decode(&d));
         if let Some(expected) = expected_version {
-            let current = match drafts.find(&self.object_type(), app, name, client).await? {
-                Some(d) => DraftStore::decode(&d).get("version").and_then(JValue::as_i64).unwrap_or(1),
+            let current = match &prior {
+                Some(d) => d.get("version").and_then(JValue::as_i64).unwrap_or(1),
                 None => 0,
             };
             if expected != current {
                 return Err(self.err(StatusCode::PRECONDITION_FAILED, msg::VERSION_MISMATCH, &[]));
             }
         }
+        // What the caller was shown held back comes back from the draft it replaces, else
+        // from the document it belongs on.
+        let prior_content = prior.as_ref().and_then(|d| d.get("content")).and_then(JValue::as_object).map(|c| convert_json(self.kind().pojo(), c));
+        self.kind().keep_withheld(&mut entity, Some(prior_content.as_ref().unwrap_or(&target)));
         let content = jackson_document(self.kind().pojo(), &entity);
         let saved = drafts
             .upsert(
