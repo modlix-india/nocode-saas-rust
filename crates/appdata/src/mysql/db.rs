@@ -370,6 +370,83 @@ pub fn message(e: &AppDataError) -> String {
     }
 }
 
+/// The MySQL error number of a driver error, when it has one.
+pub fn error_number(e: &AppDataError) -> Option<u16> {
+    match e {
+        AppDataError::Internal(inner) => inner
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|s| s.as_database_error())
+            .and_then(|d| d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
+            .map(|m| m.number()),
+        _ => None,
+    }
+}
+
+/// DDL that lost a race with the same DDL run elsewhere (another request, another unit): a
+/// duplicate foreign key name (1826), a duplicate key name (1061), a key or index already
+/// dropped (1091), a table that already exists (1050), a constraint name already written
+/// (1022, or errno 121 under 1005), or a metadata-lock deadlock between two such runs (1213).
+/// The caller reads the table again and plans what is still missing.
+pub fn is_concurrent_ddl(number: Option<u16>, message: &str) -> bool {
+    matches!(number, Some(1826 | 1061 | 1091 | 1050 | 1022 | 1213))
+        || (number == Some(1005) && message.contains("errno: 121"))
+        || message.contains("Duplicate foreign key constraint name")
+}
+
+pub fn is_concurrent_ddl_error(e: &AppDataError) -> bool {
+    is_concurrent_ddl(error_number(e), &message(e))
+}
+
+/// The MySQL named lock that guards the first-use DDL of one table in one schema (MySQL keeps
+/// lock names to 64 characters, so the pair is hashed).
+pub fn ddl_lock_name(db: &str, table: &str) -> String {
+    let digest = Sha256::digest(format!("{db}`{table}").as_bytes());
+    format!("appdata.ddl:{}", hex::encode(&digest[..24]))
+}
+
+/// A MySQL named lock held on a connection of its own, opened outside the pool so that
+/// holding it never takes a slot the guarded statements need. Released explicitly, and by
+/// MySQL when the connection goes.
+pub struct NamedLock {
+    conn: sqlx::MySqlConnection,
+    name: String,
+}
+
+impl NamedLock {
+    /// `GET_LOCK(name, wait_seconds)`; `None` when it cannot be had in time or at all, and the
+    /// caller goes on unguarded (its DDL tolerates losing the race).
+    pub async fn take(pool: &MySqlPool, name: &str, wait_seconds: u32) -> Option<NamedLock> {
+        use sqlx::Connection as _;
+        let opts = pool.connect_options();
+        let mut conn = match sqlx::MySqlConnection::connect_with(&opts).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(lock = name, error = %e, "no connection for the DDL lock; going on without it");
+                return None;
+            }
+        };
+        let got: Result<Option<i64>, sqlx::Error> =
+            sqlx::query_scalar("SELECT GET_LOCK(?, ?)").bind(name).bind(wait_seconds).fetch_one(&mut conn).await;
+        match got {
+            Ok(Some(1)) => Some(NamedLock { conn, name: name.to_string() }),
+            other => {
+                tracing::warn!(lock = name, answer = ?other.as_ref().ok(), error = ?other.as_ref().err(), "DDL lock not taken; going on without it");
+                let _ = conn.close().await;
+                None
+            }
+        }
+    }
+
+    pub async fn release(mut self) {
+        use sqlx::Connection as _;
+        let released: Result<Option<i64>, sqlx::Error> = sqlx::query_scalar("SELECT RELEASE_LOCK(?)").bind(&self.name).fetch_one(&mut self.conn).await;
+        if let Err(e) = released {
+            tracing::warn!(lock = self.name, error = %e, "DDL lock not released; it goes with its connection");
+        }
+        let _ = self.conn.close().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,6 +484,32 @@ mod tests {
         let none = credentials(&Connection { id: "2".into(), ..Default::default() }, &default);
         assert!(none.url.is_none());
         assert!(connect_options(&none).is_err());
+    }
+
+    #[test]
+    fn concurrent_ddl_answers() {
+        assert!(is_concurrent_ddl(Some(1826), "Duplicate foreign key constraint name 'fk_cxPayment_unit'"));
+        assert!(is_concurrent_ddl(None, "Duplicate foreign key constraint name 'fk_x'"));
+        assert!(is_concurrent_ddl(Some(1061), "Duplicate key name 'idx_unit'"));
+        assert!(is_concurrent_ddl(Some(1091), "Can't DROP 'fk_x'; check that column/key exists"));
+        assert!(is_concurrent_ddl(Some(1050), "Table 'cxUnit' already exists"));
+        assert!(is_concurrent_ddl(Some(1005), "Can't create table `a`.`b` (errno: 121 \"Duplicate key on write or update\")"));
+        assert!(is_concurrent_ddl(Some(1213), "Deadlock found when trying to get lock; try restarting transaction"));
+        assert!(!is_concurrent_ddl(Some(1005), "Can't create table `a`.`b` (errno: 150 \"Foreign key constraint is incorrectly formed\")"));
+        assert!(!is_concurrent_ddl(Some(1452), "Cannot add or update a child row: a foreign key constraint fails"));
+        assert!(!is_concurrent_ddl(Some(1062), "Duplicate entry 'x' for key 'PRIMARY'"));
+        assert!(!is_concurrent_ddl(None, "connection refused"));
+        assert!(!is_concurrent_ddl_error(&AppDataError::internal("Duplicate entry")));
+    }
+
+    #[test]
+    fn ddl_lock_names_fit_mysql() {
+        let a = ddl_lock_name("ANTER_cxzump", "cxUnit");
+        assert_eq!(a, ddl_lock_name("ANTER_cxzump", "cxUnit"));
+        assert_ne!(a, ddl_lock_name("ANTER_cxzump", "cxPayment"));
+        assert_ne!(a, ddl_lock_name("ANTER_cxzum", "pcxUnit"));
+        assert!(a.starts_with("appdata.ddl:") && a.len() <= 64, "{a}");
+        assert_eq!(ddl_lock_name(&"d".repeat(64), &"t".repeat(64)).len(), a.len());
     }
 
     #[test]

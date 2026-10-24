@@ -45,6 +45,11 @@ use crate::value::{Document, Value};
 
 const BACKEND: &str = "MySQL";
 const VERSION_PURGE_BATCH: usize = 500;
+/// How long a first use waits for another run's DDL on the same table before going on without
+/// the lock (the DDL tolerates the race either way).
+const DDL_LOCK_WAIT_SECONDS: u32 = 30;
+/// Rounds of reading the keys and applying what differs when a concurrent run keeps winning.
+const FOREIGN_KEY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct MySqlEngineConfig {
@@ -545,7 +550,15 @@ impl MySqlAppDataService {
         let key = format!("{db_name}{}", storage.version);
         self.flags
             .get_or_load(&cache_name, key, || async {
-                self.create_table(cx, pool, &db_name, storage).await?;
+                // Two first uses at once (two requests, or two units) would both add the same
+                // keys and indexes; the lock lines them up per schema and table, and the
+                // second finds nothing left to do.
+                let lock = db::NamedLock::take(pool, &db::ddl_lock_name(&db_name, &storage.unique_name), DDL_LOCK_WAIT_SECONDS).await;
+                let made = self.create_table(cx, pool, &db_name, storage).await;
+                if let Some(lock) = lock {
+                    lock.release().await;
+                }
+                made?;
                 Ok::<_, AppDataError>(Some(true))
             })
             .await?;
@@ -566,10 +579,27 @@ impl MySqlAppDataService {
     }
 
     async fn sync_indexes(&self, pool: &MySqlPool, db_name: &str, storage: &Storage, schema: &PhysicalSchema) -> AppDataResult<()> {
+        let mut raced = Vec::new();
         for sql in self.planned_index_statements(pool, db_name, storage, schema).await? {
             // One index failing is not a reason to fail the write that triggered it.
             if let Err(e) = execute_raw(pool, &sql).await {
-                tracing::error!(db = db_name, table = storage.unique_name, sql, error = %e, "could not apply index");
+                if db::is_concurrent_ddl_error(&e) {
+                    raced.push(sql);
+                } else {
+                    tracing::error!(db = db_name, table = storage.unique_name, sql, error = %e, "could not apply index");
+                }
+            }
+        }
+        if raced.is_empty() {
+            return Ok(());
+        }
+        // Lost to the same DDL run elsewhere: done when the table now has what was planned.
+        let left = self.planned_index_statements(pool, db_name, storage, schema).await?;
+        for sql in raced {
+            if left.contains(&sql) {
+                tracing::error!(db = db_name, table = storage.unique_name, sql, "could not apply index: a concurrent change left it unapplied");
+            } else {
+                tracing::debug!(db = db_name, table = storage.unique_name, sql, "index already applied by a concurrent run");
             }
         }
         Ok(())
@@ -693,15 +723,46 @@ impl MySqlAppDataService {
         Ok(())
     }
 
+    /// Brings the table's keys in line with its relations. A statement that loses to the same
+    /// DDL run elsewhere (1826 "Duplicate foreign key constraint name" and the like) is not an
+    /// error: the keys are read again and only what still differs is planned, so a key that
+    /// now exists as desired counts as done, and one that exists differently is replaced.
     async fn sync_foreign_keys(&self, cx: &Ctx, pool: &MySqlPool, db_name: &str, storage: &Storage) -> AppDataResult<()> {
         let desired = self.desired_foreign_keys(cx, pool, db_name, storage).await?;
         let table = &storage.unique_name;
-        let existing = self.existing_keys(pool, db_name, table).await?;
-        let statements = foreign_keys::sync(db_name, table, &existing, &desired);
-        if statements.is_empty() {
-            return Ok(());
+        let mut changed = false;
+        let mut outcome = Ok(());
+        for _ in 0..FOREIGN_KEY_ATTEMPTS {
+            let existing = match self.existing_keys(pool, db_name, table).await {
+                Ok(k) => k,
+                Err(e) => {
+                    outcome = Err(e);
+                    break;
+                }
+            };
+            let statements = foreign_keys::sync(db_name, table, &existing, &desired);
+            if statements.is_empty() {
+                outcome = Ok(());
+                break;
+            }
+            changed = true;
+            outcome = self.apply_foreign_keys(pool, db_name, table, &desired, &statements).await;
+            match &outcome {
+                Err(e) if db::is_concurrent_ddl_error(e) => {
+                    tracing::info!(db = db_name, table, error = %e, "foreign keys changed concurrently; reading them again");
+                }
+                _ => break,
+            }
         }
-        for sql in &statements {
+        if changed {
+            self.cache.evict_all_everywhere(&foreign_key_cache(storage)).await;
+        }
+        outcome
+    }
+
+    async fn apply_foreign_keys(&self, pool: &MySqlPool, db_name: &str, table: &str, desired: &[ForeignKey], statements: &[String])
+        -> AppDataResult<()> {
+        for sql in statements {
             let adding = desired.iter().find(|fk| sql.contains(&format!("`{}`", fk.name)));
             match adding {
                 Some(fk) if sql.contains("ADD CONSTRAINT") => {
@@ -724,7 +785,6 @@ impl MySqlAppDataService {
                 }
             }
         }
-        self.cache.evict_all_everywhere(&foreign_key_cache(storage)).await;
         Ok(())
     }
 

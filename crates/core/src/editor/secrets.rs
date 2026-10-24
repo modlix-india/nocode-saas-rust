@@ -5,7 +5,10 @@
 //!
 //! Which keys are secrets is `connections::connection::is_secret_key`. Under a secret key every
 //! non-empty text is masked, at any depth (other values, such as `isLifeTimeToken: true`, are
-//! not credentials and stay). Any other text that is an address with a password in its user
+//! not credentials and stay). A key whose value is a block makes the whole block secret only by
+//! name (`is_secret_block_key`: `credentials`, `client_secret`), never by ending alone, so a
+//! settings block such as `updateToken {url, methodType, client_id}` keeps its settings readable
+//! and only the credentials inside it are masked. Any other text that is an address with a password in its user
 //! part (`mysql://app:pw@db/x`) has that password masked.
 //!
 //! A save that sends a secret back absent, null, empty or as the mask keeps the stored one, so a
@@ -14,7 +17,7 @@
 //! an object the save does send: a save without `connectionDetails` at all replaces the details
 //! as before.
 
-use connections::connection::{is_secret_key, mask_url_password, restore_url_password, SECRET_MASK};
+use connections::connection::{is_secret_block_key, is_secret_key, mask_url_password, restore_url_password, SECRET_MASK};
 use overridable::write::version::VersionRedaction;
 use overridable::{JMap, JValue};
 
@@ -86,6 +89,11 @@ fn withheld(v: Option<&JValue>) -> bool {
     }
 }
 
+/// Whether `key` makes `value` secret: a block only by name, anything else by name or ending.
+fn secret_entry(key: &str, value: &JValue) -> bool {
+    if matches!(value, JValue::Object(_)) { is_secret_block_key(key) } else { is_secret_key(key) }
+}
+
 fn mask_value(v: &mut JValue, secret: bool) {
     match v {
         JValue::Str(s) if secret => {
@@ -106,7 +114,8 @@ fn mask_value(v: &mut JValue, secret: bool) {
 
 fn mask_map(m: &mut JMap, secret: bool) {
     for (k, v) in m.iter_mut() {
-        mask_value(v, secret || is_secret_key(k));
+        let secret = secret || secret_entry(k, v);
+        mask_value(v, secret);
     }
 }
 
@@ -134,7 +143,7 @@ fn keep_value(incoming: &mut JValue, stored: &JValue, secret: bool) {
 
 fn keep_map(incoming: &mut JMap, stored: &JMap, secret: bool) {
     for (k, s) in stored {
-        let secret = secret || is_secret_key(k);
+        let secret = secret || secret_entry(k, s);
         match incoming.get_mut(k.as_str()) {
             Some(i) => keep_value(i, s, secret),
             None if secret && would_mask(s) => {
@@ -148,7 +157,7 @@ fn keep_map(incoming: &mut JMap, stored: &JMap, secret: bool) {
 fn drop_map(m: &mut JMap, secret: bool) {
     let keys: Vec<String> = m.keys().cloned().collect();
     for k in keys {
-        let secret = secret || is_secret_key(&k);
+        let secret = secret || m.get(k.as_str()).is_some_and(|v| secret_entry(&k, v));
         let remove = match m.get_mut(k.as_str()) {
             Some(JValue::Object(inner)) => {
                 drop_map(inner, secret);
@@ -302,5 +311,41 @@ mod tests {
         for f in ["object.name", "versionNumber", "createdAt", "objectName"] {
             assert!(filterable(f, "object."), "{f}");
         }
+    }
+
+    /// The shape of an OAuth2 connection with a refresh block (`updateToken`): a block named by an
+    /// ending alone is settings, not a secret; only the credentials inside it are masked.
+    const OAUTH: &str = r#"{"name":"g","connectionDetails":{
+        "headers":{"developer-token":"fake-dt"},
+        "tokenDetails":{"url":"https://example.com/t","queryParams":{"client_id":"id","client_secret":"fake-cs"}},
+        "updateToken":{"url":"https://example.com/r","methodType":"POST",
+            "queryParams":{"client_id":"id","client_secret":"fake-cs2","grant_type":"refresh_token"}},
+        "refreshTokenKey":"refresh_token","tokenKey":"access_token"}}"#;
+
+    #[test]
+    fn a_settings_block_named_like_a_token_stays_readable() {
+        let out = masked(obj(OAUTH));
+        let d = out[DETAILS].as_object().unwrap();
+        let s = |v: &JValue| v.as_str().map(str::to_string);
+        let up = d["updateToken"].as_object().unwrap();
+        assert_eq!(s(&up["url"]).as_deref(), Some("https://example.com/r"));
+        assert_eq!(s(&up["methodType"]).as_deref(), Some("POST"));
+        let q = up["queryParams"].as_object().unwrap();
+        assert_eq!(s(&q["client_id"]).as_deref(), Some("id"));
+        assert_eq!(s(&q["grant_type"]).as_deref(), Some("refresh_token"));
+        assert_eq!(s(&q["client_secret"]).as_deref(), Some(SECRET_MASK));
+        assert_eq!(s(&d["headers"].as_object().unwrap()["developer-token"]).as_deref(), Some(SECRET_MASK));
+        assert_eq!(s(&d["refreshTokenKey"]).as_deref(), Some("refresh_token"));
+        assert_eq!(s(&d["tokenKey"]).as_deref(), Some("access_token"));
+
+        // The masked read saved back keeps the stored secret inside the block, and an edited
+        // setting in the block is taken.
+        let mut back = masked(obj(OAUTH));
+        back[DETAILS].as_object_mut().unwrap()["updateToken"].as_object_mut().unwrap()
+            .insert("methodType".into(), JValue::Str("GET".into()));
+        keep_stored(&mut back, &obj(OAUTH));
+        let up = back[DETAILS].as_object().unwrap()["updateToken"].as_object().unwrap();
+        assert_eq!(up["methodType"].as_str(), Some("GET"));
+        assert_eq!(up["queryParams"].as_object().unwrap()["client_secret"].as_str(), Some("fake-cs2"));
     }
 }

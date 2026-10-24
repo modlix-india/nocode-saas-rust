@@ -335,7 +335,7 @@ piece 1's user side of it (`admin/users/registration.rs`). Kept as Java has them
 | U3 | Lists Java fills with a concurrent `flatMap`: `app/{appId}/profiles`, `users?fetchProfiles`, `users/{id}/app/{appId}/assignedProfiles`, `client-managers/{uid}`, and the ties of `users/findUserClients` (sorted by client name only: two users of one client, or two clients of one name) | completion order | the order of the rows (for the picker's ties, Java's `HashMap` order of the user ids) | Java's order is not deterministic; the parity script compares these lists by id. |
 | U4 | A profile whose overrides come from two or more clients (none locally) | `readRootProfile` merges each override with `DifferenceApplicator` on a bounded-elastic scheduler, so which merge lands last is a race | the overrides merged in the hierarchy's order, farthest client first | With one override (every override locally, and the one the parity script makes) both give the same profile, byte for byte. |
 | U5 | Cached objects Java fills in place (`client.activeUsers` and the other counts, a picker's `managagingClient`, a user's `profiles`) | carried by later reads that did not ask for them | only what the request asked for | The same leak as piece 2's and security-internal's; the parity script strips these properties where they were not asked for. |
-| U6 | `USER_INVITED`, `USER_<TYPE>_CHANGED`, `USER_<TYPE>_RESET_DONE`, `USER_OTP_GENERATE` | published on the `events` exchange | published through the unit's `EventSink` (`[events]` / `[otp] publish_events`, off locally: logged) | Locally nothing is published. The invite mail's `urlPrefix` is the newest LIVE client URL of the app (the invited client's, else any), which is what `getAppUrlInternal` answers for the URLs that exist locally. |
+| U6 | `USER_INVITED`, `USER_<TYPE>_CHANGED`, `USER_<TYPE>_RESET_DONE`, `USER_OTP_GENERATE` | published on the `events` exchange | published through the unit's `EventSink` (`[events]` / `[otp] publish_events`, off locally: logged) | Locally nothing is published. The invite mail's `urlPrefix` is the invited client's app URL (its `URL` property, else its own newest LIVE URL), else the app's platform address; never another client's URL (see "Invite links use only the invited client's URL" below). |
 | U7 | `GET users/{id}` for a user of another client | `UserService.read` checks only `User_READ`: any holder reads any user by id, whatever the client | the user is answered to SYSTEM, to the user's own client, to a caller whose client manages the user's client at any level (`ClientHierarchy.isManagedBy`; no client-manager role or assignment needed), and to a caller whose client's DIRECT managing client is the user's client, unless that is SYSTEM (the root nobody manages); anyone else (an unrelated or sibling client, a manager above the direct one) gets the 404 a missing id gets | Decided 2026-10-17 as manager-only; widened 2026-10-21 (QA-0482, Kiran: option A): business staff read their partners' and customers' users (deal owners, booking customers) without being client managers, and a partner reads its business's user, which core's `GetUser` already allows (`isRelatedClient`). The 404 does not reveal that the id exists elsewhere. Writes keep the manager check (update, delete, reporting manager, designation). The users list (`UserDAO.filter`) is unchanged and stays Java's. |
 
 ## security-admin piece 1: Java behaviour kept as it is
@@ -414,3 +414,54 @@ rest. Evictions are published, so they reach every Rust process and any Java one
   (about 25 lines an hour on dev from browsers holding signed-out tokens). It is now the client's
   condition (`UNKNOWN_TOKEN`, with the old text as the debug message), logged at debug. The
   request still continues anonymous, as in Java.
+
+## Invite mails fall back to the app's URL (RS2, 2026-10-23)
+
+Superseded by RS3 below: the order here is no longer what runs.
+
+`USER_INVITED`'s `urlPrefix` (`raiseInvitedEvent`) came only from LIVE `security_client_url`
+rows: the invited client's newest, else any client's. An app with none (adzumptwo locally, whose
+host is only its `URL` app property) sent a dead relative `/acceptInvite/<code>` link. Owner
+direction: the app's host comes from its `URL` property. The order is now:
+
+1. the invited client's newest LIVE client URL, then any client's (unchanged, as stored);
+2. only when both are empty, the app URL `CoreServices.Security.GetAppUrl` answers
+   (`app_url_for`): the invited client's `URL` property, else its newest LIVE URL, as the caller
+   may read them;
+3. then the app owner's `URL` property (else its LIVE URL), read for the server's own mail
+   (`app_url_internal`): a business admin inviting into their own client may not read SYSTEM's
+   properties, so the caller-scoped read alone would still find nothing;
+4. else `""`, as before.
+
+Steps 2 and 3 are written as `checkUrl` writes them (`https://`, no trailing slash). A failure in
+them (a null `URL` property is Java's mapper error) logs a warning and leaves the prefix empty, so
+the mail still goes out. Apps with LIVE client URL rows are unchanged. Tests:
+`admin::users::invites::live::invite_url_prefix_falls_back_to_the_app_url`.
+
+## Invite links use only the invited client's URL (RS3, 2026-10-24)
+
+Supersedes the order in RS2. Java (and RS2) fell back to ANY client's newest LIVE URL of the
+app, so an invite into one tenant could link to another tenant's site; RS2's owner `URL`
+property step had the same reach. Approved by the product owner on 2026-10-24, the invite's
+`urlPrefix` is now, in order:
+
+1. the invited client's `URL` app property, read for the server's own mail whoever invites
+   (`app_url_internal`, the lookup `CoreServices.Security.GetAppUrl` and
+   `clienturls/internal/applications/property/url` answer for that client);
+2. else the invited client's own newest LIVE client URL for the app;
+3. else the app's platform address, `https://<appCode><first subdomain ending>`
+   (`platform_app_url`), the host `subdomainAppCode` resolves to the app;
+4. `""` only for an unknown app or with no subdomain ending configured.
+
+Another client's URL (a sibling's, the managing client's, the app owner's) is never used. Every
+answer starts with a scheme (`checkUrl` adds `https://`; a stored `http://` URL keeps its own
+scheme instead of `checkUrl`'s `https://http://`), with no trailing slash, so templates that write
+`${urlPrefix}/inviteUser/...` get an absolute link; before, a LIVE row was sent bare
+(`host.example`) and only templates that add `https://` themselves made a working link. Those
+templates check `urlPrefix?starts_with("http")` first, so they are unaffected. A failure reading
+the client's URL (a null `URL` property) logs a warning and falls back to the platform address.
+Registration (`getUrlPrefix`: the signed-in client's app URL, else the request's own host),
+invoice and wallet mails (`getAppUrl` for the buyer's managing client, by design) and password
+resets (OTP, no link) have no "any client" fallback and are unchanged. Tests:
+`admin::users::invites::tests::invite_link_prefix_is_the_clients_or_the_platforms`,
+`admin::users::invites::live::invite_url_prefix_is_the_invited_clients_or_the_platforms`.
