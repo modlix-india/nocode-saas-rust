@@ -395,6 +395,27 @@ pub fn is_secret_key(key: &str) -> bool {
         && (SECRET_KEY_PARTS.iter().any(|p| plain.contains(p)) || SECRET_KEY_ENDINGS.iter().any(|e| plain.ends_with(e)))
 }
 
+/// Whether a key whose value is a nested block makes the whole block secret: an exact name in
+/// [`SECRET_KEYS`] or a name containing one of [`SECRET_KEY_PARTS`] (`credentials`,
+/// `secrets`). A name that is a credential only by its ending (`updateToken`,
+/// `refreshTokenSettings`) names a group of settings when its value is a block, so only the
+/// credentials inside that block are secret, by their own names.
+pub fn is_secret_block_key(key: &str) -> bool {
+    let unescaped = key.replace("__d-o-t__", ".");
+    let last = unescaped.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if SECRET_KEYS.contains(&last.as_str()) {
+        return true;
+    }
+    let plain: String = last.chars().filter(char::is_ascii_alphanumeric).collect();
+    !plain.is_empty() && SECRET_KEY_PARTS.iter().any(|p| plain.contains(p))
+}
+
+/// Whether `key` makes `value` secret: a block only by [`is_secret_block_key`], anything else by
+/// [`is_secret_key`].
+pub fn is_secret_entry(key: &str, value: &Value) -> bool {
+    if value.is_object() { is_secret_block_key(key) } else { is_secret_key(key) }
+}
+
 /// The byte range of the password in a `scheme://user:password@host` address, if it has one.
 fn url_password_range(s: &str) -> Option<(usize, usize)> {
     let start = s.find("://")? + 3;
@@ -427,7 +448,7 @@ pub fn restore_url_password(incoming: &str, stored: &str) -> Option<String> {
 pub fn without_secrets(details: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
     for (k, v) in details {
-        if is_secret_key(k) {
+        if is_secret_entry(k, v) {
             continue;
         }
         let v = match v {
@@ -566,5 +587,11 @@ mod tests {
         let d = json!({"baseUrl": "x", "Password": "p", "tokenDetails": {"client_secret": "s", "url": "u"}, "list": [{"apiKey": 1}]});
         let out = without_secrets(d.as_object().unwrap());
         assert_eq!(Value::Object(out), json!({"baseUrl": "x", "tokenDetails": {"url": "u"}, "list": [{"apiKey": 1}]}));
+        let m = json!({"updateToken": {"url": "u", "queryParams": {"client_id": "i", "client_secret": "s"}},
+                       "credentials": {"kind": "k"}});
+        let out = without_secrets(m.as_object().unwrap());
+        assert_eq!(Value::Object(out), json!({"updateToken": {"url": "u", "queryParams": {"client_id": "i"}}}));
+        assert!(is_secret_block_key("credentials") && is_secret_block_key("client_secret"));
+        assert!(!is_secret_block_key("updateToken") && is_secret_key("updateToken"));
     }
 }

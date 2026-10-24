@@ -144,10 +144,25 @@ pub async fn execute(pool: &MySqlPool, sql: &Sql) -> AppDataResult<u64> {
     on_connection(pool, move |c| Box::pin(async move { db::execute_on(c, &sql).await })).await
 }
 
+/// How many times a read outside a scope is sent again after losing a deadlock.
+const READ_DEADLOCK_RETRIES: u32 = 2;
+
 /// [`db::fetch`], on the scope's transaction when there is one, so a batch reads its own writes.
+/// Outside a scope the read is one autocommit statement, so a read chosen as a deadlock's victim
+/// (a table's first-use DDL changing a related table's keys at the same moment) is sent again.
 pub async fn fetch(pool: &MySqlPool, sql: &Sql) -> AppDataResult<Vec<Document>> {
     if !active() {
-        return db::fetch(pool, sql).await;
+        let mut tries = 0;
+        loop {
+            match db::fetch(pool, sql).await {
+                Err(e) if tries < READ_DEADLOCK_RETRIES && db::error_number(&e) == Some(1213) => {
+                    tries += 1;
+                    tracing::info!(error = %e, tries, "read lost a deadlock; sending it again");
+                    tokio::time::sleep(std::time::Duration::from_millis(25 * tries as u64)).await;
+                }
+                other => return other,
+            }
+        }
     }
     let sql = sql.clone();
     on_connection(pool, move |c| Box::pin(async move { db::fetch_on(c, &sql).await })).await
