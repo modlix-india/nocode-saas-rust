@@ -34,11 +34,11 @@ fn blank(s: Option<&str>) -> bool {
     s.is_none_or(|v| v.trim().is_empty())
 }
 
-/// The invite link's prefix: the invited client's app URL (as `checkUrl` wrote it) when there is
-/// one, else the app's platform address. `checkUrl` puts `https://` before a stored `http://`
-/// URL; the link keeps the stored scheme instead.
-fn invite_link_prefix(client_url: &str, platform: &str) -> String {
-    let u = client_url.trim();
+/// The invite link's prefix: the first non blank of the invited client's app URL and the app
+/// owner's (each as `checkUrl` wrote it), else the app's platform address. `checkUrl` puts
+/// `https://` before a stored `http://` URL; the link keeps the stored scheme instead.
+fn invite_link_prefix(client_url: &str, owner_url: &str, platform: &str) -> String {
+    let u = if client_url.trim().is_empty() { owner_url.trim() } else { client_url.trim() };
     if u.is_empty() {
         return platform.to_string();
     }
@@ -308,19 +308,24 @@ impl Admin {
         Ok(deleted)
     }
 
-    /// The invite mail's `urlPrefix` (DIFFERENCES.md, RS3): the app's URL for the invited client
-    /// as `getAppUrl` answers it, read for the server's own mail (the client's `URL` property,
-    /// else its own newest LIVE URL), else the app's platform address. Never another client's
-    /// URL: one tenant's invite must not link to another tenant's site. `""` only for an unknown
-    /// app or with no platform ending configured. A failure reading the client's URL falls back to
-    /// the platform address rather than dropping the mail.
+    /// The invite mail's `urlPrefix` (DIFFERENCES.md, RS3 and RS4): the app's URL for the invited
+    /// client as `getAppUrl` answers it, read for the server's own mail (the client's `URL`
+    /// property, else its own newest LIVE URL); else the same for the app's OWNER (its `URL`
+    /// property, else its own newest LIVE URL); else the app's platform address. Never a sibling
+    /// tenant's URL: one tenant's invite must not link to another tenant's site. `""` only for an
+    /// unknown app or with no platform ending configured. A failure reading a URL falls through to
+    /// the next step rather than dropping the mail.
     async fn invite_url_prefix(&self, app_code: &str, client_id: u64) -> AuthResult<String> {
         let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(String::new()) };
-        let client_url = self.app_url_internal(&app, client_id).await.unwrap_or_else(|e| {
-            tracing::warn!(error = %e, app = app_code, client = client_id, "no client URL for the invite mail");
-            String::new()
-        });
-        Ok(invite_link_prefix(&client_url, &platform_app_url(&app.app_code, &self.dir().subdomain_endings)))
+        let url_of = |id: u64| async move {
+            self.app_url_internal(&app, id).await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, app = app_code, client = id, "no client URL for the invite mail");
+                String::new()
+            })
+        };
+        let client_url = url_of(client_id).await;
+        let owner_url = if client_url.trim().is_empty() && app.client_id != client_id { url_of(app.client_id).await } else { String::new() };
+        Ok(invite_link_prefix(&client_url, &owner_url, &platform_app_url(&app.app_code, &self.dir().subdomain_endings)))
     }
 
     /// `raiseInvitedEvent`: `USER_INVITED` for the app's mail (false without an app).
@@ -897,7 +902,8 @@ mod tests {
         assert_eq!(request_json(&a, &RequestNames::default()), json!({"id": 1, "status": "PENDING"}));
     }
 
-    /// RS3: the invited client's URL when it has one, else the app's platform address.
+    /// RS3 and RS4: the invited client's URL when it has one, else the app owner's, else the
+    /// app's platform address.
     #[test]
     fn invite_link_prefix_is_the_clients_or_the_platforms() {
         let endings = vec![" .local.modlix.com".to_string(), ".local.sitezump.ai".to_string()];
@@ -907,14 +913,18 @@ mod tests {
         assert_eq!(platform_app_url(" ", &endings), "");
         assert_eq!(platform_app_url("cxzump", &[" ".into(), ".modlix.com".into()]), "https://cxzump.modlix.com");
 
-        assert_eq!(invite_link_prefix("https://anter.example.test", &platform), "https://anter.example.test");
-        assert_eq!(invite_link_prefix("", &platform), platform);
-        assert_eq!(invite_link_prefix("  ", &platform), platform);
-        assert_eq!(invite_link_prefix("", ""), "");
+        let owner = "https://owner.example.test";
+        assert_eq!(invite_link_prefix("https://anter.example.test", owner, &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("https://anter.example.test", "", &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("", owner, &platform), owner);
+        assert_eq!(invite_link_prefix("  ", " https://http://owner.example.test ", &platform), "http://owner.example.test");
+        assert_eq!(invite_link_prefix("", "", &platform), platform);
+        assert_eq!(invite_link_prefix("  ", " ", &platform), platform);
+        assert_eq!(invite_link_prefix("", "", ""), "");
         // `checkUrl` over a stored `http://` URL.
-        assert_eq!(invite_link_prefix("https://http://anter.example.test:8080", &platform), "http://anter.example.test:8080");
-        assert_eq!(invite_link_prefix("https://https://anter.example.test", &platform), "https://anter.example.test");
-        assert_eq!(invite_link_prefix("https://httpbin.example.test", &platform), "https://httpbin.example.test");
+        assert_eq!(invite_link_prefix("https://http://anter.example.test:8080", "", &platform), "http://anter.example.test:8080");
+        assert_eq!(invite_link_prefix("https://https://anter.example.test", "", &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("https://httpbin.example.test", "", &platform), "https://httpbin.example.test");
     }
 }
 
@@ -1110,10 +1120,11 @@ mod live {
         }
     }
 
-    /// RS3: the invite mail's `urlPrefix` on a scratch app of SYSTEM, for an invite into ZZRUM:
-    /// the platform address while ZZRUM has no URL of its own, whatever the owner's `URL`
-    /// property or another client's LIVE row say; then ZZRUM's LIVE row; then ZZRUM's `URL`
-    /// property over it. Then `POST users/invite` carries the same prefix.
+    /// RS3 and RS4: the invite mail's `urlPrefix` on a scratch app of SYSTEM, for an invite into
+    /// ZZRUM: the platform address while neither ZZRUM nor the owner has a URL, whatever another
+    /// client's LIVE row says; then the owner's LIVE row; then the owner's `URL` property over it;
+    /// then ZZRUM's own LIVE row over the owner's; then ZZRUM's `URL` property over that. Then
+    /// `POST users/invite` carries the same prefix.
     #[tokio::test]
     async fn invite_url_prefix_is_the_invited_clients_or_the_platforms() {
         let Some(mut fx) = fx().await else { return };
@@ -1137,13 +1148,17 @@ mod live {
         let platform = platform_app_url(&code, &s.dir().subdomain_endings);
         assert_eq!(platform, format!("https://{code}.local.modlix.com"));
 
-        // Nothing of ZZRUM's: the platform address.
+        // Nothing of ZZRUM's or the owner's: the platform address.
         assert_eq!(url_of(s.clone(), code.clone()).await, platform);
-        // The owner's property and another client's LIVE row are not ZZRUM's.
-        exec(format!("INSERT INTO security_app_property (APP_ID, CLIENT_ID, NAME, VALUE) VALUES ({app_id}, {owner}, 'URL', 'zzrs3-owner.example.test/')")).await;
+        // Another client's (a sibling's) LIVE row never reaches it.
         exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({c}, 'zzrs3-c.example.test', '{code}', 'LIVE')")).await;
         assert_eq!(url_of(s.clone(), code.clone()).await, platform);
-        // ZZRUM's own LIVE row, as `checkUrl` writes it.
+        // RS4: no URL of ZZRUM's, the owner's LIVE row, then the owner's `URL` property over it.
+        exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({owner}, 'zzrs3-owner-live.example.test', '{code}', 'LIVE')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-owner-live.example.test");
+        exec(format!("INSERT INTO security_app_property (APP_ID, CLIENT_ID, NAME, VALUE) VALUES ({app_id}, {owner}, 'URL', 'zzrs3-owner.example.test/')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-owner.example.test");
+        // ZZRUM's own LIVE row wins over the owner's, as `checkUrl` writes it.
         exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({m}, 'zzrs3-live.example.test', '{code}', 'LIVE')")).await;
         assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-live.example.test");
         // ZZRUM's `URL` property comes first.
