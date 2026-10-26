@@ -1375,6 +1375,35 @@ mod live {
         fx.finish().await;
     }
 
+    /// QA-0599 (2026-10-26): a client that overrides a profile reads the user's assignment
+    /// under the OVERRIDE's id, while the row holds the root; removing by that id removes it.
+    #[tokio::test]
+    async fn removing_a_profile_by_its_override_id_removes_the_root_assignment() {
+        let Some(fx) = fx().await else { return };
+        let (s, c, m) = (&fx.s, fx.c, fx.m);
+        let sys = sys();
+        let body = |v: serde_json::Value| super::super::profiles::profile_from_body(v.as_object().unwrap()).unwrap();
+        let root = s.profile_create(&sys, body(json!({"appId": 2, "clientId": c, "name": format!("zz rp {}", fx.run), "arrangement": {"k": {"roleId": 70}}}))).await.unwrap().id.unwrap();
+        let over = s.profile_create(&sys, body(json!({"rootProfileId": root, "appId": 2, "clientId": m, "name": "", "title": "Below"}))).await.unwrap().id.unwrap();
+        let u = fx.user(m, "po").await;
+        let owner = fx.as_user(&u, "ZZRUM", MEMBER);
+
+        assert!(s.user_assign_profile(&owner, u.id, over).await.unwrap());
+        assert_eq!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap(), vec![root], "the root is stored");
+        let seen: Vec<_> = s.assigned_profiles(&owner, u.id, Some(2), true).await.unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(seen, vec![Some(over)], "the client below reads it as its override");
+
+        assert!(s.user_remove_profile(&owner, u.id, over).await.unwrap(), "removed by the override's id");
+        assert!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap().is_empty());
+        assert!(!s.user_remove_profile(&owner, u.id, over).await.unwrap(), "nothing left to remove");
+
+        // By the root's id, as before.
+        assert!(s.user_assign_profile(&owner, u.id, root).await.unwrap());
+        assert!(s.user_remove_profile(&owner, u.id, root).await.unwrap());
+        assert!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap().is_empty());
+        fx.finish().await;
+    }
+
     /// U7 (2026-10-21, QA-0482): `GET users/{id}` by a plain `User_READ` holder, no client
     /// manager role or assignment: own client, a client its client manages, and its client's
     /// direct manager are read; a sibling client is not found.
