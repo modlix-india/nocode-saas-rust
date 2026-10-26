@@ -57,7 +57,7 @@ pub fn state(store: overridable::Store, cache: CacheService, callers: Arc<dyn Ca
         app_code_suffix: cfg.editor.app_code_suffix.clone(),
         key_bits: 2048,
     };
-    Arc::new(EditorState { callers, cx, ev, applications, pages, styles, themes, functions, schemas, uripaths, fillers, transports, mobile, purge: None })
+    Arc::new(EditorState { callers, cx, ev, applications, pages, styles, themes, functions, schemas, uripaths, fillers, transports, mobile, purge: None, purge_guard: None })
 }
 
 /// Loads configuration, connects everything, and serves until shut down.
@@ -88,10 +88,12 @@ pub async fn run() -> Result<()> {
             }
         });
     }
+    let guard: Arc<dyn purge::ManagedClients> = Arc::new(security.clone());
     let callers: Arc<dyn CallerSource> = Arc::new(SecurityCallers { security, server_port: cfg.server.port });
     let mut st = state(store, cache.clone(), callers, &cfg, reqwest::Client::new());
     if let Some(s) = Arc::get_mut(&mut st) {
         s.purge = Some(Arc::new(db.clone()));
+        s.purge_guard = Some(guard);
     }
     cache.spawn_eviction_listener();
 

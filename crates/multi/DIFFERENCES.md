@@ -49,7 +49,10 @@ header 400, create by app id, update without a definition, transport export of `
   stops the purge before core or ui change anything. Then core (`/api/core/purge/...`: definitions
   and the `<CLIENT>_<app>` tenant databases), ui (`/api/ui/purge/...`) and security
   (`/api/security/.../purge/...`) run with the caller's `dryRun`; the answer is
-  `{dryRun, security, core, ui}`. Codes are letters, digits and `_` only (they go into three URLs).
+  `{dryRun, security, core, ui, files}`; files (`/api/files/purge/...` on files-manage, the
+  optional `[files]` upstream: without it the purge is a 503 naming files) runs after ui and
+  before security, which it asks who manages the client. A client is purged only by a client
+  that manages it, never by itself, and SYSTEM never; an app only by SYSTEM. Codes are letters, digits and `_` only (they go into three URLs).
   Made for the clean-slate wipe of dead test clients and empty apps on local, dev and stage. Unlike
   `DELETE /api/multi/application/{code}`, an app purge takes every client's definitions and tenant
   data, not only the caller's.

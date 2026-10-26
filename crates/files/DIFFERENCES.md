@@ -161,6 +161,17 @@ split. A missing file's empty 404 stays empty.
   500.
 - **Transform without multipart** is an empty 415; Java 500.
 
+- **The admin purge (new, 2026-10-26, no Java counterpart).** `DELETE /api/files/purge/client/{clientCode}`
+  and `DELETE /api/files/purge/app/{appCode}` on files-manage, `dryRun` true unless `dryRun=false`,
+  called by multi's purge. A client: every object under `<client>/` in both buckets, its
+  `files_file_system` rows, its access paths, upload records, retention rules and the secured
+  access keys under `<client>/`; only by a client that manages it (security's
+  `doesClientManageClientCode`) with `Client_DELETE`, never by itself, never SYSTEM. An app:
+  every root folder named exactly the app code, under every client and in both buckets, with
+  its objects and rows, and the app's retention rules; SYSTEM with `Application_DELETE` only.
+  Answers `{dryRun, objects: {STATIC|SECURED: n}, rows: {table: n}, errors}`; refusals are
+  `FILES.PURGE_FORBIDDEN` (403) and `FILES.PURGE_BAD_CODE` (400).
+
 ## Known, kept
 
 - Only 32 bits of randomness in a secured access key (`base36UUID`).

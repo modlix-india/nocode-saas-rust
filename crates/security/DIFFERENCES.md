@@ -515,3 +515,8 @@ when an app has invoices or other apps depend on it, and when the walk reaches a
 (user, app, profile, role, permission, package) owned by another client or app. The SYSTEM client
 is never purged. One sox row records each purge; every client, user, app and profile cache is
 evicted everywhere. Tests: `admin::clients::purge::tests`.
+
+Who may purge (2026-10-26, Kiran): a client only by a client that manages it, through a user who
+is its client manager (`caller_manages_client`), never by the client itself (403
+`SEC.PURGE_REFUSED`), and the SYSTEM client never, whoever asks (400). An app purge stays SYSTEM's.
+A purge evicts the purged users' own tokens, not the whole token cache.
