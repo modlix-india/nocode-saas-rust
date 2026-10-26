@@ -17,7 +17,8 @@ Three steps, each its own command, so nothing deletes before its backup exists:
 
 Databases are reached with the environment variables MYSQL_HOST, MYSQL_USER, MYSQL_PWD and
 MONGO_URI (read only in plan; dumps in backup). The API token comes from MODLIX_PURGE_TOKEN, or
-on local from tools/platform_common.py's sign-in. Nothing secret is printed.
+on local from tools/platform_common.py's sign-in; MODLIX_PURGE_TOKEN_FILE names a file read
+again on every call, so a long run survives a token refreshed beside it. Nothing secret is printed.
 
   clean_slate.py plan   --env dev --report ~/.claude/plans/clean-slate-2026-10-26 --out DIR
   clean_slate.py backup --env dev --plan DIR/plan-dev.json
@@ -79,6 +80,12 @@ def mysql(sql: str) -> list[list[str]]:
     if out.returncode != 0:
         die(f"mysql: {out.stderr.strip().splitlines()[-1] if out.stderr.strip() else out.returncode}")
     return [line.split("\t") for line in out.stdout.splitlines() if line]
+
+
+def dump_uri() -> str:
+    """MONGO_URI without a database in its path: mongodump refuses one together with --db."""
+    u = urllib.parse.urlsplit(db_env()["MONGO_URI"])
+    return urllib.parse.urlunsplit((u.scheme, u.netloc, "/", u.query, u.fragment))
 
 
 def mongo_eval(js: str) -> str:
@@ -257,7 +264,7 @@ def cmd_backup(a: argparse.Namespace) -> None:
     for i in range(0, len(my_v), 100):
         run(base + ["--databases", *my_v[i:i + 100]], dest / f"tenant-mysql-{i // 100:03d}.sql.gz", menv)
     for n in mg_v:
-        r = subprocess.run(["mongodump", f"--uri={e['MONGO_URI']}", f"--db={n}", f"--archive={dest / ('tenant-mongo-' + n + '.archive.gz')}", "--gzip", "--quiet"],
+        r = subprocess.run(["mongodump", f"--uri={dump_uri()}", f"--db={n}", f"--archive={dest / ('tenant-mongo-' + n + '.archive.gz')}", "--gzip", "--quiet"],
                            capture_output=True, text=True)
         if r.returncode != 0:
             die(f"mongodump {n}: {r.stderr.strip()[-300:]}")
@@ -270,7 +277,7 @@ def cmd_backup(a: argparse.Namespace) -> None:
             q = {"$or": [{"clientCode": {"$in": codes}}, {"appCode": {"$in": apps}}, {"objectAppCode": {"$in": apps}}]}
             qfile = dest / f".q-{d}-{c}.json"
             qfile.write_text(json.dumps(q))
-            r = subprocess.run(["mongodump", f"--uri={e['MONGO_URI']}", f"--db={d}", f"--collection={c}", f"--queryFile={qfile}",
+            r = subprocess.run(["mongodump", f"--uri={dump_uri()}", f"--db={d}", f"--collection={c}", f"--queryFile={qfile}",
                                 f"--archive={dest / f'defs-{d}-{c}.archive.gz'}", "--gzip", "--quiet"], capture_output=True, text=True)
             qfile.unlink()
             if r.returncode != 0:
@@ -299,8 +306,11 @@ def api_for(env: str, base_url: str | None) -> pc.Api:
     if not base_url:
         die("--base-url is required off local (e.g. https://appbuilder.dev.modlix.com)")
     tok = os.environ.get("MODLIX_PURGE_TOKEN", "").strip()
+    tok_file = os.environ.get("MODLIX_PURGE_TOKEN_FILE", "").strip()
+    if tok_file:
+        tok = Path(tok_file).read_text().strip()
     if not tok:
-        die("set MODLIX_PURGE_TOKEN to a SYSTEM token for this environment")
+        die("set MODLIX_PURGE_TOKEN, or MODLIX_PURGE_TOKEN_FILE (re-read on every call, for a run longer than a token lives)")
     api = pc.Api(base_url.rstrip("/"), tok)
     api.ctx = None  # real certificates off local
     return api
@@ -308,6 +318,9 @@ def api_for(env: str, base_url: str | None) -> pc.Api:
 
 def call(api: pc.Api, path: str, dry: bool) -> tuple[int, object]:
     url = f"{api.base}{path}?dryRun={'true' if dry else 'false'}"
+    tok_file = os.environ.get("MODLIX_PURGE_TOKEN_FILE", "").strip()
+    if tok_file:
+        api.token = Path(tok_file).read_text().strip()
     req = urllib.request.Request(url, method="DELETE", headers=api.headers())
     for attempt in range(3):
         try:
