@@ -28,6 +28,7 @@ use platform::error::{AppError, AppResult};
 use platform::security::ContextAuthentication;
 
 use crate::docs::{SCHEMA, STORAGE};
+use crate::editor::purge::TenantDb;
 use crate::editor::kinds::{self, CoreKind};
 use crate::repos::{Hybrid, SchemaSource};
 use crate::storage::defs::Catalog;
@@ -111,6 +112,19 @@ pub trait DataStores: Send + Sync {
     async fn drop_draft_data(&self, app_code: &str, client_code: &str) -> Result<bool, String>;
     /// `AppDataService.estimatedRowCount`.
     async fn estimated_row_count(&self, app_code: &str, client_code: &str) -> i64;
+    /// Rust only, for the admin purge: every database on every app-data server (the engines'
+    /// default servers and each distinct APP_DATA connection's), with what could not be listed.
+    async fn tenant_databases(&self) -> (Vec<TenantDb>, Vec<String>) {
+        (Vec::new(), Vec::new())
+    }
+    /// Rust only, for the admin purge: the rows in one of [`Self::tenant_databases`].
+    async fn tenant_rows(&self, _db: &TenantDb) -> Result<i64, String> {
+        Ok(0)
+    }
+    /// Rust only, for the admin purge: drops one of [`Self::tenant_databases`].
+    async fn drop_tenant_database(&self, _db: &TenantDb) -> Result<bool, String> {
+        Err("no app data here".into())
+    }
 }
 
 /// Runs a definition trigger (a core function) as the caller.

@@ -1,7 +1,7 @@
 //! The editor's routes: the commons routers of every ui document kind (CRUD, drafts, fork,
 //! publish, versions, publish-all, transport, an app's wipe) under the Java base paths, and the
 //! ui controllers' own routes on top: the application index and mobile apps, the page component
-//! and event routes, the function step routes.
+//! and event routes, the function step routes; and the Rust-only admin purge.
 
 use std::sync::Arc;
 
@@ -32,6 +32,7 @@ use crate::docs::{COMPONENT_DEFINITION, FUNCTION, PAGE};
 use crate::editor::index::{build_index, IndexServices};
 use crate::editor::kinds::{copy_then_put, java_put_order, UiEvictions, UiFiller, UiKind};
 use crate::editor::mobile::{self, MobileApps, MOBILE_APP_CREATE};
+use crate::editor::purge::{self, Target};
 use crate::respond::with_ui_layers;
 
 /// Everything the editor's routes share.
@@ -49,6 +50,8 @@ pub struct EditorState {
     pub fillers: OverridableService<UiFiller>,
     pub transports: Arc<TransportService>,
     pub mobile: MobileApps,
+    /// The admin purge's view of the `ui` Mongo database (`None`: the purge reports it cannot run).
+    pub purge: Option<Arc<dyn purge::DocStore>>,
 }
 
 type St = Arc<EditorState>;
@@ -147,6 +150,8 @@ fn own_routes(st: St) -> Router {
         .route("/api/ui/pages/{id}/components/{component_key}", patch(patch_component).delete(remove_component))
         .route("/api/ui/pages/{id}/events/{function_name}", get(read_event).put(put_event))
         .route("/api/ui/functions/{id}/steps", get(read_steps).patch(patch_steps))
+        .route("/api/ui/purge/client/{code}", delete(purge_client))
+        .route("/api/ui/purge/app/{code}", delete(purge_app))
         .with_state(st)
 }
 
@@ -179,6 +184,45 @@ fn pre_authorize(ca: &ContextAuthentication, authority: &str) -> Result<(), Resp
 /// The caller, or the refusal as the router answers it.
 async fn caller(st: &St, h: &HeaderMap, route: &'static str) -> Result<ContextAuthentication, Response> {
     st.callers.caller(h).await.map_err(|e| with_route(error_response(e), route))
+}
+
+// ── Admin purge (Rust only) ─────────────────────────────────────────
+
+/// `DELETE /api/ui/purge/client/{clientCode}?dryRun=`: see [`purge`].
+async fn purge_client(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/ui/purge/client/{clientCode}", purge::CLIENT_DELETE, Target::client(&code), q, h).await
+}
+
+/// `DELETE /api/ui/purge/app/{appCode}?dryRun=`: see [`purge`].
+async fn purge_app(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/ui/purge/app/{appCode}", purge::APPLICATION_DELETE, Target::app(&code), q, h).await
+}
+
+/// A signed-in SYSTEM caller holding `authority` only; a bad code is a 400; a dry run unless
+/// `dryRun=false`.
+async fn purge_route(st: St, route: &'static str, authority: &'static str, target: Result<Target, String>, q: Option<String>, h: HeaderMap) -> Response {
+    let ca = match caller(&st, &h, route).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    if let Err(r) = pre_authorize(&ca, authority) {
+        return with_route(r, route);
+    }
+    if !ca.is_system_client() {
+        let c = platform::error::Coded::permission_required(&[authority]).debug("Access Denied: the purge is for the SYSTEM client only");
+        return with_route(platform::error::coded_response(&c), route);
+    }
+    let target = match target {
+        Ok(t) => t,
+        Err(m) => return respond(route, Err(bad_request(&m))),
+    };
+    let dry_run = purge::dry_run(Params::from_query(q.as_deref()).first("dryRun"));
+    tracing::warn!(target = ?target, dry_run, user = ca.user.id, "admin purge");
+    let report = purge::run(&st, &target, dry_run).await;
+    if !report.errors.is_empty() {
+        tracing::warn!(target = ?target, dry_run, errors = ?report.errors, "admin purge finished with errors");
+    }
+    respond(route, Ok(json(report.to_json())))
 }
 
 // ── ApplicationController ───────────────────────────────────────────

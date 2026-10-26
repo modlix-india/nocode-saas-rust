@@ -1,7 +1,8 @@
 //! core-editor's routes: the commons routers of every core document kind (CRUD, drafts, fork,
 //! publish, versions, publish-all, transport) under the Java base paths, and the core
 //! controllers' own routes on top (event definition schedules, template previews, a
-//! notification for the services, the index, the caches, an app's wipe, billing).
+//! notification for the services, the index, the caches, an app's wipe, billing, and the
+//! Rust-only admin purge of a client or an app).
 
 use std::sync::Arc;
 
@@ -29,6 +30,7 @@ use platform::security::ContextAuthentication;
 use crate::editor::billing::Billing;
 use crate::editor::caller;
 use crate::editor::index::build_index;
+use crate::editor::purge::{self, Target};
 use crate::editor::kinds::CoreKind;
 use crate::editor::schedules::{self, ScheduleModel, ScheduleSources};
 use crate::editor::storage::{DataStores, StorageOps};
@@ -55,6 +57,8 @@ pub struct CoreEditor {
     pub schedules: Arc<dyn ScheduleSources>,
     pub redis: Option<redis::Client>,
     pub eviction_channel: String,
+    pub purge_docs: Option<Arc<dyn purge::DocStore>>,
+    pub purge_rows: Option<Arc<dyn purge::RowStore>>,
 }
 
 type St = Arc<CoreEditor>;
@@ -164,6 +168,8 @@ pub fn router(st: St) -> Router {
 fn own_routes(st: St) -> Router {
     Router::new()
         .route("/api/core", delete(delete_app))
+        .route("/api/core/purge/client/{code}", delete(purge_client))
+        .route("/api/core/purge/app/{code}", delete(purge_app))
         .route("/api/core/eventDefinitions/schedules", get(client_schedules))
         .route("/api/core/eventDefinitions/schedule/toCron", post(to_cron))
         .route("/api/core/eventDefinitions/schedule/fromCron", post(from_cron))
@@ -243,6 +249,45 @@ async fn delete_app(State(st): State<St>, RawQuery(q): RawQuery, h: HeaderMap) -
     }
     .await;
     respond(R, r)
+}
+
+// ── Admin purge (Rust only) ──────────────────────────────────────────
+
+/// `DELETE /api/core/purge/client/{clientCode}?dryRun=`: see [`purge`].
+async fn purge_client(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/core/purge/client/{clientCode}", purge::CLIENT_DELETE, Target::client(&code), q, h).await
+}
+
+/// `DELETE /api/core/purge/app/{appCode}?dryRun=`: see [`purge`].
+async fn purge_app(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/core/purge/app/{appCode}", purge::APPLICATION_DELETE, Target::app(&code), q, h).await
+}
+
+/// A signed-in SYSTEM caller holding `authority` only; a bad code is a 400; a dry run unless
+/// `dryRun=false`.
+async fn purge_route(st: St, route: &'static str, authority: &'static str, target: Result<Target, String>, q: Option<String>, h: HeaderMap) -> Response {
+    let ca = match caller(&st, &h, route).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    if let Err(r) = pre_authorize(&ca, authority) {
+        return with_route(r, route);
+    }
+    if !ca.is_system_client() {
+        let c = platform::error::Coded::permission_required(&[authority]).debug("Access Denied: the purge is for the SYSTEM client only");
+        return with_route(platform::error::coded_response(&c), route);
+    }
+    let target = match target {
+        Ok(t) => t,
+        Err(m) => return respond(route, Err(bad_request(&m))),
+    };
+    let dry_run = purge::dry_run(Params::from_query(q.as_deref()).first("dryRun"));
+    tracing::warn!(target = ?target, dry_run, user = ca.user.id, "admin purge");
+    let report = purge::run(&st, &target, dry_run).await;
+    if !report.errors.is_empty() {
+        tracing::warn!(target = ?target, dry_run, errors = ?report.errors, "admin purge finished with errors");
+    }
+    respond(route, Ok(json(report.to_json())))
 }
 
 // ── EventDefinitionController ────────────────────────────────────────
