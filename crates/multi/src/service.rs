@@ -32,6 +32,8 @@ pub struct AppState {
     pub security_up: Upstream,
     pub core_up: Upstream,
     pub ui_up: Upstream,
+    /// files-manage, for the purge only; `None` (no `[files]` configured) refuses the purge.
+    pub files_up: Option<Upstream>,
     pub http: reqwest::Client,
     pub port: u16,
 }
@@ -673,13 +675,18 @@ enum Purge {
 }
 
 impl Purge {
-    /// Each service's purge route for `code`: security's, core's, ui's.
-    fn paths(self, code: &str) -> (String, String, String) {
+    /// Each service's purge route for `code`: security's, core's, ui's, files'.
+    fn paths(self, code: &str) -> (String, String, String, String) {
         let (sec, other) = match self {
             Purge::Client => ("clients", "client"),
             Purge::App => ("applications", "app"),
         };
-        (format!("/api/security/{sec}/purge/{code}"), format!("/api/core/purge/{other}/{code}"), format!("/api/ui/purge/{other}/{code}"))
+        (
+            format!("/api/security/{sec}/purge/{code}"),
+            format!("/api/core/purge/{other}/{code}"),
+            format!("/api/ui/purge/{other}/{code}"),
+            format!("/api/files/purge/{other}/{code}"),
+        )
     }
 }
 
@@ -690,8 +697,10 @@ fn purge_code_ok(code: &str) -> bool {
 
 /// Security answers first, always as a dry run, so a purge it refuses (a client that still owns
 /// apps, manages clients or has billing rows; an app others depend on) never reaches core or ui.
-/// Then core (definitions and tenant databases), ui (definitions) and last security (the rows),
-/// each with the caller's `dryRun`. The three reports come back side by side.
+/// Then core (definitions and tenant databases), ui (definitions), files (the stored files and
+/// their rows) and last security (the rows: files asks security who manages the client, so it
+/// runs while the client is still there), each with the caller's `dryRun`. The reports come back
+/// side by side. Without a `[files]` upstream the purge is refused, not run without files.
 async fn purge_impl(s: &AppState, kind: Purge, code: PathArg, q: QueryArg<PurgeQuery>, h: &HeaderMap) -> Res<Response> {
     let ca = authenticate(s, h).await?;
     let fwd = Fwd::from(h)?;
@@ -702,7 +711,10 @@ async fn purge_impl(s: &AppState, kind: Purge, code: PathArg, q: QueryArg<PurgeQ
     }
     let dry_run = q.dry_run != Some(false);
     let as_caller = fwd.with_token(ca.access_token.as_deref());
-    let (sec_path, core_path, ui_path) = kind.paths(&code);
+    let (sec_path, core_path, ui_path, files_path) = kind.paths(&code);
+    let Some(files_up) = &s.files_up else {
+        return Err(Coded::new("MULTI.SERVICE_UNAVAILABLE").param("service", "files").debug("multi has no [files] upstream configured").into());
+    };
     let sec_base = base_for(&s.security_up, "security", &sec_path).await?;
     let call = |base: &str, path: &str, dry: bool| {
         as_caller.apply(s.http.delete(format!("{base}{path}")).query(&[("dryRun", if dry { "true" } else { "false" })]))
@@ -713,12 +725,14 @@ async fn purge_impl(s: &AppState, kind: Purge, code: PathArg, q: QueryArg<PurgeQ
     let core = json_or_empty(send(call(&core_base, &core_path, dry_run), "core purge").await?).await?;
     let ui_base = base_for(&s.ui_up, "UI", &ui_path).await?;
     let ui = json_or_empty(send(call(&ui_base, &ui_path, dry_run), "ui purge").await?).await?;
+    let files_base = base_for(files_up, "files", &files_path).await?;
+    let files = json_or_empty(send(call(&files_base, &files_path, dry_run), "files purge").await?).await?;
     let security = if dry_run {
         check
     } else {
         json_or_empty(send(call(&sec_base, &sec_path, false), "security purge").await?).await?
     };
-    Ok(Json(json!({"dryRun": dry_run, "security": security, "core": core, "ui": ui})).into_response())
+    Ok(Json(json!({"dryRun": dry_run, "security": security, "core": core, "ui": ui, "files": files})).into_response())
 }
 
 #[cfg(test)]
@@ -729,11 +743,21 @@ mod purge_tests {
     fn purge_paths_per_service() {
         assert_eq!(
             Purge::Client.paths("ABC1"),
-            ("/api/security/clients/purge/ABC1".into(), "/api/core/purge/client/ABC1".into(), "/api/ui/purge/client/ABC1".into())
+            (
+                "/api/security/clients/purge/ABC1".into(),
+                "/api/core/purge/client/ABC1".into(),
+                "/api/ui/purge/client/ABC1".into(),
+                "/api/files/purge/client/ABC1".into()
+            )
         );
         assert_eq!(
             Purge::App.paths("my_app"),
-            ("/api/security/applications/purge/my_app".into(), "/api/core/purge/app/my_app".into(), "/api/ui/purge/app/my_app".into())
+            (
+                "/api/security/applications/purge/my_app".into(),
+                "/api/core/purge/app/my_app".into(),
+                "/api/ui/purge/app/my_app".into(),
+                "/api/files/purge/app/my_app".into()
+            )
         );
     }
 

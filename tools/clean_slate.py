@@ -343,7 +343,7 @@ def cmd_purge(a: argparse.Namespace) -> None:
     def one(kind: str, code: str) -> dict:
         t0 = time.time()
         st, body = call(api, f"/api/multi/purge/{kind}/{code}", dry)
-        outcome = "ok" if st == 200 else "refused" if st in (400, 404, 409) else "failed"
+        outcome = "ok" if st == 200 else "refused" if st in (400, 403, 404, 409) else "failed"
         return dict(kind=kind, code=code, status=st, outcome=outcome, ms=int((time.time() - t0) * 1000), body=body)
 
     def batch(kind: str, codes: list[str], f) -> None:

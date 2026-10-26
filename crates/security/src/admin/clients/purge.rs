@@ -10,7 +10,7 @@
 //!
 //! | Route | Who |
 //! |---|---|
-//! | `DELETE clients/purge/{idOrCode}?dryRun=` | SYSTEM with `Client_DELETE` |
+//! | `DELETE clients/purge/{idOrCode}?dryRun=` | a client manager of a client that manages it, with `Client_DELETE`; never the client itself, never SYSTEM |
 //! | `DELETE applications/purge/{idOrCode}?dryRun=` | SYSTEM with `Application_DELETE` |
 //!
 //! `dryRun` is true unless it is `false`: the report then says what would go, and nothing changes.
@@ -133,7 +133,8 @@ pub async fn purge_app(s: &AdminState, ca: &ContextAuth, key: &str, dry_run: boo
 }
 
 async fn purge(s: &AdminState, ca: &ContextAuth, kind: Kind, key: &str, dry_run: bool) -> AuthResult<Value> {
-    if !ca.is_system_client() {
+    // An app: SYSTEM only. A client: see below, once its id is known.
+    if kind == Kind::App && !ca.is_system_client() {
         return Err(AuthError::denied(ca, &["SYSTEM client"]));
     }
     let key = key.trim();
@@ -142,8 +143,18 @@ async fn purge(s: &AdminState, ca: &ContextAuth, kind: Kind, key: &str, dry_run:
     }
     let mut tx = s.db.pool.begin().await?;
     let (id, code) = root(&mut tx, kind, key).await?;
-    if kind == Kind::Client && code == "SYSTEM" {
-        return Err(refused(StatusCode::BAD_REQUEST, "The SYSTEM client cannot be purged".into()));
+    if kind == Kind::Client {
+        // SYSTEM is never purged, whoever asks; a client never purges itself; only a client
+        // that manages it may, through a user who is its client manager (Kiran, 2026-10-26).
+        if code.eq_ignore_ascii_case("SYSTEM") {
+            return Err(refused(StatusCode::BAD_REQUEST, "The SYSTEM client cannot be purged".into()));
+        }
+        if id == ca.user.client_id() {
+            return Err(refused(StatusCode::FORBIDDEN, format!("client {code} cannot purge itself; its managing client can")));
+        }
+        if !s.caller_manages_client(ca, id).await? {
+            return Err(refused(StatusCode::FORBIDDEN, format!("only a client that manages {code} may purge it")));
+        }
     }
     let blockers = blockers(&mut tx, kind, id).await?;
     if !blockers.is_empty() {
@@ -166,6 +177,9 @@ async fn purge(s: &AdminState, ca: &ContextAuth, kind: Kind, key: &str, dry_run:
         tx.rollback().await?;
         return Ok(report(kind, id, &code, true, &counts));
     }
+    // The purged users' signed-in contexts, evicted one by one after the commit (evicting the
+    // whole token cache on every purge would make every signed-in user re-authenticate).
+    let tokens = token_strings(&mut tx, &users).await?;
     delete_found(&mut tx, &found).await?;
     tx.commit().await?;
 
@@ -175,7 +189,7 @@ async fn purge(s: &AdminState, ca: &ContextAuth, kind: Kind, key: &str, dry_run:
         Kind::App => (object::APP, format!("Application purged: {code}")),
     };
     sox(&s.db, Some(id), what.0, action::DELETE, what.1, by);
-    evict(s, kind, id, &code, &profiles).await;
+    evict(s, kind, id, &code, &profiles, &tokens).await;
     tracing::info!(kind = kind.label(), id, code, rows = counts.values().sum::<usize>(), "purged");
     Ok(report(kind, id, &code, false, &counts))
 }
@@ -352,6 +366,20 @@ async fn child_ids(conn: &mut MySqlConnection, fk: &Fk, parent_ids: &[u64]) -> A
     Ok(out)
 }
 
+/// The bearer tokens the users hold, which key their cached signed-in contexts.
+async fn token_strings(conn: &mut MySqlConnection, users: &[u64]) -> AuthResult<Vec<String>> {
+    let mut out = Vec::new();
+    for chunk in users.chunks(CHUNK) {
+        let sql = format!("SELECT TOKEN FROM security_user_token WHERE USER_ID IN ({})", marks(chunk.len()));
+        let mut q = sqlx::query_scalar::<_, String>(&sql);
+        for u in chunk {
+            q = q.bind(*u);
+        }
+        out.extend(q.fetch_all(&mut *conn).await?);
+    }
+    Ok(out)
+}
+
 fn marks(n: usize) -> String {
     vec!["?"; n].join(", ")
 }
@@ -412,10 +440,12 @@ async fn delete_found(conn: &mut MySqlConnection, found: &Found) -> AuthResult<(
 }
 
 /// Every cache a purged client, user, app or profile can sit in, here and in the other units.
-async fn evict(s: &AdminState, kind: Kind, id: u64, code: &str, profiles: &[u64]) {
+async fn evict(s: &AdminState, kind: Kind, id: u64, code: &str, profiles: &[u64], tokens: &[String]) {
     let svc = &s.caches().service;
+    for t in tokens {
+        svc.evict_everywhere(crate::caches::TOKEN, t).await;
+    }
     for name in [
-        crate::caches::TOKEN,
         crate::caches::USER,
         crate::caches::USER_ROLES,
         crate::caches::CLIENT_TYPE_CODE_LEVEL,

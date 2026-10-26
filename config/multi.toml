@@ -24,6 +24,10 @@ upstream = "lighthouse:CORE-EDITOR"
 # index, makeTransport, createAndApply and DELETE /api/ui are all editor routes: ui-editor.
 upstream = "http://localhost:8107"
 
+[files]
+# The purge only: files-manage deletes a purged client's or app's stored files.
+upstream = "lighthouse:FILES-MANAGE"
+
 [registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true

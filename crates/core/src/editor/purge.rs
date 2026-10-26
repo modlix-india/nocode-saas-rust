@@ -100,6 +100,32 @@ pub fn apps_of(name: &str) -> Vec<String> {
     out
 }
 
+/// Whether one client manages another, as security's hierarchy says.
+#[async_trait]
+pub trait ManagedClients: Send + Sync {
+    async fn manages(&self, managing: &str, client: &str) -> Result<bool>;
+}
+
+#[async_trait]
+impl ManagedClients for platform::security::SecurityClient {
+    async fn manages(&self, managing: &str, client: &str) -> Result<bool> {
+        self.does_client_manage_client_code(managing, client).await
+    }
+}
+
+/// Who may purge a client: only a client that manages it. Never the client itself, and never
+/// SYSTEM, whoever asks (Kiran, 2026-10-26). Security makes the same check first, with the
+/// caller's client-manager role; this one stands on its own for a call that skips multi.
+pub async fn may_purge_client(guard: Option<&dyn ManagedClients>, caller_client: &str, target: &str) -> Result<bool> {
+    if target.eq_ignore_ascii_case("SYSTEM") || caller_client.is_empty() || caller_client == target {
+        return Ok(false);
+    }
+    match guard {
+        Some(g) => g.manages(caller_client, target).await,
+        None => Ok(false),
+    }
+}
+
 /// `dryRun`: only `false` deletes anything; absent or anything else is a dry run.
 pub fn dry_run(param: Option<&str>) -> bool {
     !matches!(param, Some(v) if v.trim().eq_ignore_ascii_case("false"))
@@ -169,6 +195,55 @@ pub trait DocStore: Send + Sync {
     /// The matching documents' app and name fields, for the cache evictions.
     async fn keys(&self, collection: &str, filter: Document) -> Result<Vec<Document>>;
     async fn delete(&self, collection: &str, filter: Document) -> Result<u64>;
+    /// The filter that finds `target`'s documents in `collection`; a store that can read its
+    /// indexes answers one that uses them.
+    async fn filter_for(&self, _collection: &str, target: &Target) -> Result<Document> {
+        Ok(target.doc_filter())
+    }
+}
+
+/// Collections at least this big are only read through an index. `ui.version` is 27 GB on dev,
+/// and both the app filter's `$or` (only `objectAppCode` is indexed there) and a bare
+/// `clientCode` scan it whole: 217 s for one app.
+const SCAN_LIMIT_BYTES: f64 = 64e6;
+
+/// The filter for one big collection, over its index on `appCode` or `objectAppCode` (the first
+/// such index key): the app itself for an app purge; for a client purge, the client inside the
+/// index's every app (`$in` the distinct values, missing included), so the index bounds the
+/// read. A small collection, or one without such an index, keeps [`Target::doc_filter`]. A big
+/// collection is assumed to keep the app under its indexed field only (true of `version`,
+/// `transport` and `page`).
+async fn indexed_filter(db: &mongodb::Database, collection: &str, target: &Target) -> Result<Document> {
+    let stats = db.run_command(doc! {"collStats": collection}).await;
+    let size = stats.ok().and_then(|s| s.get("size").and_then(|v| match v {
+        mongodb::bson::Bson::Int32(n) => Some(*n as f64),
+        mongodb::bson::Bson::Int64(n) => Some(*n as f64),
+        mongodb::bson::Bson::Double(n) => Some(*n),
+        _ => None,
+    }));
+    if size.is_some_and(|s| s < SCAN_LIMIT_BYTES) {
+        return Ok(target.doc_filter());
+    }
+    let coll = db.collection::<Document>(collection);
+    let mut field = None;
+    let mut indexes = coll.list_indexes().await?;
+    while let Some(ix) = indexes.try_next().await? {
+        if let Some(first) = ix.keys.keys().next() {
+            if first == "objectAppCode" || first == "appCode" {
+                field = Some(first.clone());
+                break;
+            }
+        }
+    }
+    let Some(field) = field else { return Ok(target.doc_filter()) };
+    Ok(match target {
+        Target::App(a) => doc! {field: a},
+        Target::Client(c) => {
+            let mut apps = coll.distinct(&field, doc! {}).await?;
+            apps.push(mongodb::bson::Bson::Null);
+            doc! {field: {"$in": apps}, "clientCode": c}
+        }
+    })
 }
 
 fn key_projection() -> Document {
@@ -192,6 +267,9 @@ impl DocStore for mongodb::Database {
     }
     async fn delete(&self, collection: &str, filter: Document) -> Result<u64> {
         Ok(self.collection::<Document>(collection).delete_many(filter).await?.deleted_count)
+    }
+    async fn filter_for(&self, collection: &str, target: &Target) -> Result<Document> {
+        indexed_filter(self, collection, target).await
     }
 }
 
@@ -336,7 +414,10 @@ pub async fn run(st: &CoreEditor, target: &Target, dry_run: bool) -> Report {
         None => r.errors.push("core rows: no MySQL pool configured".into()),
     }
 
-    if !dry_run {
+    // Nothing deleted or dropped, nothing to evict: a full eviction per purge would keep a whole
+    // environment's caches cold for the length of a sweep.
+    let changed = !owned.is_empty() || !deleted.is_empty() || !r.mysql.is_empty();
+    if !dry_run && changed {
         apps.extend(deleted.iter().map(|(_, a, _)| a.clone()));
         evict(st, &apps, &deleted, &storages).await;
     }
@@ -372,7 +453,13 @@ async fn purge_docs(docs: &dyn DocStore, target: &Target, dry_run: bool, r: &mut
     };
     collections.sort();
     for c in collections.iter().filter(|c| !c.starts_with("system.")) {
-        let filter = target.doc_filter();
+        let filter = match docs.filter_for(c, target).await {
+            Ok(f) => f,
+            Err(e) => {
+                r.errors.push(format!("{db}.{c}: filter: {e}"));
+                continue;
+            }
+        };
         let n = if dry_run {
             docs.count(c, filter).await
         } else {

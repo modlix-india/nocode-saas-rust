@@ -241,6 +241,16 @@ impl super::purge::RowStore for FakeRows {
     }
 }
 
+/// Who manages whom for the purge: SYSTEM every other client, LZCLA (MID) only ZZ10.
+struct FakeManaged;
+
+#[async_trait]
+impl super::purge::ManagedClients for FakeManaged {
+    async fn manages(&self, managing: &str, client: &str) -> anyhow::Result<bool> {
+        Ok((managing == "SYSTEM" && client != "SYSTEM") || (managing == "LZCLA" && client == "ZZ10"))
+    }
+}
+
 /// The collections the purge's document store lists (the in-memory store has no listing).
 const PURGE_COLLECTIONS: [&str; 5] = ["function", "storage", "version", "connection", "system.views"];
 
@@ -430,6 +440,7 @@ fn env_with(block_private_targets: bool) -> Env {
             collections: PURGE_COLLECTIONS.iter().map(|c| c.to_string()).collect(),
         })),
         purge_rows: Some(rows.clone()),
+        purge_guard: Some(Arc::new(FakeManaged)),
     };
     let callers: Arc<dyn CallerSource> = Arc::new(EditorCallers { inner: Arc::new(HeaderCallers) });
     let st = state(store, cache.clone(), callers, parts);
@@ -1703,7 +1714,7 @@ mod purge_routes {
     }
 
     #[tokio::test]
-    async fn only_a_system_caller_with_the_authority_may_purge() {
+    async fn only_a_managing_client_with_the_authority_may_purge_a_client() {
         let e = seeded();
         let a = e.purge(None, PURGERS, "/api/core/purge/client/ZZ1").await;
         assert_eq!(a.status, StatusCode::UNAUTHORIZED, "{}", a.text());
@@ -1711,13 +1722,21 @@ mod purge_routes {
         assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
         let a = e.purge(Some(SYSTEM), "Authorities.Client_DELETE", "/api/core/purge/app/zapp").await;
         assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
-        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
-        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
-        assert!(a.text().contains("SYSTEM client only"), "{}", a.text());
+        // MID does not manage ZZ1; ZZ1 never purges itself.
+        for (caller, uri) in [(MID, "/api/core/purge/client/ZZ1?dryRun=false"), ("ZZ1", "/api/core/purge/client/ZZ1?dryRun=false")] {
+            let a = e.purge(Some(caller), PURGERS, uri).await;
+            assert_eq!(a.status, StatusCode::FORBIDDEN, "{caller}: {}", a.text());
+            assert!(a.text().contains("only a client that manages ZZ1"), "{}", a.text());
+        }
+        // An app purge stays SYSTEM's.
         let a = e.purge(Some(MID), PURGERS, "/api/core/purge/app/zapp?dryRun=false").await;
         assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        assert!(a.text().contains("SYSTEM client only"), "{}", a.text());
         assert_eq!(names(&e, "function").len(), 4, "a refused purge deleted documents");
         assert_eq!(tenants(&e).len(), 8, "a refused purge dropped databases");
+        // MID manages ZZ10: its dry run answers.
+        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/client/ZZ10").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
     }
 
     #[tokio::test]

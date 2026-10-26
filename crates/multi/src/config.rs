@@ -1,4 +1,4 @@
-//! multi's configuration: where security, core and ui are.
+//! multi's configuration: where security, core, ui and files are.
 
 use platform::config::{RegistryConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub struct MultiConfig {
     pub security: SecurityConfig,
     pub core: ServiceConfig,
     pub ui: ServiceConfig,
+    /// files-manage, for the purge only.
+    pub files: ServiceConfig,
 }
 
 impl Default for MultiConfig {
@@ -24,6 +26,7 @@ impl Default for MultiConfig {
             security: SecurityConfig::default(),
             core: ServiceConfig::default(),
             ui: ServiceConfig::default(),
+            files: ServiceConfig::default(),
         }
     }
 }
