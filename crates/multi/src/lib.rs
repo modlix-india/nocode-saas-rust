@@ -68,6 +68,12 @@ pub async fn run() -> Result<()> {
         security_up,
         core_up: Upstream::from_config(&cfg.core.upstream, registry.as_ref())?,
         ui_up: Upstream::from_config(&cfg.ui.upstream, registry.as_ref())?,
+        // Optional: without `[files]` multi still serves everything else and refuses only the purge.
+        files_up: if cfg.files.upstream.entries().is_empty() {
+            None
+        } else {
+            Some(Upstream::from_config(&cfg.files.upstream, registry.as_ref())?)
+        },
         // Transports of big apps take a while on every side.
         http: reqwest::Client::builder().timeout(Duration::from_secs(600)).build()?,
         port: cfg.server.port,

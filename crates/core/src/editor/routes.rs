@@ -59,6 +59,8 @@ pub struct CoreEditor {
     pub eviction_channel: String,
     pub purge_docs: Option<Arc<dyn purge::DocStore>>,
     pub purge_rows: Option<Arc<dyn purge::RowStore>>,
+    /// Who manages whom, for the purge; `None` refuses every client purge.
+    pub purge_guard: Option<Arc<dyn purge::ManagedClients>>,
 }
 
 type St = Arc<CoreEditor>;
@@ -263,8 +265,8 @@ async fn purge_app(State(st): State<St>, Path(code): Path<String>, RawQuery(q): 
     purge_route(st, "/api/core/purge/app/{appCode}", purge::APPLICATION_DELETE, Target::app(&code), q, h).await
 }
 
-/// A signed-in SYSTEM caller holding `authority` only; a bad code is a 400; a dry run unless
-/// `dryRun=false`.
+/// A signed-in caller holding `authority`; a client only by a client that manages it, an app
+/// only by SYSTEM; a bad code is a 400; a dry run unless `dryRun=false`.
 async fn purge_route(st: St, route: &'static str, authority: &'static str, target: Result<Target, String>, q: Option<String>, h: HeaderMap) -> Response {
     let ca = match caller(&st, &h, route).await {
         Ok(ca) => ca,
@@ -273,14 +275,32 @@ async fn purge_route(st: St, route: &'static str, authority: &'static str, targe
     if let Err(r) = pre_authorize(&ca, authority) {
         return with_route(r, route);
     }
-    if !ca.is_system_client() {
-        let c = platform::error::Coded::permission_required(&[authority]).debug("Access Denied: the purge is for the SYSTEM client only");
-        return with_route(platform::error::coded_response(&c), route);
-    }
     let target = match target {
         Ok(t) => t,
         Err(m) => return respond(route, Err(bad_request(&m))),
     };
+    // A client: only a client that manages it (never itself, never SYSTEM). An app: SYSTEM only.
+    let allowed = match &target {
+        Target::Client(c) => {
+            let guard = st.purge_guard.as_deref();
+            match purge::may_purge_client(guard, ca.client_code(), c).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::error!(error = %e, "purge: could not ask security who manages the client");
+                    false
+                }
+            }
+        }
+        Target::App(_) => ca.is_system_client(),
+    };
+    if !allowed {
+        let why = match &target {
+            Target::Client(c) => format!("Access Denied: only a client that manages {c} may purge it"),
+            Target::App(_) => "Access Denied: an app purge is for the SYSTEM client only".to_string(),
+        };
+        let c = platform::error::Coded::permission_required(&[authority]).debug(why);
+        return with_route(platform::error::coded_response(&c), route);
+    }
     let dry_run = purge::dry_run(Params::from_query(q.as_deref()).first("dryRun"));
     tracing::warn!(target = ?target, dry_run, user = ca.user.id, "admin purge");
     let report = purge::run(&st, &target, dry_run).await;

@@ -76,6 +76,7 @@ pub struct Parts {
     /// The admin purge's view of the `core` Mongo database and the core MySQL schema.
     pub purge_docs: Option<Arc<dyn purge::DocStore>>,
     pub purge_rows: Option<Arc<dyn purge::RowStore>>,
+    pub purge_guard: Option<Arc<dyn purge::ManagedClients>>,
 }
 
 /// The editor's state on a store.
@@ -124,6 +125,7 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
         eviction_channel: parts.eviction_channel,
         purge_docs: parts.purge_docs,
         purge_rows: parts.purge_rows,
+        purge_guard: parts.purge_guard,
     })
 }
 
@@ -415,6 +417,7 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         block_private_targets: cfg.connections.block_private_targets,
         purge_docs: Some(Arc::new(exec.mongo.clone())),
         purge_rows: Some(Arc::new(exec.pool.clone())),
+        purge_guard: Some(Arc::new(security.clone())),
     };
     let security_callers = SecurityCallers { security: security.clone(), server_port: cfg.server.port };
     let callers: Arc<dyn CallerSource> = Arc::new(caller::EditorCallers { inner: Arc::new(SecurityCallers { security, server_port: cfg.server.port }) });

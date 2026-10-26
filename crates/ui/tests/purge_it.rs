@@ -50,6 +50,16 @@ impl CallerSource for Callers {
     }
 }
 
+/// Who manages whom for the purge: SYSTEM every other client, LZCLA only ZZ10.
+struct Managed;
+
+#[async_trait]
+impl ui::editor::purge::ManagedClients for Managed {
+    async fn manages(&self, managing: &str, client: &str) -> anyhow::Result<bool> {
+        Ok((managing == SYSTEM && client != SYSTEM) || (managing == "LZCLA" && client == "ZZ10"))
+    }
+}
+
 struct Env {
     mem: Arc<MemBackend>,
     router: Router,
@@ -64,8 +74,9 @@ fn env() -> Env {
     let cache = CacheService::new("cmn", "evictionChannel", None).unwrap();
     let store = Store::with_parts(mem.clone(), dir, &cache).unwrap();
     let mut st = ui::editor::state(store, cache.clone(), Arc::new(Callers), &EditorConfig::default(), reqwest::Client::new());
-    Arc::get_mut(&mut st).unwrap().purge =
-        Some(Arc::new(BackendDocs { name: "ui".into(), backend: mem.clone(), collections: COLLECTIONS.iter().map(|c| c.to_string()).collect() }));
+    let s = Arc::get_mut(&mut st).unwrap();
+    s.purge = Some(Arc::new(BackendDocs { name: "ui".into(), backend: mem.clone(), collections: COLLECTIONS.iter().map(|c| c.to_string()).collect() }));
+    s.purge_guard = Some(Arc::new(Managed));
     let router = ui::editor::routes::router(st.clone());
     for (coll, d) in [
         ("application", doc! {"name": "zapp", "appCode": "zapp", "clientCode": "ZZ1"}),
@@ -107,7 +118,7 @@ impl Env {
 }
 
 #[tokio::test]
-async fn only_a_system_caller_with_the_authority_may_purge() {
+async fn only_a_managing_client_with_the_authority_may_purge_a_client() {
     let e = env();
     let (s, b) = e.purge(None, PURGERS, "/api/ui/purge/client/ZZ1?dryRun=false").await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "{b}");
@@ -115,10 +126,19 @@ async fn only_a_system_caller_with_the_authority_may_purge() {
     assert_eq!(s, StatusCode::FORBIDDEN, "{b}");
     let (s, b) = e.purge(Some(SYSTEM), "Authorities.Client_DELETE", "/api/ui/purge/app/zapp?dryRun=false").await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{b}");
-    let (s, b) = e.purge(Some("LZCLA"), PURGERS, "/api/ui/purge/client/ZZ1?dryRun=false").await;
+    // LZCLA does not manage ZZ1, and ZZ1 never purges itself.
+    for caller in ["LZCLA", "ZZ1"] {
+        let (s, b) = e.purge(Some(caller), PURGERS, "/api/ui/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{caller}: {b}");
+        assert!(b.contains("only a client that manages ZZ1"), "{b}");
+    }
+    let (s, b) = e.purge(Some("LZCLA"), PURGERS, "/api/ui/purge/app/zapp?dryRun=false").await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{b}");
     assert!(b.contains("SYSTEM client only"), "{b}");
     assert_eq!(e.total(), 7, "a refused purge deleted documents");
+    // LZCLA manages ZZ10: its dry run answers.
+    let (s, b) = e.purge(Some("LZCLA"), PURGERS, "/api/ui/purge/client/ZZ10").await;
+    assert_eq!(s, StatusCode::OK, "{b}");
 }
 
 #[tokio::test]

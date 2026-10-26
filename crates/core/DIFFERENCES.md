@@ -559,6 +559,12 @@ the evictions each write publishes included. Tags are the parity script's case n
   name on every instance, the deleted definitions' caches, the affected apps' page caches, the
   engines' table and index caches of the affected apps' storages, and the inheritance,
   dependency and storage reference caches.
+  Two later rules (2026-10-26): a collection of 64 MB or more is read only through its index on
+  `objectAppCode` or `appCode` (as the ui purge does: a full scan of a big `version` collection
+  took minutes a call on dev), and caches are evicted only when the purge dropped a database or
+  deleted a document or row.
+  Who may purge (2026-10-26): a client only by a client that manages it (security's
+  `doesClientManageClientCode`), never by itself and never SYSTEM; an app only by SYSTEM.
 
 Java's own behaviour kept (not differences, listed so nobody "fixes" them by accident):
 `TransportService` exports and imports schemas, storages, functions, templates, event

@@ -383,3 +383,11 @@ The write path is the `overridable` crate's, so its differences hold here too
     and the SSR caches whole) and, by name on every instance, the deleted definitions' caches
     on both surfaces, each affected app's page, OUI, index, manifest and properties caches,
     its URI patterns and the inheritance order.
+    Two later rules (2026-10-26, after the first dev dry run timed out): a collection of 64 MB
+    or more is read only through its index on `objectAppCode` or `appCode` (an app purge
+    filters on that field alone; a client purge on `{field: {$in: every value of it, null},
+    clientCode}`), because `ui.version` is 27 GB on dev and the `$or` scanned it whole (217 s
+    a call, now 2 to 3 s); and the evictions run only when the purge deleted something, so a
+    sweep of thousands of empty clients does not keep the environment's caches cold.
+    Who may purge (2026-10-26): a client only by a client that manages it (security's
+    `doesClientManageClientCode`), never by itself and never SYSTEM; an app only by SYSTEM.
