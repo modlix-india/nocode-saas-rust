@@ -528,6 +528,20 @@ impl MySqlAppDataService {
         Ok(pool)
     }
 
+    /// The pool of a connection's server; `None` is the configured default server (the admin
+    /// purge lists and drops tenant schemas there too).
+    async fn server_pool(&self, conn: Option<&Connection>) -> AppDataResult<MySqlPool> {
+        match conn {
+            Some(c) => self.pool(Some(c)).await,
+            None => {
+                let mut details = Document::new();
+                details.insert("useDefaultConnection".into(), Value::Bool(true));
+                let default = Connection { id: "__default__".into(), connection_details: Some(details), ..Default::default() };
+                self.pool(Some(&default)).await
+            }
+        }
+    }
+
     /// `database(clientCode, storage)`: the data client's schema on the request's surface.
     fn database(&self, cx: &Ctx, client_code: &str, storage: &Storage) -> AppDataResult<String> {
         database_name(&data_client_code(cx, client_code, storage), &storage.app_code, cx.draft)
@@ -2090,6 +2104,33 @@ impl AppDataEngine for MySqlAppDataService {
         let name = database_name(client_code, app_code, true)?;
         let pool = self.pool(conn).await?;
         Ok(execute_raw(&pool, &format!("DROP DATABASE IF EXISTS `{name}`")).await.is_ok())
+    }
+
+    async fn database_names(&self, conn: Option<&Connection>) -> AppDataResult<Vec<String>> {
+        let pool = self.server_pool(conn).await?;
+        let names: Vec<String> =
+            sqlx::query_scalar("SELECT CAST(schema_name AS CHAR) FROM information_schema.schemata").fetch_all(&pool).await?;
+        Ok(names)
+    }
+
+    async fn database_rows(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<i64> {
+        let pool = self.server_pool(conn).await?;
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT CAST(COALESCE(SUM(table_rows), 0) AS SIGNED) FROM information_schema.tables WHERE table_schema = ?",
+        )
+        .bind(name)
+        .fetch_one(&pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn drop_database(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<bool> {
+        if !crate::engine::is_tenant_database_name(name) {
+            return Err(AppDataError::internal(format!("IllegalArgumentException: not a tenant schema: {name}")));
+        }
+        let pool = self.server_pool(conn).await?;
+        execute_raw(&pool, &format!("DROP DATABASE IF EXISTS `{name}`")).await?;
+        Ok(true)
     }
 
     async fn copy_live_to_draft(

@@ -317,8 +317,9 @@ impl Admin {
     /// the next step rather than dropping the mail.
     async fn invite_url_prefix(&self, app_code: &str, client_id: u64) -> AuthResult<String> {
         let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(String::new()) };
+        let app = &app;
         let url_of = |id: u64| async move {
-            self.app_url_internal(&app, id).await.unwrap_or_else(|e| {
+            self.app_url_internal(app, id).await.unwrap_or_else(|e| {
                 tracing::warn!(error = %e, app = app_code, client = id, "no client URL for the invite mail");
                 String::new()
             })

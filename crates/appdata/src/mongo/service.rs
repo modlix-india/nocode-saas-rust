@@ -1011,6 +1011,28 @@ impl AppDataEngine for MongoAppDataService {
         Ok(client.database(&database_name(client_code, app_code, true)).drop().await.is_ok())
     }
 
+    async fn database_names(&self, conn: Option<&Connection>) -> AppDataResult<Vec<String>> {
+        Ok(self.client(conn).await?.list_database_names().await?)
+    }
+
+    async fn database_rows(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<i64> {
+        let stats = self.client(conn).await?.database(name).run_command(doc! {"dbStats": 1}).await?;
+        Ok(match stats.get("objects") {
+            Some(Bson::Int32(n)) => i64::from(*n),
+            Some(Bson::Int64(n)) => *n,
+            Some(Bson::Double(n)) => *n as i64,
+            _ => 0,
+        })
+    }
+
+    async fn drop_database(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<bool> {
+        if !crate::engine::is_tenant_database_name(name) {
+            return Err(AppDataError::internal(format!("IllegalArgumentException: not a tenant database: {name}")));
+        }
+        self.client(conn).await?.database(name).drop().await?;
+        Ok(true)
+    }
+
     async fn copy_live_to_draft(
         &self,
         cx: &Ctx,

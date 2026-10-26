@@ -798,7 +798,7 @@ pub async fn patch(s: &AdminState, ca: &ContextAuth, id: u64, fields: &serde_jso
 /// id is Java's).
 async fn may_delete(s: &AdminState, ca: &ContextAuth, id: u64, app: &Row) -> AuthResult<bool> {
     let app_client = entity::u64_of(app, "clientId").unwrap_or(0);
-    if ca.is_system_client() || app_client == id {
+    if ca.is_system_client() || app_client == ca.user.client_id() {
         return Ok(true);
     }
     if entity::str_of(app, "appAccessType") == Some("EXPLICIT") {
@@ -859,7 +859,7 @@ async fn delete_everything_related(s: &AdminState, app_id: u64, app_code: &str) 
 pub async fn delete_everything(s: &AdminState, ca: &ContextAuth, id: u64, force: bool) -> AuthResult<bool> {
     let app = read(s, id).await?;
     let app_client = entity::u64_of(&app, "clientId").unwrap_or(0);
-    let allowed = if ca.is_system_client() || app_client == id || Some(app_client) == ca.logged_in_from_client_id {
+    let allowed = if ca.is_system_client() || app_client == ca.user.client_id() || Some(app_client) == ca.logged_in_from_client_id {
         if force {
             true
         } else {

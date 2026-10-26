@@ -1,8 +1,8 @@
 //! ui-editor: the Java ui's editing surface on port 8107. Every controller that is neither the
 //! engine's nor the shell's: CRUD, drafts, fork and publish of applications, pages, styles,
 //! themes, functions, schemas, URI paths and fillers, their version history, publish-all,
-//! transport, an app's wipe, and the controllers' own routes (the application index and mobile
-//! apps, page components and events, function steps). The write path is the `overridable`
+//! transport, an app's wipe, the controllers' own routes (the application index and mobile
+//! apps, page components and events, function steps), and the Rust-only admin purge. The write path is the `overridable`
 //! crate's; this module plugs in the ui document kinds.
 
 pub mod apple;
@@ -11,6 +11,7 @@ pub mod index;
 pub mod jks;
 pub mod kinds;
 pub mod mobile;
+pub mod purge;
 pub mod routes;
 
 use std::sync::Arc;
@@ -56,7 +57,7 @@ pub fn state(store: overridable::Store, cache: CacheService, callers: Arc<dyn Ca
         app_code_suffix: cfg.editor.app_code_suffix.clone(),
         key_bits: 2048,
     };
-    Arc::new(EditorState { callers, cx, ev, applications, pages, styles, themes, functions, schemas, uripaths, fillers, transports, mobile })
+    Arc::new(EditorState { callers, cx, ev, applications, pages, styles, themes, functions, schemas, uripaths, fillers, transports, mobile, purge: None })
 }
 
 /// Loads configuration, connects everything, and serves until shut down.
@@ -88,7 +89,10 @@ pub async fn run() -> Result<()> {
         });
     }
     let callers: Arc<dyn CallerSource> = Arc::new(SecurityCallers { security, server_port: cfg.server.port });
-    let st = state(store, cache.clone(), callers, &cfg, reqwest::Client::new());
+    let mut st = state(store, cache.clone(), callers, &cfg, reqwest::Client::new());
+    if let Some(s) = Arc::get_mut(&mut st) {
+        s.purge = Some(Arc::new(db.clone()));
+    }
     cache.spawn_eviction_listener();
 
     // CORS is answered inside the router, under the security headers, as the Java ui does.

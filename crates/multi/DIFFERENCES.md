@@ -42,6 +42,18 @@ header 400, create by app id, update without a definition, transport export of `
   `Accept-Language` travels with every call made on its behalf, so a passed-on message is in the
   caller's language.
 
+- **Purge routes (new, 2026-10-26, no Java counterpart).** `DELETE /api/multi/purge/client/{code}`
+  and `DELETE /api/multi/purge/application/{code}`, `dryRun` true unless `dryRun=false`. Security
+  is asked first as a dry run and its refusal (409 `SEC.PURGE_REFUSED`: a client that still owns
+  apps, manages clients or has invoices/payments; an app with invoices or apps depending on it)
+  stops the purge before core or ui change anything. Then core (`/api/core/purge/...`: definitions
+  and the `<CLIENT>_<app>` tenant databases), ui (`/api/ui/purge/...`) and security
+  (`/api/security/.../purge/...`) run with the caller's `dryRun`; the answer is
+  `{dryRun, security, core, ui}`. Codes are letters, digits and `_` only (they go into three URLs).
+  Made for the clean-slate wipe of dead test clients and empty apps on local, dev and stage. Unlike
+  `DELETE /api/multi/application/{code}`, an app purge takes every client's definitions and tenant
+  data, not only the caller's.
+
 ## Same on purpose
 
 - Every route needs a signed-in caller (anonymous: a 401 without a `WWW-Authenticate` challenge,

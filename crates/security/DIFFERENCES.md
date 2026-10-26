@@ -440,6 +440,8 @@ the mail still goes out. Apps with LIVE client URL rows are unchanged. Tests:
 
 ## Invite links use only the invited client's URL (RS3, 2026-10-24)
 
+Amended by RS4 below: the app owner's URL now comes between steps 2 and 3.
+
 Supersedes the order in RS2. Java (and RS2) fell back to ANY client's newest LIVE URL of the
 app, so an invite into one tenant could link to another tenant's site; RS2's owner `URL`
 property step had the same reach. Approved by the product owner on 2026-10-24, the invite's
@@ -465,3 +467,51 @@ invoice and wallet mails (`getAppUrl` for the buyer's managing client, by design
 resets (OTP, no link) have no "any client" fallback and are unchanged. Tests:
 `admin::users::invites::tests::invite_link_prefix_is_the_clients_or_the_platforms`,
 `admin::users::invites::live::invite_url_prefix_is_the_invited_clients_or_the_platforms`.
+
+## Invite links fall back to the app owner's URL before the platform host (RS4, 2026-10-26)
+
+Amends RS3 (QA-0593, approved by the product owner on 2026-10-26). RS3 went from the invited
+client's URL straight to the platform address, so an invite into a business with no site of its
+own linked to the bare platform host (`https://adzumptwo.dev.modlix.com`) instead of the app's
+own address (`dev.adzump.ai`, the owner's `URL` app property). The invite's `urlPrefix` is now,
+in order:
+
+1. the invited client's `URL` app property, else its own newest LIVE client URL for the app (as
+   in RS3, `app_url_internal` for the invited client);
+2. else the app OWNER's `URL` app property, else the owner's own newest LIVE client URL for the
+   app (`app_url_internal` for `app.client_id`, read for the server's own mail whoever invites);
+   skipped when the invited client is the owner;
+3. else the app's platform address (`platform_app_url`);
+4. `""` only for an unknown app or with no subdomain ending configured.
+
+What RS3 fixed stays fixed: a sibling tenant's URL (another client's LIVE row or `URL`
+property) is never used, and every answer starts with a scheme with no trailing slash. The
+owner's address is the app's own public host, not another tenant's site. A failure reading
+either URL logs a warning and falls through to the next step. Tests:
+`admin::users::invites::tests::invite_link_prefix_is_the_clients_or_the_platforms`,
+`admin::users::invites::live::invite_url_prefix_is_the_invited_clients_or_the_platforms`.
+
+## App delete checks the caller's client, not the app id (2026-10-26)
+
+`AppService.delete` (`may_delete`) and `deleteEverything` let a caller through when
+`app.getClientId().equals(id)`: the app's owning client id compared with the APP id, true only
+by coincidence. An app's owner could delete it only through the other branches (SYSTEM, the
+`loggedInFromClientId` match, or managing the owner). Both now compare the owner with the
+caller's own client (`ca.user.client_id()`), which is what the check was written to ask. A
+caller that coincidentally passed on a matching id before and owns nothing is now refused.
+
+## Hard purge of a client or an app (new, 2026-10-26)
+
+No Java counterpart. Java's `DELETE clients/{id}` only sets `STATUS_CODE = DELETED`, and its app
+`deleteEverything` removes urls, permissions and access but not the app's roles, profiles,
+packages, policies or wallets, whose RESTRICT keys then make the app delete fail.
+`DELETE /api/security/clients/purge/{idOrCode}` (`Client_DELETE`) and
+`DELETE /api/security/applications/purge/{idOrCode}` (`Application_DELETE`), SYSTEM callers only,
+`dryRun` true unless `dryRun=false`, answer `{dryRun, kind, id, code, tables: {table: rows}, rows}`.
+The rows come from walking the schema's own foreign keys (information_schema) from the root row;
+`SET NULL` keys are left to MySQL; rows go deepest first in one transaction. Refused with 409
+`SEC.PURGE_REFUSED` when a client manages other clients, owns apps or has invoice/payment rows,
+when an app has invoices or other apps depend on it, and when the walk reaches an entity row
+(user, app, profile, role, permission, package) owned by another client or app. The SYSTEM client
+is never purged. One sox row records each purge; every client, user, app and profile cache is
+evicted everywhere. Tests: `admin::clients::purge::tests`.
