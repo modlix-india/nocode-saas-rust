@@ -363,3 +363,23 @@ The write path is the `overridable` crate's, so its differences hold here too
     - The editor saves the lists as they come (they are inside `pathDefinitions`, which it
       copies whole), so nothing changed there.
 
+## Admin purge (Rust only, 2026-10-26)
+
+42. **`DELETE /api/ui/purge/client/{clientCode}?dryRun=` and `DELETE
+    /api/ui/purge/app/{appCode}?dryRun=`** (ui-editor; no Java counterpart) remove every ui
+    trace of a dead client, or of an app for every client (multi's clean-up calls core's, then
+    these, then security's). Only a signed-in SYSTEM caller (`is_system_client`) holding
+    `Authorities.Client_DELETE` (client) or `Authorities.Application_DELETE` (app) may call them
+    (401 anonymous, 403 otherwise); `SYSTEM` and codes that are not letters and digits (an app
+    code may also hold `_`) are a 400. `dryRun` is **true unless it is `false`**: a dry run
+    counts and deletes nothing. A client's purge deletes every document in every `ui`
+    collection (listed at run time: application, page, function, theme, style, uri_path,
+    schema, filler, mobileApp, personalization, version, draft, transport, ...) whose
+    `clientCode` is the client; an app's every document whose `appCode` or `objectAppCode`
+    (versions, drafts) is the app, whoever owns it. The ui has no tenant data. The answer is
+    the report core answers too: `{"dryRun", "mongo": {"ui.<collection>": n}, "mysql": {},
+    "dropped": [], "errors": [...]}`; a failure is a line in `errors` and the rest goes on. A
+    real run then evicts what `DELETE /api/ui/internal/cache` does (every cache Redis knows,
+    and the SSR caches whole) and, by name on every instance, the deleted definitions' caches
+    on both surfaces, each affected app's page, OUI, index, manifest and properties caches,
+    its URI patterns and the inheritance order.

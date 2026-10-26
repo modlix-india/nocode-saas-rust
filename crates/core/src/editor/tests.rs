@@ -159,6 +159,8 @@ impl Catalog for FakeCatalog {
 #[derive(Default)]
 struct FakeData {
     calls: Mutex<Vec<String>>,
+    /// The databases the app-data servers hold, with their rows.
+    tenants: Mutex<Vec<(String, i64)>>,
 }
 
 impl FakeData {
@@ -186,7 +188,61 @@ impl DataStores for FakeData {
     async fn estimated_row_count(&self, _: &str, _: &str) -> i64 {
         3
     }
+    async fn tenant_databases(&self) -> (Vec<super::purge::TenantDb>, Vec<String>) {
+        let dbs = self
+            .tenants
+            .lock()
+            .iter()
+            .map(|(name, _)| super::purge::TenantDb { backend: super::purge::TenantBackend::Mongo, server: "default".into(), conn: None, name: name.clone() })
+            .collect();
+        (dbs, Vec::new())
+    }
+    async fn tenant_rows(&self, db: &super::purge::TenantDb) -> Result<i64, String> {
+        Ok(self.tenants.lock().iter().find(|(n, _)| *n == db.name).map(|(_, r)| *r).unwrap_or(0))
+    }
+    async fn drop_tenant_database(&self, db: &super::purge::TenantDb) -> Result<bool, String> {
+        self.calls.lock().push(format!("drop database {}", db.name));
+        self.tenants.lock().retain(|(n, _)| *n != db.name);
+        Ok(true)
+    }
 }
+
+/// The core MySQL schema: `core_tokens` has a CLIENT_CODE, `core_things` a CLIENT_CODE and an
+/// APP_CODE; rows are (table, client, app).
+#[derive(Default)]
+struct FakeRows {
+    rows: Mutex<Vec<(&'static str, String, String)>>,
+}
+
+impl FakeRows {
+    fn matching(&self, table: &str, column: &str, value: &str) -> usize {
+        self.rows.lock().iter().filter(|r| Self::hit(r, table, column, value)).count()
+    }
+    fn hit(r: &(&'static str, String, String), table: &str, column: &str, value: &str) -> bool {
+        r.0 == table && if column == "CLIENT_CODE" { r.1 == value } else { r.2 == value }
+    }
+}
+
+#[async_trait]
+impl super::purge::RowStore for FakeRows {
+    async fn schema(&self) -> anyhow::Result<String> {
+        Ok("core".into())
+    }
+    async fn tables_with(&self, column: &str) -> anyhow::Result<Vec<String>> {
+        Ok(if column == "CLIENT_CODE" { vec!["core_things".into(), "core_tokens".into()] } else { vec!["core_things".into()] })
+    }
+    async fn count(&self, table: &str, column: &str, value: &str) -> anyhow::Result<u64> {
+        Ok(self.matching(table, column, value) as u64)
+    }
+    async fn delete(&self, table: &str, column: &str, value: &str) -> anyhow::Result<u64> {
+        let n = self.matching(table, column, value);
+        self.rows.lock().retain(|r| !Self::hit(r, table, column, value));
+        Ok(n as u64)
+    }
+}
+
+/// The collections the purge's document store lists (the in-memory store has no listing).
+const PURGE_COLLECTIONS: [&str; 5] = ["function", "storage", "version", "connection", "system.views"];
 
 #[derive(Default)]
 struct FakeTriggers {
@@ -277,6 +333,7 @@ struct Env {
     triggers: Arc<FakeTriggers>,
     catalog: Arc<FakeCatalog>,
     billing: Arc<FakeBilling>,
+    rows: Arc<FakeRows>,
     probe: Arc<LocalCaches<String, u32>>,
 }
 
@@ -355,6 +412,7 @@ fn env_with(block_private_targets: bool) -> Env {
     let triggers = Arc::new(FakeTriggers::default());
     let catalog = Arc::new(FakeCatalog::default());
     let billing = Arc::new(FakeBilling::default());
+    let rows = Arc::new(FakeRows::default());
     let parts = Parts {
         catalog: catalog.clone(),
         kirun_schemas: crate::state::Builtins::kirun_schemas(),
@@ -366,12 +424,18 @@ fn env_with(block_private_targets: bool) -> Env {
         redis: None,
         eviction_channel: "evictionChannel".into(),
         block_private_targets,
+        purge_docs: Some(Arc::new(super::purge::BackendDocs {
+            name: "core".into(),
+            backend: mem.clone(),
+            collections: PURGE_COLLECTIONS.iter().map(|c| c.to_string()).collect(),
+        })),
+        purge_rows: Some(rows.clone()),
     };
     let callers: Arc<dyn CallerSource> = Arc::new(EditorCallers { inner: Arc::new(HeaderCallers) });
     let st = state(store, cache.clone(), callers, parts);
     let router = with_layers(router(st.clone()), Arc::new(HeaderResolver));
     let probe = cache.family();
-    Env { mem, dir, cache, st, router, data, triggers, catalog, billing, probe }
+    Env { mem, dir, cache, st, router, data, triggers, catalog, billing, rows, probe }
 }
 
 impl Env {
@@ -1562,5 +1626,185 @@ mod schedule_view {
         let p = from_cron_preview(Some("61 * * * *"), None, Some("UTC"), now).unwrap();
         assert!(!p.valid);
         assert!(p.error.as_deref().unwrap_or_default().starts_with("The scheduler cannot read this cron"), "{:?}", p.error);
+    }
+}
+
+// ── the admin purge ─────────────────────────────────────────────────
+
+mod purge_routes {
+    use super::*;
+    use mongodb::bson::doc;
+
+    const PURGERS: &str = "Authorities.Client_DELETE,Authorities.Application_DELETE";
+
+    impl Env {
+        async fn purge(&self, client: Option<&str>, auth: &str, uri: &str) -> Answer {
+            self.send("DELETE", uri, client, &[("x-test-auth", auth)], "").await
+        }
+    }
+
+    /// Two clients' documents of two apps, their tenant databases, a few service databases,
+    /// and core rows.
+    fn seeded() -> Env {
+        let e = env();
+        for (coll, d) in [
+            ("function", doc! {"name": "f1", "appCode": "zapp", "clientCode": "ZZ1"}),
+            ("function", doc! {"name": "f2", "appCode": "zapp2", "clientCode": "ZZ1"}),
+            ("function", doc! {"name": "f3", "appCode": "zapp", "clientCode": "ZZ10"}),
+            ("function", doc! {"name": "f4", "appCode": "other", "clientCode": "ZZ10"}),
+            ("storage", doc! {"name": "s1", "uniqueName": "u_s1", "appCode": "zapp", "clientCode": "SYSTEM"}),
+            ("version", doc! {"objectName": "f1", "objectAppCode": "zapp", "clientCode": "ZZ1"}),
+            ("version", doc! {"objectName": "f4", "objectAppCode": "other", "clientCode": "ZZ10"}),
+            ("connection", doc! {"name": "c", "appCode": "zapp2", "clientCode": "ZZ1"}),
+        ] {
+            e.mem.put_raw(coll, d);
+        }
+        *e.data.tenants.lock() = [
+            ("ZZ1_zapp", 4),
+            ("ZZ1_zapp_draft", 1),
+            ("ZZ1_zapp2", 2),
+            ("ZZ10_zapp", 7),
+            ("ZZ10_other_draft", 3),
+            ("core", 100),
+            ("entity_processor", 50),
+            ("ZZ1", 1),
+        ]
+        .iter()
+        .map(|(n, r)| (n.to_string(), *r))
+        .collect();
+        *e.rows.rows.lock() = vec![
+            ("core_tokens", "ZZ1".into(), String::new()),
+            ("core_tokens", "ZZ10".into(), String::new()),
+            ("core_things", "ZZ1".into(), "zapp".into()),
+            ("core_things", "ZZ10".into(), "zapp".into()),
+            ("core_things", "ZZ10".into(), "other".into()),
+        ];
+        e
+    }
+
+    fn names(e: &Env, coll: &str) -> Vec<String> {
+        let mut v: Vec<String> = e
+            .mem
+            .all(coll)
+            .iter()
+            .filter_map(|d| d.get_str("name").or_else(|_| d.get_str("objectName")).ok().map(str::to_string))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// The report as compact JSON (the editor writes it pretty, as Jackson).
+    fn compact(a: &Answer) -> String {
+        to_compact(&JValue::Object(a.obj()))
+    }
+
+    fn tenants(e: &Env) -> Vec<String> {
+        e.data.tenants.lock().iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn only_a_system_caller_with_the_authority_may_purge() {
+        let e = seeded();
+        let a = e.purge(None, PURGERS, "/api/core/purge/client/ZZ1").await;
+        assert_eq!(a.status, StatusCode::UNAUTHORIZED, "{}", a.text());
+        let a = e.purge(Some(SYSTEM), "Authorities.Application_DELETE", "/api/core/purge/client/ZZ1").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        let a = e.purge(Some(SYSTEM), "Authorities.Client_DELETE", "/api/core/purge/app/zapp").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        assert!(a.text().contains("SYSTEM client only"), "{}", a.text());
+        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/app/zapp?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        assert_eq!(names(&e, "function").len(), 4, "a refused purge deleted documents");
+        assert_eq!(tenants(&e).len(), 8, "a refused purge dropped databases");
+    }
+
+    #[tokio::test]
+    async fn bad_codes_and_system_are_refused() {
+        let e = seeded();
+        for uri in [
+            "/api/core/purge/client/SYSTEM",
+            "/api/core/purge/client/system",
+            "/api/core/purge/client/ZZ_1",
+            "/api/core/purge/client/ZZ-1",
+            "/api/core/purge/app/z-app",
+            "/api/core/purge/app/_",
+        ] {
+            let a = e.purge(Some(SYSTEM), PURGERS, &format!("{uri}?dryRun=false")).await;
+            assert_eq!(a.status, StatusCode::BAD_REQUEST, "{uri}: {}", a.text());
+        }
+        assert_eq!(names(&e, "function").len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_client_purge_is_a_dry_run_unless_asked() {
+        let e = seeded();
+        for uri in ["/api/core/purge/client/ZZ1", "/api/core/purge/client/ZZ1?dryRun=true", "/api/core/purge/client/ZZ1?dryRun=yes"] {
+            let a = e.purge(Some(SYSTEM), PURGERS, uri).await;
+            assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+            assert_eq!(
+                compact(&a),
+                r#"{"dryRun":true,"mongo":{"ZZ1_zapp.*":4,"ZZ1_zapp2.*":2,"ZZ1_zapp_draft.*":1,"core.connection":1,"core.function":2,"core.version":1},"mysql":{"core.core_things":1,"core.core_tokens":1},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ1_zapp2"],"errors":[]}"#
+            );
+        }
+        assert_eq!(names(&e, "function").len(), 4, "a dry run deleted documents");
+        assert_eq!(tenants(&e).len(), 8, "a dry run dropped databases");
+        assert_eq!(e.rows.rows.lock().len(), 5, "a dry run deleted rows");
+        assert!(e.data.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_client_purge_deletes_the_clients_traces_only() {
+        let e = seeded();
+        let cached = e.st.functions.cache_name("zapp", "f1", false);
+        let other = e.st.functions.cache_name("zapp2", "f2", true);
+        let table = appdata::engine::storage_cache_names("u_s1")[0].clone();
+        for c in [&cached, &other, &table] {
+            e.warm(c).await;
+        }
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        assert_eq!(
+            compact(&a),
+            r#"{"dryRun":false,"mongo":{"ZZ1_zapp.*":4,"ZZ1_zapp2.*":2,"ZZ1_zapp_draft.*":1,"core.connection":1,"core.function":2,"core.version":1},"mysql":{"core.core_things":1,"core.core_tokens":1},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ1_zapp2"],"errors":[]}"#
+        );
+        assert_eq!(names(&e, "function"), ["f3", "f4"]);
+        assert_eq!(names(&e, "version"), ["f4"]);
+        assert_eq!(names(&e, "storage"), ["s1"], "another client's storage of the app stays");
+        assert!(names(&e, "connection").is_empty());
+        assert_eq!(tenants(&e), ["ZZ10_zapp", "ZZ10_other_draft", "core", "entity_processor", "ZZ1"]);
+        assert_eq!(e.data.calls(), ["drop database ZZ1_zapp", "drop database ZZ1_zapp_draft", "drop database ZZ1_zapp2"]);
+        assert!(e.rows.rows.lock().iter().all(|r| r.1 == "ZZ10"));
+        for c in [&cached, &other, &table] {
+            assert!(!e.is_warm(c).await, "{c} outlived the purge");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_app_purge_reaches_every_client() {
+        let e = seeded();
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/app/zapp?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        assert_eq!(
+            compact(&a),
+            r#"{"dryRun":false,"mongo":{"ZZ10_zapp.*":7,"ZZ1_zapp.*":4,"ZZ1_zapp_draft.*":1,"core.function":2,"core.storage":1,"core.version":1},"mysql":{"core.core_things":2},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ10_zapp"],"errors":[]}"#
+        );
+        assert_eq!(names(&e, "function"), ["f2", "f4"]);
+        assert_eq!(names(&e, "version"), ["f4"]);
+        assert!(names(&e, "storage").is_empty());
+        assert_eq!(tenants(&e), ["ZZ1_zapp2", "ZZ10_other_draft", "core", "entity_processor", "ZZ1"]);
+        assert_eq!(e.rows.rows.lock().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn failures_are_reported_and_the_rest_goes_on() {
+        let e = seeded();
+        e.mem.fail("version", true);
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        let errors = a.obj().get("errors").cloned().unwrap();
+        assert!(to_compact(&errors).contains("core.version"), "{}", a.text());
+        assert_eq!(names(&e, "function"), ["f3", "f4"]);
     }
 }

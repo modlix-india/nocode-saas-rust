@@ -15,6 +15,7 @@ pub mod docs;
 pub mod index;
 pub mod kinds;
 pub mod preview;
+pub mod purge;
 pub mod recovery;
 pub mod routes;
 pub mod schedules;
@@ -23,6 +24,8 @@ pub mod storage;
 
 #[cfg(test)]
 mod local_stack;
+#[cfg(test)]
+mod purge_local_stack;
 #[cfg(test)]
 mod tests;
 
@@ -70,6 +73,9 @@ pub struct Parts {
     /// `[connections] block_private_targets`: whether a saved connection may point at a
     /// private, loopback or internal address (refused while on, the default).
     pub block_private_targets: bool,
+    /// The admin purge's view of the `core` Mongo database and the core MySQL schema.
+    pub purge_docs: Option<Arc<dyn purge::DocStore>>,
+    pub purge_rows: Option<Arc<dyn purge::RowStore>>,
 }
 
 /// The editor's state on a store.
@@ -116,6 +122,8 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
         schedules,
         redis: parts.redis,
         eviction_channel: parts.eviction_channel,
+        purge_docs: parts.purge_docs,
+        purge_rows: parts.purge_rows,
     })
 }
 
@@ -147,6 +155,25 @@ impl LiveData {
 
     async fn conn(&self, app: &str, client: &str) -> Result<Option<appdata::model::Connection>, String> {
         self.catalog.connection("appData", app, client, "APP_DATA").await.map_err(|e| e.text())
+    }
+
+    /// A connection's server, so two connections to one server are listed once: `default` for
+    /// one using the default connection or naming no URL (the engines' default server then).
+    fn server_key(c: &appdata::model::Connection) -> String {
+        if appdata::mysql::db::truthy(c.detail("useDefaultConnection")) {
+            return "default".into();
+        }
+        match c.detail("url").map(appdata::Value::java_string).filter(|u| !u.trim().is_empty() && u != "null") {
+            Some(url) => url,
+            None => "default".into(),
+        }
+    }
+
+    fn backend_engine(&self, backend: purge::TenantBackend) -> Arc<dyn appdata::engine::AppDataEngine> {
+        match backend {
+            purge::TenantBackend::Mongo => self.mongo.clone(),
+            purge::TenantBackend::MySql => self.mysql.clone(),
+        }
     }
 
     /// `services.get(subType)`: an app on another backend has no engine.
@@ -201,6 +228,44 @@ impl DataStores for LiveData {
     async fn estimated_row_count(&self, app: &str, client: &str) -> i64 {
         let conn = self.conn(app, client).await.ok().flatten();
         self.mongo.estimated_row_count(conn.as_ref(), app, client).await
+    }
+
+    async fn tenant_databases(&self) -> (Vec<purge::TenantDb>, Vec<String>) {
+        use purge::TenantBackend as B;
+        // One entry per server: the engines' defaults, then each connection with other details.
+        let mut servers: Vec<(B, String, String, Option<appdata::model::Connection>)> =
+            vec![(B::Mongo, "default".into(), "default".into(), None), (B::MySql, "default".into(), "default".into(), None)];
+        let mut errors = Vec::new();
+        for (backend, sub) in [(B::Mongo, "MONGO"), (B::MySql, "MYSQL")] {
+            match self.catalog.all_app_data_everywhere(sub).await {
+                Ok(conns) => {
+                    for c in conns {
+                        let key = Self::server_key(&c);
+                        if !servers.iter().any(|(b, k, _, _)| *b == backend && *k == key) {
+                            let label = format!("connection {}", c.id);
+                            servers.push((backend, key, label, Some(c)));
+                        }
+                    }
+                }
+                Err(e) => errors.push(format!("{sub} app-data connections: {}", e.text())),
+            }
+        }
+        let mut out = Vec::new();
+        for (backend, _, server, conn) in servers {
+            match self.backend_engine(backend).database_names(conn.as_ref()).await {
+                Ok(names) => out.extend(names.into_iter().map(|name| purge::TenantDb { backend, server: server.clone(), conn: conn.clone(), name })),
+                Err(e) => errors.push(format!("{backend} ({server}): list databases: {e}")),
+            }
+        }
+        (out, errors)
+    }
+
+    async fn tenant_rows(&self, db: &purge::TenantDb) -> Result<i64, String> {
+        self.backend_engine(db.backend).database_rows(db.conn.as_ref(), &db.name).await.map_err(|e| e.to_string())
+    }
+
+    async fn drop_tenant_database(&self, db: &purge::TenantDb) -> Result<bool, String> {
+        self.backend_engine(db.backend).drop_database(db.conn.as_ref(), &db.name).await.map_err(|e| e.to_string())
     }
 }
 
@@ -348,6 +413,8 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         redis,
         eviction_channel: cfg.redis.eviction_channel.clone(),
         block_private_targets: cfg.connections.block_private_targets,
+        purge_docs: Some(Arc::new(exec.mongo.clone())),
+        purge_rows: Some(Arc::new(exec.pool.clone())),
     };
     let security_callers = SecurityCallers { security: security.clone(), server_port: cfg.server.port };
     let callers: Arc<dyn CallerSource> = Arc::new(caller::EditorCallers { inner: Arc::new(SecurityCallers { security, server_port: cfg.server.port }) });

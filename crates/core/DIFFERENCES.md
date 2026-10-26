@@ -533,6 +533,32 @@ the evictions each write publishes included. Tags are the parity script's case n
   document and is unchanged, and the `/api/core/connections/internal/*` routes (other units
   sending mail and opening REST and app-data connections; nginx refuses every `/internal` path
   from outside) still answer the full connection. Core's transports never carried connections.
+- **E16 the admin purge** (2026-10-26, Rust only, no Java counterpart). `DELETE
+  /api/core/purge/client/{clientCode}?dryRun=` and `DELETE /api/core/purge/app/{appCode}?dryRun=`
+  remove every core trace of a dead client, or of an app for every client (multi's clean-up
+  calls them, then ui's and security's). Only a signed-in SYSTEM caller (`is_system_client`)
+  holding `Authorities.Client_DELETE` (client) or `Authorities.Application_DELETE` (app) may
+  call them (401 anonymous, 403 otherwise); `SYSTEM` and codes that are not letters and digits
+  (an app code may also hold `_`) are a 400. `dryRun` is **true unless it is `false`**: a dry
+  run counts and deletes nothing. A client's purge deletes every document in every `core`
+  collection (listed at run time) whose `clientCode` is the client, every row of the core
+  MySQL schema's tables having a `CLIENT_CODE` column with that value, and drops every tenant
+  database and schema `<client>_<anything>` (the name split at its first `_`, the left part
+  the client exactly) on the engines' default servers and every APP_DATA connection's server.
+  An app's purge does the same keyed by app: documents whose `appCode` or `objectAppCode`
+  (versions, drafts) is the app, rows with an `APP_CODE` column, and every
+  `<client>_<app>` / `<client>_<app>_draft`. Names that cannot be tenant databases (no `_`,
+  anything but letters, digits and `_`, the servers' and the platform's own: `admin`,
+  `config`, `local`, `ui`, `core`, `security`, `information_schema`, `mysql`,
+  `performance_schema`, `sys`, `entity_processor`, ...) are never dropped
+  (`appdata::engine::PROTECTED_DATABASES`). The answer is a report, the same shape for both
+  runs: `{"dryRun", "mongo": {"<db>.<collection>": n}, "mysql": {"<schema>.<table>": n},
+  "dropped": [names], "errors": [...]}`; a dropped database is counted as `"<name>.*"` (Mongo
+  `dbStats.objects`, MySQL the `table_rows` estimate). A failure is a line in `errors` and the
+  rest goes on. A real run then evicts what `DELETE /api/core/internal/cache` does and, by
+  name on every instance, the deleted definitions' caches, the affected apps' page caches, the
+  engines' table and index caches of the affected apps' storages, and the inheritance,
+  dependency and storage reference caches.
 
 Java's own behaviour kept (not differences, listed so nobody "fixes" them by accident):
 `TransportService` exports and imports schemas, storages, functions, templates, event

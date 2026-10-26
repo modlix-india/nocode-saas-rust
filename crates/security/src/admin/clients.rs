@@ -22,6 +22,7 @@ pub mod integrations;
 #[cfg(test)]
 mod live_tests;
 pub mod policies;
+pub mod purge;
 pub mod register;
 pub mod registration;
 pub mod rollover;
@@ -44,4 +45,5 @@ pub fn router() -> Router<AdminState> {
         .merge(ssl::router())
         .merge(registration::router())
         .merge(register::router())
+        .merge(purge::router())
 }

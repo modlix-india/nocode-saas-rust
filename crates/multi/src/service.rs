@@ -46,6 +46,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/multi/application", post(create_application))
         .route("/api/multi/application/update", post(update_application))
         .route("/api/multi/application/{app_code_or_id}", delete(delete_application))
+        .route("/api/multi/purge/client/{code}", delete(purge_client))
+        .route("/api/multi/purge/application/{code}", delete(purge_application))
         .with_state(state)
 }
 
@@ -642,4 +644,105 @@ async fn delete_impl(s: &AppState, app_code_or_id: PathArg, h: &HeaderMap) -> Re
     let y = flag(json_or_empty(send(as_caller.apply(s.http.delete(format!("{core_base}/api/core")).query(&[("deleteAppCode", &code)])), "core deleteAll").await?).await?);
     let z = flag(json_or_empty(send(as_caller.apply(s.http.delete(format!("{sec_base}/api/security/applications/everything/{id}"))), "security deleteEverything").await?).await?);
     Ok(Json(json!(x && y && z)).into_response())
+}
+
+// ── Clean-slate purges (no Java counterpart) ──────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PurgeQuery {
+    dry_run: Option<bool>,
+}
+
+/// `DELETE /api/multi/purge/client/{code}?dryRun=`: the client, its users and every row, definition
+/// and tenant database it has, in security, core and ui. A dry run unless `dryRun=false`.
+async fn purge_client(State(s): State<Shared>, code: PathArg, q: QueryArg<PurgeQuery>, h: HeaderMap) -> Response {
+    finish(purge_impl(&s, Purge::Client, code, q, &h).await, "/api/multi/purge/client/{code}")
+}
+
+/// `DELETE /api/multi/purge/application/{code}?dryRun=`: the app and everything of it, for every
+/// client. A dry run unless `dryRun=false`.
+async fn purge_application(State(s): State<Shared>, code: PathArg, q: QueryArg<PurgeQuery>, h: HeaderMap) -> Response {
+    finish(purge_impl(&s, Purge::App, code, q, &h).await, "/api/multi/purge/application/{code}")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Purge {
+    Client,
+    App,
+}
+
+impl Purge {
+    /// Each service's purge route for `code`: security's, core's, ui's.
+    fn paths(self, code: &str) -> (String, String, String) {
+        let (sec, other) = match self {
+            Purge::Client => ("clients", "client"),
+            Purge::App => ("applications", "app"),
+        };
+        (format!("/api/security/{sec}/purge/{code}"), format!("/api/core/purge/{other}/{code}"), format!("/api/ui/purge/{other}/{code}"))
+    }
+}
+
+/// A code goes into three URLs as it is: letters, digits and `_` only.
+fn purge_code_ok(code: &str) -> bool {
+    !code.is_empty() && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Security answers first, always as a dry run, so a purge it refuses (a client that still owns
+/// apps, manages clients or has billing rows; an app others depend on) never reaches core or ui.
+/// Then core (definitions and tenant databases), ui (definitions) and last security (the rows),
+/// each with the caller's `dryRun`. The three reports come back side by side.
+async fn purge_impl(s: &AppState, kind: Purge, code: PathArg, q: QueryArg<PurgeQuery>, h: &HeaderMap) -> Res<Response> {
+    let ca = authenticate(s, h).await?;
+    let fwd = Fwd::from(h)?;
+    let Path(code) = code.map_err(AppError::from)?;
+    let Query(q) = q.map_err(AppError::from)?;
+    if !purge_code_ok(&code) {
+        return Err(Failure::from(input::param_invalid("code", Some("letters, digits and _"))));
+    }
+    let dry_run = q.dry_run != Some(false);
+    let as_caller = fwd.with_token(ca.access_token.as_deref());
+    let (sec_path, core_path, ui_path) = kind.paths(&code);
+    let sec_base = base_for(&s.security_up, "security", &sec_path).await?;
+    let call = |base: &str, path: &str, dry: bool| {
+        as_caller.apply(s.http.delete(format!("{base}{path}")).query(&[("dryRun", if dry { "true" } else { "false" })]))
+    };
+
+    let check = json_or_empty(send(call(&sec_base, &sec_path, true), "security purge check").await?).await?;
+    let core_base = base_for(&s.core_up, "core", &core_path).await?;
+    let core = json_or_empty(send(call(&core_base, &core_path, dry_run), "core purge").await?).await?;
+    let ui_base = base_for(&s.ui_up, "UI", &ui_path).await?;
+    let ui = json_or_empty(send(call(&ui_base, &ui_path, dry_run), "ui purge").await?).await?;
+    let security = if dry_run {
+        check
+    } else {
+        json_or_empty(send(call(&sec_base, &sec_path, false), "security purge").await?).await?
+    };
+    Ok(Json(json!({"dryRun": dry_run, "security": security, "core": core, "ui": ui})).into_response())
+}
+
+#[cfg(test)]
+mod purge_tests {
+    use super::*;
+
+    #[test]
+    fn purge_paths_per_service() {
+        assert_eq!(
+            Purge::Client.paths("ABC1"),
+            ("/api/security/clients/purge/ABC1".into(), "/api/core/purge/client/ABC1".into(), "/api/ui/purge/client/ABC1".into())
+        );
+        assert_eq!(
+            Purge::App.paths("my_app"),
+            ("/api/security/applications/purge/my_app".into(), "/api/core/purge/app/my_app".into(), "/api/ui/purge/app/my_app".into())
+        );
+    }
+
+    #[test]
+    fn purge_codes_cannot_carry_a_path() {
+        assert!(purge_code_ok("ABC1"));
+        assert!(purge_code_ok("my_app"));
+        for bad in ["", "a/b", "a?x=1", "..", "a b", "a%2F"] {
+            assert!(!purge_code_ok(bad), "{bad}");
+        }
+    }
 }
