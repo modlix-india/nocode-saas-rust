@@ -482,6 +482,14 @@ impl Store {
     /// document when live moved on after the draft was taken, with the note a publish appends
     /// to its message. The draft surface and publish share it, so the preview is what a
     /// publish produces.
+    ///
+    /// Rust only: the three sides are whole merged documents. The base is the draft's
+    /// `baseContent` (the merged document it was taken from), else one rebuilt from the version
+    /// history ([`Self::base_from_history`]); live is the stored copy merged onto its current
+    /// base chain. So the draft's own edits (draft against base) are replayed onto what the
+    /// chain serves now, and whatever the chain below shipped since the draft started (SYSTEM's
+    /// fixes under a client's copy) shows through instead of being written back as the
+    /// client's override. Only a legacy draft with no recoverable base takes Java's path.
     pub async fn reconcile(&self, dt: &dyn DocType, draft: &Document, stored: &JMap) -> Result<Reconciled> {
         let content = match draft.get("content") {
             Some(Bson::Document(c)) => bson_conv::doc_to_j(c),
@@ -494,6 +502,45 @@ impl Store {
         stamp_from_stored(&mut draft_entity, stored);
         draft_entity.insert("version".into(), JValue::Int(base_version));
         let unreconciled = |entity: JMap| Reconciled { entity, note: None };
+
+        let recorded = match draft.get(crate::write::draft::BASE_CONTENT) {
+            Some(Bson::Document(b)) => Some(bson_conv::doc_to_j(b)),
+            _ => None,
+        };
+        let base = match recorded {
+            Some(b) => Some(b),
+            None => self.base_from_history(dt, draft, stored, base_version).await?.map(|b| jackson_round_trip(dt.pojo(), &b)),
+        };
+        if let Some(base) = base {
+            let id = str_field(stored, "id").unwrap_or_default().to_string();
+            let Some(live) = self.read_merged_by_id(dt, &id).await? else {
+                return Ok(unreconciled(draft_entity));
+            };
+            let live_map = jackson_round_trip(dt.pojo(), &live);
+            let ignored: HashSet<&str> = RECONCILE_IGNORED.iter().copied().collect();
+            if without_keys(&base, &ignored) == without_keys(&live_map, &ignored) {
+                // Nothing moved under the draft: it is published as it is.
+                draft_entity.insert("version".into(), JValue::Int(stored_version));
+                return Ok(unreconciled(draft_entity));
+            }
+            let merged = three_way::merge(Some(&base), Some(&live_map), Some(&content), &ignored);
+            let mut entity = convert_json(dt.pojo(), &merged.merged);
+            stamp_from_stored(&mut entity, stored);
+            entity.insert("version".into(), JValue::Int(stored_version));
+            let note = reconcile_note(base_version, stored_version, &merged.conflicts);
+            return Ok(Reconciled { entity, note: Some(note) });
+        }
+
+        // A draft saved before its base was recorded, whose history cannot rebuild it: Java's
+        // path, which pins whatever the chain below shipped since the draft started.
+        tracing::warn!(
+            object_type = dt.object_name(),
+            app = str_field(stored, "appCode").unwrap_or_default(),
+            name = str_field(stored, "name").unwrap_or_default(),
+            client = str_field(stored, "clientCode").unwrap_or_default(),
+            base_version,
+            "draft has no recorded or recoverable base; reconciling against the version row only"
+        );
         if stored_version == base_version {
             return Ok(unreconciled(draft_entity));
         }
@@ -522,6 +569,92 @@ impl Store {
         entity.insert("version".into(), JValue::Int(stored_version));
         let note = reconcile_note(base_version, stored_version, &merged.conflicts);
         Ok(Reconciled { entity, note: Some(note) })
+    }
+
+    /// Rust only: the merged document a legacy draft (no `baseContent`) was taken from, rebuilt
+    /// from history: the stored copy as it stood at the draft's `baseVersion` (the row itself
+    /// when it has not moved, else its Version row), over each document of its base chain as it
+    /// stood when the draft started (its newest Version row from before, or the row itself when
+    /// that is still its version; with no such Version row, the row when it was last updated by
+    /// then). `None` when the history cannot say: no start time, no Version row where one is
+    /// needed, or a merge that comes out empty. Best effort: a component patch writes no Version
+    /// row and moves no version, so history cannot see one.
+    pub async fn base_from_history(&self, dt: &dyn DocType, draft: &Document, stored: &JMap, base_version: i64) -> Result<Option<JMap>> {
+        let Some(at) = draft_started_at(draft) else {
+            return Ok(None);
+        };
+        let stored_version = stored.get("version").and_then(JValue::as_i64).unwrap_or(1);
+        let own = if stored_version == base_version {
+            Some(stored.clone())
+        } else {
+            self.version_object(dt, stored, Some(base_version), None).await?.map(|(_, o)| o)
+        };
+        let Some(own) = own else {
+            return Ok(None);
+        };
+        let mut chain = vec![own];
+        let mut cursor = stored.clone();
+        while chain.len() < MAX_CHAIN {
+            let Some(base_cc) = str_field(&cursor, "baseClientCode").map(str::to_string) else {
+                break;
+            };
+            let name = cursor.get("name").cloned().unwrap_or_default();
+            let app = cursor.get("appCode").cloned().unwrap_or_default();
+            let Some(next) = self.base_document(dt, &name, &app, base_cc).await? else {
+                break;
+            };
+            let current_version = next.get("version").and_then(JValue::as_i64).unwrap_or(1);
+            let updated = next.get("updatedAt").and_then(JValue::as_i64);
+            let then = match self.version_object(dt, &next, None, Some(at)).await? {
+                Some((number, _)) if number == current_version => Some(next.clone()),
+                Some((_, object)) => Some(object),
+                None => updated.filter(|u| *u <= pojo::epoch_seconds_of(at.timestamp_millis())).map(|_| next.clone()),
+            };
+            let Some(then) = then else {
+                return Ok(None);
+            };
+            chain.push(then);
+            cursor = next;
+        }
+        let mut current = chain.pop();
+        while let Some(next) = chain.pop() {
+            current = match current {
+                Some(base) => apply_actual_override(dt, next, Some(&base)),
+                None => return Ok(None),
+            };
+        }
+        Ok(current)
+    }
+
+    /// A Version row of `of` (same type, app, name and client), its number and object: the row
+    /// numbered `number`, or the newest one created by `at`.
+    async fn version_object(
+        &self,
+        dt: &dyn DocType,
+        of: &JMap,
+        number: Option<i64>,
+        at: Option<mongodb::bson::DateTime>,
+    ) -> Result<Option<(i64, JMap)>> {
+        let mut filter = doc! {
+            "objectType": dt.object_name().to_uppercase(),
+            "objectAppCode": str_field(of, "appCode").unwrap_or_default(),
+            "objectName": str_field(of, "name").unwrap_or_default(),
+            "clientCode": str_field(of, "clientCode").unwrap_or_default(),
+        };
+        if let Some(n) = number {
+            filter.insert("versionNumber", n);
+        }
+        if let Some(at) = at {
+            filter.insert("createdAt", doc! {"$lte": at});
+        }
+        let sort = doc! {"versionNumber": -1, "createdAt": -1};
+        let found = self.inner.backend.find_one("version", filter, Some(sort)).await?;
+        let Some(found) = found else { return Ok(None) };
+        let n = found.get("versionNumber").map(|b| bson_conv::to_j(b).as_i64().unwrap_or(0)).unwrap_or(0);
+        Ok(match found.get("object") {
+            Some(Bson::Document(o)) => Some((n, convert_json(dt.pojo(), &bson_conv::doc_to_j(o)))),
+            _ => None,
+        })
     }
 
     /// The read of `readInternal(name, appCode, urlClientCode, clientCode)` up to, not
@@ -579,6 +712,28 @@ pub fn unique_id(entity: &JMap) -> String {
     }
     out.reverse();
     String::from_utf8(out).unwrap_or_default()
+}
+
+/// When a draft started, as its dates are stored: its `createdAt`, else (a draft written before
+/// drafts were stamped) the time in its ObjectId.
+fn draft_started_at(draft: &Document) -> Option<mongodb::bson::DateTime> {
+    match (draft.get("createdAt"), draft.get("_id")) {
+        (Some(Bson::DateTime(d)), _) => Some(*d),
+        (_, Some(Bson::ObjectId(o))) => {
+            Some(mongodb::bson::DateTime::from_millis(pojo::stored_millis_for_utc_now(o.timestamp().timestamp_millis())))
+        }
+        _ => None,
+    }
+}
+
+/// `m` as a draft's content is stored and read back (`jackson_document`, then `doc_to_j`), so
+/// a document read now compares equal to one recorded earlier.
+fn jackson_round_trip(p: &Pojo, m: &JMap) -> JMap {
+    bson_conv::doc_to_j(&crate::write::persist::jackson_document(p, m))
+}
+
+fn without_keys(m: &JMap, ignored: &HashSet<&str>) -> JMap {
+    m.iter().filter(|(k, _)| !ignored.contains(k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
 /// `stampFromStored`: identity and bookkeeping from the stored document.
