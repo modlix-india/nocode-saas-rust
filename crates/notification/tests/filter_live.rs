@@ -64,6 +64,7 @@ async fn a_filtered_notification_reaches_only_the_users_holding_the_authority() 
             email: mails.clone(),
             in_app: Arc::new(InAppService { dao: Dao::new(pool.clone()), push: push.clone() }),
             push,
+            prefs: None,
         };
         let message = |filter: &str| {
             json!({"appCode": "appbuilder", "clientCode": "SYSTEM", "urlClientCode": "SYSTEM", "targetType": "User Id",

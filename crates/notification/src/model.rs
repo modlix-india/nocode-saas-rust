@@ -198,6 +198,10 @@ pub struct CoreNotification {
     pub language_expression: Option<String>,
     /// `None` when absent or null; a channel mapped to null is `Some(None)`.
     pub channel_templates: Option<Vec<(String, Option<NotificationTemplate>)>>,
+    /// `channelEnabled`: per channel, whether a person who made no choice gets it (`true` or
+    /// absent: on until they turn it off; `false`: off until they turn it on). Rust only: Java
+    /// stored it and never read it.
+    pub channel_enabled: Vec<(String, bool)>,
 }
 
 impl CoreNotification {
@@ -227,12 +231,17 @@ impl CoreNotification {
             }
             Some(_) => return Err(Unreadable("Cannot deserialize channelTemplates".into())),
         };
+        let channel_enabled = match m.get("channelEnabled") {
+            Some(Value::Object(ce)) => ce.iter().filter_map(|(k, v)| v.as_bool().map(|b| (k.clone(), b))).collect(),
+            _ => Vec::new(),
+        };
         Ok(Self {
             name: string_field(m, "name")?,
             notification_type,
             default_language: string_field(m, "defaultLanguage")?,
             language_expression: string_field(m, "languageExpression")?,
             channel_templates,
+            channel_enabled,
         })
     }
 
@@ -269,6 +278,11 @@ impl CoreNotification {
 
     pub fn has_channel(&self, channel: &str) -> Option<bool> {
         self.channel_templates.as_ref().map(|c| c.iter().any(|(k, _)| k == channel))
+    }
+
+    /// Whether `channel` reaches a person who made no choice about it (`channelEnabled`).
+    pub fn on_by_default(&self, channel: &str) -> bool {
+        self.channel_enabled.iter().find(|(k, _)| k == channel).map_or(true, |(_, on)| *on)
     }
 
     /// `channelTemplates.get(channel)`: `None` when the channel is absent or mapped to null.

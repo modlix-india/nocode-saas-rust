@@ -12,6 +12,7 @@
 
 pub mod calls;
 pub mod catalogue;
+pub mod choices;
 pub mod config;
 pub mod dao;
 pub mod email;
@@ -96,6 +97,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         email: Arc::new(EmailService { block_private_targets: cfg.email.block_private_targets, ..EmailService::new(&cfg.email.sendgrid_url)? }),
         in_app: Arc::new(InAppService { dao: dao.clone(), push: push.clone() }),
         push: push.clone(),
+        prefs: Some(Arc::new(dao.clone())),
     });
     let state = Arc::new(AppState {
         security: SecurityClient::from_config(&cfg.security, registry.as_ref())?,

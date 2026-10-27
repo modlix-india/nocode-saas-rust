@@ -103,6 +103,7 @@ async fn data_and_in_app_notifications_reach_both_instances_through_redis() {
             email: Arc::new(NoMail),
             in_app: Arc::new(InAppService { dao: dao.clone(), push: push_a.clone() }),
             push: push_a.clone(),
+            prefs: None,
         };
         let mut tab_a = hub_a.subscribe("142-rsapp".into());
         let mut tab_b = hub_b.subscribe("142-rsapp".into());

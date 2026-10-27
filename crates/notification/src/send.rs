@@ -7,23 +7,26 @@
 //!    template. Neither: nothing is sent.
 //! 3. The recipients from security's real user directory (never the draft surface), only those
 //!    holding `filterAuthorization` when the message names one (Rust only).
-//! 4. Email to each recipient, then in-app to all of them.
+//! 4. Each recipient's choices for the app ([`crate::choices`], Rust only: Java read none):
+//!    per channel and the message's category, else the definition's `channelEnabled` default.
+//! 5. Email to each recipient who wants it, then in-app to all who want it.
 //!
 //! A missing definition or no recipients ends the run quietly (logged). Anything that fails
-//! ends it with an error, which the listener logs; the message is acked either way. User
-//! preferences play no part: Java reads none when sending.
+//! ends it with an error, which the listener logs; the message is acked either way.
 //!
 //! A data notification (`kind: DATA`, Rust only) skips steps 1, 2 and 4: once it is found not
 //! expired, the recipients come from the same security call, and one frame, `event:<eventName>` with
 //! `{"event","data","id","sentAt"}`, goes to their open streams. Nothing is stored, and it is
 //! never retried: a user who is not online misses it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 
 use crate::calls::{CoreClient, DefinitionRead, DirectoryClient};
+use crate::choices::{wants, PreferenceSource};
 use crate::email::{EmailSink, EMAIL_TEMPLATE_NAME};
 use crate::inapp::{InAppSink, INAPP_TEMPLATE_NAME};
 use crate::model::{CoreNotification, NotificationConnection, NotificationUser, QueueMessage, UsersListRequest};
@@ -57,6 +60,8 @@ pub struct SendService {
     pub in_app: Arc<dyn InAppSink>,
     /// Where data notifications go.
     pub push: Arc<Push>,
+    /// The recipients' choices; `None` sends to everyone as Java did (tests).
+    pub prefs: Option<Arc<dyn PreferenceSource>>,
 }
 
 /// Now, in epoch milliseconds.
@@ -120,23 +125,41 @@ impl SendService {
             return Ok(Outcome::NoUsers);
         }
 
+        let prefs = self.choices(qob, &users).await?;
+        let category = qob.notification_category.as_deref();
+        let wanting = |channel: &str| -> Vec<NotificationUser> {
+            users
+                .iter()
+                .filter(|u| wants(u.id.and_then(|id| prefs.get(&(id as u64))), channel, category, &notification))
+                .cloned()
+                .collect()
+        };
+
         let empty = Map::new();
         let payload = qob.payload.as_ref().unwrap_or(&empty);
         let mut emails = 0;
         if is_email {
             let mail = conn.mail.as_ref().expect("checked above");
-            for user in &users {
+            for user in &wanting(EMAIL_TEMPLATE_NAME) {
                 self.email.send_email(user, mail, &notification, payload).await?;
                 emails += 1;
             }
         }
-        if !is_in_app {
+        let in_app_users = if is_in_app { wanting(INAPP_TEMPLATE_NAME) } else { Vec::new() };
+        if in_app_users.is_empty() {
             return Ok(Outcome::Sent { emails, in_app: false });
         }
-        self.in_app
-            .send_in_app(&users, &notification, qob.app_code.as_deref(), qob.notification_category.as_deref(), payload)
-            .await?;
+        self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await?;
         Ok(Outcome::Sent { emails, in_app: true })
+    }
+
+    /// The recipients' preference maps in the message's app; none without a source or an app.
+    async fn choices(&self, qob: &QueueMessage, users: &[NotificationUser]) -> Result<HashMap<u64, Map<String, Value>>> {
+        let (Some(source), Some(app)) = (&self.prefs, qob.app_code.as_deref().filter(|a| !a.is_empty())) else {
+            return Ok(HashMap::new());
+        };
+        let ids: Vec<u64> = users.iter().filter_map(|u| u.id).filter(|id| *id >= 0).map(|id| id as u64).collect();
+        source.preferences(app, &ids).await
     }
 
     /// The recipients from security's user directory, as Java's `UsersListRequest` per target

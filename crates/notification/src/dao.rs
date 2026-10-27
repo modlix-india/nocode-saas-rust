@@ -6,6 +6,8 @@
 //! Timestamps are read as epoch seconds (`CommonsSerializationModule` writes a `LocalDateTime`
 //! as its UTC epoch second) and written as the current instant in the session's UTC.
 
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 use sqlx::mysql::MySqlPool;
@@ -193,6 +195,46 @@ impl Dao {
             q = q.bind(*id);
         }
         Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// The rows of these users that are theirs and still unread, or all of the user's unread
+    /// rows in the app when `ids` is `None`, marked read now. Answers how many changed.
+    pub async fn mark_read_of(&self, app_code: &str, user_id: u64, ids: Option<&[u64]>) -> Result<u64> {
+        let mut sql = String::from("UPDATE notification_inapp SET READ_AT = CURRENT_TIMESTAMP WHERE APP_CODE = ? AND USER_ID = ? AND READ_AT IS NULL");
+        if let Some(ids) = ids {
+            if ids.is_empty() {
+                return Ok(0);
+            }
+            sql.push_str(&format!(" AND ID IN ({})", vec!["?"; ids.len()].join(", ")));
+        }
+        let mut q = sqlx::query(&sql).bind(app_code).bind(user_id);
+        for id in ids.unwrap_or_default() {
+            q = q.bind(*id);
+        }
+        Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// The preference maps of these users in the app, for the sender. Where a user has more
+    /// than one row (there is no unique key), the newest wins.
+    pub async fn preferences_of(&self, app_code: &str, user_ids: &[u64]) -> Result<HashMap<u64, Map<String, Value>>> {
+        let mut out = HashMap::new();
+        if user_ids.is_empty() {
+            return Ok(out);
+        }
+        let sql = format!(
+            "SELECT USER_ID, CAST(PREFERENCE AS CHAR) AS P FROM notification_preference WHERE APP_CODE = ? AND USER_ID IN ({}) ORDER BY ID",
+            vec!["?"; user_ids.len()].join(", ")
+        );
+        let mut q = sqlx::query(&sql).bind(app_code);
+        for id in user_ids {
+            q = q.bind(*id);
+        }
+        for r in q.fetch_all(&self.pool).await? {
+            let uid: u64 = r.try_get("USER_ID")?;
+            let p: Option<String> = r.try_get("P")?;
+            out.insert(uid, preference_map(p.as_deref()));
+        }
+        Ok(out)
     }
 
     /// `getNotificationPreferenceRecord`: jOOQ's `fetchOne` fails when more than one row
