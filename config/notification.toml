@@ -1,10 +1,8 @@
 # notification on the local stack. Secrets (MODLIX__DATABASE__PASSWORD, MODLIX__REDIS__URL) come
 # from config/local.toml.
 #
-# Consumes SCRATCH queues only. The real notifications1..3 hold ~600 local messages nobody has
-# consumed (Java notification is not running locally); consuming them would send real email to
-# real addresses. Switch [notifications] to the real queues (and declare = false) only on purpose.
-# Registers as NOTIFICATION-RS so it takes no traffic meant for Java notification.
+# Consumes the real notifications1..3 queues core publishes to (since 2026-10-27, after the ~700
+# old local messages were purged). Registers as NOTIFICATION.
 
 [server]
 port = 8114
@@ -49,9 +47,9 @@ username = "guest"
 password = "guest"
 
 [notifications]
-queues = "rs_scratch_notifications1,rs_scratch_notifications2,rs_scratch_notifications3"
-exchange = "rs_scratch_notifications"
-declare = true
+queues = "notifications1,notifications2,notifications3"
+exchange = "notifications"
+declare = false
 prefetch = 10
 
 [sse]

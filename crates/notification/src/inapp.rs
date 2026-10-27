@@ -94,7 +94,8 @@ impl InAppService {
     }
 
     /// `readNotifications`: one page, newest first; the rows returned are then marked read
-    /// (the page still shows them as they were before).
+    /// (the page still shows them as they were before), unless `mark_read` is false (Rust only:
+    /// an app that marks each row read itself, through [`Self::mark_read`]).
     pub async fn read(
         &self,
         app_code: Option<&str>,
@@ -102,17 +103,26 @@ impl InAppService {
         category: Option<&str>,
         pageable: &Pageable,
         user_id: u64,
+        mark_read: bool,
     ) -> Result<Value> {
         let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else {
             return Ok(page_json(Vec::new(), pageable));
         };
         let filter = InAppFilter { app_code, user_id, notification_type: not_blank(notification_type), category: not_blank(category) };
         let rows = self.dao.page(&filter, pageable.size, pageable.offset()).await?;
-        if !rows.is_empty() {
+        if mark_read && !rows.is_empty() {
             let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
             self.dao.mark_read(&ids).await?;
         }
         Ok(page_json(rows.iter().map(list_item_json).collect(), pageable))
+    }
+
+    /// The caller's own unread rows in the app marked read: these `ids`, or all of them when
+    /// `ids` is `None`. Rows of other users or apps are left alone. Answers how many changed;
+    /// 0 for a blank app code.
+    pub async fn mark_read(&self, app_code: Option<&str>, ids: Option<&[u64]>, user_id: u64) -> Result<u64> {
+        let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else { return Ok(0) };
+        self.dao.mark_read_of(app_code, user_id, ids).await
     }
 }
 

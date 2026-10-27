@@ -175,6 +175,22 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   that expression, on both channels: the emails go only to them and only they get a
   `notification_inapp` row and the bell entry. A blank or absent filter changes nothing. A
   filter nobody meets ends the run as "no recipients" (logged, nothing sent).
+- **N16. People's choices are applied when sending** (Kiran, 2026-10-27, for LoopZump: no email
+  unless a person opts in, while other apps keep email on unless a person opts out). Java stored
+  the preference map and the definition's `channelEnabled` and read neither. Now, per recipient
+  and channel (`email`, `inapp`), the sender takes the person's preference map for the message's
+  app: `categories.<notificationCategory>.<channel>`, else `channels.<channel>`, else the
+  definition's `channelEnabled.<channel>` (absent or `true`: on until the person turns it off;
+  `false`: off until they turn it on). Values that are not `true`/`false` count as no choice, and
+  other keys in the map are left to the app. With no map and no `channelEnabled` (every
+  definition before this), everyone gets every channel, as before. Code: `src/choices.rs`.
+- **N17. An app may mark rows read itself** (Kiran, 2026-10-27: the app's bell decides whether
+  opening it reads everything, or each row has a Read button and See all opens a list).
+  `GET /notifications?markRead=false` lists without marking (any other value, or none, marks as
+  Java did). `POST /read?appCode=` (appCode also from the header) with `{"ids": [..]}` (numbers or
+  digit strings) or `{"all": true}` marks the caller's own unread rows in that app and answers
+  `{"read": <rows changed>}`; other users' rows and other apps are left alone; a body naming
+  neither is a 400 `COMMON.PARAM_MISSING`, ids that are not whole numbers a 400.
 
 ## Data notifications (Rust only, 2026-10-22)
 
