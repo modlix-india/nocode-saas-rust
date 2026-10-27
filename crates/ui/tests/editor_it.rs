@@ -1268,6 +1268,124 @@ async fn a_draft_for_a_target_is_an_unpublished_copy_then_that_copys_draft() {
     assert_eq!(path(&merged, &["componentDefinition", "txt", "properties", "text"]), Some(&s("Draft text")));
 }
 
+// ── A client's page draft published over a SYSTEM page that moved (Rust only) ──
+// QA-0637 (NAGEN5): the client's draft held the whole merged page, and its publish stored every
+// change SYSTEM shipped while the draft was open as the client's override: old styles, and
+// deletions of the components SYSTEM added. Only the client's own edits may be stored.
+
+fn color_style(color: &str) -> String {
+    format!(r#"{{"styleProperties":{{"s1":{{"resolutions":{{"ALL":{{"color":{{"value":"{color}"}}}}}}}}}}}}"#)
+}
+
+fn txt_color(page: &JMap) -> Option<JValue> {
+    path(page, &["componentDefinition", "txt", "styleProperties", "s1", "resolutions", "ALL", "color", "value"]).cloned()
+}
+
+/// SYSTEM's page with a styled text, and CP_MID's published copy overriding the button label.
+async fn system_and_client_copy(e: &Env) -> (String, String) {
+    let base = system_page(e);
+    assert_eq!(patch_for(e, SYSTEM, &base, "txt", &color_style("red"), "").await.status, StatusCode::OK);
+    assert_eq!(patch_for(e, SYSTEM, &base, "btn", &label_data("Client label"), &format!("?clientCode={CP_MID}")).await.status, StatusCode::OK);
+    let mid = str_field(&stored_for(e, CP_MID)[0], "id").unwrap().to_string();
+    (base, mid)
+}
+
+/// The client's editor: reads its draft view, changes it, saves it as the whole page.
+async fn client_draft(e: &Env, mid: &str, change: impl FnOnce(&mut JMap)) {
+    let r = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}?draft=true"), "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let mut page = r.obj();
+    change(&mut page);
+    let r = e.as_client(CP_MID, "PUT", &format!("/api/ui/pages/{mid}?draft=true"), &to_compact(&JValue::Object(page))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+}
+
+/// SYSTEM ships after the client's draft started: a style change and a new component.
+async fn system_ships(e: &Env, base: &str) {
+    assert_eq!(patch_for(e, SYSTEM, base, "txt", &color_style("blue"), "").await.status, StatusCode::OK);
+    let add = r#"{"componentKey":"extra","componentData":{"type":"Text","name":"extra","properties":{"text":"New from SYSTEM"}},"parentKey":"root","message":"m"}"#;
+    assert_eq!(e.call("POST", &format!("/api/ui/pages/{base}/components"), add).await.status, StatusCode::OK);
+}
+
+async fn publish_as_client(e: &Env, mid: &str) -> JMap {
+    let r = e.as_client(CP_MID, "POST", &format!("/api/ui/pages/{mid}/publish"), "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}"), "").await.obj()
+}
+
+fn comp_mut<'a>(page: &'a mut JMap, key: &str) -> &'a mut JMap {
+    page.get_mut("componentDefinition").and_then(|c| c.as_object_mut()).and_then(|c| c.get_mut(key)).and_then(|c| c.as_object_mut()).unwrap()
+}
+
+#[tokio::test]
+async fn a_client_draft_publish_stores_only_the_clients_edit_and_system_changes_show_through() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        comp_mut(p, "txt").insert("properties".into(), JValue::Object(obj(r#"{"text":"Client text"}"#)));
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert_eq!(txt_color(&merged), Some(s("blue")), "SYSTEM's style change shows through");
+    assert_eq!(path(&merged, &["componentDefinition", "extra", "properties", "text"]), Some(&s("New from SYSTEM")));
+    assert_eq!(path(&merged, &["componentDefinition", "root", "children", "extra"]), Some(&JValue::Bool(true)));
+    assert_eq!(path(&merged, &["componentDefinition", "txt", "properties", "text"]), Some(&s("Client text")));
+    assert_eq!(btn_label(&merged), Some(s("Client label")), "the client's earlier override survives");
+    let stored = &stored_for(&e, CP_MID)[0];
+    assert_eq!(component_keys(stored), vec!["btn", "txt"], "no SYSTEM component pinned, none deleted");
+    let txt = path(stored, &["componentDefinition", "txt"]).and_then(JValue::as_object).unwrap();
+    assert!(map_is_empty(txt.get("styleProperties")), "the old style is not stored: {:?}", txt.get("styleProperties"));
+    // A later SYSTEM change still reaches the client.
+    assert_eq!(patch_for(&e, SYSTEM, &base, "txt", &color_style("green"), "").await.status, StatusCode::OK);
+    let again = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}"), "").await.obj();
+    assert_eq!(txt_color(&again), Some(s("green")));
+}
+
+#[tokio::test]
+async fn a_client_draft_deleting_a_component_keeps_the_deletion_and_systems_addition() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        p.get_mut("componentDefinition").and_then(|c| c.as_object_mut()).unwrap().shift_remove("btn");
+        comp_mut(p, "root").get_mut("children").and_then(|c| c.as_object_mut()).unwrap().shift_remove("btn");
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert!(path(&merged, &["componentDefinition", "btn"]).is_none(), "the client's deletion is kept");
+    assert!(path(&merged, &["componentDefinition", "root", "children", "btn"]).is_none());
+    assert_eq!(path(&merged, &["componentDefinition", "root", "children", "extra"]), Some(&JValue::Bool(true)), "SYSTEM's new child is not deleted");
+    assert!(path(&merged, &["componentDefinition", "extra"]).is_some());
+    assert_eq!(txt_color(&merged), Some(s("blue")));
+}
+
+#[tokio::test]
+async fn a_client_draft_changing_what_system_also_changed_wins() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        let style = obj(&color_style("purple"));
+        comp_mut(p, "txt").insert("styleProperties".into(), style["styleProperties"].clone());
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert_eq!(txt_color(&merged), Some(s("purple")), "the client's own change wins");
+    assert!(path(&merged, &["componentDefinition", "extra"]).is_some(), "the rest of SYSTEM's ship shows through");
+    let stored = &stored_for(&e, CP_MID)[0];
+    assert_eq!(component_keys(stored), vec!["btn", "txt"]);
+    assert!(str_field(stored, "message").unwrap_or("").contains("draft kept over live at componentDefinition.txt.styleProperties"), "{:?}", stored.get("message"));
+}
+
+fn map_is_empty(v: Option<&JValue>) -> bool {
+    match v {
+        None | Some(JValue::Null) => true,
+        Some(JValue::Object(m)) => m.is_empty(),
+        _ => false,
+    }
+}
+
 #[tokio::test]
 async fn the_seed_is_read_as_the_page_service_reads_it() {
     let e = client_patch_env();
@@ -1901,4 +2019,82 @@ async fn publish_versions_and_transport_cover_every_ui_kind() {
     }
     let resp = e.router.clone().oneshot(req.body(Body::from(json.body.clone())).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+// ── Page change sets (`PATCH /api/ui/pages/{id}/changes`) ───────────
+// Several components, event functions and fields of a page in one write FOR a client: the
+// client's copy holds only what changed, never the whole page.
+
+async fn changes_for(e: &Env, id: &str, body: &str, query: &str) -> Answer {
+    e.call("PATCH", &format!("/api/ui/pages/{id}/changes{query}"), body).await
+}
+
+#[tokio::test]
+async fn a_change_set_for_a_client_stores_only_the_changed_entries() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let body = r#"{"components":{"btn":{"key":"btn","name":"btn","type":"Button","properties":{"label":"Go MID"}},"txt":null},
+        "eventFunctions":{"onGo":{"name":"onGo","steps":{}}},"fields":{"title":"MID title"},"message":"m"}"#;
+    let r = changes_for(&e, &base, body, &format!("?clientCode={CP_MID}")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let system = &stored_for(&e, SYSTEM)[0];
+    assert_eq!(btn_label(system), Some(s("Submit")), "the base page is untouched");
+    assert_eq!(component_keys(system), vec!["btn", "root", "txt"]);
+    let mid = &stored_for(&e, CP_MID)[0];
+    assert_eq!(str_field(mid, "baseClientCode"), Some(SYSTEM));
+    assert!(!component_keys(mid).contains(&"root".to_string()), "an unchanged component is not stored: {:?}", component_keys(mid));
+    let merged = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{}", str_field(mid, "id").unwrap()), "").await.obj();
+    assert_eq!(btn_label(&merged), Some(s("Go MID")));
+    assert_eq!(component_keys(&merged), vec!["btn", "root"], "the removed component is gone from the client's page");
+    assert!(path(&merged, &["eventFunctions", "onGo"]).is_some());
+    assert_eq!(str_field(&merged, "title"), Some("MID title"));
+    // A later SYSTEM change to a component the client never changed still reaches the client.
+    assert_eq!(e.call("PATCH", &format!("/api/ui/pages/{base}/components/root"), r#"{"componentData":{"properties":{"gap":"8px"}}}"#).await.status, StatusCode::OK);
+    let merged = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{}", str_field(mid, "id").unwrap()), "").await.obj();
+    assert_eq!(path(&merged, &["componentDefinition", "root", "properties", "gap"]), Some(&s("8px")));
+}
+
+#[tokio::test]
+async fn a_change_set_on_a_clients_draft_checks_and_answers_the_draft_version() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let q = format!("?clientCode={CP_MID}&draft=true");
+    let one = r#"{"components":{"btn":{"key":"btn","type":"Button","properties":{"label":"Draft MID"}}}}"#;
+    let first = changes_for(&e, &base, one, &q).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text());
+    let mid = &stored_for(&e, CP_MID)[0];
+    assert_eq!(mid.get("published"), Some(&JValue::Bool(false)));
+    let mid_id = str_field(mid, "id").unwrap().to_string();
+    let read = e.call("GET", &format!("/api/ui/pages/{mid_id}?draft=true"), "").await;
+    let seen: i64 = read.headers["x-draft-version"].to_str().unwrap().parse().unwrap();
+    let two = r#"{"components":{"txt":{"key":"txt","type":"Text","properties":{"text":"Draft text"}}}}"#;
+    let stale = changes_for(&e, &base, two, &format!("{q}&draftVersion={}", seen + 5)).await;
+    assert_eq!(stale.status, StatusCode::PRECONDITION_FAILED, "{}", stale.text());
+    let ok = changes_for(&e, &base, two, &format!("{q}&draftVersion={seen}")).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    let next: i64 = ok.headers["x-draft-version"].to_str().unwrap().parse().unwrap();
+    assert!(next > seen, "{next} after {seen}");
+    assert_eq!(btn_label(&ok.obj()), Some(s("Draft MID")));
+    assert_eq!(path(&ok.obj(), &["componentDefinition", "txt", "properties", "text"]), Some(&s("Draft text")));
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("Submit")));
+}
+
+#[tokio::test]
+async fn a_change_set_refuses_identity_fields_stale_entries_and_nothing() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let r = changes_for(&e, &base, r#"{"fields":{"clientCode":"X"}}"#, "").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    let r = changes_for(&e, &base, r#"{"components":{"btn":"x"}}"#, "").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(changes_for(&e, &base, "{}", "").await.status, StatusCode::BAD_REQUEST);
+    // One patch gives the page component versions; a change made from an older one is refused.
+    assert_eq!(patch_for(&e, SYSTEM, &base, "btn", &label_data("v2"), "").await.status, StatusCode::OK);
+    let stale = r#"{"components":{"btn":{"key":"btn","properties":{"label":"old"}}},"expectedComponentVersions":{"btn":1}}"#;
+    assert_eq!(changes_for(&e, &base, stale, "").await.status, StatusCode::PRECONDITION_FAILED);
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("v2")));
+    let current = r#"{"components":{"btn":{"key":"btn","properties":{"label":"v3"}}},"expectedComponentVersions":{"btn":2}}"#;
+    let r = changes_for(&e, &base, current, "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("v3")));
 }

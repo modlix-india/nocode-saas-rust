@@ -450,7 +450,7 @@ mod tests {
         let mut drafted = schema(serde_json::json!({"a": {"type": "STRING"}, "b": {"type": "INTEGER"}}));
         drafted.insert("id".into(), JValue::Str(id.clone()));
         DraftStore::new(mem.clone())
-            .upsert("SCHEMA", "app", "App.Thing", "SYSTEM", &id, to_document(&crate::docs::SCHEMA, &drafted, None, &[]), 1, None)
+            .upsert("SCHEMA", "app", "App.Thing", "SYSTEM", &id, to_document(&crate::docs::SCHEMA, &drafted, None, &[]), 1, None, None)
             .await
             .unwrap();
 

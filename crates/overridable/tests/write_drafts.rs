@@ -53,6 +53,14 @@ async fn live_edit(e: &Env, ca: &ContextAuthentication, id: &str, k: &str, v: Op
     e.pages.update(ca, p).await.unwrap();
 }
 
+/// Makes the client's draft a legacy one, saved before drafts recorded their base content.
+fn forget_base(e: &Env) {
+    for mut raw in e.raw("draft") {
+        raw.remove("baseContent");
+        e.mem.put_raw("draft", raw);
+    }
+}
+
 fn drafts(e: &Env) -> Vec<JMap> {
     e.raw("draft").iter().map(DraftStore::decode).collect()
 }
@@ -122,8 +130,9 @@ mod publishing {
         let id = e.page(&page_json("testPage", SYSTEM, "original", "r", ""));
         draft_edit(&e, &system(), &id, "title", "drafted").await;
         live_edit(&e, &system(), &id, "title", Some("live edit")).await;
+        forget_base(&e);
         let err = e.pages.publish(&system(), &id, None).await.unwrap_err();
-        assert_eq!(err.status(), StatusCode::PRECONDITION_FAILED, "no v1 snapshot, so the frozen base version meets the lock");
+        assert_eq!(err.status(), StatusCode::PRECONDITION_FAILED, "a legacy draft with no v1 snapshot: the frozen base version meets the lock");
         assert_eq!(e.count("draft"), 1);
     }
 
@@ -277,6 +286,7 @@ mod reconciliation {
         raw.insert("version", 9);
         raw.get_document_mut("properties").unwrap().insert("title", "live edit");
         e.mem.put_raw("page", raw);
+        forget_base(&e);
         assert!(e.pages.publish(&system(), &id, None).await.is_err());
         assert_eq!(prop_str(&e.raw_page(&id), "title"), Some("live edit"));
         assert_eq!(e.count("draft"), 1);
@@ -350,6 +360,140 @@ mod reconciliation {
     }
 }
 
+// ── A client's draft publish over a base that moved (Rust only) ───────────
+// A client's draft holds the whole merged document. Publishing it used to store, as the
+// client's override, every change its base shipped while the draft was open (old values, and
+// deletions of what the base added). The draft records the merged document it started from,
+// and only what the client changed against that is written.
+
+mod client_publish {
+    use super::*;
+
+    const TENANT: &str = "LZCLA";
+
+    fn tenant() -> ContextAuthentication {
+        auth_for(TENANT, &all_for("Page"))
+    }
+
+    /// SYSTEM's page and the tenant's own (published) copy holding nothing yet.
+    async fn pages(e: &Env) -> (String, String) {
+        e.dir.chain(&[SYSTEM, TENANT]);
+        let body = obj(&format!(r#"{{"name":"shared","appCode":"{APP}","rootComponent":"root","properties":{{"title":"t","style":"old","keep":"k"}}}}"#));
+        let sys = str_field(&e.pages.create(&system(), body).await.unwrap(), "id").unwrap().to_string();
+        let body = obj(&format!(r#"{{"name":"shared","appCode":"{APP}","baseClientCode":"SYSTEM","properties":{{"title":"t","style":"old","keep":"k"}}}}"#));
+        let own = str_field(&e.pages.create(&tenant(), body).await.unwrap(), "id").unwrap().to_string();
+        assert!(stored_props(e, &own).is_empty(), "the copy starts as an empty difference");
+        (sys, own)
+    }
+
+    fn stored_props(e: &Env, id: &str) -> JMap {
+        map_field(&e.raw_page(id), "properties").cloned().unwrap_or_default()
+    }
+
+    async fn ships(e: &Env, sys: &str) {
+        live_edit(e, &system(), sys, "style", Some("new")).await;
+        live_edit(e, &system(), sys, "added", Some("A")).await;
+    }
+
+    #[tokio::test]
+    async fn only_the_clients_edit_is_stored_and_what_the_base_shipped_shows_through() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        draft_edit(&e, &tenant(), &own, "title", "Tenant title").await;
+        ships(&e, &sys).await;
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"title":"Tenant title"}"#), "no stale base value and no deletion of what the base added");
+        let merged = e.pages.read(&tenant(), &own).await.unwrap();
+        for (k, v) in [("title", "Tenant title"), ("style", "new"), ("added", "A"), ("keep", "k")] {
+            assert_eq!(prop_str(&merged, k), Some(v), "{k}");
+        }
+        live_edit(&e, &system(), &sys, "style", Some("newer")).await;
+        assert_eq!(prop_str(&e.pages.read(&tenant(), &own).await.unwrap(), "style"), Some("newer"), "later base changes keep reaching the client");
+    }
+
+    #[tokio::test]
+    async fn the_draft_surface_shows_the_same() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        draft_edit(&e, &tenant(), &own, "title", "Tenant title").await;
+        ships(&e, &sys).await;
+        let preview = runtime(&e, &tenant(), "shared", TENANT, true).await.unwrap();
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        let live = runtime(&e, &tenant(), "shared", TENANT, false).await.unwrap();
+        assert_eq!(map_field(&preview, "properties"), map_field(&live, "properties"));
+        assert_eq!(prop_str(&preview, "style"), Some("new"));
+    }
+
+    #[tokio::test]
+    async fn a_client_deletion_is_kept_while_base_changes_show_through() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        let (mut d, _) = e.pages.read_draft_with_version(&tenant(), &own).await.unwrap();
+        set_prop(&mut d, "keep", None);
+        e.pages.save_draft(&tenant(), d, None).await.unwrap();
+        ships(&e, &sys).await;
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"keep":null}"#), "the deletion, and only it");
+        let merged = e.pages.read(&tenant(), &own).await.unwrap();
+        assert!(prop(&merged, "keep").is_none());
+        assert_eq!((prop_str(&merged, "style"), prop_str(&merged, "added")), (Some("new"), Some("A")));
+    }
+
+    #[tokio::test]
+    async fn the_client_wins_a_key_both_changed_and_the_note_says_so() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        draft_edit(&e, &tenant(), &own, "style", "tenant").await;
+        ships(&e, &sys).await;
+        e.pages.publish(&tenant(), &own, Some("ship")).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"style":"tenant"}"#));
+        let merged = e.pages.read(&tenant(), &own).await.unwrap();
+        assert_eq!((prop_str(&merged, "style"), prop_str(&merged, "added")), (Some("tenant"), Some("A")));
+        assert_eq!(str_field(&e.raw_page(&own), "message"), Some("ship [reconciled from v1 onto live v1; draft kept over live at properties.style]"));
+    }
+
+    #[tokio::test]
+    async fn the_clients_earlier_overrides_survive() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        live_edit(&e, &tenant(), &own, "keep", Some("mine")).await;
+        draft_edit(&e, &tenant(), &own, "title", "Tenant title").await;
+        ships(&e, &sys).await;
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"keep":"mine","title":"Tenant title"}"#));
+    }
+
+    #[tokio::test]
+    async fn a_legacy_draft_is_rebuilt_from_the_base_history() {
+        let e = env();
+        let (sys, own) = pages(&e).await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        draft_edit(&e, &tenant(), &own, "title", "Tenant title").await;
+        forget_base(&e);
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        ships(&e, &sys).await;
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"title":"Tenant title"}"#));
+        assert_eq!(prop_str(&e.pages.read(&tenant(), &own).await.unwrap(), "added"), Some("A"));
+    }
+
+    #[tokio::test]
+    async fn a_legacy_draft_with_no_history_keeps_the_old_behaviour() {
+        let e = env();
+        e.dir.chain(&[SYSTEM, TENANT]);
+        e.page(&page_json("shared", SYSTEM, "t", "root", r#","style":"old""#));
+        let own = e.page(&format!(r#"{{"name":"shared","appCode":"{APP}","clientCode":"{TENANT}","baseClientCode":"SYSTEM","version":1,"properties":{{}}}}"#));
+        draft_edit(&e, &tenant(), &own, "title", "Tenant title").await;
+        forget_base(&e);
+        let mut raw = e.raw("page").into_iter().find(|d| d.get_str("clientCode") == Ok(SYSTEM)).unwrap();
+        raw.insert("updatedAt", mongodb::bson::DateTime::from_millis(i64::MAX / 2));
+        raw.get_document_mut("properties").unwrap().insert("style", "new");
+        e.mem.put_raw("page", raw);
+        e.pages.publish(&tenant(), &own, None).await.unwrap();
+        assert_eq!(stored_props(&e, &own), obj(r#"{"title":"Tenant title","style":"old"}"#), "nothing to tell the base's change from the client's");
+    }
+}
+
 // ── ConcurrentDraftEditIntegrationTest and DraftBaseVersionIntegrationTest ─
 
 mod versions {
@@ -413,6 +557,9 @@ mod versions {
         e.mem.put_raw("page", raw);
         let d = save(&e, &id, "draftTwo", None).await.unwrap();
         assert_eq!((&d["baseVersion"], str_field(content(&d), "rootComponent")), (&JValue::Int(7), Some("draftTwo")));
+        let base = e.raw("draft").remove(0);
+        assert_eq!(base.get_document("baseContent").unwrap().get_str("rootComponent").ok(), Some("liveRoot"), "the base content is frozen too");
+        forget_base(&e);
         assert!(e.pages.publish(&system(), &id, None).await.is_err());
         assert_eq!(str_field(&e.raw_page(&id), "rootComponent"), Some("liveMovedOn"));
         assert_eq!(e.count("draft"), 1);

@@ -129,6 +129,12 @@ mod publish {
         let mut raw = e.raw("page").remove(0);
         raw.insert("version", 5);
         e.mem.put_raw("page", raw);
+        // A legacy draft (no recorded base content) cannot be reconciled onto the moved copy.
+        for mut d in e.raw("draft") {
+            if d.remove("baseContent").is_some() {
+                e.mem.put_raw("draft", d);
+            }
+        }
         let r = publisher(&e).publish_all(&system(), APP, None).await.unwrap();
         let results = arr(&r["results"]);
         assert_eq!((&r["attempted"], &r["published"]), (&JValue::Int(2), &JValue::Int(0)));
