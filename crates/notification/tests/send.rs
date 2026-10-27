@@ -72,6 +72,7 @@ async fn rig() -> Rig {
         email: sinks.clone(),
         in_app: sinks.clone(),
         push: Push::local(Hub::new(8)),
+        prefs: None,
     };
     // Only the in-app channel: which channel fires is not what the draft tests are about.
     core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true})));
@@ -245,6 +246,45 @@ async fn channels_are_chosen_from_connection_and_templates() {
     // ... but not when neither channel needs them.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": false})));
     assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::NoChannel);
+}
+
+/// A source of preference maps answering from a fixed table.
+struct Prefs(std::collections::HashMap<u64, Map<String, Value>>);
+
+#[async_trait]
+impl notification::choices::PreferenceSource for Prefs {
+    async fn preferences(&self, app: &str, ids: &[u64]) -> Result<std::collections::HashMap<u64, Map<String, Value>>> {
+        assert_eq!(app, "testapp");
+        Ok(self.0.iter().filter(|(k, _)| ids.contains(k)).map(|(k, v)| (*k, v.clone())).collect())
+    }
+}
+
+#[tokio::test]
+async fn each_recipient_gets_the_channels_they_chose() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
+    // Email is opt in for this notification; in-app keeps the default (on).
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}, "channelEnabled": {"email": false}})));
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}, {"id": 3}, {"clientId": 9}])));
+    let obj = |v: Value| v.as_object().unwrap().clone();
+    let prefs = Prefs(
+        [
+            (2, obj(json!({"channels": {"email": true}}))),
+            (3, obj(json!({"categories": {"SYSTEM": {"email": true, "inapp": false}}}))),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let service = SendService { prefs: Some(Arc::new(prefs)), ..r.service };
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true });
+    assert_eq!(*r.sinks.emails.lock(), vec![(Some(2), Some("SMTP".into())), (Some(3), Some("SMTP".into()))]);
+    assert_eq!(r.sinks.in_app.lock()[0].0, 3, "users 1, 2 and the one without an id; 3 turned in-app off");
+
+    // Nobody wants in-app: it does not run.
+    r.sinks.in_app.lock().clear();
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 3}])));
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false });
+    assert!(r.sinks.in_app.lock().is_empty());
 }
 
 #[tokio::test]

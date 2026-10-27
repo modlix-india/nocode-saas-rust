@@ -307,6 +307,73 @@ async fn in_app_notifications_count_list_and_mark_read() {
 
 #[tokio::test]
 #[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn an_app_can_keep_rows_unread_and_mark_them_one_by_one_or_all() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        for who in ["Ann", "Bob", "Cy"] {
+            r.inapp.send_in_app(&users(&[142, 7]), &notification(), Some("rsapp"), None, &payload(who)).await.unwrap();
+        }
+        r.inapp.send_in_app(&users(&[142]), &notification(), Some("otherapp"), None, &payload("Dee")).await.unwrap();
+
+        // markRead=false lists without reading.
+        let g = get(&r.app, "/api/notification/notifications?appCode=rsapp&markRead=false").await;
+        let ids: Vec<u64> = g.json()["content"].as_array().unwrap().iter().map(|c| c["id"].as_u64().unwrap()).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "3");
+
+        // One read; an id twice, as a string, and an already read one count once.
+        let p = post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [ids[0]]}).to_string()).await;
+        assert_eq!((p.status, p.json()), (StatusCode::OK, json!({"read": 1})));
+        let p = post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [ids[0], ids[1].to_string()]}).to_string()).await;
+        assert_eq!(p.json(), json!({"read": 1}));
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "1");
+
+        // Another user's row cannot be marked by this caller.
+        let theirs: (u64,) = sqlx::query_as("SELECT ID FROM notification_inapp WHERE USER_ID = 7 LIMIT 1").fetch_one(&r.pool).await.unwrap();
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [theirs.0]}).to_string()).await.json(), json!({"read": 0}));
+
+        // All: the rest of this app only.
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", r#"{"all": true}"#).await.json(), json!({"read": 1}));
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "0");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=otherapp").await.body, "1");
+        let unread: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM notification_inapp WHERE USER_ID = 7 AND READ_AT IS NULL")
+            .fetch_one(&r.pool)
+            .await
+            .unwrap();
+        assert_eq!(unread.0, 3);
+
+        // A body that names nothing, or not numbers, is refused; GET is not allowed.
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", "{}").await.status, StatusCode::BAD_REQUEST);
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", r#"{"ids": ["x"]}"#).await.status, StatusCode::BAD_REQUEST);
+        assert_eq!(get(&r.app, "/api/notification/read?appCode=rsapp").await.status, StatusCode::METHOD_NOT_ALLOWED);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn the_sender_reads_the_saved_choices() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let choice = json!({"channels": {"email": true}, "categories": {"comment": {"inapp": false}}});
+        assert_eq!(post(&r.app, "/api/notification/preference?appCode=rsapp", &choice.to_string()).await.status, StatusCode::OK);
+        post(&r.app, "/api/notification/preference?appCode=otherapp", r#"{"channels": {"email": false}}"#).await;
+        let found = Dao::new(r.pool.clone()).preferences_of("rsapp", &[142, 7]).await.unwrap();
+        assert_eq!(found.len(), 1, "7 saved nothing");
+        assert_eq!(Value::Object(found[&142].clone()), choice);
+        assert!(Dao::new(r.pool.clone()).preferences_of("rsapp", &[]).await.unwrap().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
 async fn in_app_send_rules() {
     if !local_stack() {
         return;

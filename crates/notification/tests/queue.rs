@@ -57,6 +57,7 @@ async fn service() -> (Arc<SendService>, Arc<Fake>, Arc<Seen>) {
         email: seen.clone(),
         in_app: seen.clone(),
         push: Push::local(Hub::new(8)),
+        prefs: None,
     };
     (Arc::new(s), fake, seen)
 }

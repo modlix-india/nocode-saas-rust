@@ -2,9 +2,10 @@
 //!
 //! | Route | Answer |
 //! |---|---|
-//! | `GET /api/notification/notifications` | a page of the caller's in-app notifications (marked read) |
+//! | `GET /api/notification/notifications` | a page of the caller's in-app notifications (marked read, unless `markRead=false`) |
 //! | `GET /api/notification/subscribe?appCode=` | the SSE stream (`init`, then `notification` events and keepalives) |
 //! | `GET /api/notification/new` | the caller's unread count |
+//! | `POST /api/notification/read?appCode=` | marks the caller's `{"ids": [...]}` or `{"all": true}` read (Rust only) |
 //! | `GET /api/notification/preference?appCode=[&userId=]` | a preference map |
 //! | `POST /api/notification/preference?appCode=[&userId=]` | stores a preference map |
 //!
@@ -52,6 +53,7 @@ enum Route {
     Notifications,
     Subscribe,
     New,
+    Read,
     Preference,
 }
 
@@ -61,6 +63,7 @@ impl Route {
             "/api/notification/notifications" => Some(Self::Notifications),
             "/api/notification/subscribe" => Some(Self::Subscribe),
             "/api/notification/new" => Some(Self::New),
+            "/api/notification/read" => Some(Self::Read),
             "/api/notification/preference" => Some(Self::Preference),
             _ => None,
         }
@@ -71,6 +74,7 @@ impl Route {
             Self::Notifications => "/api/notification/notifications",
             Self::Subscribe => "/api/notification/subscribe",
             Self::New => "/api/notification/new",
+            Self::Read => "/api/notification/read",
             Self::Preference => "/api/notification/preference",
         }
     }
@@ -79,12 +83,17 @@ impl Route {
     fn allow(self) -> &'static str {
         match self {
             Self::Preference => "GET,HEAD,POST,OPTIONS",
+            Self::Read => "POST,OPTIONS",
             _ => "GET,HEAD,OPTIONS",
         }
     }
 
     fn accepts(self, m: &Method) -> bool {
-        *m == Method::GET || *m == Method::HEAD || (self == Self::Preference && *m == Method::POST)
+        match self {
+            Self::Read => *m == Method::POST,
+            Self::Preference => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
+            _ => *m == Method::GET || *m == Method::HEAD,
+        }
     }
 }
 
@@ -200,12 +209,20 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             // StringUtil.safeValueOf(paramAppCode, headerAppCode).
             let app = params.string("appCode").or_else(|| header_str(req.headers(), "appcode"));
             let pageable = Pageable::from_params(&params);
+            let mark_read = !params.string("markRead").is_some_and(|v| v.eq_ignore_ascii_case("false"));
             let page = st
                 .inapp
-                .read(app.as_deref(), params.string("type").as_deref(), params.string("category").as_deref(), &pageable, uid)
+                .read(app.as_deref(), params.string("type").as_deref(), params.string("category").as_deref(), &pageable, uid, mark_read)
                 .await
                 .map_err(internal_error)?;
             Ok(json_body(&page))
+        }
+        (Route::Read, _) => {
+            let app = params.string("appCode").or_else(|| header_str(req.headers(), "appcode"));
+            let body = read_body(req).await?.unwrap_or_default();
+            let ids = read_ids(&body)?;
+            let n = st.inapp.mark_read(app.as_deref(), ids.as_deref(), uid).await.map_err(internal_error)?;
+            Ok(json_body(&serde_json::json!({"read": n})))
         }
         (Route::New, _) => {
             let app = params.string("appCode").or_else(|| header_str(req.headers(), "appcode"));
@@ -229,6 +246,26 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             }
         }
     }
+}
+
+/// `POST /read`'s body: `{"all": true}` is every unread row (`None`); otherwise `ids`, a list
+/// of whole numbers (strings of digits accepted).
+fn read_ids(body: &Map<String, Value>) -> Res<Option<Vec<u64>>> {
+    if body.get("all").and_then(Value::as_bool) == Some(true) {
+        return Ok(None);
+    }
+    let bad = || -> Failure { input::param_invalid("ids", Some("a list of notification ids")).debug("ids must be whole numbers").into() };
+    let Some(Value::Array(list)) = body.get("ids") else {
+        return Err(input::param_missing("ids").debug("give ids, or all: true").into());
+    };
+    list.iter()
+        .map(|v| match v {
+            Value::Number(n) => n.as_u64().ok_or_else(bad),
+            Value::String(s) => s.trim().parse::<u64>().map_err(|_| bad()),
+            _ => Err(bad()),
+        })
+        .collect::<Res<Vec<u64>>>()
+        .map(Some)
 }
 
 /// `@RequestBody(required = false) Map<String, Object>`: no body (or JSON `null`) is no value;
