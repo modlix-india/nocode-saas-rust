@@ -6,6 +6,13 @@
 //! and its own `version` moves on every save so a stale save can be refused. `baseVersion` is
 //! the live version the draft was taken from and never moves, which is what makes a publish
 //! onto a newer live document reconcile (or fail) rather than overwrite.
+//!
+//! Rust only: `baseContent` is the document the draft was taken from, merged down its base
+//! chain, recorded when the draft starts and never moved either. A draft holds the whole merged
+//! document, so without it a client's publish could not tell its own edits from what its base
+//! (SYSTEM) shipped since, and stored every such change as the client's override
+//! ([`crate::store::Store::reconcile`]). It is kept on the stored row only: replies do not
+//! carry it.
 
 use std::sync::Arc;
 
@@ -49,6 +56,9 @@ pub const DRAFT: Pojo = Pojo {
 
 const COLLECTION: &str = "draft";
 
+/// The draft row's field holding the merged document the draft was taken from.
+pub const BASE_CONTENT: &str = "baseContent";
+
 /// The `draft` collection.
 #[derive(Clone)]
 pub struct DraftStore {
@@ -69,7 +79,8 @@ impl DraftStore {
     }
 
     /// `upsert`: replaces the content of the client's draft (its version moves on, its
-    /// `baseVersion` does not), or starts one. Answers the saved draft.
+    /// `baseVersion` and `baseContent` do not), or starts one, recording `base_content` (the
+    /// merged document it is taken from) when given. Answers the saved draft.
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert(
         &self,
@@ -81,6 +92,7 @@ impl DraftStore {
         content: Document,
         base_version: i64,
         message: Option<&str>,
+        base_content: Option<Document>,
     ) -> AppResult<JMap> {
         let clock = Clock::now();
         let existing = self.find(object_type, app, name, client).await?;
@@ -97,6 +109,7 @@ impl DraftStore {
                     e.insert(k.into(), JValue::Str(v.to_string()));
                 }
                 e.insert("baseVersion".into(), JValue::Int(base_version));
+                e.insert("createdAt".into(), clock.value());
                 e
             }
         };
@@ -107,6 +120,13 @@ impl DraftStore {
         let priors: Vec<&Document> = existing.iter().collect();
         let mut d = to_document(&DRAFT, &draft, Some(&clock), &priors);
         d.insert("content", content);
+        let base = match &existing {
+            Some(e) => e.get(BASE_CONTENT).cloned(),
+            None => base_content.map(Bson::Document),
+        };
+        if let Some(b) = base {
+            d.insert(BASE_CONTENT, b);
+        }
         match existing.as_ref().and_then(|e| e.get("_id")) {
             Some(id) => self.backend.replace(COLLECTION, id.clone(), d).await?,
             None => {
@@ -212,6 +232,7 @@ impl<K: Kind> OverridableService<K> {
         content.insert("id".into(), created.get("id").cloned().unwrap_or_default());
         content.insert("version".into(), created.get("version").cloned().unwrap_or_default());
         let (app, name, client) = (jstr(str_field(&created, "appCode")), jstr(str_field(&created, "name")), jstr(str_field(&created, "clientCode")));
+        let base = self.draft_base(str_field(&created, "id").unwrap_or_default()).await?;
         self.commons()
             .drafts
             .upsert(
@@ -223,6 +244,7 @@ impl<K: Kind> OverridableService<K> {
                 jackson_document(self.kind().pojo(), &content),
                 version_of(&created),
                 message.as_deref(),
+                base,
             )
             .await?;
         self.evict_draft(app, client, name).await?;
@@ -255,20 +277,33 @@ impl<K: Kind> OverridableService<K> {
         let prior_content = prior.as_ref().and_then(|d| d.get("content")).and_then(JValue::as_object).map(|c| convert_json(self.kind().pojo(), c));
         self.kind().keep_withheld(&mut entity, Some(prior_content.as_ref().unwrap_or(&target)));
         let content = jackson_document(self.kind().pojo(), &entity);
+        let target_id = str_field(&target, "id").unwrap_or_default();
+        // A draft starting now records what it starts from; a later save keeps that.
+        let base = match prior {
+            Some(_) => None,
+            None => self.draft_base(target_id).await?,
+        };
         let saved = drafts
             .upsert(
                 &self.object_type(),
                 app,
                 name,
                 client,
-                str_field(&target, "id").unwrap_or_default(),
+                target_id,
                 content,
                 version_of(&target),
                 str_field(&entity, "message"),
+                base,
             )
             .await?;
         self.evict_draft(app, client, name).await?;
         Ok(saved)
+    }
+
+    /// Rust only: the merged document a draft of `id` starting now is taken from, as a draft's
+    /// content is stored.
+    async fn draft_base(&self, id: &str) -> AppResult<Option<Document>> {
+        Ok(self.read_internal(id).await?.map(|m| jackson_document(self.kind().pojo(), &m)))
     }
 
     /// `forkForCaller`: the caller's own override of the object, made if it may have one and

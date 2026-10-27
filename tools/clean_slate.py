@@ -228,14 +228,27 @@ def victims(plan: dict, my: list[str], mg: list[str]) -> tuple[list[str], list[s
     return [n for n in my if hit(n)], [n for n in mg if hit(n)]
 
 
-def run(cmd: list[str], out: Path, env: dict[str, str] | None = None) -> None:
-    with gzip.open(out, "wb") as f:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-        assert p.stdout is not None
-        shutil.copyfileobj(p.stdout, f)
-        err = p.stderr.read().decode() if p.stderr else ""
-        if p.wait() != 0:
-            die(f"{cmd[0]} failed for {out.name}: {err.strip()[-300:]}")
+def run(cmd: list[str], out: Path, env: dict[str, str] | None = None, limit: int = 1800) -> None:
+    """Runs a dump to `out` (gzipped), killed after `limit` seconds and tried once more: a
+    connection that died on the way (VPN, jumphost) otherwise waits for a reply forever."""
+    raw = out.with_suffix(".part")
+    for attempt in (1, 2):
+        with raw.open("wb") as f:
+            p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.PIPE, env=env)
+            try:
+                _, err = p.communicate(timeout=limit)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+                say(f"  {out.name}: no answer in {limit} s, attempt {attempt}")
+                continue
+        if p.returncode != 0:
+            die(f"{cmd[0]} failed for {out.name}: {err.decode(errors='replace').strip()[-300:]}")
+        with raw.open("rb") as src, gzip.open(out, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        raw.unlink()
+        return
+    die(f"{cmd[0]} for {out.name} gave up after two attempts")
 
 
 def cmd_backup(a: argparse.Namespace) -> None:
@@ -243,7 +256,15 @@ def cmd_backup(a: argparse.Namespace) -> None:
     e = db_env()
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     dest = path.parent / "backups" / a.env / stamp
-    dest.mkdir(parents=True)
+    if a.resume:
+        # The newest unfinished backup of this env: its finished tenant dumps are kept.
+        root = path.parent / "backups" / a.env
+        open_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not (d / "MANIFEST.json").exists()) if root.is_dir() else []
+        if not open_dirs:
+            die("--resume: no unfinished backup of this env")
+        dest, stamp = open_dirs[-1], open_dirs[-1].name
+        say(f"resuming {dest}")
+    dest.mkdir(parents=True, exist_ok=True)
     menv = {**os.environ, "MYSQL_PWD": e["MYSQL_PWD"]}
     base = ["mysqldump", "-h", e["MYSQL_HOST"], "-u", e["MYSQL_USER"], "--single-transaction", "--no-tablespaces",
             "--set-gtid-purged=OFF", "--column-statistics=0"]
@@ -261,13 +282,47 @@ def cmd_backup(a: argparse.Namespace) -> None:
     my, mg = tenant_names()
     my_v, mg_v = victims(plan, my, mg)
     say(f"tenant data: {len(my_v)} MySQL schemas, {len(mg_v)} Mongo databases ...")
-    for i in range(0, len(my_v), 100):
-        run(base + ["--databases", *my_v[i:i + 100]], dest / f"tenant-mysql-{i // 100:03d}.sql.gz", menv)
-    for n in mg_v:
-        r = subprocess.run(["mongodump", f"--uri={dump_uri()}", f"--db={n}", f"--archive={dest / ('tenant-mongo-' + n + '.archive.gz')}", "--gzip", "--quiet"],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            die(f"mongodump {n}: {r.stderr.strip()[-300:]}")
+    # Tenant schemas are mostly empty tables (dev: 97 of 2,373 hold rows) and a dump over the
+    # VPN costs a round trip per table, hours for the empty ones. Every table's exact row count
+    # goes into the manifest; only the tables holding rows are dumped. The empty ones' columns
+    # come back from the storage definitions.
+    tenant_tables: dict[str, dict[str, int]] = {}
+    for sch in my_v:
+        names = [r[0] for r in mysql(f"SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{sch}' AND TABLE_TYPE = 'BASE TABLE'")]
+        counts: dict[str, int] = {}
+        for i in range(0, len(names), 200):
+            part = names[i:i + 200]
+            union = " UNION ALL ".join(f"SELECT '{t}', COUNT(*) FROM `{sch}`.`{t.replace('`', '``')}`" for t in part)
+            counts.update({r[0]: int(r[1]) for r in mysql(union)})
+        tenant_tables[sch] = counts
+        full = [t for t, n in counts.items() if n > 0]
+        done = dest / f"tenant-mysql-{sch}.sql.gz"
+        if full and not (done.exists() and done.stat().st_size > 0):
+            run(base + [sch, *full], dest / f"tenant-mysql-{sch}.sql.gz", menv)
+    say(f"  MySQL: {sum(len(c) for c in tenant_tables.values())} tables counted, "
+        f"{sum(1 for c in tenant_tables.values() for n in c.values() if n)} dumped ({sum(n for c in tenant_tables.values() for n in c.values())} rows)")
+    def mongo_one(n: str) -> str | None:
+        target = dest / f"tenant-mongo-{n}.archive.gz"
+        if target.exists() and target.stat().st_size > 0:
+            return None  # done by the run this one resumes
+        last = ""
+        for attempt in range(3):
+            try:
+                r = subprocess.run(["mongodump", f"--uri={dump_uri()}", f"--db={n}", f"--archive={target}", "--gzip", "--quiet"],
+                                   capture_output=True, text=True, timeout=900)
+                if r.returncode == 0:
+                    return None
+                last = f"exit {r.returncode}: {r.stderr.strip()[-300:]}"
+            except subprocess.TimeoutExpired:
+                last = "no answer in 900 s"
+            time.sleep(5 * (attempt + 1))
+        return f"mongodump {n} (3 attempts): {last}"
+
+    # One dump per database over the VPN: four at a time.
+    with cf.ThreadPoolExecutor(max_workers=4) as ex:
+        failed = [e for e in ex.map(mongo_one, mg_v) if e]
+    if failed:
+        die(failed[0])
 
     apps = [x["code"] for x in plan["apps"]]
     say("ui/core definitions of the plan's clients and apps ...")
@@ -283,7 +338,7 @@ def cmd_backup(a: argparse.Namespace) -> None:
             if r.returncode != 0:
                 die(f"mongodump {d}.{c}: {r.stderr.strip()[-300:]}")
 
-    manifest = dict(plan=str(path), plan_made=plan_key(plan), env=a.env, at=stamp, mysql_tenant=my_v, mongo_tenant=mg_v,
+    manifest = dict(plan=str(path), plan_made=plan_key(plan), env=a.env, at=stamp, mysql_tenant=my_v, mysql_tenant_tables=tenant_tables, mongo_tenant=mg_v,
                     clients=len(codes), apps=len(apps))
     (dest / "MANIFEST.json").write_text(json.dumps(manifest, indent=1))
     size = sum(f.stat().st_size for f in dest.iterdir())
@@ -393,6 +448,7 @@ def main() -> None:
     b = sub.add_parser("backup")
     b.add_argument("--env", required=True, choices=["local", "dev", "stage"])
     b.add_argument("--plan", required=True)
+    b.add_argument("--resume", action="store_true", help="continue the newest unfinished backup of this env")
     g = sub.add_parser("purge")
     g.add_argument("--env", required=True, choices=["local", "dev", "stage"])
     g.add_argument("--plan", required=True)
