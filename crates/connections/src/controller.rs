@@ -6,6 +6,7 @@
 //! | `POST /oauth/evoke?connectionName=` | 200 `text/plain` consent URL; 200 empty when the connection is not visible |
 //! | `GET /oauth/callback?code=&state=` | 302 to the connection's `pagePath` (see [`CallbackOutcome`]) |
 //! | `GET /oauth/revoke?connectionName=` | 200 `true` |
+//! | `GET /oauth/status?connectionName=` (Rust only) | 200 JSON [`SignIn`] of the caller's stored sign-in |
 //! | `GET /internal/oauth2/token/{connectionName}` (`appCode`, `clientCode` headers) | 200 `text/plain` token, or empty |
 //! | `GET /internal/notification/{name}?appCode=&clientCode=&urlClientCode=` | 200 JSON [`NotificationConnectionDetails`], or empty |
 //! | `GET /internal/{name}?appCode=&clientCode=&urlClientCode=&connectionType=` | 200 JSON connection, or empty |
@@ -17,7 +18,7 @@ use http::StatusCode;
 use crate::connection::{self, Connection, ConnectionType, NotificationConnectionDetails};
 use crate::context::Caller;
 use crate::error::{ConnError, ConnResult};
-pub use crate::rest::oauth2::CallbackOutcome;
+pub use crate::rest::oauth2::{CallbackOutcome, SignIn};
 use crate::rest::oauth2::{self, CONSENT_CALLBACK_URI};
 use crate::Connections;
 
@@ -37,6 +38,10 @@ pub async fn oauth_callback(
 
 pub async fn revoke_token(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<bool> {
     oauth2::revoke_connection_token(svc, caller, connection_name).await
+}
+
+pub async fn sign_in_status(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<Option<SignIn>> {
+    oauth2::stored_sign_in(svc, caller, connection_name).await
 }
 
 pub async fn oauth2_token(

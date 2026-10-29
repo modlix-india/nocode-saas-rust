@@ -262,6 +262,18 @@ Everything in those runs is the same except what is listed here.
     masked (`mask_url_password`) and put back on a save (`restore_url_password`). Java's
     `withoutSecrets` matched the first 15 names exactly; the rule is wider, so a caller
     without `Connection_UPDATE` sees fewer keys than in Java.
+35. **A stored sign-in can be read, and revoked once its access token has expired**
+    (2026-10-29, Rust only). `GET /api/core/connections/oauth/status?connectionName=` (signed in;
+    `stored_sign_in`) answers `{"hasToken", "connectedAt", "connectedBy"}` for the caller's own
+    client and URL app, the tokens `oauth/revoke` would drop: `connectedAt` is the `CREATED_AT`
+    (UTC) of the consent's first row (`TokenStore::consent_row`, the lowest ID with the active
+    token's `STATE`), `connectedBy` its `USER_ID`; never the token. Java had no such route.
+    `oauth/revoke` refused (400 `cannot_delete_token_with_client_code`) when the caller had no
+    active ACCESS token, so a sign-in whose access token had expired (Google's, after an hour)
+    kept its active refresh token for good; an active refresh token now counts, and the revoke
+    drops every row of the caller's client, URL app and connection as before. Nothing is sent to
+    the provider: a provider-side revoke (Meta `DELETE /me/permissions`, Google's `/revoke`)
+    would end the grant for the whole OAuth client, which other apps of the same business share.
 
 ## Error codes (2026-10-17)
 

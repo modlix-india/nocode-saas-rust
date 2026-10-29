@@ -120,6 +120,12 @@ impl TokenStore for MemoryTokens {
     async fn by_state(&self, state: Option<&str>) -> ConnResult<Option<CoreToken>> {
         Ok(self.rows.lock().iter().find(|t| state.is_some() && t.state.as_deref() == state).cloned())
     }
+    async fn consent_row(&self, c: &str, a: &str, n: &str, state: &str) -> ConnResult<Option<CoreToken>> {
+        Ok(self.rows.lock().iter().filter(|t| {
+            t.client_code.as_deref() == Some(c) && t.app_code.as_deref() == Some(a) && t.connection_name.as_deref() == Some(n)
+                && t.state.as_deref() == Some(state)
+        }).min_by_key(|t| t.id).cloned())
+    }
     async fn revoke(&self, c: &str, a: &str, n: &str, _: Option<TokenType>) -> ConnResult<bool> {
         let mut any = false;
         for t in self.rows.lock().iter_mut() {
@@ -846,6 +852,68 @@ async fn oauth_revoke_honours_consent_auth() {
     assert_eq!((st, body.as_str()), (200, "true"));
     assert_eq!(revoked(), Some(true));
     let (st, _, _) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!(st, 400, "nothing left to revoke");
+}
+
+/// `GET /oauth/status` (Rust only): the caller's stored sign-in, its consent's start and user,
+/// for the caller's own client and URL app; and `oauth/revoke` also drops a sign-in whose access
+/// token has expired while its refresh token is active.
+#[tokio::test]
+async fn oauth_status_and_revoke_of_a_refresh_only_sign_in() {
+    let s = setup().await;
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &json!({
+        "user": {"id": 110, "clientId": 7, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true, "clientCode": "FIN"
+    }).to_string());
+    s.docs.add_connection(json!({"name": "G", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                                 "connectionSubType": "REST_API_OAUTH2", "connectionDetails": {"grantType": "AUTHORIZATION_CODE"}}));
+    let at = |t: &str| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S").unwrap();
+    let row = |id: u64, client: &str, app: &str, ty: TokenType, revoked: bool, created: &str, user: u64| CoreToken {
+        id: Some(id),
+        client_code: Some(client.into()),
+        app_code: Some(app.into()),
+        connection_name: Some("G".into()),
+        token_type: Some(ty),
+        token: Some(format!("t{id}")),
+        state: Some("consent-1".into()),
+        is_revoked: Some(revoked),
+        user_id: Some(user),
+        created_at: Some(at(created)),
+        ..Default::default()
+    };
+    {
+        let mut rows = s.tokens.rows.lock();
+        // The consent's first row (its access token, since refreshed and revoked), its refresh
+        // token, a later access token that expired, and another client's and another app's.
+        rows.push(row(1, "FIN", "leadzumptwo", TokenType::Access, true, "2026-10-20 09:15:00", 110));
+        rows.push(row(2, "FIN", "leadzumptwo", TokenType::Refresh, false, "2026-10-20 09:16:00", 110));
+        rows.push(row(3, "FIN", "leadzumptwo", TokenType::Access, true, "2026-10-28 11:00:00", 0));
+        rows.push(row(4, "OTHER", "leadzumptwo", TokenType::Access, false, "2026-10-21 08:00:00", 9));
+        rows.push(row(5, "FIN", "marketingai", TokenType::Access, false, "2026-10-22 08:00:00", 9));
+    }
+    let base = routes(&s).await;
+
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", false).await;
+    assert_eq!(st, 401);
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/status", true).await;
+    assert_eq!(st, 400);
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", true).await;
+    assert_eq!(st, 200, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v, json!({"hasToken": true, "connectedAt": "2026-10-20T09:15:00Z", "connectedBy": 110}));
+    assert!(!body.contains("t2"), "never the token");
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=none", true).await;
+    assert_eq!(st, 200);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), json!({"hasToken": false, "connectedAt": null, "connectedBy": null}));
+
+    // Only the refresh token is active: revoke drops the caller's rows, no other client's or app's.
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=G", true).await;
+    assert_eq!((st, body.as_str()), (200, "true"));
+    let revoked: Vec<_> = s.tokens.rows.lock().iter().map(|t| (t.id.unwrap(), t.is_revoked == Some(true))).collect();
+    assert_eq!(revoked, vec![(1, true), (2, true), (3, true), (4, false), (5, false)]);
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", true).await;
+    assert_eq!(st, 200);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["hasToken"], json!(false));
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=G", true).await;
     assert_eq!(st, 400, "nothing left to revoke");
 }
 
