@@ -15,7 +15,7 @@ use crate::fsdao::FileType;
 use crate::jackson::{self, json};
 use crate::keys::{create_access_key, short_uuid, ChronoUnit};
 use crate::model::DetailOut;
-use crate::paths::{java_url_decode, resolve_with_client_code, resolve_without, uri_part, Kind};
+use crate::paths::{has_dot_segment, java_url_decode, resolve_with_client_code, resolve_without, uri_part, Kind};
 use crate::spring::{known_total, page_json, safe_bool, Pageable};
 use crate::upload::{read_form, read_json};
 
@@ -219,11 +219,18 @@ pub async fn copy_to_client_page(cx: &Ctx, req: Request) -> AppResult<Response> 
 }
 
 /// `GET /secured/createKey/**`: a download key for a secured file the caller may read.
+///
+/// The key holds the DECODED path, the one `GET /secured/file/**` reads and checks, so the key
+/// opens exactly the file that URL opens (`Money+Apartment.pdf` is the file `Money Apartment.pdf`,
+/// `a%2Bb.pdf` the file `a+b.pdf`). Java stored and checked the path as it came, still encoded,
+/// and the key then looked for a file of that encoded name: a 404 for any name with a space or
+/// an encoded character (CXZ-1138).
 pub async fn create_key(cx: &Ctx) -> AppResult<Response> {
-    let path = cx.uri.replace("/createKey", "");
-    let raw = resolve_with_client_code(&path, Kind::Secured).map(|(_, raw)| raw).unwrap_or_default();
-    if raw.is_empty() || !can_read_secured(&cx.st, cx.ca(), &raw).await.app()? {
-        return Err(forbidden_path(Kind::Secured, &raw));
+    // Only the route's own `/createKey`: a folder of that name further on is part of the path.
+    let path = cx.uri.replacen("/createKey", "", 1);
+    let rp = resolve_with_client_code(&path, Kind::Secured).map(|(rp, _)| rp).unwrap_or_default();
+    if rp.is_empty() || has_dot_segment(&rp) || !can_read_secured(&cx.st, cx.ca(), &rp).await.app()? {
+        return Err(forbidden_path(Kind::Secured, &rp));
     }
     let time = opt_i64(&cx.params, "timeSpan")?;
     let unit = match cx.params.get("timeUnit").filter(|s| !s.trim().is_empty()) {
@@ -237,7 +244,7 @@ pub async fn create_key(cx: &Ctx) -> AppResult<Response> {
         Some(l) if l >= 0 => Some(l as u64),
         Some(l) => return Err(crate::errors::param_invalid("accessLimit", format!("Invalid value '{l}' for parameter 'accessLimit'"))),
     };
-    let key = create_access_key(&cx.st, time, unit, limit, &raw).await?;
+    let key = create_access_key(&cx.st, time, unit, limit, &rp, Some(cx.ca().user.id)).await?;
     Ok(jackson::text(format!("{}{key}", cx.st.config().secured_keys.key_uri)))
 }
 

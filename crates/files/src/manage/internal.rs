@@ -35,10 +35,12 @@ fn limit(cx: &Ctx) -> AppResult<i64> {
     Ok(opt_i64(&cx.params, "limit")?.unwrap_or(500))
 }
 
-/// `GET /internal/secured/createKey?filePath=`: a key for any path, unchecked.
+/// `GET /internal/secured/createKey?filePath=`: a key for any path, unchecked. The value is the
+/// storage path as is (the query decoding is the only one), cut at `?` as Java does.
 pub async fn create_key(cx: &Ctx) -> AppResult<Response> {
     let path = required(&cx.params, "filePath")?;
-    let key = create_access_key(&cx.st, None, None, None, path).await?;
+    let path = path.split('?').next().unwrap_or(path);
+    let key = create_access_key(&cx.st, None, None, None, path, None).await?;
     Ok(jackson::text(format!("{}{key}", cx.st.config().secured_keys.key_uri)))
 }
 

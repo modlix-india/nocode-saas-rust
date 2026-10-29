@@ -73,6 +73,9 @@ pub struct AccessKey {
     pub access_till: DateTime<Utc>,
     pub access_limit: Option<u64>,
     pub accessed_count: u64,
+    /// The caller who made the key; `None` for internal keys and for keys made before CXZ-1138
+    /// (whose path is still URL encoded).
+    pub created_by: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -142,7 +145,7 @@ impl Dao {
     /// `FilesSecuredAccessKeyDao.getAccessByKey`.
     pub async fn access_key(&self, key: &str) -> Result<Option<AccessKey>> {
         let row = sqlx::query(
-            "SELECT ID, PATH, ACCESS_TILL, ACCESS_LIMIT, ACCESSED_COUNT \
+            "SELECT ID, PATH, ACCESS_TILL, ACCESS_LIMIT, ACCESSED_COUNT, CREATED_BY \
              FROM files_secured_access_keys WHERE ACCESS_KEY = ? LIMIT 1",
         )
         .bind(key)
@@ -156,6 +159,7 @@ impl Dao {
                 access_till: r.try_get("ACCESS_TILL")?,
                 access_limit: r.try_get("ACCESS_LIMIT")?,
                 accessed_count: r.try_get("ACCESSED_COUNT")?,
+                created_by: r.try_get("CREATED_BY")?,
             }),
         })
     }

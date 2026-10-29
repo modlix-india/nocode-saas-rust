@@ -134,14 +134,20 @@ impl ChronoUnit {
     }
 }
 
-/// `SecuredFileResourceService.createAccessKey`: a key row for `path` (cut at `?`) lasting
-/// `time` `unit`s (the configured default when not given), used at most `limit` times.
+/// `SecuredFileResourceService.createAccessKey`: a key row for `path` lasting `time` `unit`s
+/// (the configured default when not given), used at most `limit` times.
+///
+/// `path` is the storage path as the tree walk reads it (decoded, no query): Java cut it at `?`
+/// here, which cut a decoded name with a `?` in it; the callers cut a query off before decoding.
+/// `created_by` is the signed-in caller. It also tells keys made with a decoded path (set) from
+/// keys made before CXZ-1138, which hold the path as it came in the URL (`NULL`).
 pub async fn create_access_key(
     st: &AppState,
     time: Option<i64>,
     unit: Option<ChronoUnit>,
     limit: Option<u64>,
     path: &str,
+    created_by: Option<u64>,
 ) -> AppResult<String> {
     if unit.is_none() && time.is_some() {
         return Err(errors::status(StatusCode::BAD_REQUEST, TIME_UNIT_ERROR, &[]));
@@ -155,7 +161,6 @@ pub async fn create_access_key(
         Some(u) => u,
         None => ChronoUnit::parse(&cfg.default_time_unit).unwrap_or(ChronoUnit::Days),
     };
-    let path = path.split('?').next().unwrap_or(path);
     let till = unit
         .add(Utc::now(), time)
         .ok_or_else(|| -> AppError {
@@ -168,12 +173,13 @@ pub async fn create_access_key(
     for _ in 0..5 {
         let key = base36_uuid();
         let r = sqlx::query(
-            "INSERT INTO files_secured_access_keys (PATH, ACCESS_KEY, ACCESS_TILL, ACCESS_LIMIT) VALUES (?, ?, ?, ?)",
+            "INSERT INTO files_secured_access_keys (PATH, ACCESS_KEY, ACCESS_TILL, ACCESS_LIMIT, CREATED_BY) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(path)
         .bind(&key)
         .bind(till)
         .bind(limit)
+        .bind(created_by)
         .execute(st.dao().pool())
         .await;
         match r {

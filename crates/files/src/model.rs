@@ -15,6 +15,24 @@ pub fn type_uri(kind: Kind) -> &'static str {
     }
 }
 
+/// A decoded folder path put into a listing's `url`. Java put it in as it is, which is right for
+/// the common folder (`My Docs (2)`: a browser sends the space as `%20`), but a folder with `+`
+/// or `%` read back as another folder (`a+b` is `a b`), and one with `#` or `?` lost the rest of
+/// the URL. Only those four are escaped, so every URL that worked keeps its exact text.
+fn escape_folder(folder: &str) -> String {
+    let mut out = String::with_capacity(folder.len());
+    for c in folder.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '+' => out.push_str("%2B"),
+            '#' => out.push_str("%23"),
+            '?' => out.push_str("%3F"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// The Java model `FileDetail`, as Jackson writes it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DetailOut {
@@ -78,7 +96,12 @@ impl DetailOut {
         };
         self.file_path = Some(format!("{folder}/{}", self.name_str()));
         let file_part = if self.directory { String::new() } else { format!("/file/{client_code}") };
-        self.url = Some(format!("{}{file_part}{folder}/{}", type_uri(kind), url_encode(self.name_str())));
+        self.url = Some(format!(
+            "{}{file_part}{}/{}",
+            type_uri(kind),
+            escape_folder(&folder),
+            url_encode(self.name_str())
+        ));
         self
     }
 
@@ -134,6 +157,12 @@ mod tests {
         let out = DetailOut::listed(&detail(5, "a b.png", false)).with_list_paths(Kind::Secured, "x/y", "CC");
         assert_eq!(out.id, None);
         assert_eq!(out.url.as_deref(), Some("api/files/secured/file/CC/x/y/a+b.png"));
+        // A folder keeps its text, bar the four characters that would read back as another path.
+        let out = DetailOut::listed(&detail(5, "a+b.pdf", false)).with_list_paths(Kind::Secured, "My Docs (2)/x+y/50%/C#/why?", "CC");
+        assert_eq!(out.url.as_deref(), Some("api/files/secured/file/CC/My Docs (2)/x%2By/50%25/C%23/why%3F/a%2Bb.pdf"));
+        assert_eq!(out.file_path.as_deref(), Some("/My Docs (2)/x+y/50%/C#/why?/a+b.pdf"));
+        let back = crate::paths::resolve_with_client_code(&format!("/{}", out.url.unwrap().replace(' ', "%20")), Kind::Secured).unwrap().0;
+        assert_eq!(back, "CC/My Docs (2)/x+y/50%/C#/why?/a+b.pdf");
         let dir = DetailOut::listed(&detail(5, "sub", true)).with_list_paths(Kind::Static, "", "CC");
         assert_eq!(dir.file_path.as_deref(), Some("/sub"));
         assert_eq!(dir.url.as_deref(), Some("api/files/static/sub"));
