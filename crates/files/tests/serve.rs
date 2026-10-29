@@ -348,3 +348,51 @@ async fn files_manage_answers_the_read_routes_too() {
     let r = h.get("/api/files/static/file/SYSTEM/docs/hello.txt", None).await;
     assert_eq!((r.status, &r.body[..]), (StatusCode::OK, &b"hello world"[..]));
 }
+
+/// CXZ-1138: a secured file read directly under every special name, in a nested folder with
+/// spaces, by the service's own spelling (`+` for a space) and by `encodeURIComponent`'s (`%20`).
+/// A literal `+` in a name reads only as `%2B`; a bare `+` is a space.
+#[tokio::test]
+async fn special_names_read_directly_in_both_spellings() {
+    let h = Harness::new(Unit::Serve).await;
+    let folder = "_withInClient/My Docs (2)/sub, folder";
+    for (i, name) in special_names().iter().enumerate() {
+        let rest = format!("{folder}/{name}");
+        h.seed_detail(Kind::Secured, "CLIA", &rest, file(100 + i as u64, name, 3, WRITTEN)).await;
+        h.put_object(Kind::Secured, &format!("CLIA/{rest}"), format!("#{i}").as_bytes());
+        for spelled in [java_path(&rest), component_path(&rest)] {
+            let r = h.get(&format!("/api/files/secured/file/CLIA/{spelled}"), Some("clia")).await;
+            assert_eq!((r.status, String::from_utf8_lossy(&r.body).to_string()), (StatusCode::OK, format!("#{i}")), "{name:?} as {spelled}");
+            let d = r.header("content-disposition").unwrap_or("").to_string();
+            assert!(d.starts_with("inline; filename=\""), "{name:?}: {d}");
+            if !name.is_ascii() {
+                assert!(d.contains("filename*=UTF-8''"), "{name:?}: {d}");
+            }
+        }
+        // The same path through the gateway prefix.
+        let r = h.get(&format!("/x/app/CLIA/api/files/secured/file/CLIA/{}", java_path(&rest)), Some("clia")).await;
+        assert_eq!(r.status, StatusCode::OK, "{name:?} behind a prefix");
+    }
+    // `plus+sign.pdf` sent with a bare `+` is `plus sign.pdf`, which is not there.
+    let r = h.get(&format!("/api/files/secured/file/CLIA/{}/plus+sign.pdf", java_path(folder)), Some("clia")).await;
+    assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR, "not seeded: the tree walk reaches the (dead) database");
+    // A raw `?` starts the query, an encoded one is part of the name.
+    let r = h.get(&format!("/api/files/secured/file/CLIA/{}/what%3F.pdf?download=true", java_path(folder)), Some("clia")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.header("content-disposition").unwrap().starts_with("attachment; filename=\"what?.pdf\""));
+}
+
+/// Static files resolve the same way, with no caller.
+#[tokio::test]
+async fn special_names_read_directly_from_static() {
+    let h = Harness::new(Unit::Serve).await;
+    for (i, name) in special_names().iter().enumerate() {
+        let rest = format!("My Site/{name}");
+        h.seed_detail(Kind::Static, "CLIA", &rest, file(300 + i as u64, name, 2, WRITTEN)).await;
+        h.put_object(Kind::Static, &format!("CLIA/{rest}"), b"ok");
+        for spelled in [java_path(&rest), component_path(&rest)] {
+            let r = h.get(&format!("/api/files/static/file/CLIA/{spelled}"), None).await;
+            assert_eq!(r.status, StatusCode::OK, "{name:?} as {spelled}");
+        }
+    }
+}

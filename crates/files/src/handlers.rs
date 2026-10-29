@@ -24,7 +24,7 @@ use crate::access::can_read_secured;
 use crate::download::respond;
 use crate::errors;
 use crate::options::DownloadOptions;
-use crate::paths::{make_tuple, resolve_with_client_code, Kind};
+use crate::paths::{has_dot_segment, legacy_key_path, make_tuple, resolve_with_client_code, Kind};
 use crate::state::AppState;
 use crate::Unit;
 
@@ -154,11 +154,26 @@ async fn by_key(state: &AppState, key: &str, q: &HashMap<String, String>, h: &He
         }
     }
 
-    let detail = state
-        .file_detail(Kind::Secured, &rec.path)
-        .await?
-        .ok_or(AppError::Empty(StatusCode::NOT_FOUND))?;
-    respond(state, Kind::Secured, &rec.path, &detail, &options, h).await
+    let (path, detail) = key_file(state, &rec).await?.ok_or(AppError::Empty(StatusCode::NOT_FOUND))?;
+    respond(state, Kind::Secured, &path, &detail, &options, h).await
+}
+
+/// The file a key opens: the stored path as is; for a key made before CXZ-1138 (no
+/// `CREATED_BY`, the path still URL encoded) that is not there, the decoded path, which is the
+/// file the `createKey` URL named. A key made since holds the decoded path and is never decoded
+/// again (a file named `a%20b.pdf` must not open `a b.pdf`, which the caller was not checked for).
+async fn key_file(state: &AppState, rec: &crate::dao::AccessKey) -> AppResult<Option<(String, crate::dao::FileDetail)>> {
+    if has_dot_segment(&rec.path) {
+        return Ok(None);
+    }
+    if let Some(d) = state.file_detail(Kind::Secured, &rec.path).await? {
+        return Ok(Some((rec.path.clone(), d)));
+    }
+    if rec.created_by.is_some() {
+        return Ok(None);
+    }
+    let Some(decoded) = legacy_key_path(&rec.path) else { return Ok(None) };
+    Ok(state.file_detail(Kind::Secured, &decoded).await?.map(|d| (decoded, d)))
 }
 
 /// `FilesInternalController.downloadFile`: service-to-service reads, no checks.

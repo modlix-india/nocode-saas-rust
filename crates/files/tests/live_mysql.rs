@@ -1154,3 +1154,257 @@ async fn a_stale_exists_answers_an_empty_200() {
     })
     .await;
 }
+
+// ---------------------------------------------------------------------------------------------
+// CXZ-1138: special characters in file names, end to end
+// ---------------------------------------------------------------------------------------------
+
+/// A URL as a browser puts it on the wire: what may not stand in a request path is escaped
+/// (space, quotes, braces, non-ASCII), everything else (`+`, `%XX`, `(`) is sent as it is.
+fn browser(url: &str) -> String {
+    let mut out = String::new();
+    for b in url.bytes() {
+        match b {
+            b' ' | b'"' | b'<' | b'>' | b'`' | b'{' | b'}' | b'|' | b'\\' | b'^' | 0x80..=0xFF | 0..=0x1F | 0x7F => {
+                out.push_str(&format!("%{b:02X}"))
+            }
+            _ => out.push(b as char),
+        }
+    }
+    format!("/{}", out.trim_start_matches('/'))
+}
+
+async fn key_row(pool: &MySqlPool, link: &str) -> (String, Option<u64>) {
+    let key = link.rsplit('/').next().unwrap();
+    let r = sqlx::query("SELECT PATH, CREATED_BY FROM files_secured_access_keys WHERE ACCESS_KEY = ?")
+        .bind(key)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    (r.try_get("PATH").unwrap(), r.try_get("CREATED_BY").unwrap())
+}
+
+/// Every special name: upload into a nested folder with spaces, read directly in both
+/// spellings, make a key in both spellings and open it, find it in the listing and open the
+/// listing's `url`, then delete it, after which neither the file nor its key opens.
+#[tokio::test]
+#[ignore = "needs the local MySQL (FILES_TEST_MYSQL=1, MODLIX__DATABASE__PASSWORD)"]
+async fn special_names_upload_read_key_list_delete() {
+    with_scratch(|pool| async move {
+        let h = service(pool.clone()).await;
+        clia_writable(&h).await;
+        let folder = "docs/My Folder (2)/sub, dir+x";
+        let folder_url = java_path(folder);
+        let names = special_names();
+
+        let mut urls = Vec::new();
+        for (i, name) in names.iter().enumerate() {
+            let body = format!("body #{i} of {name}").into_bytes();
+            let r = h.form(&format!("/api/files/secured/{folder_url}"), Some("clia"), &[FormPart::File("file", name, "application/pdf", body.clone())]).await;
+            assert_eq!(r.status, StatusCode::OK, "{name:?}: {}", r.text());
+            let up = r.json();
+            assert_eq!(up["name"].as_str(), Some(name.as_str()), "the name is stored as given");
+            let url = up["url"].as_str().unwrap().to_string();
+            assert_eq!(url, format!("api/files/secured/file/CLIA/{folder_url}/{}", files::spring::url_encode(name)));
+            assert_eq!(h.object(Kind::Secured, &format!("CLIA/{folder}/{name}")).unwrap().bytes, body, "{name:?}: the object key is the decoded path");
+
+            // Direct reads: the service's spelling, and encodeURIComponent's.
+            for u in [browser(&url), format!("/api/files/secured/file/CLIA/{}", component_path(&format!("{folder}/{name}")))] {
+                let r = h.get(&u, Some("clia")).await;
+                assert_eq!((r.status, &r.body[..]), (StatusCode::OK, &body[..]), "{name:?} read as {u}");
+            }
+
+            // Keys, from both spellings: each holds the decoded path and the caller, and opens the file.
+            let key_urls = [
+                browser(&url.replacen("api/files/secured/file/", "api/files/secured/createKey/file/", 1)),
+                format!("/api/files/secured/createKey/file/CLIA/{}", component_path(&format!("{folder}/{name}"))),
+            ];
+            for ku in key_urls {
+                let r = h.get(&format!("{ku}?timeSpan=10&timeUnit=MINUTES&accessLimit=10"), Some("clia")).await;
+                assert_eq!(r.status, StatusCode::OK, "{name:?} key from {ku}: {}", r.text());
+                let link = r.text();
+                assert_eq!(key_row(&pool, &link).await, (format!("CLIA/{folder}/{name}"), Some(500)), "{name:?}");
+                let r = h.get(&format!("/{link}"), None).await;
+                assert_eq!((r.status, &r.body[..]), (StatusCode::OK, &body[..]), "{name:?} by key from {ku}");
+                let r = h.get(&format!("/{link}?download=true"), None).await;
+                assert!(r.header("content-disposition").unwrap().starts_with("attachment; filename=\""), "{name:?}");
+            }
+            urls.push((name.clone(), url, body));
+        }
+
+        // The listing: every name, and each listed `url` opens its file.
+        let r = h.get(&format!("/api/files/secured/{folder_url}?size=200"), Some("clia")).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        let page = r.json();
+        let listed = names_of(&page);
+        assert_eq!(listed.len(), names.len(), "{listed:?}");
+        for entry in page["content"].as_array().unwrap() {
+            let name = entry["name"].as_str().unwrap();
+            let (_, _, body) = urls.iter().find(|(n, _, _)| n == name).unwrap_or_else(|| panic!("unexpected {name:?}"));
+            let u = browser(entry["url"].as_str().unwrap());
+            let r = h.get(&u, Some("clia")).await;
+            assert_eq!((r.status, &r.body[..]), (StatusCode::OK, &body[..]), "listed {name:?} as {u}");
+            assert_eq!(entry["filePath"].as_str(), Some(format!("/{folder}/{name}").as_str()));
+        }
+        // The folder lists from its encodeURIComponent spelling too.
+        let r = h.get(&format!("/api/files/secured/{}?size=200", component_path(folder)), Some("clia")).await;
+        assert_eq!(names_of(&r.json()).len(), names.len());
+
+        // Delete each (alternating spellings); then neither the file nor a key for it opens.
+        for (i, (name, url, _)) in urls.iter().enumerate() {
+            let link = h.get(&browser(&url.replacen("api/files/secured/file/", "api/files/secured/createKey/file/", 1)), Some("clia")).await.text();
+            let path = if i % 2 == 0 { format!("{folder_url}/{}", files::spring::url_encode(name)) } else { component_path(&format!("{folder}/{name}")) };
+            let r = h.call(Method::DELETE, &format!("/api/files/secured/{path}"), Some("clia")).await;
+            assert_eq!((r.status, r.text()), (StatusCode::OK, "true".to_string()), "delete {name:?}");
+            assert!(h.object(Kind::Secured, &format!("CLIA/{folder}/{name}")).is_none(), "{name:?}");
+            assert_eq!(h.get(&browser(url), Some("clia")).await.status, StatusCode::NOT_FOUND, "{name:?} after delete");
+            assert_eq!(h.get(&format!("/{link}"), None).await.status, StatusCode::NOT_FOUND, "{name:?} key after delete");
+        }
+        assert!(names_of(&h.get(&format!("/api/files/secured/{folder_url}?size=200"), Some("clia")).await.json()).is_empty());
+    })
+    .await;
+}
+
+fn names_of(page: &Value) -> Vec<String> {
+    names(page)
+}
+
+/// A literal `+` and a space are two files; each spelling opens its own, never the other.
+#[tokio::test]
+#[ignore = "needs the local MySQL (FILES_TEST_MYSQL=1, MODLIX__DATABASE__PASSWORD)"]
+async fn plus_and_space_are_two_files() {
+    with_scratch(|pool| async move {
+        let h = service(pool.clone()).await;
+        clia_writable(&h).await;
+        for (name, body) in [("a+b.pdf", "PLUS"), ("a b.pdf", "SPACE"), ("a%20b.pdf", "PCT20")] {
+            let r = h.form("/api/files/secured/pair", Some("clia"), &[FormPart::File("file", name, "application/pdf", body.as_bytes().to_vec())]).await;
+            assert_eq!(r.status, StatusCode::OK, "{name}");
+        }
+        for (spelled, body) in [("a%2Bb.pdf", "PLUS"), ("a%2bb.pdf", "PLUS"), ("a+b.pdf", "SPACE"), ("a%20b.pdf", "SPACE"), ("a%2520b.pdf", "PCT20")] {
+            let r = h.get(&format!("/api/files/secured/file/CLIA/pair/{spelled}"), Some("clia")).await;
+            assert_eq!(String::from_utf8_lossy(&r.body), body, "direct {spelled}");
+            let link = h.get(&format!("/api/files/secured/createKey/file/CLIA/pair/{spelled}"), Some("clia")).await.text();
+            let r = h.get(&format!("/{link}"), None).await;
+            assert_eq!(String::from_utf8_lossy(&r.body), body, "by key {spelled}");
+        }
+    })
+    .await;
+}
+
+/// The read check runs on the decoded path. A caller allowed only the file literally named
+/// `a+b.pdf` gets a key for `a%2Bb.pdf`, not for `a+b.pdf` (which is `a b.pdf`); paths that step
+/// out of their folder, plain or encoded, get none.
+#[tokio::test]
+#[ignore = "needs the local MySQL (FILES_TEST_MYSQL=1, MODLIX__DATABASE__PASSWORD)"]
+async fn keys_check_the_decoded_path() {
+    with_scratch(|pool| async move {
+        let h = service(pool.clone()).await;
+        clia_writable(&h).await;
+        for (folder, name) in [("open", "a+b.pdf"), ("open", "a b.pdf"), ("closed", "secret.pdf"), ("My Docs", "x.pdf")] {
+            let r = h.form(&format!("/api/files/secured/{}", java_path(folder)), Some("clia"), &[FormPart::File("file", name, "application/pdf", name.as_bytes().to_vec())]).await;
+            assert_eq!(r.status, StatusCode::OK);
+        }
+        // `reader` (CLIA, no authorities): the one file `/open/a+b.pdf`, and the folder `/My Docs`.
+        h.sec.token("reader", ca(700, 10, "CLIA", false, &[]));
+        rule(&h, json!({"clientCode": "CLIA", "userId": 700, "resourceType": "SECURED", "path": "/open/a+b.pdf", "allowSubPathAccess": false})).await;
+        rule(&h, json!({"clientCode": "CLIA", "userId": 700, "resourceType": "SECURED", "path": "/My Docs", "allowSubPathAccess": true})).await;
+        let key = |p: &'static str| {
+            let h = &h;
+            async move { h.get(&format!("/api/files/secured/createKey/file/CLIA/{p}"), Some("reader")).await }
+        };
+        let r = key("open/a%2Bb.pdf").await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(&h.get(&format!("/{}", r.text()), None).await.body[..], b"a+b.pdf");
+        // The direct route agrees.
+        assert_eq!(h.get("/api/files/secured/file/CLIA/open/a%2Bb.pdf", Some("reader")).await.status, StatusCode::OK);
+        for p in ["open/a+b.pdf", "open/a%20b.pdf", "closed/secret.pdf"] {
+            assert_eq!(key(p).await.status, StatusCode::FORBIDDEN, "{p}");
+            assert_eq!(h.get(&format!("/api/files/secured/file/CLIA/{p}"), Some("reader")).await.status, StatusCode::FORBIDDEN, "direct {p}");
+        }
+        // A folder with a space, in both spellings.
+        for p in ["My+Docs/x.pdf", "My%20Docs/x.pdf"] {
+            let r = key(p).await;
+            assert_eq!(r.status, StatusCode::OK, "{p}");
+            assert_eq!(&h.get(&format!("/{}", r.text()), None).await.body[..], b"x.pdf");
+        }
+        // Out of the allowed folder, plain or encoded: no key, no read.
+        for p in [
+            "My+Docs/../closed/secret.pdf",
+            "My+Docs/%2E%2E/closed/secret.pdf",
+            "My+Docs/..%2Fclosed%2Fsecret.pdf",
+            "My+Docs/x%2F..%2F..%2Fclosed%2Fsecret.pdf",
+            "My+Docs/./x.pdf",
+        ] {
+            assert_eq!(key(p).await.status, StatusCode::FORBIDDEN, "{p}");
+            let s = h.get(&format!("/api/files/secured/file/CLIA/{p}"), Some("reader")).await.status;
+            assert!(s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND, "direct {p}: {s}");
+        }
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM files_secured_access_keys WHERE PATH LIKE '%..%' OR PATH LIKE '%/./%'").await, 0);
+        // A key row that holds a `..` path (only an internal caller could make one) opens nothing.
+        let link = h.get("/api/files/internal/secured/createKey?filePath=CLIA%2FMy%20Docs%2F..%2Fclosed%2Fsecret.pdf", None).await.text();
+        assert_eq!(h.get(&format!("/{link}"), None).await.status, StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
+/// Keys made before CXZ-1138 hold the `createKey` URL's path as it came (no `CREATED_BY`). They
+/// open the decoded file; the stored text is tried first, so a file that really has that name
+/// still wins. Keys made since are never decoded a second time.
+#[tokio::test]
+#[ignore = "needs the local MySQL (FILES_TEST_MYSQL=1, MODLIX__DATABASE__PASSWORD)"]
+async fn keys_made_before_the_fix_open_the_decoded_file() {
+    with_scratch(|pool| async move {
+        let h = service(pool.clone()).await;
+        clia_writable(&h).await;
+        for (folder, name) in [
+            ("_allSubClients", "Money Apartment_11_A-142costsheet.pdf"),
+            ("My Docs", "Cost Sheet (1).pdf"),
+            ("both", "a b.pdf"),
+            ("both", "a+b.pdf"),
+            ("new", "a b.pdf"),
+            ("closed", "secret.pdf"),
+        ] {
+            let r = h.form(&format!("/api/files/secured/{}", java_path(folder)), Some("clia"), &[FormPart::File("file", name, "application/pdf", format!("{folder}/{name}").into_bytes())]).await;
+            assert_eq!(r.status, StatusCode::OK);
+        }
+        let legacy = |path: &'static str, by: Option<u64>| {
+            let pool = pool.clone();
+            async move {
+                let key = format!("legacy{:07x}", rand::random::<u32>() & 0xfffffff);
+                sqlx::query("INSERT INTO files_secured_access_keys (PATH, ACCESS_KEY, ACCESS_TILL, CREATED_BY) VALUES (?, ?, UTC_TIMESTAMP() + INTERVAL 1 DAY, ?)")
+                    .bind(path)
+                    .bind(&key)
+                    .bind(by)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                format!("/api/files/secured/downloadFileByKey/{key}")
+            }
+        };
+        for (stored, opens) in [
+            ("CLIA/_allSubClients/Money+Apartment_11_A-142costsheet.pdf", Some("_allSubClients/Money Apartment_11_A-142costsheet.pdf")),
+            ("CLIA/My+Docs/Cost+Sheet+%281%29.pdf", Some("My Docs/Cost Sheet (1).pdf")),
+            ("/CLIA/My%20Docs/Cost%20Sheet%20(1).pdf", Some("My Docs/Cost Sheet (1).pdf")),
+            // The stored text names a real file: that one, as before.
+            ("CLIA/both/a+b.pdf", Some("both/a+b.pdf")),
+            ("CLIA/both/a%2Bb.pdf", Some("both/a+b.pdf")),
+            // Out of the folder, or into another client: nothing.
+            ("CLIA/My+Docs/%2E%2E/closed/secret.pdf", None),
+            ("CLIA/My+Docs/..%2Fclosed%2Fsecret.pdf", None),
+            ("CL%49A/closed/secret.pdf", None),
+        ] {
+            let r = h.get(&legacy(stored, None).await, None).await;
+            match opens {
+                Some(p) => assert_eq!((r.status, String::from_utf8_lossy(&r.body).to_string()), (StatusCode::OK, p.to_string()), "{stored}"),
+                None => assert_eq!(r.status, StatusCode::NOT_FOUND, "{stored}"),
+            }
+        }
+        // Made since the fix (a caller is recorded): the path is final. `new/a%20b.pdf` is a
+        // file literally named so, which is not there; `new/a b.pdf` is not opened in its place.
+        let r = h.get(&legacy("CLIA/new/a%20b.pdf", Some(500)).await, None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+        let r = h.get(&legacy("CLIA/new/a b.pdf", Some(500)).await, None).await;
+        assert_eq!(r.status, StatusCode::OK);
+    })
+    .await;
+}
