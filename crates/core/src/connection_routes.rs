@@ -3,7 +3,7 @@
 //! functions.
 //!
 //! `oauth/evoke`, `oauth/callback` and `internal/**` are open (`CoreConfiguration`);
-//! `oauth/revoke` needs a signed-in caller (a bare 401 otherwise).
+//! `oauth/revoke` and `oauth/status` need a signed-in caller (a bare 401 otherwise).
 
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/core/connections/oauth/evoke", post(evoke))
         .route("/api/core/connections/oauth/callback", get(callback))
         .route("/api/core/connections/oauth/revoke", get(revoke))
+        .route("/api/core/connections/oauth/status", get(status))
         .route("/api/core/connections/internal/oauth2/token/{connection_name}", get(oauth2_token))
         .route("/api/core/connections/internal/notification/{name}", get(notification))
         .route("/api/core/connections/internal/{name}", get(internal))
@@ -131,6 +132,31 @@ async fn revoke(State(st): State<AppState>, RawQuery(q): RawQuery, h: HeaderMap)
     })
     .await;
     finish(r, "/api/core/connections/oauth/revoke")
+}
+
+/// The answer of `oauth/status`: whether the caller's business has a stored sign-in for the
+/// connection, when it was made (UTC, ISO 8601) and by which user. Never the token.
+fn sign_in_json(s: Option<&controller::SignIn>) -> String {
+    let at = s.and_then(|s| s.connected_at).map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    serde_json::json!({
+        "hasToken": s.is_some(),
+        "connectedAt": at,
+        "connectedBy": s.and_then(|s| s.user_id),
+    })
+    .to_string()
+}
+
+/// `GET /oauth/status?connectionName=` (Rust only): the caller's stored sign-in for the
+/// connection, for the caller's own client and URL app (the tokens `oauth/revoke` would drop).
+async fn status(State(st): State<AppState>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    let r = in_request(&st.clone(), &h, true, || async move {
+        let name = required(&params(q.as_deref()), "connectionName")?;
+        let i = &st.inner().integrations;
+        let s = controller::sign_in_status(&i.connections, &caller(), &name).await.map_err(core_error)?;
+        Ok(json(sign_in_json(s.as_ref())))
+    })
+    .await;
+    finish(r, "/api/core/connections/oauth/status")
 }
 
 /// `GET /internal/oauth2/token/{connectionName}` with the `appCode` and `clientCode` headers.

@@ -83,6 +83,10 @@ async fn checks(pool: sqlx::MySqlPool) {
     assert_eq!(dao.active_token("SYSTEM", "app", "conn", TokenType::Access).await.unwrap().unwrap().id, created.id);
     assert!(dao.active_token("SYSTEM", "app", "conn", TokenType::Refresh).await.unwrap().is_none());
     assert_eq!(dao.by_state(Some("st")).await.unwrap().unwrap().id, created.id);
+    // The consent's first row, scoped to the client, app and connection.
+    assert_eq!(dao.consent_row("SYSTEM", "app", "conn", "st").await.unwrap().unwrap().id, created.id);
+    assert!(dao.consent_row("OTHER", "app", "conn", "st").await.unwrap().is_none());
+    assert!(dao.consent_row("SYSTEM", "app2", "conn", "st").await.unwrap().is_none());
     assert!(dao.by_state(None).await.unwrap().is_none());
 
     // A lifetime refresh token without an expiry is active; an expired access token is not.

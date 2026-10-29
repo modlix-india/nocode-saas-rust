@@ -595,10 +595,20 @@ async fn gate_revoke(svc: &Connections, caller: &Caller, connection_name: &str, 
     }
 }
 
+/// The caller's active token for the connection: the access token, or, when it has expired
+/// and not been refreshed yet, the refresh token that would renew it.
+async fn active_sign_in_token(svc: &Connections, client: &str, app: &str, connection_name: &str) -> ConnResult<Option<CoreToken>> {
+    if let Some(t) = svc.tokens.active_token(client, app, connection_name, TokenType::Access).await? {
+        return Ok(Some(t));
+    }
+    svc.tokens.active_token(client, app, connection_name, TokenType::Refresh).await
+}
+
 /// `revokeConnectionToken`: revokes the caller's tokens for the connection. Refused when the
-/// caller has no active access token for it, and (Rust only) when the caller does not satisfy
-/// the connection's `consentAuth` ([`check_revoke_auth`]), before anything is looked up or
-/// revoked.
+/// caller has no active token for it (Java looked for an access token only; here an active
+/// refresh token counts too, so a sign-in whose access token has expired can be removed), and
+/// (Rust only) when the caller does not satisfy the connection's `consentAuth`
+/// ([`check_revoke_auth`]), before anything is looked up or revoked.
 pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<bool> {
     let refuse = || ConnError::msg(StatusCode::BAD_REQUEST, messages::CANNOT_DELETE_TOKEN_WITH_CLIENT_CODE, &[connection_name]);
     if !caller.present {
@@ -608,7 +618,7 @@ pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connect
         return Err(refuse());
     };
     gate_revoke(svc, caller, connection_name, app, client).await?;
-    let Some(token) = svc.tokens.active_token(client, app, connection_name, TokenType::Access).await? else {
+    let Some(token) = active_sign_in_token(svc, client, app, connection_name).await? else {
         return Err(refuse());
     };
     svc.tokens.revoke(client, app, connection_name, None).await?;
@@ -616,6 +626,39 @@ pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connect
         .evict_everywhere(CACHE_NAME, &cache_key(Some(connection_name), token.client_code.as_deref(), token.app_code.as_deref()))
         .await;
     Ok(true)
+}
+
+/// The business's stored sign-in for a connection (Rust only): when it was made and by which
+/// user. Nothing about the token itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SignIn {
+    /// When the consent that produced the active token started (`CREATED_AT` of its first row,
+    /// the database's UTC clock).
+    pub connected_at: Option<NaiveDateTime>,
+    /// The user who started that consent.
+    pub user_id: Option<u64>,
+}
+
+/// Rust only: the caller's stored sign-in for the connection, read for the caller's own client
+/// and URL app exactly as [`revoke_connection_token`] would revoke it. `None` when there is no
+/// active token (or no signed-in caller). It says that a token is stored, not that the provider
+/// still accepts it.
+pub async fn stored_sign_in(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<Option<SignIn>> {
+    if !caller.present {
+        return Ok(None);
+    }
+    let (Some(client), Some(app)) = (caller.client_code.as_deref(), caller.url_app_code.as_deref()) else {
+        return Ok(None);
+    };
+    let Some(token) = active_sign_in_token(svc, client, app, connection_name).await? else {
+        return Ok(None);
+    };
+    let first = match token.state.as_deref().filter(|s| !s.is_empty()) {
+        Some(state) => svc.tokens.consent_row(client, app, connection_name, state).await?,
+        None => None,
+    };
+    let first = first.unwrap_or_else(|| token.clone());
+    Ok(Some(SignIn { connected_at: first.created_at.or(token.created_at), user_id: first.user_id.or(token.user_id) }))
 }
 
 #[cfg(test)]
