@@ -35,17 +35,44 @@ pub fn java_url_decode(s: &str) -> String {
 
 /// `makeTuple`: `(decoded path, path as it came)`. Leading `/` dropped from both; the decoded
 /// one also loses anything from a `?` and a trailing `/`.
+///
+/// The decoding is the inverse of what the service hands out (`url_encode`, `URLEncoder`): `+`
+/// is a space and `%XX` a byte, so `a+b.pdf` is `a b.pdf` and `a%2Bb.pdf` is `a+b.pdf`.
+///
+/// Only a `?` that is in the path as it came starts a query. Java cut at the first `?` AFTER
+/// decoding, so a name with an encoded `?` (`a%3Fb.pdf`, as the service's own `url` for
+/// `a?b.pdf` spells it) lost everything from it and resolved to another path, `a`.
 pub fn make_tuple(path: &str) -> (String, String) {
     let path = path.strip_prefix('/').unwrap_or(path);
     let orig = path.to_string();
-    let mut decoded = java_url_decode(path);
-    if let Some(i) = decoded.find('?') {
-        decoded.truncate(i);
-    }
+    let before_query = path.split('?').next().unwrap_or(path);
+    let mut decoded = java_url_decode(before_query);
     if decoded.ends_with('/') {
         decoded.pop();
     }
     (decoded, orig)
+}
+
+/// A `.` or `..` segment: a path that would step out of its folder. The tree walk never finds
+/// one (no row has such a name), but a key or a check should not be made for it either.
+pub fn has_dot_segment(path: &str) -> bool {
+    path.split('/').any(|s| s == "." || s == "..")
+}
+
+/// The path a key minted before CXZ-1138 meant. Those keys hold the path as it came in the
+/// `createKey` URL (`ANTER/_allSubClients/Money+Apartment_11.pdf`, at times with a leading `/`),
+/// not the decoded one the direct route reads (`Money Apartment_11.pdf`). `None` when decoding
+/// changes nothing, steps out of a folder, or changes the client code.
+pub fn legacy_key_path(stored: &str) -> Option<String> {
+    let (decoded, _) = make_tuple(stored);
+    if decoded.is_empty() || decoded == stored || has_dot_segment(&decoded) {
+        return None;
+    }
+    let stored = stored.strip_prefix('/').unwrap_or(stored);
+    if split_client_code(&decoded).0 != split_client_code(stored).0 {
+        return None;
+    }
+    Some(decoded)
 }
 
 /// `resolvePathWithClientCode`: everything after the first `api/files/<type>/file` in the raw
@@ -150,11 +177,82 @@ mod tests {
 
     #[test]
     fn query_marks_and_empty_names() {
-        assert_eq!(make_tuple("/a%3Fb/c").0, "a");
+        // An encoded `?` is part of the name; a raw one starts a query.
+        assert_eq!(make_tuple("/a%3Fb/c").0, "a?b/c");
+        assert_eq!(make_tuple("/a/b.pdf?x=1").0, "a/b.pdf");
+        assert_eq!(make_tuple("/a/b+c.pdf?x=%3F").0, "a/b c.pdf");
         assert_eq!(make_tuple("x"), ("x".to_string(), "x".to_string()));
         assert_eq!(download_name(""), "file");
         assert_eq!(download_name("/"), "file");
         assert_eq!(uri_part(Kind::Secured), "api/files/secured");
         assert_eq!(java_url_decode("a+b%2Fc%ZZ"), "a b/c%ZZ");
+    }
+
+    /// CXZ-1138: the decoding is the exact inverse of the `url` the service hands out
+    /// (`URLEncoder`: space `+`, `+` `%2B`), and of `encodeURIComponent` (space `%20`).
+    #[test]
+    fn every_special_name_round_trips() {
+        let names = [
+            "a b.pdf", "a+b.pdf", "a b+c.pdf", "100%.pdf", "a%20b.pdf", "%", "%2", "%ZZ.pdf", "Q&A.pdf",
+            "C#.pdf", "what?.pdf", "a=b;c.pdf", "Cost Sheet (1).pdf", "[x] {y}.pdf", "a, b.pdf",
+            "Owner's.pdf", "नक्शा.pdf", "café.pdf", "🏠 plan.pdf", "a.b.c.tar.gz", " lead.pdf",
+            "trail.pdf ", "Money%2BApartment%281%29.pdf", "~!*$@:.pdf", "a\tb.pdf",
+        ];
+        let component = |s: &str| {
+            s.bytes()
+                .map(|b| match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
+                        (b as char).to_string()
+                    }
+                    _ => format!("%{b:02X}"),
+                })
+                .collect::<String>()
+        };
+        for name in names {
+            let folder = "CC/My Docs (2)/x";
+            for spelled in [crate::spring::url_encode(name), component(name)] {
+                let uri = format!("/api/files/secured/file/{}/{spelled}", crate::spring::url_encode("My Docs (2)").replace("%2F", "/"));
+                let uri = uri.replacen("/file/", "/file/CC/", 1).replacen("My+Docs+%282%29", "My+Docs+%282%29/x", 1);
+                let (rp, _) = resolve_with_client_code(&uri, Kind::Secured).unwrap();
+                assert_eq!(rp, format!("{folder}/{name}"), "{name:?} as {spelled}");
+            }
+        }
+        // A bare `+` is a space; only `%2B` is a plus.
+        assert_eq!(make_tuple("CC/a+b.pdf").0, "CC/a b.pdf");
+        assert_eq!(make_tuple("CC/a%2Bb.pdf").0, "CC/a+b.pdf");
+        assert_eq!(make_tuple("CC/a%2bb.pdf").0, "CC/a+b.pdf");
+        // Decoded once only: `%2520` is the text `%20`.
+        assert_eq!(make_tuple("CC/a%2520b.pdf").0, "CC/a%20b.pdf");
+    }
+
+    #[test]
+    fn dot_segments() {
+        assert!(has_dot_segment("CC/../x"));
+        assert!(has_dot_segment("CC/a/."));
+        assert!(has_dot_segment(".."));
+        assert!(!has_dot_segment("CC/..a/b../.hidden/x..y"));
+        assert!(!has_dot_segment("CC/a b/c"));
+    }
+
+    /// Keys made before CXZ-1138 hold the `createKey` URL's path, still encoded, at times with a
+    /// leading `/`: the file they meant is the decoded one, unless decoding steps out of a
+    /// folder or names another client.
+    #[test]
+    fn legacy_key_paths() {
+        assert_eq!(
+            legacy_key_path("ANTER/_allSubClients/Money+Apartment_11_A-142costsheet.pdf").as_deref(),
+            Some("ANTER/_allSubClients/Money Apartment_11_A-142costsheet.pdf")
+        );
+        assert_eq!(legacy_key_path("/LALIT/Cost+Sheet+%281%29.pdf").as_deref(), Some("LALIT/Cost Sheet (1).pdf"));
+        assert_eq!(legacy_key_path("CC/My+Docs/a%2Bb.pdf").as_deref(), Some("CC/My Docs/a+b.pdf"));
+        // Nothing to decode: the stored path was the answer (or there is none).
+        assert_eq!(legacy_key_path("CC/plain.pdf"), None);
+        assert_eq!(legacy_key_path(""), None);
+        // A leading `/` alone is still a different path to look up.
+        assert_eq!(legacy_key_path("/CC/plain.pdf").as_deref(), Some("CC/plain.pdf"));
+        // Never out of the folder, never another client.
+        assert_eq!(legacy_key_path("CC/a/%2E%2E/b.pdf"), None);
+        assert_eq!(legacy_key_path("CC/a/x%2F..%2F..%2FDD%2Fb.pdf"), None);
+        assert_eq!(legacy_key_path("C%43/a.pdf"), None);
     }
 }
