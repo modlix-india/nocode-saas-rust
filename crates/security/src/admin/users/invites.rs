@@ -574,7 +574,9 @@ impl Admin {
             Some(p) => self.has_access_to_profiles(u.client_id, &[p]).await?,
             None => false,
         };
-        self.caches().service.evict_everywhere(crate::caches::USER_SUB_ORG, &format!("orgStructure:{}", created.client_id)).await;
+        // The owner's cached sub-org (`<client>:owner`) lists every user of the client, so it has to
+        // drop too, or an Owner cannot hand work to the new user until the cache expires (LZT-1716).
+        self.evict_owner_cache(created.client_id, created.reporting_to).await;
         if addable {
             self.db.add_profile_to_user(created.id, i.profile_id.unwrap_or_default()).await?;
         }
@@ -1045,12 +1047,18 @@ mod live {
             .unwrap()
             .to_string();
         assert_eq!(err(s.invite_accept(&on_c, &reg(&otp, json!({"passType": "OTP", "otp": "1"})), &info()).await).0, StatusCode::FORBIDDEN, "OTP sets no secret");
+        // An Owner's cached sub-org (every user of the client) must drop when the invite makes a
+        // user, or a transfer to the new user is refused until it expires (LZT-1716).
+        let owner_key = format!("{c}:owner");
+        s.caches().id_lists.insert(crate::caches::USER_SUB_ORG, owner_key.clone(), std::sync::Arc::new(vec![])).await;
+        assert!(s.caches().id_lists.get(crate::caches::USER_SUB_ORG, &owner_key).await.is_some());
         let (body, _) = s.invite_accept(&on_c, &reg(&full, json!({"passType": "PIN", "pin": "1234"})), &info()).await.map_err(|e| e.to_string()).unwrap_or_else(|e| (json!({"error": e}), None));
         // The user is made, with the invite's identifiers and profile; signing in with a PIN is
         // then refused, as appbuilder has no PIN sign-in for the client.
         assert!(body["error"].as_str().unwrap().contains("403"), "{body}");
         let made = fx.ids(&format!("SELECT ID FROM security_user WHERE CLIENT_ID = {c} AND USER_NAME = 'zzrl{run}k1' AND PHONE_NUMBER IS NOT NULL")).await;
         assert_eq!(made.len(), 1);
+        assert!(s.caches().id_lists.get(crate::caches::USER_SUB_ORG, &owner_key).await.is_none(), "the owner sub-org cache is dropped");
         assert_eq!(s.db.assigned_profile_ids(made[0], Some(2)).await.unwrap(), vec![p1]);
         let twin = s.invite_create(&sys, Invite { client_id: Some(c), email_id: Some(mail("k3")), ..Default::default() }).await.unwrap()["userRequest"]["inviteCode"]
             .as_str()

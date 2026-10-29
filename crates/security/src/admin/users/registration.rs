@@ -256,6 +256,8 @@ impl Admin {
         let label = describe(&created).unwrap_or_else(|| "null".into());
         sox(&self.db, Some(created.id), object::USER, action::CREATE, format!("User created: {label}"), None);
         activity(&self.db, Some(created.client_id), "User Create".into(), format!("User created: {label}"), None);
+        // Same cache drop as an admin create: the client's sub-org lists must include the new user.
+        self.evict_owner_cache(created.client_id, created.reporting_to).await;
         // `setPassword`: PASSWORD and PIN are stored; anything else sets nothing (Java's empty).
         let set = match pass_type {
             Some(t @ (SecretType::Password | SecretType::Pin)) => {
