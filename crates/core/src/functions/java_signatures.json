@@ -129,6 +129,34 @@
     "variableArgument": true,
     "type": "EXPRESSION"
    },
+   "cc": {
+    "schema": {
+     "namespace": "_",
+     "name": "cc",
+     "version": 1,
+     "type": [
+      "STRING",
+      "NULL"
+     ]
+    },
+    "parameterName": "cc",
+    "variableArgument": true,
+    "type": "EXPRESSION"
+   },
+   "bcc": {
+    "schema": {
+     "namespace": "_",
+     "name": "bcc",
+     "version": 1,
+     "type": [
+      "STRING",
+      "NULL"
+     ]
+    },
+    "parameterName": "bcc",
+    "variableArgument": true,
+    "type": "EXPRESSION"
+   },
    "appCode": {
     "schema": {
      "namespace": "_",

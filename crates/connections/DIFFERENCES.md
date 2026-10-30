@@ -274,6 +274,18 @@ Everything in those runs is the same except what is listed here.
     drops every row of the caller's client, URL app and connection as before. Nothing is sent to
     the provider: a provider-side revoke (Meta `DELETE /me/permissions`, Google's `/revoke`)
     would end the grant for the whole OAuth client, which other apps of the same business share.
+36. **`SendEmail` takes `cc` and `bcc`** (2026-10-30, Rust only; Java sends no copies). Each is
+    a string of addresses separated by `,` or `;`, or an array of such strings; blanks and
+    nulls are dropped, each address is trimmed and kept once (ignoring case). An address that
+    is not one refuses the whole send before the connection is read (400
+    `CORE.MAIL_ADDRESS_INVALID`, `Unable to send the email: Not an email address: <address>`).
+    Once the template gives the `to` addresses, a copy already in `to` is dropped, and a BCC
+    already in CC (SendGrid refuses an address twice in one personalization). SMTP sends one
+    message: `Cc` in its headers, BCC only in the envelope, so each copy gets one mail whatever
+    the number of `to` addresses; a copy the server refuses is logged and does not stop the
+    mail, which the `to` addresses alone decide. SendGrid gets `personalizations[0].cc` and
+    `.bcc`, only when there are some. The event action (`SendEmailTask`) and the notification
+    service send no copies.
 
 ## Error codes (2026-10-17)
 

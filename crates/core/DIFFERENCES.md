@@ -62,9 +62,9 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   `CoreServices.*` functions of `CoreFunctionRepository`, in its order. The signatures of the 53
   added in step 3 are Java's own `repositoryFind` JSON, kept in
   `functions/java_signatures.json` and read back into kirun's model (a test checks each reads
-  back to the JSON); a signature change in Java needs that file re-captured. One parameter in
-  it is Rust only: `CoreServices.Email.SendEmail`'s `attachments` (see the connections crate's
-  DIFFERENCES.md, item 25). Seven Rust-only
+  back to the JSON); a signature change in Java needs that file re-captured. Three parameters
+  in it are Rust only: `CoreServices.Email.SendEmail`'s `attachments`, `cc` and `bcc` (see the
+  connections crate's DIFFERENCES.md, items 25 and 36). Seven Rust-only
   `CoreServices.Platform.*` follow them (79 in all; see "Platform functions").
 - **D4 KIRun built-ins follow kirun-js** (`D4_kirun_builtins`). The `System.*` functions and
   schemas are kirun-rust's: the set listed with `includeKIRunRepos=true` differs, signatures

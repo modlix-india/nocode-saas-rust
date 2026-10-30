@@ -930,6 +930,15 @@ java = "mail_send_error"
 when = "Sending an e-mail fails (no addresses, a SendGrid connection without an API key, the mail server refusing it)."
 audience = "anyone"
 
+[CORE.MAIL_ADDRESS_INVALID]
+status = 400
+params = ["address"]
+text = "The copy address[ {address}] is not an e-mail address, so the e-mail was not sent."
+action = "Correct the CC or BCC address and try again."
+java_text = "Unable to send the email: Not an email address: $"
+when = "CoreServices.Email.SendEmail with a cc or bcc value that is not an e-mail address."
+audience = "anyone"
+
 [CORE.UNABLE_AI_CONNECTION]
 status = 500
 params = ["connection"]

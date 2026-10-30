@@ -112,7 +112,7 @@ impl EmailService {
             from,
             subject: t.get("subject").cloned().unwrap_or_default(),
             body,
-            attachments: Vec::new(),
+            ..Default::default()
         };
         // Transport.send's MessagingException is logged, and the answer is still true.
         if let Err(e) = connections::email::smtp_send(&conn, &details, self.block_private_targets).await {
