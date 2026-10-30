@@ -3,7 +3,8 @@
 //! and what `CoreServices.Email.SendEmail` reports.
 //!
 //! Attachments are Rust only (Java's `SendEmail` sends none): stored files or inline content,
-//! sent as `multipart/mixed` by SMTP and as `attachments` to SendGrid.
+//! sent as `multipart/mixed` by SMTP and as `attachments` to SendGrid. So are `SendEmail`'s
+//! `cc` and `bcc` copies.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -69,6 +70,9 @@ pub trait TemplateStore: Send + Sync {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProcessedEmail {
     pub to: Vec<String>,
+    /// Copies, none already in `to`; `bcc` holds none of `cc` either.
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
     pub from: String,
     pub subject: String,
     pub body: String,
@@ -176,7 +180,67 @@ pub fn processed_email(
     let lang = language(tmpl, data)?;
     let parts = processed_parts(lang.as_deref(), tmpl, data)?;
     let part = |k: &str| parts.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    Ok(ProcessedEmail { to, from, subject: part("subject"), body: part("body"), attachments: Vec::new() })
+    Ok(ProcessedEmail { to, from, subject: part("subject"), body: part("body"), ..Default::default() })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Copies
+
+/// The copies of one send (Rust only): `cc` shown to every recipient, `bcc` to none.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Copies {
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
+}
+
+impl Copies {
+    /// `SendEmail`'s `cc` and `bcc`, each read by [`copy_addresses`].
+    pub fn from_args(cc: Option<&Value>, bcc: Option<&Value>) -> ConnResult<Self> {
+        Ok(Copies { cc: copy_addresses(cc)?, bcc: copy_addresses(bcc)? })
+    }
+
+    /// Without the addresses already in `to`, and `bcc` without those in `cc`, ignoring case:
+    /// SendGrid refuses an address that appears twice in one personalization.
+    pub fn without(&self, to: &[String]) -> Copies {
+        let seen = |list: &[String], a: &str| list.iter().any(|t| t.trim().eq_ignore_ascii_case(a));
+        let cc: Vec<String> = self.cc.iter().filter(|a| !seen(to, a)).cloned().collect();
+        let bcc = self.bcc.iter().filter(|a| !seen(to, a) && !seen(&cc, a)).cloned().collect();
+        Copies { cc, bcc }
+    }
+}
+
+fn bad_address(shown: &str) -> ConnError {
+    ConnError::coded(StatusCode::BAD_REQUEST, "CORE.MAIL_ADDRESS_INVALID", format!("Unable to send the email: Not an email address: {shown}"))
+        .param("address", shown)
+}
+
+/// `SendEmail`'s `cc` or `bcc`: a string of addresses separated by `,` or `;`, or an array of
+/// such strings. Blanks are dropped, each address is trimmed and kept once (ignoring case).
+/// A value that is not an email address refuses the whole send (400), so nothing goes to part
+/// of the list.
+pub fn copy_addresses(arg: Option<&Value>) -> ConnResult<Vec<String>> {
+    let items: &[Value] = match arg {
+        None | Some(Value::Null) => &[],
+        Some(Value::Array(a)) => a,
+        Some(v) => std::slice::from_ref(v),
+    };
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let text = match item {
+            Value::Null => continue,
+            Value::String(s) => s,
+            other => return Err(bad_address(&other.to_string())),
+        };
+        for a in text.split([',', ';']).map(java::trim).filter(|a| !a.is_empty()) {
+            if a.parse::<Address>().is_err() {
+                return Err(bad_address(a));
+            }
+            if !out.iter().any(|o| o.eq_ignore_ascii_case(a)) {
+                out.push(a.to_string());
+            }
+        }
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -484,12 +548,26 @@ fn smtp_code(e: &lettre::transport::smtp::Error) -> Option<u16> {
     e.status().and_then(|c| c.to_string().parse().ok())
 }
 
-/// The message JavaMail builds: `From`, `To`, `Subject`, an HTML body. With attachments it is
-/// `multipart/mixed`: the HTML body, then each attachment.
-fn build_message(from: &Mailbox, to: &[Mailbox], subject: &str, body: &str, attachments: &[EmailAttachment]) -> ConnResult<Vec<u8>> {
+/// The message JavaMail builds: `From`, `To`, `Cc`, `Subject`, an HTML body. With attachments
+/// it is `multipart/mixed`: the HTML body, then each attachment. The `bcc` mailboxes are only
+/// recipients of the envelope: lettre leaves the `Bcc` header out of the message.
+fn build_message(
+    from: &Mailbox,
+    to: &[Mailbox],
+    copies: (&[Mailbox], &[Mailbox]),
+    subject: &str,
+    body: &str,
+    attachments: &[EmailAttachment],
+) -> ConnResult<Vec<u8>> {
     let mut b = lettre::Message::builder().from(from.clone());
     for t in to {
         b = b.to(t.clone());
+    }
+    for c in copies.0 {
+        b = b.cc(c.clone());
+    }
+    for c in copies.1 {
+        b = b.bcc(c.clone());
     }
     let b = b.subject(subject);
     let m = if attachments.is_empty() {
@@ -543,14 +621,20 @@ pub async fn smtp_send(conn: &Connection, details: &ProcessedEmail, block_privat
         tracing::warn!("Recipients refused : No recipient addresses");
         return Ok(false);
     }
+    // Checked when the step's arguments were read; a copy that still does not parse is dropped
+    // as a `to` address is.
+    let mailboxes = |list: &[String]| -> Vec<Mailbox> { list.iter().filter_map(|a| a.parse::<Mailbox>().ok()).collect() };
+    let (cc, bcc) = (mailboxes(&details.cc), mailboxes(&details.bcc));
     let targets = if block_private_targets {
         let found = outbound::guard_host(&format!("smtp://{}:{}", props.host, props.port), &props.host).await?;
         Some(found.into_iter().map(|ip| SocketAddr::new(ip, props.port)).collect::<Vec<_>>())
     } else {
         None
     };
-    let message = build_message(&from, &to, &details.subject, &details.body, &details.attachments)?;
-    match deliver(&props, targets.as_deref(), &user, &password, &from, &to, &message).await {
+    let message = build_message(&from, &to, (&cc, &bcc), &details.subject, &details.body, &details.attachments)?;
+    // One message, so each copy goes once whatever the number of `to` addresses.
+    let copies: Vec<Mailbox> = cc.into_iter().chain(bcc).collect();
+    match deliver(&props, targets.as_deref(), &user, &password, &from, &to, &copies, &message).await {
         Ok(sent) => Ok(sent),
         Err(e) => {
             tracing::error!("Error while sending : {}", e.message());
@@ -569,6 +653,8 @@ async fn timed<T>(limit: Option<Duration>, f: impl std::future::Future<Output = 
 }
 
 /// `targets`: the addresses the guard checked, connected to instead of the host's name.
+/// `copies` (the CC and BCC mailboxes) are recipients too, but one the server refuses is only
+/// logged: whether the mail goes out is decided by the `to` addresses alone.
 #[allow(clippy::too_many_arguments)]
 async fn deliver(
     props: &SmtpProps,
@@ -577,6 +663,7 @@ async fn deliver(
     password: &str,
     from: &Mailbox,
     to: &[Mailbox],
+    copies: &[Mailbox],
     message: &[u8],
 ) -> ConnResult<bool> {
     let net = |e: lettre::transport::smtp::Error| ConnError::other(e.to_string());
@@ -617,17 +704,23 @@ async fn deliver(
 
     let mut valid = 0usize;
     let mut failed = false;
-    for to in to {
-        let code = match timed(t, c.command(Rcpt::new(to.email.clone(), vec![]))).await? {
+    for (i, rcpt) in to.iter().chain(copies).enumerate() {
+        let code = match timed(t, c.command(Rcpt::new(rcpt.email.clone(), vec![]))).await? {
             Ok(r) => r.code().to_string().parse().unwrap_or(0),
             Err(e) => match smtp_code(&e) {
                 Some(code) => code,
                 None => return Err(net(e)),
             },
         };
-        match classify_rcpt(code) {
-            RcptOutcome::Valid => valid += 1,
-            _ => failed = true,
+        let valid_rcpt = classify_rcpt(code) == RcptOutcome::Valid;
+        if i >= to.len() {
+            if !valid_rcpt {
+                tracing::warn!("Copy recipient refused : {} {code}", rcpt.email);
+            }
+        } else if valid_rcpt {
+            valid += 1;
+        } else {
+            failed = true;
         }
     }
     if valid == 0 || (failed && !props.send_partial) {
@@ -646,10 +739,19 @@ async fn deliver(
 // ---------------------------------------------------------------------------------------------
 // SendGrid
 
-/// `getSendGridBody`, and `attachments` (base64) when there are any.
+/// `getSendGridBody`, with `cc` and `bcc` in the personalization and `attachments` (base64)
+/// when there are any.
 pub fn sendgrid_body(details: &ProcessedEmail) -> Value {
+    let emails = |list: &[String]| list.iter().map(|e| json!({"email": e})).collect::<Vec<_>>();
+    let mut personalization = json!({"to": emails(&details.to)});
+    if !details.cc.is_empty() {
+        personalization["cc"] = emails(&details.cc).into();
+    }
+    if !details.bcc.is_empty() {
+        personalization["bcc"] = emails(&details.bcc).into();
+    }
     let mut body = json!({
-        "personalizations": [{"to": details.to.iter().map(|e| json!({"email": e})).collect::<Vec<_>>()}],
+        "personalizations": [personalization],
         "from": {"email": details.from},
         "subject": details.subject,
         "content": [{"type": "text/html", "value": details.body}],
@@ -722,11 +824,11 @@ pub async fn send_email(
     data: &Map<String, Value>,
 ) -> ConnResult<Option<bool>> {
     let none = Attachments::default();
-    send_email_attaching(ctx, caller, app_code, client_code, addresses, &none, template_name, connection_name, data).await
+    send_email_attaching(ctx, caller, app_code, client_code, addresses, &none, &Copies::default(), template_name, connection_name, data).await
 }
 
 /// [`send_email`] with attachments, read once the connection and the template are found and
-/// the template is rendered.
+/// the template is rendered, and copies, less the `to` addresses the template gives.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_email_attaching(
     ctx: &EmailContext<'_>,
@@ -735,6 +837,7 @@ pub async fn send_email_attaching(
     client_code: Option<&str>,
     addresses: &[String],
     attachments: &Attachments<'_>,
+    copies: &Copies,
     template_name: &str,
     connection_name: Option<&str>,
     data: &Map<String, Value>,
@@ -768,6 +871,8 @@ pub async fn send_email_attaching(
         }
     }
     let mut details = processed_email(&conn, addresses, &tmpl, data)?;
+    let copies = copies.without(&details.to);
+    (details.cc, details.bcc) = (copies.cc, copies.bcc);
     details.attachments = read_attachments(attachments).await?;
     let sent = match sub {
         Some(ConnectionSubType::SendGrid) => sendgrid_send(ctx.http, ctx.sendgrid_url, &conn, &details).await?,
@@ -789,6 +894,7 @@ pub async fn send_email_function(
     address: Option<&Value>,
     data: &Map<String, Value>,
     attachments: &Attachments<'_>,
+    copies: &Copies,
 ) -> ConnResult<Option<bool>> {
     if !caller.in_kirun {
         return Ok(Some(false));
@@ -796,17 +902,17 @@ pub async fn send_email_function(
     let addresses = given_addresses(address);
     let data = java::hash_map_order_deep(Value::Object(data.clone()));
     let data = data.as_object().cloned().unwrap_or_default();
-    let (to, a) = (&addresses, attachments);
+    let (to, a, c) = (&addresses, attachments, copies);
     if caller.present {
         let app = if java::trim(app_code).is_empty() { caller.url_app_code.clone() } else { Some(app_code.to_string()) };
         let client = if java::trim(client_code).is_empty() { caller.client_code.clone() } else { Some(client_code.to_string()) };
         if let Some(sent) =
-            send_email_attaching(ctx, caller, app.as_deref(), client.as_deref(), to, a, template_name, connection_name, &data).await?
+            send_email_attaching(ctx, caller, app.as_deref(), client.as_deref(), to, a, c, template_name, connection_name, &data).await?
         {
             return Ok(Some(sent));
         }
     }
-    send_email_attaching(ctx, caller, Some(app_code), Some(client_code), to, a, template_name, connection_name, &data).await
+    send_email_attaching(ctx, caller, Some(app_code), Some(client_code), to, a, c, template_name, connection_name, &data).await
 }
 
 #[cfg(test)]
@@ -948,13 +1054,13 @@ mod tests {
         let from: Mailbox = "f@x.com".parse().unwrap();
         let to: Vec<Mailbox> = vec!["a@x.com".parse().unwrap()];
         let a = EmailAttachment { name: "r.pdf".into(), content_type: "application/pdf".into(), bytes: vec![0, 1, 2, 255] };
-        let m = String::from_utf8(build_message(&from, &to, "S", "<p>B</p>", &[a]).unwrap()).unwrap();
+        let m = String::from_utf8(build_message(&from, &to, (&[], &[]), "S", "<p>B</p>", &[a]).unwrap()).unwrap();
         assert!(m.contains("Content-Type: multipart/mixed"), "{m}");
         assert!(m.contains("Content-Type: text/html"), "{m}");
         assert!(m.contains("Content-Disposition: attachment; filename=\"r.pdf\""), "{m}");
         assert!(m.contains("Content-Type: application/pdf"), "{m}");
         assert!(m.contains("AAEC/w=="), "{m}");
-        let plain = String::from_utf8(build_message(&from, &to, "S", "<p>B</p>", &[]).unwrap()).unwrap();
+        let plain = String::from_utf8(build_message(&from, &to, (&[], &[]), "S", "<p>B</p>", &[]).unwrap()).unwrap();
         assert!(!plain.contains("multipart"), "{plain}");
     }
 }
