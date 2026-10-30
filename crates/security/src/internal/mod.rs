@@ -7,6 +7,7 @@
 pub mod apps;
 pub mod billing;
 pub mod clients;
+pub mod contact;
 pub mod routes;
 pub mod scope;
 pub mod ssl;
