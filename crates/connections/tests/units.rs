@@ -346,7 +346,7 @@ async fn send_email_paths() {
     assert_eq!(email::send_email(&ctx, &c, None, None, &to, "t", None, &d).await.unwrap_err().message(), "Connection details missing null");
     // SendEmail with explicit codes and no caller: the second, raw-codes attempt is the one that runs.
     let anon = Caller { in_kirun: true, ..Default::default() };
-    assert_eq!(email::send_email_function(&ctx, &anon, "app", "SYSTEM", Some("sg"), "t", None, &json!({"x": 1}).as_object().unwrap().clone(), &Default::default()).await.unwrap_err().message(), "Unable to send the email: No Send Addresses Found.");
+    assert_eq!(email::send_email_function(&ctx, &anon, "app", "SYSTEM", Some("sg"), "t", None, &json!({"x": 1}).as_object().unwrap().clone(), &Default::default(), &Default::default()).await.unwrap_err().message(), "Unable to send the email: No Send Addresses Found.");
 }
 
 #[test]

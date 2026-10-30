@@ -558,6 +558,40 @@ async fn send_email_with_attachments() {
 }
 
 #[tokio::test]
+async fn send_email_with_cc_and_bcc() {
+    let s = setup().await;
+    let (files_base, _) = attachment_files().await;
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&[&files_base])).unwrap());
+    let fns = crate::functions::integration_fns::email(&s.integrations, &files);
+    s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL",
+                                 "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "k"}}));
+    s.docs.templates.lock().insert(
+        "welcome".into(),
+        jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
+                    "fromExpression": "from@x.com", "toExpression": "${email}"})),
+    );
+    let send = find(&fns, "SendEmail");
+    // A string (as a step passes one) and an array; a copy already in `to` and a BCC already in CC are dropped.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "Asha", "email": "a@x.com"},
+                      "cc": "ops@x.com, A@x.com", "bcc": ["audit@x.com; ops@x.com", null]});
+    let r = run(send.as_ref(), args, fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
+    assert!(sent.contains(r#""to":[{"email":"a@x.com"}],"cc":[{"email":"ops@x.com"}],"bcc":[{"email":"audit@x.com"}]"#), "{sent}");
+    // Empty and null are no copies.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"}, "cc": "", "bcc": null});
+    assert_eq!(run(send.as_ref(), args, fin(), true, true).await.unwrap()["sent"], json!(true));
+    // One bad address: 400, nothing posted.
+    let before = s.seen.lock().len();
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"},
+                      "cc": "ops@x.com", "bcc": "audit@x.com, nope"});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(e.text(), "Unable to send the email: Not an email address: nope");
+    assert_eq!(s.seen.lock().len(), before);
+}
+
+#[tokio::test]
 async fn send_notification() {
     let s = setup().await;
     let fns = all(&s.integrations, crate::testing::MemoryCatalog::with(Vec::new()));

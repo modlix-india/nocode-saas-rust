@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use connections::ai::{chat_function, ChatOutcome};
-use connections::email::{attachment_sources, send_email_function, AttachmentFiles, Attachments, EmailContext};
+use connections::email::{attachment_sources, send_email_function, AttachmentFiles, Attachments, Copies, EmailContext};
 use connections::error::ConnResult;
 use connections::mq::{jackson_authentication, EventMessage};
 use connections::notification::{DataNotificationRequest, NotificationRequest};
@@ -151,7 +151,8 @@ impl JavaFunction for CallRequest {
 // --- CoreServices.Email.SendEmail ----------------------------------------------------------------
 
 /// `attachments` is Rust only: stored files (read through the files service as the caller's
-/// client, as `FileToBase64` reads them) or inline content.
+/// client, as `FileToBase64` reads them) or inline content. So are `cc` and `bcc`: addresses
+/// separated by `,` or `;`, or an array of them, refused (400) when one is not an address.
 pub struct SendEmail {
     integrations: Arc<Integrations>,
     files: Arc<FilesCalls>,
@@ -185,6 +186,7 @@ impl JavaFunction for SendEmail {
         let template_name = arg_string(args, "templateName")?;
         let data = object(args, "templateData")?;
         let sources = attachment_sources(args.get("attachments")).map_err(core_error)?;
+        let copies = Copies::from_args(args.get("cc"), args.get("bcc")).map_err(core_error)?;
         require_context_key()?;
         let i = &self.integrations;
         let ctx = EmailContext {
@@ -200,7 +202,7 @@ impl JavaFunction for SendEmail {
         });
         let attachments = Attachments { sources, files: reader.as_ref().map(|r| r as &dyn AttachmentFiles) };
         let address = args.get("address");
-        let sent = send_email_function(&ctx, &caller(), &app_code, &client_code, Some(&connection_name), &template_name, address, &data, &attachments)
+        let sent = send_email_function(&ctx, &caller(), &app_code, &client_code, Some(&connection_name), &template_name, address, &data, &attachments, &copies)
             .await
             .map_err(core_error)?;
         match sent {
