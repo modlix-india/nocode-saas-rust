@@ -213,6 +213,47 @@ milliseconds) on the same exchange. The listener reads those properties too (a m
 - The message is acked at once and never retried: a user who is not online misses it.
   Counted as `notification_sent_total{channel="data"}`.
 
+## Push notifications (Rust only, 2026-10-31)
+
+A third channel, `push`, reaches the recipients' registered browsers (Web Push), Android phones
+(FCM HTTP v1) and iPhones (APNs, token auth over HTTP/2). Code: `src/push_send/`.
+
+- **When.** The NOTIFICATION connection has `push` (core answers `"push": {}` for `push: true`,
+  or the client's PUSH connection inlined for a name), and the definition has a `push` template
+  or, without one, an `inapp` template. The `push` parts are `title`, `body`, `image`, `url`; the
+  `inapp` fallback uses `title`, `description`, `image`, `url` (and `body` when there is no
+  `description`, as the template editor names it). Preferences apply as for any
+  channel (`channels.push`, `categories.<c>.push`, `channelEnabled.push`).
+- **Order and failure.** Push runs after email and in-app. Its failures are logged and counted
+  (`notification_push_total{platform,outcome}`), and never fail the message
+  (`Outcome::Sent.pushed` counts the devices that took it).
+- **Devices.** The `notification_push_device` table (`sql/notification/V5__Push devices.sql` at the
+  repository root, applied by CI before the deploy; rollback in `sql/rollback/notification/`)
+  holds one row per browser subscription or phone token, keyed by `SHA-256(PLATFORM:token)`. A
+  token registered again moves to the new user and app, so a shared device reaches whoever signed
+  in last. A device the push service
+  calls gone (Web 404/410, FCM `UNREGISTERED`, APNs 410/`BadDeviceToken`) is deleted.
+- **Only apps that have notifications.** `GET /push/config` answers `enabled: false`, and
+  `POST /push/devices` keeps nothing, unless core's
+  `GET /api/core/notifications/internal/app/{appCode}` counts at least one definition with an
+  `inapp` or `push` channel (kept `[push] app_check_seconds`, 10 min). A site without
+  notifications never registers a service worker.
+- **Credentials.** Web Push always signs with the platform's VAPID keys. FCM and APNs use the
+  client's PUSH connection (`fcm.credentials`, the service account JSON; `apns.{teamId, keyId,
+  privateKey}`) when its Firebase project or Apple team matches the one the device was built
+  against (`providerAccount`), else the platform's (`[push]`). A tenant-signed iOS app needs the
+  tenant's own APNs key: the platform's only serves the platform team's bundles.
+- **Web Push endpoints** are URLs the browser hands in, so only `https` on the known push
+  services (`fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com`,
+  `push.apple.com` and their subdomains) are taken or posted to.
+- **APNs and HTTP/2.** reqwest's `http2` feature would switch HTTP/2 on for every unit's clients
+  (features unify across the workspace), so the APNs client is hyper with `hyper-rustls`, in this
+  crate only.
+- **Routes.** `GET /push/config`, `POST` and `DELETE /push/devices` need a signed-in caller as
+  every route does; `GET /push/sw.js` is the service worker, served to anyone with
+  `Service-Worker-Allowed: /`. It shows a push only when no tab of the site is focused (a
+  visible tab already shows the in-app toast) and opens the push's `url` on a click.
+
 ## Found along the way (Java, worth knowing)
 
 - Java notification is not running locally, and `notifications1..3` hold ~607 messages nobody has

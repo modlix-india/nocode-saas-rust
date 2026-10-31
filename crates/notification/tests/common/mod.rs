@@ -231,8 +231,9 @@ fn options(database: Option<&str>) -> MySqlConnectOptions {
     }
 }
 
-/// The DDL of `notification` after V1-V4, as `SHOW CREATE TABLE` printed it on 2026-10-16.
-pub const DDL: [&str; 2] = [
+/// The DDL of `notification` after V1-V4, as `SHOW CREATE TABLE` printed it on 2026-10-16, and
+/// the push devices table (Rust only, V5 in the repository's `sql/notification`).
+pub const DDL: [&str; 3] = [
     "CREATE TABLE `notification_inapp` (
   `ID` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key, unique identifier for each notification entry',
   `USER_ID` bigint unsigned NOT NULL COMMENT 'User ID',
@@ -259,6 +260,7 @@ pub const DDL: [&str; 2] = [
   `UPDATED_BY` bigint unsigned NOT NULL COMMENT 'Updated by',
   PRIMARY KEY (`ID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    include_str!("../../../../sql/notification/V5__Push devices.sql"),
 ];
 
 /// The local MySQL is shared with the Java services (151 connections): wait while more than

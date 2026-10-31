@@ -57,6 +57,22 @@ java_text = "Function execution timed out : $. Please try again later."
 when = "A stored function runs longer than the time core allows one run."
 audience = "anyone"
 
+[CORE.EXECUTION_TIME_LIMIT]
+status = 422
+params = ["function", "seconds"]
+text = "The function[ {function}] ran longer than one call may[ ({seconds} seconds)] and was stopped."
+action = "Make the function do less in one call (smaller pages, fewer rows per loop), or run long work as an event in parts."
+when = "One execution (the function called, with every function and trigger it runs) goes past [kirun] max_execution_seconds of the unit. Rust only: Java's own timeout is FUNCTION_TIMED_OUT, five minutes per stored function, and could not stop a function that never waits."
+audience = "anyone"
+
+[CORE.EXECUTION_STEP_LIMIT]
+status = 422
+params = ["function", "steps"]
+text = "The function[ {function}] ran more steps than one call may[ ({steps})] and was stopped."
+action = "Make the function do less in one call (smaller pages, fewer rows per loop), or run long work as an event in parts."
+when = "One execution runs more steps than [kirun] max_steps of the unit (off unless set). Rust only."
+audience = "anyone"
+
 [CORE.FUNCTION_STEP_FAILED]
 status = 500
 params = ["step", "stepFunction", "function", "reason"]

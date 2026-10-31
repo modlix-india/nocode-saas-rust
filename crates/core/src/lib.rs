@@ -8,7 +8,8 @@
 //! - [`repos`]: the repositories, layered as the Java services layer them, and
 //!   `DefinitionFunction`;
 //! - [`functions`]: core's own KIRun functions;
-//! - [`exec`] / [`handlers`]: the execution and the routes;
+//! - [`exec`] / [`handlers`]: the execution and the routes; [`exec_limit`] how long one
+//!   execution may run; [`run_pool`] the threads runs execute on, apart from the health routes;
 //! - [`gson`] / [`java_model`]: the JSON the Java code writes;
 //! - [`storage`]: `AppDataService` (the storage policy layer over `crates/appdata`'s engines),
 //!   the storage definitions it reads, the write validator, rows as files;
@@ -18,6 +19,7 @@
 pub mod auth;
 pub mod authorities;
 pub mod catalogue;
+pub mod catch_policy;
 pub mod clients;
 pub mod config;
 pub mod connection_routes;
@@ -33,6 +35,7 @@ pub mod event_scheduler;
 pub mod events;
 pub mod events_queue;
 pub mod exec;
+pub mod exec_limit;
 pub mod files_calls;
 pub mod functions;
 pub mod gson;
@@ -43,6 +46,7 @@ pub mod pdf;
 pub mod pdf_render;
 pub mod platform_calls;
 pub mod repos;
+pub mod run_pool;
 pub mod scheduler;
 #[cfg(test)]
 mod platform_smoke;
@@ -95,6 +99,7 @@ pub struct Exec {
 
 /// Connects the databases, the caches and the other services, and builds the state.
 pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
+    catch_policy::install();
     overridable::pojo::set_java_zone_offset_seconds(cfg.core.zone_offset_seconds()?);
 
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
@@ -275,29 +280,16 @@ pub async fn run_exec() -> Result<()> {
     let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
     loaded.log_source(NAME);
     let cfg = loaded.config;
+    tracing::info!(max_execution_seconds = cfg.kirun.seconds(), max_steps = cfg.kirun.max_steps, "function execution limits");
     let exec = connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
 
-    let health = Health::new(telemetry.metrics.clone());
-    let pool = exec.pool.clone();
-    health.check("mysql", move || {
-        let pool = pool.clone();
-        async move {
-            sqlx::query("SELECT 1").execute(&pool).await?;
-            Ok(())
-        }
-    });
-    let db = exec.mongo.clone();
-    health.check("mongo", move || {
-        let db = db.clone();
-        async move {
-            db.run_command(mongodb::bson::doc! {"ping": 1}).await?;
-            Ok(())
-        }
-    });
+    let runs = run_pool::exec_pool(&cfg)?;
 
+    let health = Health::new(telemetry.metrics.clone());
+    run_pool::readiness_checks(&health, &cfg).await?;
     Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: true }
-        .run(handlers::router(exec.state))
+        .run(handlers::router_on(exec.state, runs))
         .await
 }
 
@@ -401,7 +393,10 @@ pub async fn run_events() -> Result<()> {
     let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
     let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
     loaded.log_source(NAME);
-    let cfg = loaded.config;
+    let mut cfg = loaded.config;
+    // Event tasks (scheduled jobs among them) keep the longer limit unless `[kirun]` sets one.
+    cfg.kirun = cfg.kirun.for_events();
+    tracing::info!(max_execution_seconds = cfg.kirun.seconds(), max_steps = cfg.kirun.max_steps, "function execution limits");
     let Some(uri) = cfg.mq.amqp_uri().filter(|_| cfg.mq.enabled) else {
         anyhow::bail!("core-events needs a broker: set [mq] (or MODLIX__MQ__URI)");
     };
@@ -409,10 +404,17 @@ pub async fn run_events() -> Result<()> {
     exec.cache.spawn_eviction_listener();
     let listener = events_listener_of(&exec, &cfg);
     events_queue::describe_metrics();
-    tokio::spawn(events_queue::consume_forever(Arc::new(listener), uri, cfg.mq.events_exchange.clone(), cfg.events.clone()));
+    // The consumer and every run it starts live on the run pool (kept until the server stops);
+    // the server's runtime keeps only the health routes.
+    let runs = run_pool::events_pool(&cfg)?;
+    let consume = |settings| events_queue::consume_forever(Arc::new(listener), uri, cfg.mq.events_exchange.clone(), settings);
+    match &runs {
+        Some(pool) => drop(pool.spawn(consume(run_pool::events_settings(&cfg.events, pool.threads())))),
+        None => drop(tokio::spawn(consume(cfg.events.clone()))),
+    }
 
     let health = Health::new(telemetry.metrics.clone());
-    mongo_and_mysql_checks(&health, &exec.mongo, Some(&exec.pool));
+    run_pool::readiness_checks(&health, &cfg).await?;
     Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: false }
         .run(axum::Router::new())
         .await

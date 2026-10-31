@@ -24,18 +24,31 @@ use crate::gson::{to_gson, to_jackson_pretty};
 use crate::java_model::jackson_schema;
 use crate::repos::app::{app_function_repository, app_schema_repository};
 use crate::repos::{signature_json, FunctionSource, Hybrid, SchemaSource};
+use crate::run_pool::RunPool;
 use crate::state::AppState;
 
 mod webhook;
 
 pub fn router(state: AppState) -> Router {
-    crate::unmapped::without_allow_header(routes(state))
+    router_on(state, None)
 }
 
-fn routes(state: AppState) -> Router {
-    Router::new()
+/// [`router`], with the function executions (the execute routes and the webhook) run on `pool`
+/// when there is one ([`crate::run_pool`]); the other routes stay on the server's runtime.
+pub fn router_on(state: AppState, pool: Option<RunPool>) -> Router {
+    crate::unmapped::without_allow_header(routes(state, pool))
+}
+
+fn routes(state: AppState, pool: Option<RunPool>) -> Router {
+    let mut executions = Router::new()
         .route("/api/core/function/execute/{namespace}/{name}", get(execute_get).post(execute_post))
         .route("/api/core/function/execute/{full_name}", get(execute_full_get).post(execute_full_post))
+        .merge(webhook::router());
+    if let Some(pool) = pool {
+        executions = executions.route_layer(middleware::from_fn_with_state(pool, crate::run_pool::offload));
+    }
+    Router::new()
+        .merge(executions)
         .route("/api/core/functions/repositoryFind", get(functions_find))
         .route("/api/core/functions/repositoryFilter", get(functions_filter))
         .route("/api/core/schemas/repositoryFind", get(schemas_find))
@@ -43,7 +56,6 @@ fn routes(state: AppState) -> Router {
         .merge(crate::data_routes::router())
         .merge(crate::connection_routes::router())
         .merge(crate::event_routes::router())
-        .merge(webhook::router())
         // Unmapped paths and methods: Spring Security's verdict first (`crate::unmapped`).
         .method_not_allowed_fallback(crate::unmapped::exec_method_not_allowed)
         .fallback(crate::unmapped::exec_not_found)

@@ -1,5 +1,5 @@
 //! notification's configuration: its MySQL schema, where security and core are, the RabbitMQ
-//! queues it consumes, and the SSE heartbeat.
+//! queues it consumes, the SSE heartbeat, and the platform's push credentials.
 
 use platform::config::{
     RegistryConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
@@ -25,6 +25,7 @@ pub struct NotificationConfig {
     pub notifications: QueueSection,
     pub email: EmailSection,
     pub sse: SseSection,
+    pub push: PushSection,
 }
 
 impl Default for NotificationConfig {
@@ -41,6 +42,7 @@ impl Default for NotificationConfig {
             notifications: QueueSection::default(),
             email: EmailSection::default(),
             sse: SseSection::default(),
+            push: PushSection::default(),
         }
     }
 }
@@ -195,6 +197,62 @@ impl Default for SseSection {
     }
 }
 
+/// The platform's push credentials (Rust only). A client's own FCM or APNs keys come from the
+/// PUSH connection its NOTIFICATION connection names instead; Web Push always uses these.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PushSection {
+    /// VAPID public key: the uncompressed P-256 point, base64url (what browsers subscribe with).
+    pub vapid_public_key: String,
+    /// VAPID private key: the 32-byte P-256 scalar, base64url.
+    pub vapid_private_key: String,
+    /// The contact push services see in the VAPID token (`mailto:` or `https:`).
+    pub vapid_subject: String,
+    /// The service account JSON of the platform's Firebase project (FCM, Android).
+    pub fcm_credentials: String,
+    /// The platform Apple team's APNs token key: the `.p8` PEM, or base64 of it (iOS).
+    pub apns_private_key: String,
+    pub apns_key_id: String,
+    pub apns_team_id: String,
+    /// How long an app's "has notifications" answer from core is kept.
+    pub app_check_seconds: u64,
+    /// Per request to FCM, APNs or a Web Push service.
+    pub timeout_seconds: u64,
+}
+
+impl Default for PushSection {
+    fn default() -> Self {
+        Self {
+            vapid_public_key: String::new(),
+            vapid_private_key: String::new(),
+            vapid_subject: "mailto:support@modlix.com".into(),
+            fcm_credentials: String::new(),
+            apns_private_key: String::new(),
+            apns_key_id: String::new(),
+            apns_team_id: String::new(),
+            app_check_seconds: 600,
+            timeout_seconds: 15,
+        }
+    }
+}
+
+impl std::fmt::Debug for PushSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hidden = |s: &str| if s.is_empty() { "" } else { "<hidden>" };
+        f.debug_struct("PushSection")
+            .field("vapid_public_key", &self.vapid_public_key)
+            .field("vapid_private_key", &hidden(&self.vapid_private_key))
+            .field("vapid_subject", &self.vapid_subject)
+            .field("fcm_credentials", &hidden(&self.fcm_credentials))
+            .field("apns_private_key", &hidden(&self.apns_private_key))
+            .field("apns_key_id", &self.apns_key_id)
+            .field("apns_team_id", &self.apns_team_id)
+            .field("app_check_seconds", &self.app_check_seconds)
+            .field("timeout_seconds", &self.timeout_seconds)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +281,11 @@ mod tests {
         assert!(!shown.contains("p@ss") && shown.contains("<hidden>"));
         mq.uri = Some("amqp://x".into());
         assert_eq!(mq.amqp_uri().unwrap(), "amqp://x");
+
+        let push = PushSection { vapid_private_key: "secret-scalar".into(), fcm_credentials: "{}".into(), ..Default::default() };
+        let shown = format!("{push:?}");
+        assert!(!shown.contains("secret-scalar") && shown.contains("<hidden>"));
+        assert_eq!(push.app_check_seconds, 600);
 
         let q = QueueSection { queues: " a, ,b ".into(), ..Default::default() };
         assert_eq!(q.names(), ["a", "b"]);

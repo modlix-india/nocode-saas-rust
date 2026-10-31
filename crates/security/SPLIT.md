@@ -115,6 +115,8 @@ compile against, so they are ported: `users/internal/clients/batch`, `app/profil
 | POST | `/internal/billing/meter/security` | InternalBillingController | yes |
 | POST | `/internal/billing/reconcile` | InternalBillingController | yes |
 | GET | `/internal/billing/serving-status` | InternalBillingController | yes |
+| POST | `/internal/contactCodes` | Rust only (contact codes for core's SendContactCode) | yes |
+| POST | `/internal/contactCodes/verify` | Rust only (core's VerifyContactCode) | yes |
 | DELETE | `/internal/cache` | SecurityCacheController | no |
 | GET | `/internal/cache` | SecurityCacheController | no |
 | GET | `/internal/cache/stats` | SecurityCacheController | no |

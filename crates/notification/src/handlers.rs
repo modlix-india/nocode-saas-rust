@@ -8,6 +8,10 @@
 //! | `POST /api/notification/read?appCode=` | marks the caller's `{"ids": [...]}` or `{"all": true}` read (Rust only) |
 //! | `GET /api/notification/preference?appCode=[&userId=]` | a preference map |
 //! | `POST /api/notification/preference?appCode=[&userId=]` | stores a preference map |
+//! | `GET /api/notification/push/config?appCode=` | `{enabled, vapidPublicKey}` (Rust only) |
+//! | `POST /api/notification/push/devices?appCode=` | registers the caller's browser or phone (Rust only) |
+//! | `DELETE /api/notification/push/devices?appCode=` | removes it, on sign-out (Rust only) |
+//! | `GET /api/notification/push/sw.js` | the service worker, to anyone (Rust only) |
 //!
 //! Around them, what Spring does: CORS for any origin (preflights answered before security),
 //! the caller from security on every request, a 403 for anyone not signed in (OPTIONS
@@ -34,7 +38,10 @@ use serde_json::{Map, Value};
 use crate::calls::to_failure;
 use crate::errors::{internal_error, Failure};
 use crate::inapp::InAppService;
+use crate::dao::{NewDevice, Platform};
 use crate::preference::PreferenceService;
+use crate::push_send::webpush::allowed_endpoint;
+use crate::push_send::PushService;
 use crate::spring::{big_integer, Pageable, Params};
 use crate::sse::{key, Hub};
 
@@ -44,6 +51,8 @@ pub struct AppState {
     pub prefs: PreferenceService,
     pub hub: Arc<Hub>,
     pub server_port: u16,
+    /// Push registration; `None` turns the push routes off (tests).
+    pub devices: Option<Arc<PushService>>,
 }
 
 pub type Shared = Arc<AppState>;
@@ -55,6 +64,9 @@ enum Route {
     New,
     Read,
     Preference,
+    PushConfig,
+    PushDevices,
+    PushWorker,
 }
 
 impl Route {
@@ -65,6 +77,9 @@ impl Route {
             "/api/notification/new" => Some(Self::New),
             "/api/notification/read" => Some(Self::Read),
             "/api/notification/preference" => Some(Self::Preference),
+            "/api/notification/push/config" => Some(Self::PushConfig),
+            "/api/notification/push/devices" => Some(Self::PushDevices),
+            "/api/notification/push/sw.js" => Some(Self::PushWorker),
             _ => None,
         }
     }
@@ -76,6 +91,9 @@ impl Route {
             Self::New => "/api/notification/new",
             Self::Read => "/api/notification/read",
             Self::Preference => "/api/notification/preference",
+            Self::PushConfig => "/api/notification/push/config",
+            Self::PushDevices => "/api/notification/push/devices",
+            Self::PushWorker => "/api/notification/push/sw.js",
         }
     }
 
@@ -84,6 +102,7 @@ impl Route {
         match self {
             Self::Preference => "GET,HEAD,POST,OPTIONS",
             Self::Read => "POST,OPTIONS",
+            Self::PushDevices => "POST,DELETE,OPTIONS",
             _ => "GET,HEAD,OPTIONS",
         }
     }
@@ -91,6 +110,7 @@ impl Route {
     fn accepts(self, m: &Method) -> bool {
         match self {
             Self::Read => *m == Method::POST,
+            Self::PushDevices => *m == Method::POST || *m == Method::DELETE,
             Self::Preference => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
             _ => *m == Method::GET || *m == Method::HEAD,
         }
@@ -147,6 +167,11 @@ async fn dispatch(State(st): State<Shared>, req: Request) -> Response {
             None => not_found(&path).into_response(),
         };
         return with_route(resp, template);
+    }
+
+    // The service worker is a script the browser fetches without credentials.
+    if route == Some(Route::PushWorker) && (method == Method::GET || method == Method::HEAD) {
+        return with_route(service_worker(), template);
     }
 
     let ca = match signed_in(&st, req.headers()).await {
@@ -230,6 +255,28 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             Ok(json_body(&Value::from(n)))
         }
         (Route::Subscribe, _) => subscribe(st, &params, req.headers(), uid),
+        (Route::PushConfig, _) => {
+            let app = required_app(&params, req.headers())?;
+            let Some(push) = st.devices.as_ref() else { return Ok(json_body(&serde_json::json!({"enabled": false}))) };
+            let enabled = push.app_has_notifications(&app).await;
+            Ok(json_body(&serde_json::json!({"enabled": enabled, "vapidPublicKey": push.vapid_public_key()})))
+        }
+        (Route::PushDevices, true) => {
+            let app = required_app(&params, req.headers())?;
+            let agent = header_str(req.headers(), "user-agent");
+            let body = read_body(req).await?.unwrap_or_default();
+            register_device(st, ca, &app, &body, agent.as_deref()).await
+        }
+        (Route::PushDevices, false) => {
+            let body = read_body(req).await?.unwrap_or_default();
+            let (platform, token) = device_key(&body)?;
+            let n = match st.devices.as_ref() {
+                Some(push) => push.dao.delete_device(uid, platform, &token).await.map_err(internal_error)?,
+                None => 0,
+            };
+            Ok(json_body(&serde_json::json!({"removed": n})))
+        }
+        (Route::PushWorker, _) => Ok(service_worker()),
         (Route::Preference, false) => {
             let app = required(&params, "appCode")?;
             let user_id = user_id(&params)?;
@@ -246,6 +293,96 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             }
         }
     }
+}
+
+/// The app of a push route: `appCode`, else the `appCode` header.
+fn required_app(p: &Params, h: &HeaderMap) -> Res<String> {
+    p.string("appCode").or_else(|| header_str(h, "appcode")).filter(|a| !a.trim().is_empty()).ok_or_else(|| {
+        input::param_missing("appCode").debug("Required request parameter 'appCode' is not present").into()
+    })
+}
+
+fn text_field<'a>(body: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
+    body.get(name).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// `{platform, token}`: which device.
+fn device_key(body: &Map<String, Value>) -> Res<(Platform, String)> {
+    let platform = text_field(body, "platform")
+        .ok_or_else(|| Failure::from(input::param_missing("platform").debug("give platform: WEB, ANDROID or IOS")))?;
+    let platform = Platform::parse(platform)
+        .ok_or_else(|| Failure::from(input::param_invalid("platform", Some("WEB, ANDROID or IOS")).debug(format!("unknown platform {platform}"))))?;
+    let token = text_field(body, "token").ok_or_else(|| Failure::from(input::param_missing("token").debug("give the device token")))?;
+    if token.len() > 2048 {
+        return Err(input::param_invalid("token", Some("at most 2048 characters")).debug("token too long").into());
+    }
+    Ok((platform, token.to_string()))
+}
+
+/// `POST /push/devices`: `{platform, token, keys: {p256dh, auth}, appIdentifier,
+/// providerAccount, apnsEnv}`. Answers `{"registered": false}` for an app without
+/// notifications, so nothing is kept for it.
+async fn register_device(st: &AppState, ca: &ContextAuthentication, app: &str, body: &Map<String, Value>, agent: Option<&str>) -> Res<Response> {
+    let Some(push) = st.devices.as_ref() else { return Ok(json_body(&serde_json::json!({"registered": false}))) };
+    let (platform, token) = device_key(body)?;
+    let keys = body.get("keys").and_then(Value::as_object);
+    let key = |k: &str| keys.and_then(|m| m.get(k)).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && s.len() <= 256);
+    let bad = |name: &str, what: &str| -> Failure { input::param_invalid(name, Some(what)).debug(format!("{name}: {what}")).into() };
+    let apns_env = match platform {
+        Platform::Web => {
+            if !allowed_endpoint(&token) {
+                return Err(bad("token", "the subscription endpoint of a browser push service"));
+            }
+            if key("p256dh").is_none() || key("auth").is_none() {
+                return Err(bad("keys", "the subscription's p256dh and auth"));
+            }
+            None
+        }
+        Platform::Ios => {
+            if !token.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(bad("token", "the hex APNs device token"));
+            }
+            if text_field(body, "appIdentifier").is_none() {
+                return Err(bad("appIdentifier", "the app's bundle id"));
+            }
+            match text_field(body, "apnsEnv").unwrap_or("production") {
+                e @ ("production" | "sandbox") => Some(e),
+                _ => return Err(bad("apnsEnv", "production or sandbox")),
+            }
+        }
+        Platform::Android => None,
+    };
+    if !push.app_has_notifications(app).await {
+        return Ok(json_body(&serde_json::json!({"registered": false})));
+    }
+    let limited = |s: Option<&str>| s.map(|v| v.chars().take(256).collect::<String>());
+    let (app_identifier, provider_account) = (limited(text_field(body, "appIdentifier")), limited(text_field(body, "providerAccount")));
+    let agent: Option<String> = agent.map(|a| a.chars().take(512).collect());
+    let device = NewDevice {
+        user_id: ca.user.id,
+        client_id: ca.user.client_id,
+        app_code: app,
+        platform,
+        token: &token,
+        web_p256dh: if platform == Platform::Web { key("p256dh") } else { None },
+        web_auth: if platform == Platform::Web { key("auth") } else { None },
+        app_identifier: app_identifier.as_deref(),
+        provider_account: provider_account.as_deref(),
+        apns_env,
+        user_agent: agent.as_deref(),
+    };
+    push.dao.upsert_device(&device).await.map_err(internal_error)?;
+    Ok(json_body(&serde_json::json!({"registered": true})))
+}
+
+/// The service worker script, allowed to control the whole origin.
+fn service_worker() -> Response {
+    let mut h = HeaderMap::new();
+    spring_security_headers(&mut h, true);
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/javascript; charset=utf-8"));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    h.insert("service-worker-allowed", HeaderValue::from_static("/"));
+    (StatusCode::OK, h, include_str!("push_send/sw.js")).into_response()
 }
 
 /// `POST /read`'s body: `{"all": true}` is every unread row (`None`); otherwise `ids`, a list
@@ -398,9 +535,27 @@ mod tests {
         assert!(Route::New.accepts(&Method::HEAD) && !Route::New.accepts(&Method::DELETE));
         assert_eq!(Route::Preference.allow(), "GET,HEAD,POST,OPTIONS");
         assert_eq!(Route::Subscribe.allow(), "GET,HEAD,OPTIONS");
-        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference] {
+        assert_eq!(Route::of("/api/notification/push/devices"), Some(Route::PushDevices));
+        assert!(Route::PushDevices.accepts(&Method::DELETE) && !Route::PushDevices.accepts(&Method::GET));
+        assert_eq!(Route::PushDevices.allow(), "POST,DELETE,OPTIONS");
+        assert_eq!(Route::of("/api/notification/push/sw.js"), Some(Route::PushWorker));
+        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference, Route::PushConfig, Route::PushDevices, Route::PushWorker] {
             assert!(r.template().starts_with("/api/notification/"));
         }
+    }
+
+    #[test]
+    fn device_bodies() {
+        let body = |v: Value| v.as_object().unwrap().clone();
+        let (p, t) = device_key(&body(serde_json::json!({"platform": "ios", "token": " ab12 "}))).unwrap();
+        assert_eq!((p, t.as_str()), (Platform::Ios, "ab12"));
+        assert!(device_key(&body(serde_json::json!({"token": "x"}))).is_err());
+        assert!(device_key(&body(serde_json::json!({"platform": "sms", "token": "x"}))).is_err());
+        assert!(device_key(&body(serde_json::json!({"platform": "WEB"}))).is_err());
+        assert!(device_key(&body(serde_json::json!({"platform": "WEB", "token": "x".repeat(2049)}))).is_err());
+        let sw = service_worker();
+        assert_eq!(sw.headers()["service-worker-allowed"], "/");
+        assert!(sw.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/javascript"));
     }
 
     #[test]

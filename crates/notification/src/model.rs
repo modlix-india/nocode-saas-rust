@@ -301,11 +301,19 @@ pub struct MailConnection {
     pub connection_details: Option<Map<String, Value>>,
 }
 
+/// Push on a notification connection (Rust only): `details` is the client's PUSH connection's
+/// `connectionDetails`, `None` for the platform's credentials (`push: true`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PushConnection {
+    pub details: Option<Map<String, Value>>,
+}
+
 /// `NotificationConnectionDetails`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NotificationConnection {
     pub in_app: bool,
     pub mail: Option<MailConnection>,
+    pub push: Option<PushConnection>,
 }
 
 impl NotificationConnection {
@@ -325,7 +333,11 @@ impl NotificationConnection {
             }),
             Some(_) => return Err(Unreadable("Cannot deserialize mail".into())),
         };
-        Ok(Self { in_app: boolean_field(m, "inApp")?, mail })
+        let push = match m.get("push") {
+            Some(Value::Object(p)) => Some(PushConnection { details: p.get("connectionDetails").and_then(Value::as_object).cloned() }),
+            _ => None,
+        };
+        Ok(Self { in_app: boolean_field(m, "inApp")?, mail, push })
     }
 }
 
