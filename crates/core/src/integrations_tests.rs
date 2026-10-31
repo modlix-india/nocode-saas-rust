@@ -744,6 +744,10 @@ async fn connection_routes() {
                                  "connectionDetails": {"apns": {"keyId": "K", "teamId": "T", "privateKey": "p"}}}));
     s.docs.add_connection(json!({"name": "notifyDefault", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
                                  "connectionDetails": {"inapp": true, "push": true}}));
+    s.docs.add_connection(json!({"name": "notifyText", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
+                                 "connectionDetails": {"inapp": "true", "push": " True "}}));
+    s.docs.add_connection(json!({"name": "notifyOff", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
+                                 "connectionDetails": {"inapp": "true", "push": "false"}}));
     s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL", "version": 2,
                                  "connectionSubType": "SMTP", "connectionDetails": {"host": "h"}, "isAppLevel": false}));
     s.docs.add_connection(json!({"name": "bare", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION", "connectionDetails": {}}));
@@ -760,6 +764,11 @@ async fn connection_routes() {
     let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyDefault?{q}"), false).await;
     let v: Value = serde_json::from_str(&body).unwrap();
     assert_eq!((v["inApp"].clone(), v["push"].clone()), (json!(true), json!({})));
+    // The AppBuilder form saves text.
+    let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyText?{q}"), false).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["push"], json!({}));
+    let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyOff?{q}"), false).await;
+    assert!(serde_json::from_str::<Value>(&body).unwrap().get("push").is_none());
     let (st, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/bare?{q}"), false).await;
     assert_eq!((st, body.as_str()), (200, ""));
     let (st, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/mail?{q}"), false).await;
