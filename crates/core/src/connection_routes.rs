@@ -212,12 +212,19 @@ async fn notification(State(st): State<AppState>, Path(name): Path<String>, RawQ
             }
         }
         // Rust only: `push: true` is push with the platform's credentials (`{}`); a name is the
-        // PUSH connection that holds the client's own.
-        match details.get("push") {
+        // PUSH connection that holds the client's own. The AppBuilder form saves text, so
+        // "true" and "false" count as the booleans.
+        let push = details.get("push").map(|v| match v {
+            JValue::Str(s) if s.trim().eq_ignore_ascii_case("true") => JValue::Bool(true),
+            JValue::Str(s) if s.trim().eq_ignore_ascii_case("false") || s.trim().is_empty() => JValue::Bool(false),
+            JValue::Str(s) => JValue::Str(s.trim().to_string()),
+            other => other.clone(),
+        });
+        match push.as_ref() {
             Some(JValue::Bool(true)) => {
                 out.insert("push".into(), JValue::Object(JMap::new()));
             }
-            Some(JValue::Str(push_name)) if !push_name.is_empty() => {
+            Some(JValue::Str(push_name)) => {
                 match docs.read_jmap(push_name, &app, &url_client, &client).await?.filter(|d| connection_type(d) == Some("PUSH")) {
                     Some(p) => {
                         out.insert("push".into(), written(&p));

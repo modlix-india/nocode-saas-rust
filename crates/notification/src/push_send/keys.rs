@@ -34,7 +34,14 @@ pub fn pem_der(pem: &str) -> Result<Vec<u8>> {
             _ => return Ok(raw),
         }
     };
-    let body: String = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("-----")).collect();
+    // Between the BEGIN and END markers, whatever the line breaks: a key pasted into a one-line
+    // field arrives as "-----BEGIN PRIVATE KEY-----MIGT...-----END PRIVATE KEY-----".
+    let after_begin = match text.find("-----BEGIN") {
+        Some(i) => text[i + 10..].find("-----").map(|j| &text[i + 10 + j + 5..]).unwrap_or(""),
+        None => text.as_str(),
+    };
+    let inner = after_begin.split("-----END").next().unwrap_or("");
+    let body: String = inner.chars().filter(|c| !c.is_whitespace()).collect();
     STANDARD.decode(body.as_bytes()).map_err(|e| anyhow!("PEM body is not base64: {e}"))
 }
 
@@ -115,6 +122,10 @@ mod tests {
         assert_eq!(pem_der(&pem).unwrap(), der);
         assert_eq!(pem_der(&STANDARD.encode(pem.as_bytes())).unwrap(), der, "base64 of a PEM");
         assert_eq!(pem_der(&STANDARD.encode(der)).unwrap(), der, "base64 of the DER");
+        let one_line = format!("-----BEGIN PRIVATE KEY-----{}-----END PRIVATE KEY-----", STANDARD.encode(der));
+        assert_eq!(pem_der(&one_line).unwrap(), der, "pasted into a one-line field");
+        let spaced = format!("-----BEGIN PRIVATE KEY----- {} -----END PRIVATE KEY-----", STANDARD.encode(der));
+        assert_eq!(pem_der(&spaced).unwrap(), der);
         assert!(es256_pkcs8(&pem).is_err());
         assert!(rs256_pkcs8(&pem).is_err());
     }
