@@ -1796,6 +1796,10 @@ struct FakeApple {
     calls: Mutex<Vec<String>>,
     refuse_bundle_create: Mutex<bool>,
     refuse_profile: Mutex<Option<String>>,
+    /// A capability Apple already has on: 409.
+    push_already_on: Mutex<bool>,
+    /// Profiles deleted so far: a profile made after a delete is "PROFILE<n>".
+    deleted: Mutex<usize>,
 }
 
 async fn certificates(State(f): State<Arc<FakeApple>>, h: HeaderMap) -> axum::response::Response {
@@ -1837,7 +1841,8 @@ async fn profiles(State(f): State<Arc<FakeApple>>) -> Json<serde_json::Value> {
         .lock()
         .unwrap()
         .iter()
-        .map(|(b, c)| serde_json::json!({"attributes": {"profileContent": c}, "relationships": {"bundleId": {"data": {"id": b}}}}))
+        .enumerate()
+        .map(|(i, (b, c))| serde_json::json!({"id": format!("P{i}"), "attributes": {"profileContent": c}, "relationships": {"bundleId": {"data": {"id": b}}}}))
         .collect();
     Json(serde_json::json!({"data": rows}))
 }
@@ -1849,8 +1854,29 @@ async fn create_profile(State(f): State<Arc<FakeApple>>, Json(b): Json<serde_jso
     if let Some(err) = f.refuse_profile.lock().unwrap().clone() {
         return (StatusCode::CONFLICT, err).into_response();
     }
-    f.profiles.lock().unwrap().push((bundle, "PROFILE".into()));
-    Json(serde_json::json!({"data": {"attributes": {"profileContent": "PROFILE"}}})).into_response()
+    let n = *f.deleted.lock().unwrap();
+    let content = if n == 0 { "PROFILE".to_string() } else { format!("PROFILE{n}") };
+    f.profiles.lock().unwrap().push((bundle, content.clone()));
+    Json(serde_json::json!({"data": {"attributes": {"profileContent": content}}})).into_response()
+}
+
+async fn delete_profile(State(f): State<Arc<FakeApple>>, axum::extract::Path(id): axum::extract::Path<String>) -> StatusCode {
+    f.calls.lock().unwrap().push(format!("delete {id}"));
+    let i: usize = id.trim_start_matches('P').parse().unwrap();
+    f.profiles.lock().unwrap().remove(i);
+    *f.deleted.lock().unwrap() += 1;
+    StatusCode::NO_CONTENT
+}
+
+async fn capabilities(State(f): State<Arc<FakeApple>>, Json(b): Json<serde_json::Value>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let bundle = b["data"]["relationships"]["bundleId"]["data"]["id"].as_str().unwrap_or("").to_string();
+    let kind = b["data"]["attributes"]["capabilityType"].as_str().unwrap_or("").to_string();
+    f.calls.lock().unwrap().push(format!("{kind} {bundle}"));
+    if *f.push_already_on.lock().unwrap() {
+        return (StatusCode::CONFLICT, r#"{"errors":[{"code":"ENTITY_ERROR"}]}"#).into_response();
+    }
+    Json(serde_json::json!({"data": {"id": "CAP1"}})).into_response()
 }
 
 async fn fake_apple() -> (Arc<FakeApple>, String) {
@@ -1859,6 +1885,8 @@ async fn fake_apple() -> (Arc<FakeApple>, String) {
         .route("/v1/certificates", get(certificates))
         .route("/v1/bundleIds", get(bundle_ids).post(create_bundle))
         .route("/v1/profiles", get(profiles).post(create_profile))
+        .route("/v1/profiles/{id}", axum::routing::delete(delete_profile))
+        .route("/v1/bundleIdCapabilities", axum::routing::post(capabilities))
         .with_state(f.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1972,6 +2000,166 @@ async fn apple_refusals_are_explained() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert!(r.obj().get("iosProvisioningProfile").is_none_or(JValue::is_null));
     assert_eq!(r.obj().get("iosBundleId"), Some(&s("com.modlix.apps.system.shop")));
+}
+
+#[tokio::test]
+async fn an_ios_app_with_push_gets_the_capability_and_a_new_profile_once() {
+    let (fake, url) = fake_apple().await;
+    let e = env_with(apple_cfg(&url, "C1"));
+    let ios = r#"{"details":{"name":"Shop App","ios":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let made = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], ios).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    let m = made.obj();
+    assert_eq!(m.get("iosPushReady"), Some(&JValue::Bool(true)));
+    assert_eq!(m.get("iosProvisioningProfile"), Some(&s("PROFILE1")), "the profile made after push was turned on");
+    assert_eq!(
+        *fake.calls.lock().unwrap(),
+        names(&[
+            "find com.modlix.apps.system.shopapp",
+            "create com.modlix.apps.system.shopapp",
+            "profiles",
+            "profile B1",
+            "find com.modlix.apps.system.shopapp",
+            "PUSH_NOTIFICATIONS B1",
+            "profiles",
+            "delete P0",
+            "profile B1",
+        ])
+    );
+    assert_eq!(fake.profiles.lock().unwrap().len(), 1, "the profile without push is gone");
+
+    // Later saves leave Apple alone, even when the request forgets the marker.
+    fake.calls.lock().unwrap().clear();
+    let mut forgot = made.obj();
+    forgot.shift_remove("iosPushReady");
+    let again = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &to_compact(&JValue::Object(forgot))).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text());
+    assert_eq!(again.obj().get("iosPushReady"), Some(&JValue::Bool(true)));
+    assert!(!fake.calls.lock().unwrap().iter().any(|c| c.starts_with("PUSH_NOTIFICATIONS")));
+
+    // A bundle that already has push is fine.
+    *fake.push_already_on.lock().unwrap() = true;
+    let other = r#"{"details":{"name":"Other","ios":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], other).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.obj().get("iosPushReady"), Some(&JValue::Bool(true)));
+}
+
+// ── Firebase (Android push) ─────────────────────────────────────────
+
+#[derive(Default)]
+struct FakeFirebase {
+    /// package -> Firebase app id
+    apps: Mutex<HashMap<String, String>>,
+    pending: Mutex<Option<String>>,
+    calls: Mutex<Vec<String>>,
+}
+
+async fn fb_token(State(f): State<Arc<FakeFirebase>>, body: String) -> Json<serde_json::Value> {
+    assert!(body.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant%2Dtype%3Ajwt%2Dbearer"), "{body}");
+    f.calls.lock().unwrap().push("token".into());
+    Json(serde_json::json!({"access_token": "AT", "expires_in": 3600}))
+}
+
+async fn fb_list(State(f): State<Arc<FakeFirebase>>, h: HeaderMap) -> Json<serde_json::Value> {
+    assert_eq!(h.get("authorization").unwrap(), "Bearer AT");
+    f.calls.lock().unwrap().push("list".into());
+    let apps: Vec<serde_json::Value> = f.apps.lock().unwrap().iter().map(|(p, id)| serde_json::json!({"packageName": p, "appId": id})).collect();
+    Json(serde_json::json!({"apps": apps}))
+}
+
+async fn fb_create(State(f): State<Arc<FakeFirebase>>, Json(b): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let package = b["packageName"].as_str().unwrap().to_string();
+    f.calls.lock().unwrap().push(format!("create {package}"));
+    *f.pending.lock().unwrap() = Some(package);
+    Json(serde_json::json!({"name": "operations/op1", "done": false}))
+}
+
+async fn fb_operation(State(f): State<Arc<FakeFirebase>>) -> Json<serde_json::Value> {
+    f.calls.lock().unwrap().push("poll".into());
+    let package = f.pending.lock().unwrap().take().unwrap();
+    f.apps.lock().unwrap().insert(package, "1:99:android:new".into());
+    Json(serde_json::json!({"name": "operations/op1", "done": true, "response": {"appId": "1:99:android:new"}}))
+}
+
+async fn fb_config(State(f): State<Arc<FakeFirebase>>, axum::extract::Path((_, app)): axum::extract::Path<(String, String)>) -> Json<serde_json::Value> {
+    f.calls.lock().unwrap().push(format!("config {app}"));
+    let package = f.apps.lock().unwrap().iter().find(|(_, id)| **id == app).map(|(p, _)| p.clone()).unwrap();
+    let gs = serde_json::json!({
+        "project_info": {"project_number": "99", "project_id": "modlix-push"},
+        "client": [{"client_info": {"mobilesdk_app_id": app, "android_client_info": {"package_name": package}}, "api_key": [{"current_key": "KEY99"}]}]
+    });
+    Json(serde_json::json!({"configFilename": "google-services.json", "configFileContents": overridable::write::transport::base64_encode(gs.to_string().as_bytes())}))
+}
+
+async fn fake_firebase() -> (Arc<FakeFirebase>, String) {
+    let f = Arc::new(FakeFirebase::default());
+    let app = Router::new()
+        .route("/token", axum::routing::post(fb_token))
+        .route("/v1beta1/projects/{project}/androidApps", get(fb_list).post(fb_create))
+        .route("/v1beta1/operations/{op}", get(fb_operation))
+        .route("/v1beta1/projects/{project}/androidApps/{app}/config", get(fb_config))
+        .with_state(f.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (f, format!("http://{addr}"))
+}
+
+fn firebase_cfg(url: &str) -> EditorConfig {
+    use rsa::pkcs8::EncodePrivateKey;
+    let key = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap().to_string();
+    let mut cfg = EditorConfig::default();
+    cfg.editor.firebase_api_url = url.into();
+    cfg.editor.firebase_credentials = serde_json::json!({
+        "type": "service_account", "project_id": "modlix-push", "client_email": "push@modlix-push.iam.gserviceaccount.com",
+        "private_key": pem, "token_uri": format!("{url}/token")
+    })
+    .to_string();
+    cfg
+}
+
+#[tokio::test]
+async fn an_android_app_with_push_is_registered_in_the_platform_firebase_project() {
+    let (fake, url) = fake_firebase().await;
+    let e = env_with(firebase_cfg(&url));
+    let android = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    let made = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], android).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    let fb = made.obj().get("firebaseAndroid").cloned().unwrap();
+    assert_eq!(
+        to_compact(&fb),
+        r#"{"apiKey":"KEY99","appId":"1:99:android:new","projectId":"modlix-push","messagingSenderId":"99"}"#
+    );
+    assert_eq!(
+        *fake.calls.lock().unwrap(),
+        names(&["token", "list", "create com.modlix.nocodemobile.system.shop_app", "poll", "config 1:99:android:new"])
+    );
+
+    // Saved again: the values are kept and Firebase is not asked.
+    fake.calls.lock().unwrap().clear();
+    let mut forgot = made.obj();
+    forgot.shift_remove("firebaseAndroid");
+    let again = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &to_compact(&JValue::Object(forgot))).await;
+    assert_eq!(again.obj().get("firebaseAndroid"), Some(&fb));
+    assert!(fake.calls.lock().unwrap().is_empty());
+
+    // A tenant's own Firebase values are used as they are.
+    let own = r#"{"details":{"name":"Own","android":true,"pushNotifications":true},"firebaseAndroid":{"apiKey":"A","appId":"1:5:android:z","projectId":"tenant-fb","messagingSenderId":"5"}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], own).await;
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
+    assert!(fake.calls.lock().unwrap().is_empty());
+
+    // An app already registered is found, not registered twice; without push nothing is asked.
+    let lookup = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], lookup).await;
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "appId"]), Some(&s("1:99:android:new")));
+    assert_eq!(*fake.calls.lock().unwrap(), names(&["token", "list", "config 1:99:android:new"]));
+    fake.calls.lock().unwrap().clear();
+    let quiet = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], r#"{"details":{"name":"Q","android":true}}"#).await;
+    assert!(quiet.obj().get("firebaseAndroid").is_none_or(JValue::is_null));
+    assert!(fake.calls.lock().unwrap().is_empty());
 }
 
 // ── The commons routes on the ui kinds ──────────────────────────────

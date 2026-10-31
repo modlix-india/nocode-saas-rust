@@ -211,6 +211,22 @@ async fn notification(State(st): State<AppState>, Path(name): Path<String>, RawQ
                 out.insert("mail".into(), written(&m));
             }
         }
+        // Rust only: `push: true` is push with the platform's credentials (`{}`); a name is the
+        // PUSH connection that holds the client's own.
+        match details.get("push") {
+            Some(JValue::Bool(true)) => {
+                out.insert("push".into(), JValue::Object(JMap::new()));
+            }
+            Some(JValue::Str(push_name)) if !push_name.is_empty() => {
+                match docs.read_jmap(push_name, &app, &url_client, &client).await?.filter(|d| connection_type(d) == Some("PUSH")) {
+                    Some(p) => {
+                        out.insert("push".into(), written(&p));
+                    }
+                    None => tracing::warn!("notification connection {name}: no PUSH connection {push_name}, push is off"),
+                }
+            }
+            _ => {}
+        }
         Ok(json(to_jackson_pretty(&JValue::Object(out))))
     })
     .await;

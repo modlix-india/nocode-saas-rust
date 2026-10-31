@@ -87,7 +87,7 @@ chrono-tz = "0.10"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 
-kirun = "2.1.0"
+kirun = "2.2.0"
 hmac = "0.12"
 md-5 = "0.10"
 sha1 = "0.10"

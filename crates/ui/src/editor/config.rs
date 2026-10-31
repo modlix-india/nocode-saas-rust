@@ -67,6 +67,11 @@ pub struct EditorSection {
     pub apple_certificate_id: String,
     /// The App Store Connect API (a test points it elsewhere).
     pub apple_api_url: String,
+    /// The service account JSON of the platform's Firebase project (Rust only): mobile apps with
+    /// push get their Android package registered there. Empty: tenants give their own values.
+    pub firebase_credentials: String,
+    /// The Firebase Management API (a test points it elsewhere).
+    pub firebase_api_url: String,
 }
 
 impl Default for EditorSection {
@@ -81,6 +86,8 @@ impl Default for EditorSection {
             apple_team_id: String::new(),
             apple_certificate_id: String::new(),
             apple_api_url: "https://api.appstoreconnect.apple.com".into(),
+            firebase_credentials: String::new(),
+            firebase_api_url: "https://firebase.googleapis.com".into(),
         }
     }
 }

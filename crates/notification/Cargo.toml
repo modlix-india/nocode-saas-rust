@@ -17,17 +17,27 @@ connections = { path = "../connections" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+base64 = "0.22"
 bytes.workspace = true
 chrono.workspace = true
 futures.workspace = true
+hex.workspace = true
 http.workspace = true
+http-body-util.workspace = true
+# APNs is HTTP/2 only. reqwest's own `http2` feature would turn HTTP/2 on for every unit's
+# clients, so only this crate's APNs client speaks it, through hyper directly.
+hyper = { workspace = true, features = ["client", "http2"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http2", "ring", "tls12", "webpki-roots"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http2", "tokio"] }
 lapin = "4"
 metrics.workspace = true
 parking_lot.workspace = true
 percent-encoding.workspace = true
 reqwest.workspace = true
+ring = "0.17"
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tokio-stream = "0.1"

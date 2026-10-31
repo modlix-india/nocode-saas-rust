@@ -204,6 +204,14 @@ impl CoreClient {
     pub async fn notification(&self, r: DefinitionRead<'_>) -> Result<Option<Value>> {
         self.read(&self.feign, "/api/core/notifications/internal/", r).await
     }
+
+    /// How many notifications of the app reach the screen (an `inapp` or `push` channel), any
+    /// client: `GET /api/core/notifications/internal/app/{appCode}` (Rust only).
+    pub async fn app_notification_count(&self, app_code: &str) -> Result<i64> {
+        let path = format!("/api/core/notifications/internal/app/{}", enc(app_code));
+        let v = self.feign.send("GET", &path, None, Feign::headers(None, &[])).await?;
+        Ok(v.as_ref().and_then(|v| v.get("count")).and_then(Value::as_i64).unwrap_or(0))
+    }
 }
 
 /// The `IFeignSecurityService` methods notification calls. None of them carries a draft

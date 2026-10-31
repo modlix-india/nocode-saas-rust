@@ -48,11 +48,12 @@ fn failed(reason: &'static str) {
 /// Counts what a send did.
 fn count(outcome: &Outcome) {
     match outcome {
-        Outcome::Sent { emails, in_app } => {
+        Outcome::Sent { emails, in_app, pushed } => {
             metrics::counter!(SENT, "channel" => "email").increment(*emails as u64);
             if *in_app {
                 metrics::counter!(SENT, "channel" => "in_app").increment(1);
             }
+            metrics::counter!(SENT, "channel" => "push").increment(*pushed as u64);
         }
         Outcome::NoConnection => failed("no_connection"),
         Outcome::NoNotification => failed("no_notification"),
@@ -242,7 +243,7 @@ mod tests {
     #[test]
     fn outcomes_are_counted() {
         let ((), text) = platform::meter::capture(|| {
-            count(&Outcome::Sent { emails: 2, in_app: false });
+            count(&Outcome::Sent { emails: 2, in_app: false, pushed: 0 });
             count(&Outcome::NoNotification);
             count(&Outcome::NoChannel);
             count(&Outcome::NoUsers);

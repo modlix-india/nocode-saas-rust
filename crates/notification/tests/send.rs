@@ -12,8 +12,9 @@ use common::{Answer, Fake, CONN_PATH, NOTIF_PATH, USERS_PATH};
 use notification::calls::{CoreClient, DirectoryClient};
 use notification::email::EmailSink;
 use notification::inapp::InAppSink;
-use notification::model::{CoreNotification, MailConnection, NotificationUser, QueueMessage};
+use notification::model::{CoreNotification, MailConnection, NotificationUser, PushConnection, QueueMessage};
 use notification::push::Push;
+use notification::push_send::PushSink;
 use notification::send::{Outcome, SendService};
 use notification::sse::Hub;
 use parking_lot::Mutex;
@@ -25,6 +26,20 @@ struct Sinks {
     emails: Mutex<Vec<(Option<i64>, Option<String>)>>,
     in_app: Mutex<Vec<(usize, Option<String>, Option<String>, Value)>>,
     fail_email: Mutex<bool>,
+    /// Each push: the recipients' ids, the app, and the client's PUSH connection details.
+    pushes: Mutex<Vec<(Vec<Option<i64>>, String, Option<Map<String, Value>>)>>,
+    fail_push: Mutex<bool>,
+}
+
+#[async_trait]
+impl PushSink for Sinks {
+    async fn send_push(&self, users: &[NotificationUser], _: &CoreNotification, app: &str, c: &PushConnection, _: &Map<String, Value>) -> Result<usize> {
+        if *self.fail_push.lock() {
+            anyhow::bail!("FCM is down");
+        }
+        self.pushes.lock().push((users.iter().map(|u| u.id).collect(), app.to_string(), c.details.clone()));
+        Ok(users.len())
+    }
 }
 
 #[async_trait]
@@ -73,6 +88,7 @@ async fn rig() -> Rig {
         in_app: sinks.clone(),
         push: Push::local(Hub::new(8)),
         prefs: None,
+        devices: None,
     };
     // Only the in-app channel: which channel fires is not what the draft tests are about.
     core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true})));
@@ -217,17 +233,17 @@ async fn channels_are_chosen_from_connection_and_templates() {
     let r = rig().await;
     // A mail connection but only an in-app template: in-app only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0 });
 
     // Both templates, both channels; every recipient gets mail, then in-app runs once.
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
     r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2, "emailId": "b@x.com"}])));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0 });
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(1), Some("SMTP".into())), (Some(2), Some("SMTP".into()))]);
 
     // The connection does not allow in-app: email only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": false, "mail": {"connectionSubType": "SENDGRID"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0 });
 
     // No mail connection and no in-app: nothing to send, and no recipients asked for.
     r.security.clear();
@@ -276,14 +292,14 @@ async fn each_recipient_gets_the_channels_they_chose() {
         .collect(),
     );
     let service = SendService { prefs: Some(Arc::new(prefs)), ..r.service };
-    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true });
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0 });
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(2), Some("SMTP".into())), (Some(3), Some("SMTP".into()))]);
     assert_eq!(r.sinks.in_app.lock()[0].0, 3, "users 1, 2 and the one without an id; 3 turned in-app off");
 
     // Nobody wants in-app: it does not run.
     r.sinks.in_app.lock().clear();
     r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 3}])));
-    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false });
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false, pushed: 0 });
     assert!(r.sinks.in_app.lock().is_empty());
 }
 
@@ -344,7 +360,7 @@ async fn the_authority_filter_narrows_a_normal_notification() {
         filter_authorization: Some("Authorities.Calls".into()),
         ..message(false)
     };
-    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true });
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true, pushed: 0 });
     let asked = r.security.calls_to(USERS_PATH);
     assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "testapp", "filterAuthorization": "Authorities.Calls"}));
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(7), Some("SMTP".into()))]);
@@ -468,4 +484,48 @@ async fn data_notifications_that_end_early() {
     let unknown = QueueMessage { kind: Some("LATER".into()), ..data_message(None) };
     assert!(service.send(&unknown).await.unwrap_err().to_string().contains("Unknown notification kind: LATER"));
     assert!(r.core.calls.lock().is_empty());
+}
+
+#[tokio::test]
+async fn push_goes_to_who_wants_it_and_never_fails_the_message() {
+    let r = rig().await;
+    let service = SendService { devices: Some(r.sinks.clone()), ..r.service };
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}])));
+    // Push only, with the platform's credentials, from the inapp template.
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}}})));
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: false, pushed: 2 });
+    assert!(r.sinks.in_app.lock().is_empty(), "the connection has no inApp");
+    assert_eq!(r.sinks.pushes.lock()[0], (vec![Some(1), Some(2)], "testapp".to_string(), None));
+
+    // The client's own PUSH connection reaches the sink; in-app and push both run.
+    r.sinks.pushes.lock().clear();
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "push": {"connectionDetails": {"apns": {"teamId": "T"}}}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "push": {}}, "channelEnabled": {"push": false}})));
+    let prefs = Prefs([(2, json!({"channels": {"push": true}}).as_object().unwrap().clone())].into_iter().collect());
+    let chooser = SendService { prefs: Some(Arc::new(prefs)), ..service };
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 1 });
+    let pushes = r.sinks.pushes.lock().clone();
+    assert_eq!(pushes[0].0, vec![Some(2)], "push is opt in here: only 2 turned it on");
+    assert_eq!(pushes[0].2.as_ref().unwrap()["apns"]["teamId"], "T");
+
+    // A failing push service is logged; the message still went out.
+    *r.sinks.fail_push.lock() = true;
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0 });
+    *r.sinks.fail_push.lock() = false;
+
+    // An email-only definition has nothing to push.
+    r.sinks.pushes.lock().clear();
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"email": {}}})));
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::NoChannel);
+    assert!(r.sinks.pushes.lock().is_empty());
+}
+
+#[tokio::test]
+async fn without_a_push_sink_push_is_no_channel() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}}})));
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::NoChannel);
 }

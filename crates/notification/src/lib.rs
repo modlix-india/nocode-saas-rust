@@ -9,6 +9,7 @@
 //!   ([`inapp`]) notifications. A data notification (`kind: DATA`) skips the definitions and the
 //!   database and only reaches the recipients' open streams.
 //! - Streams: [`sse`] holds this process's; [`push`] reaches every instance's through Redis.
+//! - Push (Rust only): [`push_send`] reaches the recipients' registered browsers and phones.
 
 pub mod calls;
 pub mod catalogue;
@@ -23,6 +24,7 @@ pub mod messages;
 pub mod model;
 pub mod preference;
 pub mod push;
+pub mod push_send;
 pub mod queue;
 pub mod send;
 pub mod spring;
@@ -48,6 +50,7 @@ use crate::handlers::AppState;
 use crate::inapp::InAppService;
 use crate::preference::PreferenceService;
 use crate::push::Push;
+use crate::push_send::PushService;
 use crate::send::SendService;
 use crate::sse::Hub;
 
@@ -87,6 +90,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         Upstream::from_config(&cfg.core.connections_upstream, registry.as_ref())?
     };
     let core = CoreClient::with_connections(core_up, connections_up, timeout)?;
+    let devices = Arc::new(PushService::new(dao.clone(), core.clone(), &cfg.push)?);
     let hub = Hub::new(cfg.sse.buffer);
     let push = Push::new(hub.clone(), cache.clone(), &cfg.sse.push_channel);
 
@@ -98,6 +102,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         in_app: Arc::new(InAppService { dao: dao.clone(), push: push.clone() }),
         push: push.clone(),
         prefs: Some(Arc::new(dao.clone())),
+        devices: Some(devices.clone()),
     });
     let state = Arc::new(AppState {
         security: SecurityClient::from_config(&cfg.security, registry.as_ref())?,
@@ -105,6 +110,7 @@ pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
         prefs: PreferenceService { dao, directory, cache },
         hub: hub.clone(),
         server_port: cfg.server.port,
+        devices: Some(devices),
     });
     Ok(Built { state, send, hub, push, registry, pool })
 }

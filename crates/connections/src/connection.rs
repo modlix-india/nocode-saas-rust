@@ -23,6 +23,8 @@ pub enum ConnectionType {
     Text,
     Call,
     Ai,
+    /// Push credentials (FCM, APNs) a NOTIFICATION connection names under `push` (Rust only).
+    Push,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -94,6 +96,7 @@ impl ConnectionType {
             Self::Text => matches!(sub, WhatsApp),
             Self::Call => matches!(sub, Exotel),
             Self::Ai => matches!(sub, OpenAi | Gemini | Claude | Grok | DeepSeek),
+            Self::Push => false,
         }
     }
 
@@ -106,6 +109,7 @@ impl ConnectionType {
             Self::Text => "TEXT",
             Self::Call => "CALL",
             Self::Ai => "AI",
+            Self::Push => "PUSH",
         }
     }
 
@@ -521,6 +525,7 @@ mod tests {
         assert!(!ConnectionType::Notification.has_sub_type(ConnectionSubType::Smtp));
         assert_eq!(ConnectionType::value_of("APP_DATA"), Some(ConnectionType::AppData));
         assert_eq!(ConnectionType::value_of("app_data"), None);
+        assert_eq!(ConnectionType::value_of("PUSH").map(|t| t.name()), Some("PUSH"));
     }
 
     /// `ConnectionSecretsTest.stripsCredentials`: the same details and expectations.

@@ -16,6 +16,7 @@ use platform::error::{AppError, AppResult};
 use platform::security::ContextAuthentication;
 
 use crate::editor::apple::Apple;
+use crate::editor::firebase::{android_package, Firebase, ANDROID_KEYS};
 use crate::editor::jks;
 use crate::editor::kinds::{INTERNAL_ONLY, MOBILE_APP_BAD_REQUEST, MOBILE_APP_UNABLE_TO_GEN_KEYSTORE};
 
@@ -50,6 +51,10 @@ pub const MOBILE_APP: Pojo = Pojo {
             Field::new("iosProvisioningProfile", K::Str, C::Copy),
             Field::new("iosTeamId", K::Str, C::Copy),
             Field::new("iosBundleId", K::Str, C::Copy),
+            // Rust only: push. The Android app's Firebase values (the platform's project, or the
+            // tenant's own), and whether the iOS profile was made with Push Notifications on.
+            Field::new("firebaseAndroid", K::MapString, C::Copy),
+            Field::new("iosPushReady", K::BoxBool, C::Copy),
         ],
     ],
 };
@@ -67,6 +72,8 @@ pub const APP_DETAILS: Pojo = Pojo {
         Field::new("icon", K::Str, C::Copy),
         Field::new("splashScreen", K::Object, C::Copy),
         Field::new("version", K::PrimInt(0), C::Copy),
+        // Rust only: the app registers for push notifications.
+        Field::new("pushNotifications", K::BoxBool, C::Copy),
     ]],
 };
 
@@ -201,6 +208,8 @@ pub struct MobileApps {
     pub directory: Arc<dyn Directory>,
     pub messages: Arc<Messages>,
     pub apple: Apple,
+    /// The platform's Firebase project, for Android push.
+    pub firebase: Firebase,
     /// `security.appCodeSuffix`, for the default start URL.
     pub app_code_suffix: String,
     /// The RSA key size of a new keystore (2048; tests use less).
@@ -356,6 +365,7 @@ impl MobileApps {
                     app.insert("iosProvisioningProfile".into(), JValue::Str(profile));
                 }
             }
+            self.prepare_push(&mut app, None, &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         };
@@ -382,6 +392,7 @@ impl MobileApps {
             if !profile.trim().is_empty() {
                 app.insert("iosProvisioningProfile".into(), JValue::Str(profile));
             }
+            self.prepare_push(&mut app, Some(&existing), &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         }
@@ -404,6 +415,7 @@ impl MobileApps {
             if !made.trim().is_empty() {
                 app.insert("iosProvisioningProfile".into(), JValue::Str(made));
             }
+            self.prepare_push(&mut app, Some(&existing), &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         }
@@ -415,8 +427,59 @@ impl MobileApps {
             }
         }
         Self::set_details_version(&mut app, &existing)?;
+        self.prepare_push(&mut app, Some(&existing), &client).await?;
         self.save(&mut app).await?;
         Ok(Some(to_json(&app)))
+    }
+
+    /// Push for an app that has `pushNotifications` (Rust only), before it is saved:
+    /// - Android: the platform's Firebase values, registering the package there the first time,
+    ///   unless the app already has a complete `firebaseAndroid` (its own project, or an earlier
+    ///   registration) or the platform has no Firebase project configured.
+    /// - iOS on the platform's account: Push Notifications turned on for the bundle and the
+    ///   App Store profile made again (a profile made before carries no `aps-environment`), once:
+    ///   `iosPushReady` remembers it. A tenant's account needs its own profile with push.
+    async fn prepare_push(&self, app: &mut JMap, existing: Option<&JMap>, client: &str) -> AppResult<()> {
+        // Kept from the stored app when the request leaves them out.
+        if let Some(old) = existing {
+            for f in ["firebaseAndroid", "iosPushReady"] {
+                if app.get(f).is_none_or(JValue::is_null) {
+                    if let Some(v) = old.get(f).filter(|v| !v.is_null()) {
+                        app.insert(f.into(), v.clone());
+                    }
+                }
+            }
+        }
+        let wants = |m: &JMap, k: &str| Self::details(m).is_some_and(|d| d.get(k) == Some(&JValue::Bool(true)));
+        if !wants(app, "pushNotifications") {
+            return Ok(());
+        }
+        let name = Self::app_name(app);
+        let complete = map_field(app, "firebaseAndroid").is_some_and(|m| ANDROID_KEYS.iter().all(|k| str_field(m, k).is_some_and(|v| !v.trim().is_empty())));
+        if wants(app, "android") && !complete && self.firebase.configured() {
+            let values = self
+                .firebase
+                .android_config(&android_package(client, &name), &format!("{name} - {client}"))
+                .await
+                .map_err(|e| Self::ios_failure(e, "Failed to register the mobile app with Firebase"))?;
+            let m: JMap = values.into_iter().map(|(k, v)| (k, JValue::Str(v.as_str().unwrap_or("").to_string()))).collect();
+            app.insert("firebaseAndroid".into(), JValue::Object(m));
+        }
+        let ready = app.get("iosPushReady") == Some(&JValue::Bool(true));
+        if Self::platform_ios(app) && !ready && self.apple.configured_for_bundle_id() {
+            let made = async {
+                let (_, apple_id) = self.apple.get_or_create_bundle_id(client, &name).await?;
+                self.apple.enable_push(&apple_id).await?;
+                self.apple.replace_profile(&apple_id, &format!("{name} - {client} - App Store")).await
+            }
+            .await
+            .map_err(|e| Self::ios_failure(e, "Failed to turn on push notifications for the iOS app"))?;
+            if !made.trim().is_empty() {
+                app.insert("iosProvisioningProfile".into(), JValue::Str(made));
+            }
+            app.insert("iosPushReady".into(), JValue::Bool(true));
+        }
+        Ok(())
     }
 
     /// `deleteMobileApp`: the app's client needs write access to the app.

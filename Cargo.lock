@@ -1155,6 +1155,7 @@ dependencies = [
  "lapin",
  "md-5",
  "metrics",
+ "metrics-exporter-prometheus",
  "mongodb",
  "overridable",
  "parking_lot",
@@ -2819,9 +2820,9 @@ dependencies = [
 
 [[package]]
 name = "kirun"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76c07197bd71d53f2a34f56769ca614e0eab80eb8307d285b1295caacbbfcfe7"
+checksum = "6696a48db121cc67496f1816e2834ac5c294df17d0de6a54c362104a9622fe23"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3484,19 +3485,27 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "connections",
  "futures",
+ "hex",
  "http 1.5.0",
+ "http-body-util",
+ "hyper 1.12.0",
+ "hyper-rustls 0.27.10",
+ "hyper-util",
  "lapin",
  "metrics",
  "parking_lot",
  "percent-encoding",
  "platform",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tokio-stream",
