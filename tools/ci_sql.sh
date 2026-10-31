@@ -20,10 +20,18 @@ IMAGE=flyway/flyway:13.8.1
 # Every folder under sql/ but rollback/ is one database.
 databases() { find "$1" -mindepth 1 -maxdepth 1 -type d ! -name rollback -exec basename {} \; | sort; }
 
+# Docker through sudo, as keepup-rust.sh runs it, when this user cannot reach the daemon (opc on
+# stage cannot, on dev it can). sudo resets the environment: keep the two Flyway variables.
+DOCKER=(docker)
+if [[ $EUID -ne 0 ]] && ! docker info >/dev/null 2>&1; then
+  # shellcheck disable=SC2054 # the comma is sudo's list, not an array separator
+  DOCKER=(sudo -n --preserve-env=FLYWAY_USER,FLYWAY_PASSWORD docker)
+fi
+
 flyway() {
   local dir=$1 host=$2 db=$3
   shift 3
-  docker run --rm \
+  "${DOCKER[@]}" run --rm \
     -e FLYWAY_USER -e FLYWAY_PASSWORD -e REDGATE_DISABLE_TELEMETRY=true \
     -v "$dir/$db:/flyway/sql:ro" \
     "$IMAGE" \
