@@ -762,6 +762,16 @@ async fn the_base_client_is_the_manager_or_the_app_owner_and_none_for_the_owner(
 
 // ── StorageOverrideChainIntegrationTest: saving a derived storage ───
 
+/// `GET /api/core/notifications/internal/app/{app}`'s count.
+async fn notifications_of(e: &Env, app: &str) -> i64 {
+    let r = e.send("GET", &format!("/api/core/notifications/internal/app/{app}"), None, &[], "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    match r.obj().get("count") {
+        Some(JValue::Int(n)) => *n,
+        other => panic!("count: {other:?}"),
+    }
+}
+
 async fn read_as(e: &Env, client: &str, id: &str) -> JMap {
     let r = e.as_client(client, "GET", &format!("/api/core/storages/{id}"), "").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
@@ -1153,6 +1163,12 @@ async fn the_other_kinds_read_their_classes_as_java_does() {
     let none = e.send("GET", "/api/core/notifications/internal/zz?appCode=testapp&clientCode=SYSTEM&urlClientCode=SYSTEM", None, &[], "").await;
     assert_eq!((none.status, none.body.len()), (StatusCode::OK, 0));
     assert_eq!(e.send("GET", "/api/core/notifications/internal/n?appCode=testapp", None, &[], "").await.status, StatusCode::BAD_REQUEST);
+    // Only `inapp` or `push` channels count: `n` has email only.
+    assert_eq!(notifications_of(&e, "testapp").await, 0);
+    let p = e.call("POST", "/api/core/notifications", r#"{"name":"p","appCode":"testapp","clientCode":"SYSTEM","channelTemplates":{"inapp":{"templateParts":{"en":{"title":"x"}}}}}"#).await;
+    assert_eq!(p.status, StatusCode::OK, "{}", p.text());
+    assert_eq!(notifications_of(&e, "testapp").await, 1);
+    assert_eq!(notifications_of(&e, "otherapp").await, 0);
     let mut nb = n.obj();
     nb.insert("channelEnabled".into(), JValue::Object(obj(r#"{"email":false}"#)));
     let r = e.call("PUT", &format!("/api/core/notifications/{}", n.id()), &to_body(&nb)).await;

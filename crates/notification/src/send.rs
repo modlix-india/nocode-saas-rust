@@ -4,12 +4,14 @@
 //!    the message was raised on (`x-draft: true` only for a draft message).
 //! 2. The channels: email when the connection names a MAIL connection and the notification has
 //!    an `email` template; in-app when the connection allows it and there is an `inapp`
-//!    template. Neither: nothing is sent.
+//!    template; push (Rust only) when the connection has `push` and there is a `push` or an
+//!    `inapp` template ([`crate::push_send`]). None of them: nothing is sent.
 //! 3. The recipients from security's real user directory (never the draft surface), only those
 //!    holding `filterAuthorization` when the message names one (Rust only).
 //! 4. Each recipient's choices for the app ([`crate::choices`], Rust only: Java read none):
 //!    per channel and the message's category, else the definition's `channelEnabled` default.
-//! 5. Email to each recipient who wants it, then in-app to all who want it.
+//! 5. Email to each recipient who wants it, then in-app to all who want it, then push to the
+//!    devices of all who want it. A push failure is logged and never fails the message.
 //!
 //! A missing definition or no recipients ends the run quietly (logged). Anything that fails
 //! ends it with an error, which the listener logs; the message is acked either way.
@@ -31,6 +33,7 @@ use crate::email::{EmailSink, EMAIL_TEMPLATE_NAME};
 use crate::inapp::{InAppSink, INAPP_TEMPLATE_NAME};
 use crate::model::{CoreNotification, NotificationConnection, NotificationUser, QueueMessage, UsersListRequest};
 use crate::push::Push;
+use crate::push_send::{PushSink, PUSH_TEMPLATE_NAME};
 use crate::sse::{event_frame, key};
 
 pub const USER_ID: &str = "User Id";
@@ -44,9 +47,9 @@ pub enum Outcome {
     NoNotification,
     NoChannel,
     NoUsers,
-    /// Mails attempted (each `false` or `true` as the email service answered), and whether the
-    /// in-app channel ran.
-    Sent { emails: usize, in_app: bool },
+    /// Mails attempted (each `false` or `true` as the email service answered), whether the
+    /// in-app channel ran, and how many devices took the push.
+    Sent { emails: usize, in_app: bool, pushed: usize },
     /// A data notification handed to the open streams of this many recipients.
     Pushed { users: usize },
     /// A data notification that arrived after its `expiresAt`: dropped.
@@ -62,6 +65,8 @@ pub struct SendService {
     pub push: Arc<Push>,
     /// The recipients' choices; `None` sends to everyone as Java did (tests).
     pub prefs: Option<Arc<dyn PreferenceSource>>,
+    /// Push to the recipients' devices; `None` sends none (tests).
+    pub devices: Option<Arc<dyn PushSink>>,
 }
 
 /// Now, in epoch milliseconds.
@@ -114,7 +119,8 @@ impl SendService {
         };
         let is_email = conn.mail.is_some() && has(EMAIL_TEMPLATE_NAME)?;
         let is_in_app = conn.in_app && has(INAPP_TEMPLATE_NAME)?;
-        if !is_email && !is_in_app {
+        let is_push = self.devices.is_some() && conn.push.is_some() && (has(PUSH_TEMPLATE_NAME)? || has(INAPP_TEMPLATE_NAME)?);
+        if !is_email && !is_in_app && !is_push {
             tracing::error!("Notification channel and templates are not found: {}, {conn:?}, {notification:?}", qob.describe());
             return Ok(Outcome::NoChannel);
         }
@@ -146,11 +152,22 @@ impl SendService {
             }
         }
         let in_app_users = if is_in_app { wanting(INAPP_TEMPLATE_NAME) } else { Vec::new() };
-        if in_app_users.is_empty() {
-            return Ok(Outcome::Sent { emails, in_app: false });
+        let in_app = !in_app_users.is_empty();
+        if in_app {
+            self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await?;
         }
-        self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await?;
-        Ok(Outcome::Sent { emails, in_app: true })
+        let mut pushed = 0;
+        let app = qob.app_code.as_deref().filter(|a| !a.is_empty());
+        if let (true, Some(devices), Some(push), Some(app)) = (is_push, &self.devices, &conn.push, app) {
+            let push_users = wanting(PUSH_TEMPLATE_NAME);
+            if !push_users.is_empty() {
+                match devices.send_push(&push_users, &notification, app, push, payload).await {
+                    Ok(n) => pushed = n,
+                    Err(e) => tracing::error!("push failed for {}: {e:#}", qob.describe()),
+                }
+            }
+        }
+        Ok(Outcome::Sent { emails, in_app, pushed })
     }
 
     /// The recipients' preference maps in the message's app; none without a source or an app.

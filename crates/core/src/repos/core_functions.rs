@@ -73,6 +73,8 @@ impl CoreFunctions {
         // Rust only (no Java counterpart): the platform app's jobs, guarded, after every
         // family Java has.
         functions.extend(crate::functions::platform::all(&deps.platform));
+        // Rust only: contact codes (security-internal keeps and checks them).
+        functions.extend(crate::functions::contact_codes::all(&deps.security, &deps.integrations));
         let mut map = HashMap::new();
         let mut names = Vec::new();
         for f in functions {
@@ -112,13 +114,18 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 85);
+        assert_eq!(core.names().len(), 87);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence and Event.GetScheduleState.
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[78..],
+            core.names()[85..],
+            ["CoreServices.Security.SendContactCode", "CoreServices.Security.VerifyContactCode"],
+            "the contact codes come last"
+        );
+        assert_eq!(
+            core.names()[78..85],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",

@@ -3,6 +3,7 @@
 //! names and schemas, events), since stored definitions call them by name.
 
 pub mod caller_security;
+pub mod contact_codes;
 pub mod crypto;
 pub mod file;
 pub mod hash;
@@ -17,6 +18,8 @@ pub mod securitycontext;
 pub mod storage;
 pub mod support;
 
+#[cfg(test)]
+mod contact_codes_tests;
 #[cfg(test)]
 mod platform_tests;
 #[cfg(test)]

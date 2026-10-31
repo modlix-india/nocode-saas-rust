@@ -14,11 +14,13 @@ use axum::response::Response;
 use axum::Router;
 use common::{context, local_stack, with_scratch, Answer, Fake, AUTH_PATH};
 use futures::StreamExt;
-use notification::calls::DirectoryClient;
+use notification::calls::{CoreClient, DirectoryClient};
+use notification::config::PushSection;
 use notification::dao::Dao;
 use notification::handlers::{router, AppState};
 use notification::inapp::{InAppService, InAppSink};
 use notification::push::Push;
+use notification::push_send::PushService;
 use notification::model::{CoreNotification, NotificationUser};
 use notification::preference::PreferenceService;
 use notification::sse::Hub;
@@ -54,6 +56,7 @@ async fn rig(pool: MySqlPool) -> Rig {
         },
         hub: hub.clone(),
         server_port: 8114,
+        devices: Some(Arc::new(PushService::new(dao.clone(), CoreClient::new(Upstream::fixed(&[&base]), Duration::from_secs(5)).unwrap(), &vapid()).unwrap())),
     });
     Rig { app: with_scope(router(st)), security, hub: hub.clone(), inapp: InAppService { dao, push: Push::local(hub) }, pool }
 }
@@ -122,6 +125,17 @@ async fn get(app: &Router, uri: &str) -> Got {
 
 async fn post(app: &Router, uri: &str, body: &str) -> Got {
     call(app, req("POST", uri).header("content-type", "application/json").body(Body::from(body.to_string())).unwrap()).await
+}
+
+async fn delete(app: &Router, uri: &str, body: &str) -> Got {
+    call(app, req("DELETE", uri).header("content-type", "application/json").body(Body::from(body.to_string())).unwrap()).await
+}
+
+/// RFC 8291 appendix A's application server key pair, as the platform's VAPID keys.
+const VAPID_PUBLIC: &str = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
+fn vapid() -> PushSection {
+    PushSection { vapid_public_key: VAPID_PUBLIC.into(), vapid_private_key: "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw".into(), ..Default::default() }
 }
 
 fn notification() -> CoreNotification {
@@ -223,6 +237,7 @@ async fn the_security_gate_and_spring_answers() {
             },
             hub: r.hub.clone(),
             server_port: 8114,
+            devices: None,
         });
         assert!(get(&with_scope(router(dead)), "/api/notification/new").await.is_internal_500());
     })
@@ -586,6 +601,79 @@ async fn another_users_preference_needs_the_management_check() {
         assert!(get(&r.app, "/api/notification/preference?appCode=rsapp&userId=-5").await.is_internal_500());
         // The caller's own id named explicitly.
         assert_eq!(get(&r.app, "/api/notification/preference?appCode=rsapp&userId=142").await.body, "{ }");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn push_devices_register_move_and_leave() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let dao = Dao::new(r.pool.clone());
+        // The worker goes to anyone, allowed to control the whole site.
+        let anonymous = Request::builder().uri("/api/notification/push/sw.js").header("host", "localhost:8114").body(Body::empty()).unwrap();
+        let g = call(&r.app, anonymous).await;
+        assert_eq!(g.status, StatusCode::OK);
+        assert_eq!(g.header("service-worker-allowed"), Some("/"));
+        assert!(g.body.contains("notificationclick"));
+
+        let web = json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc",
+                         "keys": {"p256dh": "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", "auth": "BTBZMqHH6r4Tts7J_aSIgg"}})
+        .to_string();
+        // An app without notifications (a site): push is off, and nothing is kept for it.
+        r.security.answer("GET", "/api/core/notifications/internal/app/quietsite", Answer::json(json!({"count": 0})));
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=quietsite").await.json(), json!({"enabled": false, "vapidPublicKey": VAPID_PUBLIC}));
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=quietsite", &web).await.json()["registered"], false);
+        assert!(dao.devices_of("quietsite", &[142]).await.unwrap().is_empty());
+
+        // An app with notifications.
+        r.security.answer("GET", "/api/core/notifications/internal/app/rsapp", Answer::json(json!({"count": 2})));
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json()["enabled"], true);
+        for _ in 0..2 {
+            assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &web).await.json()["registered"], true);
+        }
+        let ios = json!({"platform": "IOS", "token": "ABCDEF0123", "appIdentifier": "com.modlix.apps.system.rs", "providerAccount": "TEAM1"}).to_string();
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &ios).await.json()["registered"], true);
+        let mine = dao.devices_of("rsapp", &[142]).await.unwrap();
+        assert_eq!(mine.len(), 2, "registering again refreshes the row");
+        assert_eq!(mine[1].apns_env.as_deref(), Some("production"));
+        assert_eq!(mine[1].provider_account.as_deref(), Some("TEAM1"));
+        // The count is kept: core was asked once per app.
+        assert_eq!(r.security.calls_to("/api/core/notifications/internal/app/rsapp").len(), 1);
+
+        // What is refused.
+        for bad in [
+            json!({"platform": "WEB", "token": "https://10.0.0.5/x", "keys": {"p256dh": "a", "auth": "b"}}),
+            json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc"}),
+            json!({"platform": "IOS", "token": "not-hex", "appIdentifier": "b"}),
+            json!({"platform": "IOS", "token": "ab"}),
+            json!({"platform": "IOS", "token": "ab", "appIdentifier": "b", "apnsEnv": "staging"}),
+            json!({"platform": "PAGER", "token": "ab"}),
+        ] {
+            let g = post(&r.app, "/api/notification/push/devices?appCode=rsapp", &bad.to_string()).await;
+            assert_eq!(g.status, StatusCode::BAD_REQUEST, "{bad}: {}", g.body);
+        }
+        assert_eq!(post(&r.app, "/api/notification/push/devices", &web).await.status, StatusCode::OK, "the appCode header is enough");
+
+        // Someone else signs in on the same browser: the device moves to them.
+        let mut other = context(true);
+        other["user"]["id"] = json!(143);
+        r.security.answer("GET", AUTH_PATH, Answer::json(other));
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &web).await.json()["registered"], true);
+        assert_eq!(dao.devices_of("rsapp", &[142]).await.unwrap().len(), 1, "only the phone stays with 142");
+        assert_eq!(dao.devices_of("rsapp", &[143]).await.unwrap()[0].platform.name(), "WEB");
+
+        // Signing out removes only the caller's own device.
+        let key = json!({"platform": "IOS", "token": "ABCDEF0123"}).to_string();
+        assert_eq!(delete(&r.app, "/api/notification/push/devices?appCode=rsapp", &key).await.json()["removed"], 0);
+        let web_key = json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc"}).to_string();
+        assert_eq!(delete(&r.app, "/api/notification/push/devices?appCode=rsapp", &web_key).await.json()["removed"], 1);
+        assert!(dao.devices_of("rsapp", &[143]).await.unwrap().is_empty());
+        assert_eq!(dao.devices_of("rsapp", &[142]).await.unwrap().len(), 1);
     })
     .await;
 }

@@ -179,6 +179,7 @@ fn own_routes(st: St) -> Router {
         .route("/api/core/templates/preview", post(template_preview))
         .route("/api/core/templates/preview/pdf", post(template_preview_pdf))
         .route("/api/core/notifications/internal/{name}", get(internal_notification))
+        .route("/api/core/notifications/internal/app/{app_code}", get(internal_app_notifications))
         .route("/api/core/index", get(index))
         .route("/api/core/index/internal/{app_code}", get(internal_index))
         .route("/api/core/internal/cache", get(cache_names).delete(cache_reset_all))
@@ -481,6 +482,36 @@ async fn internal_notification(State(st): State<St>, Path(name): Path<String>, R
     }
     .await;
     respond(R, r)
+}
+
+/// `GET /internal/app/{appCode}`: `{"count": n}`, how many notifications of the app (any client)
+/// have an `inapp` or `push` channel (Rust only). The notification service turns push on for an
+/// app only when it has one, so a site without notifications never registers a service worker.
+async fn internal_app_notifications(State(st): State<St>, Path(app_code): Path<String>, h: HeaderMap) -> Response {
+    const R: &str = "/api/core/notifications/internal/app/{app_code}";
+    if let Err(r) = caller(&st, &h, R).await {
+        return r;
+    }
+    let r = async {
+        let svc = &st.notifications;
+        let docs = svc
+            .commons()
+            .store
+            .find_docs(svc.kind().object.doc().collection(), mongodb::bson::doc! {"appCode": &app_code})
+            .await
+            .map_err(AppError::Internal)?;
+        let count = docs.iter().filter(|d| notifies_on_screen(d)).count();
+        let mut out = JMap::new();
+        out.insert("count".into(), JValue::Int(count as i64));
+        Ok(json(JValue::Object(out)))
+    }
+    .await;
+    respond(R, r)
+}
+
+/// A notification with an `inapp` or a `push` channel template.
+fn notifies_on_screen(d: &mongodb::bson::Document) -> bool {
+    d.get_document("channelTemplates").is_ok_and(|ch| ch.contains_key("inapp") || ch.contains_key("push"))
 }
 
 // ── CoreIndexController ──────────────────────────────────────────────

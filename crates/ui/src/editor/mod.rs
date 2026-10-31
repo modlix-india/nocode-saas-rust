@@ -7,6 +7,7 @@
 
 pub mod apple;
 pub mod config;
+pub mod firebase;
 pub mod index;
 pub mod jks;
 pub mod kinds;
@@ -27,6 +28,7 @@ use platform::health::Health;
 use platform::security::SecurityClient;
 
 use crate::editor::apple::Apple;
+use crate::editor::firebase::Firebase;
 use crate::editor::config::EditorConfig;
 use crate::editor::kinds::{ui_messages, UiEvictions, UiFiller, UiKind, UiObject, EDITOR_AUTH_NAMES};
 use crate::editor::mobile::MobileApps;
@@ -53,7 +55,8 @@ pub fn state(store: overridable::Store, cache: CacheService, callers: Arc<dyn Ca
         backend: cx.backend().clone(),
         directory: cx.directory().clone(),
         messages: cx.messages.clone(),
-        apple: Apple::new(cfg.editor.clone(), http),
+        apple: Apple::new(cfg.editor.clone(), http.clone()),
+        firebase: Firebase::new(&cfg.editor, http),
         app_code_suffix: cfg.editor.app_code_suffix.clone(),
         key_bits: 2048,
     };

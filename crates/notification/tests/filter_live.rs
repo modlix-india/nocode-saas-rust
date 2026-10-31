@@ -65,6 +65,7 @@ async fn a_filtered_notification_reaches_only_the_users_holding_the_authority() 
             in_app: Arc::new(InAppService { dao: Dao::new(pool.clone()), push: push.clone() }),
             push,
             prefs: None,
+            devices: None,
         };
         let message = |filter: &str| {
             json!({"appCode": "appbuilder", "clientCode": "SYSTEM", "urlClientCode": "SYSTEM", "targetType": "User Id",
@@ -78,7 +79,7 @@ async fn a_filtered_notification_reaches_only_the_users_holding_the_authority() 
 
         // The SYSTEM user 142 is signed in to appbuilder: a filter it meets keeps it.
         let settled = handle(&service, Some("application/json"), message("Authorities.Logged_IN").as_bytes()).await;
-        assert_eq!(settled, Settle::Ack(Some(Outcome::Sent { emails: 1, in_app: true })));
+        assert_eq!(settled, Settle::Ack(Some(Outcome::Sent { emails: 1, in_app: true, pushed: 0 })));
         assert_eq!(*mails.0.lock(), vec![Some(142)]);
         assert_eq!(rows().await, 1);
 

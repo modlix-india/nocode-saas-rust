@@ -25,6 +25,8 @@ pub struct CoreConfig {
     /// The ui service, for `CoreServices.Platform.CleanupTransports` (Feign name `ui`).
     pub ui: UiConfig,
     pub core: CoreSection,
+    /// `[kirun]`: how long and how many steps one function execution may run.
+    pub kirun: crate::exec_limit::KirunSection,
     /// The storage policy layer and the app-data engines under it.
     pub appdata: AppDataSection,
     /// Outbound connections (`core.rest.*`, the provider endpoints).
@@ -33,6 +35,8 @@ pub struct CoreConfig {
     pub mq: MqSection,
     /// The events consumer of core-events (`events.mq.queues`).
     pub events: EventsSection,
+    /// `[runs]`: the thread pool function runs execute on, apart from the health routes.
+    pub runs: crate::run_pool::RunsSection,
     /// The HTML to PDF renderer (`crate::pdf_render`): the pdf-render sidecar, else text.
     pub pdf: crate::pdf_render::PdfConfig,
 }
@@ -51,10 +55,12 @@ impl Default for CoreConfig {
             files: FilesConfig::default(),
             ui: UiConfig::default(),
             core: CoreSection::default(),
+            kirun: crate::exec_limit::KirunSection::default(),
             appdata: AppDataSection::default(),
             connections: ConnectionsSection::default(),
             mq: MqSection::default(),
             events: EventsSection::default(),
+            runs: crate::run_pool::RunsSection::default(),
             pdf: crate::pdf_render::PdfConfig::default(),
         }
     }
@@ -66,7 +72,8 @@ impl Default for CoreConfig {
 pub struct EventsSection {
     /// Comma-separated, as Java's property.
     pub queues: String,
-    /// Deliveries in flight on the consumer's channel (Java's is unbounded).
+    /// Deliveries in flight on the consumer's channel (Java's is unbounded), never more than
+    /// the run pool's threads (`[runs] threads`).
     pub prefetch: u16,
     /// Declare `mq.events_exchange` (direct, durable) and the queues, each bound under its own
     /// name. Only for scratch setups: the real queues already exist.
@@ -370,6 +377,7 @@ mod tests {
         assert_eq!(c.ui.upstream.entries(), ["lighthouse:UI"]);
         assert_eq!(c.core.upstream.entries(), ["lighthouse:CORE"]);
         assert_eq!(c.core.function_timeout_seconds, 300);
+        assert_eq!((c.kirun.seconds(), c.kirun.max_steps), (120, 0));
         assert_eq!(c.appdata.builder_app_codes, ["appbuilder", "sitezump"]);
         assert!(c.appdata.text_search_stemming);
         assert!(c.connections.block_private_targets);

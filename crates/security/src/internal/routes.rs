@@ -5,6 +5,7 @@
 //! |---|---|
 //! | `clients/internal/**`, `applications/internal/**`, `clienturls/internal/**` | yes |
 //! | `users/internal/**`, `app/profiles/internal/**`, `internal/billing/**` | yes |
+//! | `internal/contactCodes/**` (Rust only) | yes |
 //! | `internal/cache/**`, `ssl/internal/certificates` | no |
 
 use std::sync::Arc;
@@ -77,6 +78,9 @@ pub fn router(state: State_) -> Router {
         .route("/api/security/internal/billing/reconcile", post(reconcile))
         .route("/api/security/internal/billing/serving-status", get(serving_status))
         // SecurityCacheController
+        // Contact codes (Rust only): core's SendContactCode / VerifyContactCode
+        .route("/api/security/internal/contactCodes", post(contact_code_issue))
+        .route("/api/security/internal/contactCodes/verify", post(contact_code_verify))
         .route("/api/security/internal/cache", get(cache_names).delete(cache_evict_all))
         .route("/api/security/internal/cache/stats", get(cache_stats))
         .route("/api/security/internal/cache/{cacheName}", delete(cache_evict))
@@ -156,6 +160,18 @@ macro_rules! route_path {
         $crate::web_route_path!($name, State_, $path, $protected, |$s, $r, $ca, $p| $body);
     };
 }
+
+// ---- Contact codes (Rust only; see `super::contact`) ----
+
+route!(contact_code_issue, "/internal/contactCodes", false, |s, r, ca| {
+    let v: Value = body(&r.body)?;
+    Ok(json(&s.contact_code_issue(&v).await?))
+});
+
+route!(contact_code_verify, "/internal/contactCodes/verify", false, |s, r, ca| {
+    let v: Value = body(&r.body)?;
+    Ok(json(&s.contact_code_verify(&v).await?))
+});
 
 // ---- ProfileController ----
 

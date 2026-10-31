@@ -10,6 +10,13 @@
 # its own Dockerfile and its tests run in it before anything is pushed; a push that changes only
 # it compiles nothing.
 #
+# sql-plan (self-hosted, alongside build): tools/ci_sql.sh checks with Flyway, on the host, that
+# every file of sql/ already applied to the environment's databases is unchanged, and lists the
+# pending ones. sql-apply applies them, behind the GitHub environment rust-sql-<env> (give
+# rust-sql-prod required reviewers, so a person reads the pending list before prod changes).
+# Units are replaced only after the SQL is in: sql/README.md says why every change must work
+# with the release still running.
+#
 # deploy (self-hosted, the runner the Java workflows use): one SSH per unit running
 # `keepup-rust.sh --env <env> deploy <unit> <image>` on the host, gateway-rust last, stopping at
 # the first failure.
@@ -55,6 +62,12 @@ on:
         required: false
       # SHA-256 of the dashboard's admin token; empty leaves the dashboard read-only.
       lighthouse_admin_token_sha256:
+        required: false
+      # The MySQL user sql-plan and sql-apply run as (it creates and alters tables). Without them
+      # the deploy stops at sql-plan.
+      db_user:
+        required: false
+      db_password:
         required: false
 
 permissions:
@@ -263,9 +276,58 @@ jobs:
           for unit in $SELECTED; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:$TAG"; done
           for unit in $SELECTED; do docker push "$OCIR_NAMESPACE/$ENV_NAME-$unit:latest"; done
 
+  # On every deploy, not only when sql/ changed: an environment left behind (prod was three
+  # security, one core and one files migration short at the move) is caught up before units that
+  # may need the newer schema.
+  sql-plan:
+    if: inputs.deploy
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    outputs:
+      pending: ${{ steps.plan.outputs.pending }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the applied SQL is unchanged and list what is pending
+        id: plan
+        env:
+          ENV_NAME: ${{ inputs.environment }}
+          SSH_KEY: ${{ inputs.ssh_key }}
+          SERVER_IP: ${{ secrets.server_ip }}
+          TAG: ${{ github.sha }}
+          DB_USER: ${{ secrets.db_user }}
+          DB_PASSWORD: ${{ secrets.db_password }}
+        run: tools/ci_sql.sh ship plan
+
+  sql-apply:
+    needs: sql-plan
+    if: needs.sql-plan.outputs.pending != '0'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    environment: rust-sql-${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply the pending SQL
+        env:
+          ENV_NAME: ${{ inputs.environment }}
+          SSH_KEY: ${{ inputs.ssh_key }}
+          SERVER_IP: ${{ secrets.server_ip }}
+          TAG: ${{ github.sha }}
+          DB_USER: ${{ secrets.db_user }}
+          DB_PASSWORD: ${{ secrets.db_password }}
+        run: tools/ci_sql.sh ship migrate
+
   deploy:
-    needs: build
-    if: inputs.deploy && needs.build.outputs.units != ''
+    needs: [build, sql-plan, sql-apply]
+    # sql-apply is skipped when nothing is pending; any failure, or a refused approval, stops here.
+    if: >-
+      !cancelled() && inputs.deploy && needs.build.outputs.units != ''
+      && needs.build.result == 'success' && needs.sql-plan.result == 'success'
+      && (needs.sql-apply.result == 'success' || needs.sql-apply.result == 'skipped')
     runs-on: self-hosted
     timeout-minutes: 90
 
