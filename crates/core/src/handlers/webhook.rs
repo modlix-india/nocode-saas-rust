@@ -68,7 +68,7 @@ pub async fn webhook_context(clients: &dyn ClientLookup, h: &HeaderMap) -> Resul
         forwarded_port: header(h, "x-forwarded-port").unwrap_or_default(),
         draft: header(h, "x-draft").is_some_and(|v| v.eq_ignore_ascii_case("true")),
         debug: header(h, "x-debug"),
-        raised: Default::default(),
+        ..Default::default()
     });
     Ok((ctx, app, client))
 }

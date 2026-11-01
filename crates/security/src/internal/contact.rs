@@ -11,9 +11,17 @@
 //! and [`USED`] marks a code that was accepted. A used row is kept (not deleted, unlike the other
 //! purposes) so the hourly limit still counts it.
 //!
-//! Rules, per app and user:
+//! Whose codes: a signed-in user's, or (for a caller who is not signed in) a subject's. A server
+//! function that has already checked something the caller holds (a sign link's token) passes its
+//! key as `subjectKey`; the codes then belong to that subject, of the URL's client, not to any
+//! user ([`Owner::Subject`]), and only the same subject can check them. Without a user and without
+//! a subject nothing is sent (`SIGN_IN`).
+//!
+//! Rules, per app and owner (the user or the subject):
 //! - one code per target every [`RESEND_AFTER_SECONDS`] seconds,
 //! - at most [`SENDS_PER_HOUR`] codes in any hour (all targets together),
+//! - for subjects also at most [`SUBJECT_TARGET_SENDS_PER_HOUR`] codes to one target in any hour,
+//!   whatever the subject, so many subjects cannot flood one number or address,
 //! - at most [`MAX_WRONG_TRIES`] wrong tries per code, then a new code is needed,
 //! - only the latest code of a target counts, once, before it expires (the app's OTP policy:
 //!   length, characters, expiry; the policy's target type does not apply, the caller chose it).
@@ -31,8 +39,15 @@ use crate::events::SmsSender;
 use crate::model::OtpPolicy;
 use crate::otp::generate_code;
 
-/// The `security_otp.PURPOSE` of these rows.
+/// The `security_otp.PURPOSE` of a signed-in user's rows.
 pub const PURPOSE: &str = "CONTACT_VERIFICATION";
+/// The start of a subject's `security_otp.PURPOSE`; the rest is [`Owner::subject`]'s hash. These
+/// rows have no `USER_ID`.
+pub const SUBJECT_PURPOSE_PREFIX: &str = "CONTACT_SUBJECT:";
+/// Codes to one target in any hour, over every subject.
+pub const SUBJECT_TARGET_SENDS_PER_HOUR: u64 = 5;
+/// The longest `subjectKey` taken.
+pub const SUBJECT_KEY_MAX_CHARS: usize = 200;
 /// `VERIFY_LEGS_COUNTS` of a code that was accepted.
 pub const USED: i64 = -1;
 pub const RESEND_AFTER_SECONDS: i64 = 30;
@@ -40,6 +55,40 @@ pub const SENDS_PER_HOUR: u64 = 5;
 pub const MAX_WRONG_TRIES: i64 = 5;
 /// The 2Factor account's DLT template is registered in India only.
 pub const PLATFORM_SMS_COUNTRY: &str = "91";
+
+/// Whose codes a row holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Owner {
+    /// A signed-in user.
+    User(u64),
+    /// A subject a server function vouches for: the row's whole `PURPOSE`.
+    Subject(String),
+}
+
+impl Owner {
+    /// The subject `key` of the client `client_code`: its rows' `PURPOSE`, the SHA-256 of both, so
+    /// the same key of two clients never meets and no key is stored as given.
+    pub fn subject(client_code: &str, key: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(format!("{}\n{}", client_code.to_uppercase(), key.trim()).as_bytes());
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        Self::Subject(format!("{SUBJECT_PURPOSE_PREFIX}{hex}"))
+    }
+
+    pub fn purpose(&self) -> &str {
+        match self {
+            Self::User(_) => PURPOSE,
+            Self::Subject(p) => p,
+        }
+    }
+
+    pub fn user_id(&self) -> Option<u64> {
+        match self {
+            Self::User(id) => Some(*id),
+            Self::Subject(_) => None,
+        }
+    }
+}
 
 /// Which kind of address a code goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +174,7 @@ pub struct CodeRow {
 #[derive(Debug, Clone)]
 pub struct NewCode {
     pub app_id: u64,
-    pub user_id: u64,
+    pub owner: Owner,
     pub target: Target,
     pub unique_code: String,
     pub created_at: NaiveDateTime,
@@ -135,13 +184,16 @@ pub struct NewCode {
 
 #[async_trait]
 pub trait ContactCodeStore: Send + Sync {
-    /// Codes of the app issued to the user at or after `since`.
-    async fn count_since(&self, app_id: u64, user_id: u64, since: NaiveDateTime) -> AuthResult<u64>;
-    /// The user's latest code of the app for the target.
-    async fn latest(&self, app_id: u64, user_id: u64, target: &Target) -> AuthResult<Option<CodeRow>>;
+    /// Codes of the app issued to the owner at or after `since`.
+    async fn count_since(&self, app_id: u64, owner: &Owner, since: NaiveDateTime) -> AuthResult<u64>;
+    /// Subjects' codes of the app issued to the target at or after `since`.
+    async fn count_subject_target_since(&self, app_id: u64, target: &Target, since: NaiveDateTime) -> AuthResult<u64>;
+    /// The owner's latest code of the app for the target.
+    async fn latest(&self, app_id: u64, owner: &Owner, target: &Target) -> AuthResult<Option<CodeRow>>;
     async fn insert(&self, code: &NewCode) -> AuthResult<()>;
-    /// Sets the row's tries (a wrong try, or [`USED`]); false when the row changed meanwhile.
-    async fn set_tries(&self, id: u64, from: i64, to: i64) -> AuthResult<bool>;
+    /// Sets the owner's row's tries (a wrong try, or [`USED`]); false when the row changed
+    /// meanwhile.
+    async fn set_tries(&self, id: u64, owner: &Owner, from: i64, to: i64) -> AuthResult<bool>;
 }
 
 /// How the issued code reaches the person.
@@ -167,7 +219,7 @@ impl Delivery {
 pub struct IssueRequest {
     pub app_id: u64,
     pub app_name: Option<String>,
-    pub user_id: u64,
+    pub owner: Owner,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub ip_address: Option<String>,
@@ -177,7 +229,7 @@ pub struct IssueRequest {
 #[derive(Debug, Clone)]
 pub struct VerifyRequest {
     pub app_id: u64,
-    pub user_id: u64,
+    pub owner: Owner,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub code: Option<String>,
@@ -218,7 +270,7 @@ impl ContactCodes<'_> {
                 &base,
             ));
         }
-        if let Some(last) = self.store.latest(req.app_id, req.user_id, &target).await? {
+        if let Some(last) = self.store.latest(req.app_id, &req.owner, &target).await? {
             let wait = RESEND_AFTER_SECONDS - (self.now - last.created_at).num_seconds();
             if wait > 0 {
                 let mut extra = base.to_vec();
@@ -226,7 +278,13 @@ impl ContactCodes<'_> {
                 return Ok(refused("WAIT", &format!("A code was just sent. You can ask for another in {wait} seconds."), &extra));
             }
         }
-        if self.store.count_since(req.app_id, req.user_id, self.now - Duration::hours(1)).await? >= SENDS_PER_HOUR {
+        let hour_ago = self.now - Duration::hours(1);
+        if self.store.count_since(req.app_id, &req.owner, hour_ago).await? >= SENDS_PER_HOUR {
+            return Ok(refused("LIMIT", "Too many codes were asked for in the last hour. Please try again later.", &base));
+        }
+        if matches!(req.owner, Owner::Subject(_))
+            && self.store.count_subject_target_since(req.app_id, &target, hour_ago).await? >= SUBJECT_TARGET_SENDS_PER_HOUR
+        {
             return Ok(refused("LIMIT", "Too many codes were asked for in the last hour. Please try again later.", &base));
         }
         let Some(code) = generate_code(policy)?.filter(|c| !c.trim().is_empty()) else {
@@ -245,7 +303,7 @@ impl ContactCodes<'_> {
         self.store
             .insert(&NewCode {
                 app_id: req.app_id,
-                user_id: req.user_id,
+                owner: req.owner.clone(),
                 target: target.clone(),
                 unique_code: hash,
                 created_at: self.now,
@@ -279,7 +337,7 @@ impl ContactCodes<'_> {
         if code.is_empty() {
             return Ok(refused("WRONG_CODE", "Enter the code we sent you.", &base));
         }
-        let Some(row) = self.store.latest(req.app_id, req.user_id, &target).await? else {
+        let Some(row) = self.store.latest(req.app_id, &req.owner, &target).await? else {
             return Ok(refused("NO_CODE", "Ask for a code first.", &base));
         };
         if row.tries == USED {
@@ -293,7 +351,7 @@ impl ContactCodes<'_> {
         }
         if !bcrypt::verify(code, &row.unique_code).unwrap_or(false) {
             let tries = row.tries + 1;
-            self.store.set_tries(row.id, row.tries, tries).await?;
+            self.store.set_tries(row.id, &req.owner, row.tries, tries).await?;
             let left = MAX_WRONG_TRIES - tries;
             if left <= 0 {
                 return Ok(refused("TOO_MANY_TRIES", "Too many wrong tries. Ask for a new code.", &base));
@@ -303,7 +361,7 @@ impl ContactCodes<'_> {
             return Ok(refused("WRONG_CODE", "That code is not right. Check it and try again.", &extra));
         }
         // Only one caller may use it: the row must still hold the tries it was read with.
-        if !self.store.set_tries(row.id, row.tries, USED).await? {
+        if !self.store.set_tries(row.id, &req.owner, row.tries, USED).await? {
             return Ok(refused("NO_CODE", "This code was already used. Ask for a new one.", &base));
         }
         Ok(json!({"ok": true, "channel": target.channel.target_type(), "target": target.value}))
@@ -316,11 +374,16 @@ fn field(v: &Value, name: &str) -> AuthResult<Option<String>> {
 }
 
 impl super::Internal {
-    /// The app, the client's OTP policy for it and the user, as the body names them; `Err` holds
-    /// the refusal to answer with.
-    async fn contact_scope(&self, v: &Value) -> AuthResult<Result<(std::sync::Arc<crate::model::App>, OtpPolicy, u64), Value>> {
+    /// The app, the client's OTP policy for it and the owner, as the body names them: the
+    /// `subjectKey`'s subject when there is one, else the user; `Err` holds the refusal to answer
+    /// with.
+    async fn contact_scope(&self, v: &Value) -> AuthResult<Result<(std::sync::Arc<crate::model::App>, OtpPolicy, Owner), Value>> {
         let user_id = crate::web::opt_u64_json(v.get("userId"))?.unwrap_or(0);
-        if user_id == 0 {
+        let subject_key = field(v, "subjectKey")?.map(|k| k.trim().to_string());
+        if subject_key.as_ref().is_some_and(|k| k.chars().count() > SUBJECT_KEY_MAX_CHARS) {
+            return Ok(Err(refused("INVALID", "The subject key is too long.", &[])));
+        }
+        if user_id == 0 && subject_key.is_none() {
             return Ok(Err(refused("SIGN_IN", "Please sign in to verify an e-mail address or a phone number.", &[])));
         }
         let unknown = || Ok(Err(refused("APP", "This app or organisation is not known.", &[])));
@@ -337,7 +400,11 @@ impl super::Internal {
             return unknown();
         };
         let policy = self.dir().policy_for_app(client.id(), app.id, crate::model::PassType::Otp).await?;
-        Ok(Ok((app, policy.otp.unwrap_or_else(OtpPolicy::defaults), user_id)))
+        let owner = match subject_key {
+            Some(key) => Owner::subject(client.code(), &key),
+            None => Owner::User(user_id),
+        };
+        Ok(Ok((app, policy.otp.unwrap_or_else(OtpPolicy::defaults), owner)))
     }
 
     /// `POST /api/security/internal/contactCodes`.
@@ -345,14 +412,14 @@ impl super::Internal {
         let Some(delivery) = Delivery::read(field(v, "delivery")?.as_deref()) else {
             return Ok(refused("INVALID", "Unknown delivery.", &[]));
         };
-        let (app, policy, user_id) = match self.contact_scope(v).await? {
+        let (app, policy, owner) = match self.contact_scope(v).await? {
             Ok(s) => s,
             Err(refusal) => return Ok(refusal),
         };
         let req = IssueRequest {
             app_id: app.id,
             app_name: app.app_name.clone(),
-            user_id,
+            owner,
             email: field(v, "emailId")?,
             phone: field(v, "phoneNumber")?,
             ip_address: field(v, "ipAddress")?,
@@ -364,13 +431,20 @@ impl super::Internal {
 
     /// `POST /api/security/internal/contactCodes/verify`.
     pub async fn contact_code_verify(&self, v: &Value) -> AuthResult<Value> {
-        let (app, _, user_id) = match self.contact_scope(v).await? {
+        let (app, _, owner) = match self.contact_scope(v).await? {
             Ok(s) => s,
             Err(refusal) => return Ok(refusal),
         };
-        let req = VerifyRequest { app_id: app.id, user_id, email: field(v, "emailId")?, phone: field(v, "phoneNumber")?, code: field(v, "code")? };
+        let req = VerifyRequest { app_id: app.id, owner, email: field(v, "emailId")?, phone: field(v, "phoneNumber")?, code: field(v, "code")? };
         let store = MySqlContactCodes { pool: self.db.pool.clone() };
         ContactCodes { store: &store, sms: self.auth.sms.as_ref(), now: self.auth.clock.local() }.verify(&req).await
+    }
+}
+
+fn target_column(target: &Target) -> &'static str {
+    match target.channel {
+        Channel::Email => "EMAIL_ID",
+        Channel::Phone => "PHONE_NUMBER",
     }
 }
 
@@ -381,33 +455,46 @@ pub struct MySqlContactCodes {
 
 #[async_trait]
 impl ContactCodeStore for MySqlContactCodes {
-    async fn count_since(&self, app_id: u64, user_id: u64, since: NaiveDateTime) -> AuthResult<u64> {
+    async fn count_since(&self, app_id: u64, owner: &Owner, since: NaiveDateTime) -> AuthResult<u64> {
+        // `<=>`: a subject's rows have no user.
         let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM security_otp WHERE APP_ID = ? AND USER_ID = ? AND PURPOSE = ? AND CREATED_AT >= ?",
+            "SELECT COUNT(*) FROM security_otp WHERE APP_ID = ? AND USER_ID <=> ? AND PURPOSE = ? AND CREATED_AT >= ?",
         )
         .bind(app_id)
-        .bind(user_id)
-        .bind(PURPOSE)
+        .bind(owner.user_id())
+        .bind(owner.purpose())
         .bind(since)
         .fetch_one(&self.pool)
         .await?;
         Ok(n.max(0) as u64)
     }
 
-    async fn latest(&self, app_id: u64, user_id: u64, target: &Target) -> AuthResult<Option<CodeRow>> {
+    async fn count_subject_target_since(&self, app_id: u64, target: &Target, since: NaiveDateTime) -> AuthResult<u64> {
+        let sql = format!(
+            "SELECT COUNT(*) FROM security_otp WHERE APP_ID = ? AND {} = ? AND USER_ID IS NULL AND PURPOSE LIKE ? AND CREATED_AT >= ?",
+            target_column(target)
+        );
+        let n: i64 = sqlx::query_scalar(&sql)
+            .bind(app_id)
+            .bind(&target.value)
+            .bind(format!("{SUBJECT_PURPOSE_PREFIX}%"))
+            .bind(since)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(n.max(0) as u64)
+    }
+
+    async fn latest(&self, app_id: u64, owner: &Owner, target: &Target) -> AuthResult<Option<CodeRow>> {
         use sqlx::Row;
-        let column = match target.channel {
-            Channel::Email => "EMAIL_ID",
-            Channel::Phone => "PHONE_NUMBER",
-        };
         let sql = format!(
             "SELECT ID, UNIQUE_CODE, CREATED_AT, EXPIRES_AT, VERIFY_LEGS_COUNTS FROM security_otp \
-             WHERE APP_ID = ? AND USER_ID = ? AND PURPOSE = ? AND {column} = ? ORDER BY ID DESC LIMIT 1"
+             WHERE APP_ID = ? AND USER_ID <=> ? AND PURPOSE = ? AND {} = ? ORDER BY ID DESC LIMIT 1",
+            target_column(target)
         );
         let row = sqlx::query(&sql)
             .bind(app_id)
-            .bind(user_id)
-            .bind(PURPOSE)
+            .bind(owner.user_id())
+            .bind(owner.purpose())
             .bind(&target.value)
             .fetch_optional(&self.pool)
             .await?;
@@ -429,26 +516,26 @@ impl ContactCodeStore for MySqlContactCodes {
              EXPIRES_AT, IP_ADDRESS, CREATED_BY, CREATED_AT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(c.app_id)
-        .bind(c.user_id)
+        .bind(c.owner.user_id())
         .bind(c.target.email())
         .bind(c.target.phone())
-        .bind(PURPOSE)
+        .bind(c.owner.purpose())
         .bind(c.target.channel.target_type())
         .bind(&c.unique_code)
         .bind(c.expires_at)
         .bind(&c.ip_address)
-        .bind(c.user_id)
+        .bind(c.owner.user_id())
         .bind(c.created_at)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    async fn set_tries(&self, id: u64, from: i64, to: i64) -> AuthResult<bool> {
+    async fn set_tries(&self, id: u64, owner: &Owner, from: i64, to: i64) -> AuthResult<bool> {
         let r = sqlx::query("UPDATE security_otp SET VERIFY_LEGS_COUNTS = ? WHERE ID = ? AND PURPOSE = ? AND VERIFY_LEGS_COUNTS = ?")
             .bind(to as i16)
             .bind(id)
-            .bind(PURPOSE)
+            .bind(owner.purpose())
             .bind(from as i16)
             .execute(&self.pool)
             .await?;
@@ -469,18 +556,26 @@ pub(crate) mod tests {
 
     #[async_trait]
     impl ContactCodeStore for MemoryCodes {
-        async fn count_since(&self, app_id: u64, user_id: u64, since: NaiveDateTime) -> AuthResult<u64> {
-            Ok(self.rows.lock().unwrap().iter().filter(|(c, _, _)| c.app_id == app_id && c.user_id == user_id && c.created_at >= since).count() as u64)
+        async fn count_since(&self, app_id: u64, owner: &Owner, since: NaiveDateTime) -> AuthResult<u64> {
+            Ok(self.rows.lock().unwrap().iter().filter(|(c, _, _)| c.app_id == app_id && &c.owner == owner && c.created_at >= since).count() as u64)
         }
 
-        async fn latest(&self, app_id: u64, user_id: u64, target: &Target) -> AuthResult<Option<CodeRow>> {
+        async fn count_subject_target_since(&self, app_id: u64, target: &Target, since: NaiveDateTime) -> AuthResult<u64> {
+            let rows = self.rows.lock().unwrap();
+            Ok(rows
+                .iter()
+                .filter(|(c, _, _)| c.app_id == app_id && matches!(c.owner, Owner::Subject(_)) && &c.target == target && c.created_at >= since)
+                .count() as u64)
+        }
+
+        async fn latest(&self, app_id: u64, owner: &Owner, target: &Target) -> AuthResult<Option<CodeRow>> {
             Ok(self
                 .rows
                 .lock()
                 .unwrap()
                 .iter()
                 .rev()
-                .find(|(c, _, _)| c.app_id == app_id && c.user_id == user_id && &c.target == target)
+                .find(|(c, _, _)| c.app_id == app_id && &c.owner == owner && &c.target == target)
                 .map(|(c, id, tries)| CodeRow { id: *id, unique_code: c.unique_code.clone(), created_at: c.created_at, expires_at: c.expires_at, tries: *tries }))
         }
 
@@ -491,9 +586,9 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        async fn set_tries(&self, id: u64, from: i64, to: i64) -> AuthResult<bool> {
+        async fn set_tries(&self, id: u64, owner: &Owner, from: i64, to: i64) -> AuthResult<bool> {
             let mut rows = self.rows.lock().unwrap();
-            match rows.iter_mut().find(|(_, i, t)| *i == id && *t == from) {
+            match rows.iter_mut().find(|(c, i, t)| *i == id && &c.owner == owner && *t == from) {
                 Some(r) => {
                     r.2 = to;
                     Ok(true)
@@ -530,7 +625,7 @@ pub(crate) mod tests {
         IssueRequest {
             app_id: 7,
             app_name: Some("CXZump".into()),
-            user_id: user,
+            owner: Owner::User(user),
             email: email.map(str::to_string),
             phone: phone.map(str::to_string),
             ip_address: Some("10.0.0.1".into()),
@@ -539,7 +634,7 @@ pub(crate) mod tests {
     }
 
     fn check(user: u64, email: Option<&str>, phone: Option<&str>, code: &str) -> VerifyRequest {
-        VerifyRequest { app_id: 7, user_id: user, email: email.map(str::to_string), phone: phone.map(str::to_string), code: Some(code.into()) }
+        VerifyRequest { app_id: 7, owner: Owner::User(user), email: email.map(str::to_string), phone: phone.map(str::to_string), code: Some(code.into()) }
     }
 
     fn reason(v: &Value) -> &str {
@@ -681,8 +776,73 @@ pub(crate) mod tests {
         let out = cc.issue(&constant, &issue(1, Some("a@x.io"), None, Delivery::Return)).await.unwrap();
         assert_eq!(out["code"], "111111");
         assert_eq!(cc.verify(&check(1, Some("a@x.io"), None, "111111")).await.unwrap()["ok"], true);
-        assert_eq!(store.count_since(7, 1, at(0, 0)).await.unwrap(), 1, "a used code still counts toward the hour");
+        assert_eq!(store.count_since(7, &Owner::User(1), at(0, 0)).await.unwrap(), 1, "a used code still counts toward the hour");
         let none = OtpPolicy { is_constant: true, constant_value: None, ..policy() };
         assert!(ContactCodes { store: &store, sms: &sms, now: at(5, 0) }.issue(&none, &issue(1, Some("b@x.io"), None, Delivery::Return)).await.is_err());
+    }
+    fn as_subject(mut r: IssueRequest, key: &str) -> IssueRequest {
+        r.owner = Owner::subject("FIN", key);
+        r
+    }
+
+    fn check_subject(key: &str, phone: &str, code: &str) -> VerifyRequest {
+        VerifyRequest { app_id: 7, owner: Owner::subject("FIN", key), email: None, phone: Some(phone.into()), code: Some(code.into()) }
+    }
+
+    #[test]
+    fn subjects_are_hashed_per_client() {
+        let a = Owner::subject("FIN", "01M6LINK");
+        assert_eq!(a, Owner::subject("fin", " 01M6LINK "), "the client's code in any case, the key trimmed");
+        assert_ne!(a, Owner::subject("OTHER", "01M6LINK"), "another client's same key is another subject");
+        assert_ne!(a, Owner::subject("FIN", "01M6LINK2"));
+        assert!(a.purpose().starts_with(SUBJECT_PURPOSE_PREFIX));
+        assert_eq!(a.purpose().len(), SUBJECT_PURPOSE_PREFIX.len() + 64);
+        assert!(!a.purpose().contains("01M6LINK"), "the key itself is not stored");
+        assert_eq!(a.user_id(), None);
+        assert_eq!((Owner::User(4).purpose(), Owner::User(4).user_id()), (PURPOSE, Some(4)));
+    }
+
+    #[tokio::test]
+    async fn a_subjects_codes_are_its_own() {
+        let store = MemoryCodes::default();
+        let sms = LoggedSms::default();
+        let cc = |now| ContactCodes { store: &store, sms: &sms, now };
+        let phone = "+919845012345";
+        let out = cc(at(0, 0)).issue(&policy(), &as_subject(issue(0, None, Some(phone), Delivery::PlatformSms), "link-1")).await.unwrap();
+        assert_eq!((out["ok"].as_bool(), out["sent"].as_bool()), (Some(true), Some(true)));
+        let code = sms.sent.lock().unwrap()[0].1.clone();
+        assert_eq!(store.rows.lock().unwrap()[0].0.owner.user_id(), None, "no user on a subject's row");
+
+        // Another subject, or a signed-in user, cannot use it.
+        assert_eq!(reason(&cc(at(1, 0)).verify(&check_subject("link-2", phone, &code)).await.unwrap()), "NO_CODE");
+        assert_eq!(reason(&cc(at(1, 0)).verify(&check(0, None, Some(phone), &code)).await.unwrap()), "NO_CODE");
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        let v = cc(at(1, 0)).verify(&check_subject("link-1", phone, wrong)).await.unwrap();
+        assert_eq!((reason(&v), v["triesLeft"].as_i64()), ("WRONG_CODE", Some(4)));
+        let ok = cc(at(2, 0)).verify(&check_subject("link-1", phone, &code)).await.unwrap();
+        assert_eq!(ok["ok"], true);
+        assert_eq!(reason(&cc(at(2, 1)).verify(&check_subject("link-1", phone, &code)).await.unwrap()), "NO_CODE", "once");
+
+        // The same wait per target as for a user.
+        let soon = cc(at(0, 10)).issue(&policy(), &as_subject(issue(0, None, Some(phone), Delivery::Return), "link-1")).await.unwrap();
+        assert_eq!(reason(&soon), "WAIT");
+    }
+
+    #[tokio::test]
+    async fn many_subjects_cannot_flood_one_target() {
+        let store = MemoryCodes::default();
+        let sms = LoggedSms::default();
+        let cc = |now| ContactCodes { store: &store, sms: &sms, now };
+        let phone = "+6581234567";
+        for i in 0..SUBJECT_TARGET_SENDS_PER_HOUR as i64 {
+            let r = cc(at(i, 0)).issue(&policy(), &as_subject(issue(0, None, Some(phone), Delivery::Return), &format!("link-{i}"))).await.unwrap();
+            assert_eq!(r["ok"], true, "{i}");
+        }
+        let flood = cc(at(10, 0)).issue(&policy(), &as_subject(issue(0, None, Some(phone), Delivery::Return), "link-new")).await.unwrap();
+        assert_eq!(reason(&flood), "LIMIT");
+        // Another target is fine, and a signed-in user's own codes do not count against subjects.
+        assert_eq!(cc(at(10, 0)).issue(&policy(), &as_subject(issue(0, None, Some("+6581234568"), Delivery::Return), "link-new")).await.unwrap()["ok"], true);
+        assert_eq!(cc(at(10, 0)).issue(&policy(), &issue(1, None, Some(phone), Delivery::Return)).await.unwrap()["ok"], true);
+        assert_eq!(cc(at(60, 1)).issue(&policy(), &as_subject(issue(0, None, Some(phone), Delivery::Return), "link-new")).await.unwrap()["ok"], true, "an hour later");
     }
 }

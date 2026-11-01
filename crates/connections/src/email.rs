@@ -94,21 +94,42 @@ pub fn given_addresses(address: Option<&Value>) -> Vec<String> {
 }
 
 /// `getToAddresses`: the given addresses (blanks dropped, trimmed), then the template's
-/// `toExpression` rendered and split on `;`. None at all is an error.
+/// `toExpression` rendered and split on `;`. None at all is an error. Rust only: each mailbox
+/// once, the first spelling kept ([`same_mailbox`]), so a step that names the customer and a
+/// template whose `toExpression` names them again send one mail with one `To`.
 pub fn to_addresses(given: &[String], tmpl: &EmailTemplate, data: &Map<String, Value>) -> ConnResult<Vec<String>> {
-    let mut out: Vec<String> = given.iter().filter(|a| !java::is_blank(a)).map(|a| java::trim(a).to_string()).collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |a: &str| {
+        if !java::is_blank(a) {
+            let a = java::trim(a);
+            if !out.iter().any(|o| same_mailbox(o, a)) {
+                out.push(a.to_string());
+            }
+        }
+    };
+    for a in given {
+        add(a);
+    }
     if let Some(expr) = tmpl.to_expression.as_deref().filter(|e| !java::is_blank(e)) {
         let rendered = template::process("toExpression", Some(expr), data)?;
         for a in rendered.split(';') {
-            if !java::is_blank(a) {
-                out.push(java::trim(a).to_string());
-            }
+            add(a);
         }
     }
     if out.is_empty() {
         return Err(mail_error("No Send Addresses Found."));
     }
     Ok(out)
+}
+
+/// Two `to` entries reach the same mailbox: their addresses (`Name <a@x.com>` is `a@x.com`)
+/// are equal ignoring case; text that is not an address is compared as it is, ignoring case.
+fn same_mailbox(a: &str, b: &str) -> bool {
+    let key = |s: &str| match s.parse::<Mailbox>() {
+        Ok(m) => m.email.to_string(),
+        Err(_) => java::trim(s).to_string(),
+    };
+    key(a).eq_ignore_ascii_case(&key(b))
 }
 
 /// `getFromAddress`: the template's `fromExpression`, else the connection's `fromAddress`.
@@ -939,6 +960,22 @@ mod tests {
         assert_eq!(e.message(), "Unable to send the email: No Send Addresses Found.");
         assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(to_addresses(&["a@x.com".into()], &tmpl(Some("")), &data()).unwrap(), vec!["a@x.com"]);
+    }
+
+    /// Rust only: the step's address and the template's `toExpression` naming the same person
+    /// give one `To` (CXZ-1202: the customer was listed twice).
+    #[test]
+    fn to_addresses_once_each_in_order() {
+        assert_eq!(to_addresses(&["C@X.com".into()], &tmpl(Some("${email}")), &data()).unwrap(), vec!["C@X.com"], "the first spelling stays");
+        assert_eq!(
+            to_addresses(&["b@x.com".into(), " c@x.com ".into(), "B@x.com".into()], &tmpl(Some("d@x.com;${email}; Ann <D@X.COM>")), &data()).unwrap(),
+            vec!["b@x.com", "c@x.com", "d@x.com"]
+        );
+        assert_eq!(to_addresses(&["Ann <c@x.com>".into()], &tmpl(Some("${email}")), &data()).unwrap(), vec!["Ann <c@x.com>"]);
+        // Text that is no address is still compared, and still reaches the sender as it is.
+        assert_eq!(to_addresses(&["not mail".into(), "NOT MAIL".into()], &tmpl(None), &data()).unwrap(), vec!["not mail"]);
+        assert!(same_mailbox("a@x.com", "A@X.COM"));
+        assert!(!same_mailbox("a@x.com", "a@y.com"));
     }
 
     /// SendEmailAddressesTest.

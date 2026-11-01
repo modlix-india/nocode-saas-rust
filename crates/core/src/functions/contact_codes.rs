@@ -2,10 +2,16 @@
 //! only): a server function proves that the signed-in user owns an e-mail address or a phone
 //! number before it trusts it (a KYC contact, a profile change).
 //!
-//! Both run only inside a server function, for a signed-in caller, for the URL's app and client
-//! (the institution whose site the user is on). Security keeps the codes (hashed, in
+//! Both run only inside a server function, for the URL's app and client (the institution whose
+//! site the user is on), for a signed-in caller, or for a caller who is not signed in when the
+//! server function names a `subjectKey`: the key of something it has already checked the caller
+//! holds (a sign link's id, after it found the link by its token and saw it is still live). The
+//! codes then belong to that subject, not to any user, and only the same subject can check them.
+//! Without a user and without a subject the answer is `SIGN_IN`. The caller's address
+//! ([`crate::context::client_ip`]) is kept on the code's row. Security keeps the codes (hashed, in
 //! `security_otp` under its own purpose) and the limits: one code per target every 30 seconds,
-//! five an hour per user, five wrong tries per code, each code good once and only until it
+//! five an hour per user (or subject; and five an hour to one target over all subjects), five
+//! wrong tries per code, each code good once and only until it
 //! expires (the app's OTP policy). See `crates/security/src/internal/contact.rs`.
 //!
 //! Delivery:
@@ -71,17 +77,52 @@ fn arg(args: &Map<Value>, name: &str) -> String {
     }
 }
 
-/// The caller's user and the URL's app and client, or the refusal to answer with.
-fn scope(function: &str) -> Result<Result<(u64, String, String), JMap<String, Value>>, CoreError> {
+/// Whose codes and for which app and client.
+struct Scope {
+    /// The signed-in user, 0 for none.
+    user_id: u64,
+    /// The server function's `subjectKey`, empty for none.
+    subject_key: String,
+    app: String,
+    client: String,
+}
+
+impl Scope {
+    /// What security is told about the owner: the user and the subject (a subject wins there).
+    fn owner(&self) -> serde_json::Value {
+        let mut m = JMap::new();
+        m.insert("appCode".into(), Value::from(self.app.as_str()));
+        m.insert("clientCode".into(), Value::from(self.client.as_str()));
+        m.insert("userId".into(), Value::from(self.user_id));
+        if !self.subject_key.is_empty() {
+            m.insert("subjectKey".into(), Value::from(self.subject_key.as_str()));
+        }
+        Value::Object(m)
+    }
+}
+
+/// The caller's user or the subject, and the URL's app and client, or the refusal to answer with.
+fn scope(function: &str, args: &Map<Value>) -> Result<Result<Scope, JMap<String, Value>>, CoreError> {
     let auth = definition_context_authentication(function)?;
     let (app, client) = (auth.url_app_code().unwrap_or_default().to_string(), auth.url_client_code().unwrap_or_default().to_string());
-    if !auth.is_authenticated() || !has_user(&auth) || auth.ca.user.id == 0 {
+    let signed_in = auth.is_authenticated() && has_user(&auth) && auth.ca.user.id != 0;
+    let subject_key = arg(args, "subjectKey");
+    if !signed_in && subject_key.is_empty() {
         return Ok(Err(refusal("SIGN_IN", "Please sign in to verify an e-mail address or a phone number.")));
     }
     if app.is_empty() || client.is_empty() {
         return Ok(Err(refusal("INVALID", "This page has no app or organisation to send the code for.")));
     }
-    Ok(Ok((auth.ca.user.id, app, client)))
+    Ok(Ok(Scope { user_id: if signed_in { auth.ca.user.id } else { 0 }, subject_key, app, client }))
+}
+
+/// `body`'s fields over the owner's.
+fn with_owner(scope: &Scope, body: serde_json::Value) -> serde_json::Value {
+    let mut out = scope.owner();
+    if let (Value::Object(o), Value::Object(b)) = (&mut out, body) {
+        o.extend(b);
+    }
+    out
 }
 
 fn refusal(reason: &str, message: &str) -> JMap<String, Value> {
@@ -164,7 +205,7 @@ impl SendContactCode {
         Self {
             signature: FunctionSignature::new("SendContactCode")
                 .set_namespace(NAMESPACE)
-                .set_parameters(Map::from([text_param("emailId"), text_param("phoneNumber"), text_param("smsConnection")]))
+                .set_parameters(Map::from([text_param("emailId"), text_param("phoneNumber"), text_param("smsConnection"), text_param("subjectKey")]))
                 .set_events(Map::from([Event::output_event_map_entry(Map::from([
                     ("sent".to_string(), Schema::of_boolean("sent")),
                     ("reason".to_string(), Schema::of_string("reason")),
@@ -217,10 +258,11 @@ impl CoreFunction for SendContactCode {
     }
 
     async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
-        let (user_id, app, client) = match scope("SendContactCode")? {
+        let sc = match scope("SendContactCode", args)? {
             Ok(s) => s,
             Err(r) => return Ok(Self::out(false, &r)),
         };
+        let (app, client) = (sc.app.clone(), sc.client.clone());
         let (email, phone) = (arg(args, "emailId"), arg(args, "phoneNumber"));
         let connection_name = arg(args, "smsConnection");
         let sms = if !phone.is_empty() && email.is_empty() {
@@ -234,11 +276,14 @@ impl CoreFunction for SendContactCode {
             None
         };
         let platform_sms = !phone.is_empty() && email.is_empty() && sms.is_none();
-        let body = json!({
-            "appCode": app, "clientCode": client, "userId": user_id,
-            "emailId": email, "phoneNumber": phone,
-            "delivery": if platform_sms { "PLATFORM_SMS" } else { "RETURN" },
-        });
+        let ip = crate::context::request().map(|r| r.client_ip.clone()).filter(|ip| !ip.is_empty());
+        let body = with_owner(
+            &sc,
+            json!({
+                "emailId": email, "phoneNumber": phone, "ipAddress": ip,
+                "delivery": if platform_sms { "PLATFORM_SMS" } else { "RETURN" },
+            }),
+        );
         let Some(Value::Object(answer)) = self.security.contact_code(false, &body).await? else {
             return Err(CoreError::unknown("security gave no answer for the contact code"));
         };
@@ -307,7 +352,7 @@ impl VerifyContactCode {
         Self {
             signature: FunctionSignature::new("VerifyContactCode")
                 .set_namespace(NAMESPACE)
-                .set_parameters(Map::from([text_param("emailId"), text_param("phoneNumber"), text_param("code")]))
+                .set_parameters(Map::from([text_param("emailId"), text_param("phoneNumber"), text_param("code"), text_param("subjectKey")]))
                 .set_events(Map::from([Event::output_event_map_entry(Map::from([
                     ("verified".to_string(), Schema::of_boolean("verified")),
                     ("reason".to_string(), Schema::of_string("reason")),
@@ -340,14 +385,11 @@ impl CoreFunction for VerifyContactCode {
     }
 
     async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
-        let (user_id, app, client) = match scope("VerifyContactCode")? {
+        let sc = match scope("VerifyContactCode", args)? {
             Ok(s) => s,
             Err(r) => return Ok(Self::out(false, &r)),
         };
-        let body = json!({
-            "appCode": app, "clientCode": client, "userId": user_id,
-            "emailId": arg(args, "emailId"), "phoneNumber": arg(args, "phoneNumber"), "code": arg(args, "code"),
-        });
+        let body = with_owner(&sc, json!({"emailId": arg(args, "emailId"), "phoneNumber": arg(args, "phoneNumber"), "code": arg(args, "code")}));
         let Some(Value::Object(answer)) = self.security.contact_code(true, &body).await? else {
             return Err(CoreError::unknown("security gave no answer for the contact code"));
         };

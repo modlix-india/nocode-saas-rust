@@ -94,10 +94,12 @@ async fn signatures() {
     let sig = send.get_signature();
     assert_eq!(sig.get_full_name(), "CoreServices.Security.SendContactCode");
     let params: Vec<&String> = sig.get_parameters().keys().collect();
-    for p in ["emailId", "phoneNumber", "smsConnection"] {
+    for p in ["emailId", "phoneNumber", "smsConnection", "subjectKey"] {
         assert!(params.iter().any(|x| x.as_str() == p), "{p}");
     }
-    assert_eq!(find(&s.fns, "VerifyContactCode").get_signature().get_full_name(), "CoreServices.Security.VerifyContactCode");
+    let verify = find(&s.fns, "VerifyContactCode");
+    assert_eq!(verify.get_signature().get_full_name(), "CoreServices.Security.VerifyContactCode");
+    assert!(verify.get_signature().get_parameters().contains_key("subjectKey"));
 }
 
 #[tokio::test]
@@ -112,6 +114,47 @@ async fn only_in_a_server_function_and_only_signed_in() {
     let anon = run(verify.as_ref(), json!({"emailId": "a@x.io", "code": "1"}), anonymous(7, "FIN"), true, true).await.unwrap();
     assert_eq!((anon["verified"].clone(), anon["reason"].as_str()), (json!(false), Some("SIGN_IN")));
     assert_eq!(s.world.count("/api/security/internal/contactCodes"), 0, "security is not asked");
+}
+
+#[tokio::test]
+async fn a_signed_out_caller_gets_codes_only_for_a_subject_the_function_names() {
+    let s = setup().await;
+    let send = find(&s.fns, "SendContactCode");
+    let verify = find(&s.fns, "VerifyContactCode");
+    s.world.answer("POST", ISSUE, 200, r#"{"ok":true,"channel":"PHONE","target":"+919845012345","expireMinutes":10,"resendAfterSeconds":30,"appName":"CXZump","sent":true}"#);
+    // A blank key is no key.
+    let r = run(send.as_ref(), json!({"phoneNumber": "+919845012345", "subjectKey": "  "}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(r["reason"], "SIGN_IN");
+    assert_eq!(s.world.count(ISSUE), 0);
+    // Still only inside a server function.
+    assert!(run(send.as_ref(), json!({"phoneNumber": "+919845012345", "subjectKey": "L1"}), anonymous(7, "FIN"), false, true).await.is_err());
+
+    let r = run(send.as_ref(), json!({"phoneNumber": "+919845012345", "smsConnection": "cxSms", "subjectKey": "01M6LINK"}), anonymous(7, "FIN"), true, true)
+        .await
+        .unwrap();
+    assert_eq!((r["sent"].clone(), r["channel"].as_str()), (json!(true), Some("PHONE")));
+    let asked = s.body(ISSUE);
+    assert_eq!(
+        (asked["userId"].as_u64(), asked["subjectKey"].as_str(), asked["delivery"].as_str(), asked["ipAddress"].as_str()),
+        (Some(0), Some("01M6LINK"), Some("PLATFORM_SMS"), Some("203.0.113.7"))
+    );
+    assert_eq!((asked["appCode"].as_str(), asked["clientCode"].as_str()), (Some("leadzumptwo"), Some("SYSTEM")));
+
+    s.world.answer("POST", VERIFY, 200, r#"{"ok":true,"channel":"PHONE","target":"+919845012345"}"#);
+    let r = run(verify.as_ref(), json!({"phoneNumber": "+919845012345", "code": "123456", "subjectKey": "01M6LINK"}), anonymous(7, "FIN"), true, true)
+        .await
+        .unwrap();
+    assert_eq!(r["verified"], json!(true));
+    assert_eq!(s.body(VERIFY)["subjectKey"], "01M6LINK");
+
+    // A signed-in caller's key goes too (security keys on the subject then); without one, none.
+    run(send.as_ref(), json!({"emailId": "a@x.io", "subjectKey": "K"}), user(110, 7, "FIN", &[]), true, true).await.unwrap();
+    assert_eq!((s.body(ISSUE)["userId"].as_u64(), s.body(ISSUE)["subjectKey"].as_str()), (Some(110), Some("K")));
+    run(send.as_ref(), json!({"emailId": "a@x.io"}), user(110, 7, "FIN", &[]), true, true).await.unwrap();
+    assert!(s.body(ISSUE).get("subjectKey").is_none());
+    // Outside a request's address the row gets none.
+    run(send.as_ref(), json!({"emailId": "a@x.io"}), user(110, 7, "FIN", &[]), true, false).await.unwrap();
+    assert!(s.body(ISSUE)["ipAddress"].is_null());
 }
 
 #[tokio::test]
