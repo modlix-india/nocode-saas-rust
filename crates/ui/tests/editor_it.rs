@@ -2124,7 +2124,7 @@ fn firebase_cfg(url: &str) -> EditorConfig {
 async fn an_android_app_with_push_is_registered_in_the_platform_firebase_project() {
     let (fake, url) = fake_firebase().await;
     let e = env_with(firebase_cfg(&url));
-    let android = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    let android = r#"{"details":{"name":"Shop App","android":true,"publishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
     let made = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], android).await;
     assert_eq!(made.status, StatusCode::OK, "{}", made.text());
     let fb = made.obj().get("firebaseAndroid").cloned().unwrap();
@@ -2145,14 +2145,41 @@ async fn an_android_app_with_push_is_registered_in_the_platform_firebase_project
     assert_eq!(again.obj().get("firebaseAndroid"), Some(&fb));
     assert!(fake.calls.lock().unwrap().is_empty());
 
-    // A tenant's own Firebase values are used as they are.
-    let own = r#"{"details":{"name":"Own","android":true,"pushNotifications":true},"firebaseAndroid":{"apiKey":"A","appId":"1:5:android:z","projectId":"tenant-fb","messagingSenderId":"5"}}"#;
-    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], own).await;
-    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
+    // On the client's own accounts (said, or not said): its own Firebase values, used as they
+    // are, and the platform's project is never asked.
+    let tenant_fb = r#""firebaseAndroid":{"apiKey":"A","appId":"1:5:android:z","projectId":"tenant-fb","messagingSenderId":"5"}"#;
+    for mode in [r#","publishMode":"TENANT_ACCOUNT""#, ""] {
+        let own = format!(r#"{{"details":{{"name":"Own","android":true,"pushNotifications":true{mode}}},{tenant_fb}}}"#);
+        let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &own).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
+    }
+    assert!(fake.calls.lock().unwrap().is_empty());
+    // ... without them, or with the platform's, the save is refused.
+    let platform_fb = r#""firebaseAndroid":{"apiKey":"KEY99","appId":"1:99:android:new","projectId":"modlix-push","messagingSenderId":"99"}"#;
+    for extra in ["", &format!(",{platform_fb}"), r#","firebaseAndroid":{"projectId":"tenant-fb"}"#] {
+        let body = format!(r#"{{"details":{{"name":"Own","android":true,"publishMode":"TENANT_ACCOUNT","pushNotifications":true}}{extra}}}"#);
+        let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &body).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{extra}");
+        assert_eq!(path(&r.obj(), &["code"]), Some(&s("UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE")));
+    }
+    assert!(fake.calls.lock().unwrap().is_empty());
+    // An iOS-only app on the client's accounts asks nothing of Firebase or Apple.
+    let ios_own = r#"{"details":{"name":"Own","ios":true,"publishMode":"TENANT_ACCOUNT","pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], ios_own).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert!(fake.calls.lock().unwrap().is_empty());
 
+    // Moved onto the platform's accounts with some other project's values: registered in the
+    // platform's project.
+    let moved = format!(r#"{{"details":{{"name":"Shop App","android":true,"publishMode":"PLATFORM_ACCOUNT","pushNotifications":true}},{tenant_fb}}}"#);
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &moved).await;
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("modlix-push")));
+    fake.calls.lock().unwrap().clear();
+
     // An app already registered is found, not registered twice; without push nothing is asked.
-    let lookup = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    // An app saved before `publishMode` existed reads its `iosPublishMode`.
+    let lookup = r#"{"details":{"name":"Shop App","android":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
     let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], lookup).await;
     assert_eq!(path(&r.obj(), &["firebaseAndroid", "appId"]), Some(&s("1:99:android:new")));
     assert_eq!(*fake.calls.lock().unwrap(), names(&["token", "list", "config 1:99:android:new"]));
