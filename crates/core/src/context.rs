@@ -28,6 +28,10 @@ pub struct RequestContext {
     /// The `x-debug` header: definitions run with the debug collector, and their step logs are
     /// written to the log.
     pub debug: Option<String>,
+    /// The caller's address ([`client_ip`]); empty for event and webhook runs.
+    pub client_ip: String,
+    /// The caller's `User-Agent` ([`user_agent`]); empty for event and webhook runs.
+    pub user_agent: String,
     /// The last Java-shaped error a core function or a definition raised. KIRun errors carry
     /// only text, so a `GenericException` (with its status) travels up the runtime as its
     /// message and is recovered here at the edge: Java lets it through unwrapped.
@@ -53,6 +57,36 @@ pub struct EventActionRun {
     pub app_code: String,
     pub client_code: String,
     pub event_name: String,
+}
+
+/// The longest `User-Agent` kept.
+pub const USER_AGENT_MAX_CHARS: usize = 300;
+
+/// The caller's address as our own proxies wrote it: `X-Real-IP`, which the load balancer's nginx
+/// sets to the address it saw (`proxy_set_header X-Real-IP $remote_addr`, after the Cloudflare
+/// real-ip rule), overwriting anything the browser sent; else the hop the gateway appended last
+/// to `X-Forwarded-For` (its own peer). The first `X-Forwarded-For` entry is the browser's to
+/// write, so it is never read. Empty when neither holds an address.
+pub fn client_ip(h: &axum::http::HeaderMap) -> String {
+    let text = |name: &str| h.get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let real = text("x-real-ip").map(|v| v.split(',').next().unwrap_or_default().trim().to_string());
+    let hop = || {
+        h.get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .map(str::trim)
+            .rfind(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let as_ip = |v: String| v.parse::<std::net::IpAddr>().is_ok().then_some(v);
+    real.and_then(as_ip).or_else(|| hop().and_then(as_ip)).unwrap_or_default()
+}
+
+/// The `User-Agent` header, trimmed, at most [`USER_AGENT_MAX_CHARS`] characters.
+pub fn user_agent(h: &axum::http::HeaderMap) -> String {
+    let ua = h.get(axum::http::header::USER_AGENT).map(|v| String::from_utf8_lossy(v.as_bytes()).trim().to_string()).unwrap_or_default();
+    ua.chars().take(USER_AGENT_MAX_CHARS).collect::<String>().trim_end().to_string()
 }
 
 tokio::task_local! {
@@ -146,6 +180,38 @@ pub fn owner_app_code() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(), axum::http::HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn the_caller_address_is_the_one_our_proxies_wrote() {
+        // nginx's X-Real-IP wins over everything the browser could have sent.
+        let h = headers(&[("x-real-ip", "203.0.113.7"), ("x-forwarded-for", "6.6.6.6, 10.0.0.2")]);
+        assert_eq!(client_ip(&h), "203.0.113.7");
+        assert_eq!(client_ip(&headers(&[("x-real-ip", " 2001:db8::1 ")])), "2001:db8::1");
+        // Without it: the gateway's own hop, the LAST entry, never the browser's first one.
+        assert_eq!(client_ip(&headers(&[("x-forwarded-for", "6.6.6.6, 198.51.100.4")])), "198.51.100.4");
+        assert_eq!(client_ip(&headers(&[("x-forwarded-for", "6.6.6.6"), ("x-forwarded-for", "0:0:0:0:0:0:0:1")])), "0:0:0:0:0:0:0:1");
+        // Junk is no address.
+        assert_eq!(client_ip(&headers(&[("x-real-ip", "<script>")])), "");
+        assert_eq!(client_ip(&headers(&[("x-real-ip", "nope"), ("x-forwarded-for", "192.0.2.9")])), "192.0.2.9");
+        assert_eq!(client_ip(&headers(&[("x-forwarded-for", " , ")])), "");
+        assert_eq!(client_ip(&headers(&[])), "");
+    }
+
+    #[test]
+    fn the_user_agent_is_trimmed_and_capped() {
+        assert_eq!(user_agent(&headers(&[("user-agent", "  Mozilla/5.0 (iPhone)  ")])), "Mozilla/5.0 (iPhone)");
+        let long = "a".repeat(USER_AGENT_MAX_CHARS + 50);
+        assert_eq!(user_agent(&headers(&[("user-agent", &long)])).chars().count(), USER_AGENT_MAX_CHARS);
+        assert_eq!(user_agent(&headers(&[])), "");
+    }
 
     #[tokio::test]
     async fn the_event_action_is_seen_only_inside_its_scope() {

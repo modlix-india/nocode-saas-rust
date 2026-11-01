@@ -286,6 +286,13 @@ Everything in those runs is the same except what is listed here.
     mail, which the `to` addresses alone decide. SendGrid gets `personalizations[0].cc` and
     `.bcc`, only when there are some. The event action (`SendEmailTask`) and the notification
     service send no copies.
+37. **`SendEmail`'s `to` addresses are each sent once** (2026-11-01, Rust only; Java listed an
+    address as often as it was given). The step's `address` values and the template's
+    `toExpression` are merged in that order, and a later entry for a mailbox already listed is
+    dropped: addresses compared ignoring case, `Name <a@x.com>` as `a@x.com`, the first spelling
+    kept. A step that names the customer and a template whose `toExpression` names them again
+    sent one mail with the customer twice in `To` (CXZ-1202). The event action
+    (`SendEmailTask`) reads `to` through the same function.
 
 ## Error codes (2026-10-17)
 

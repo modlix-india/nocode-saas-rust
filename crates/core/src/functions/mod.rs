@@ -144,11 +144,33 @@ mod tests {
             let auth = result(run(&Core(GetAuthentication::default()), json!({})).await.0);
             assert_eq!(auth["auth"]["isAuthenticated"], json!(true));
             assert!(auth["auth"].get("accessToken").is_none());
+            // No address or browser in this request: both present and empty.
+            assert_eq!((auth["auth"]["clientIp"].clone(), auth["auth"]["userAgent"].clone()), (json!(""), json!("")));
             let user_out = result(run(&Core(GetUser::default()), json!({})).await.0);
             assert_eq!(user_out["user"]["grantedAuthorities"].as_array().unwrap().len(), 2);
             assert_eq!(GetUser::default().signature().get_full_name(), "CoreServices.SecurityContext.GetUser");
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn get_authentication_names_the_callers_address_and_browser() {
+        let mut ctx = crate::context::RequestContext {
+            auth: Arc::new(crate::testing::auth(json!({}), Some("C1"), Some("app"))),
+            ..Default::default()
+        };
+        ctx.client_ip = "203.0.113.7".into();
+        ctx.user_agent = "Mozilla/5.0 (iPhone)".into();
+        context::with_request(Arc::new(ctx), async {
+            let auth = result(run(&Core(GetAuthentication::default()), json!({})).await.0);
+            assert_eq!(auth["auth"]["isAuthenticated"], json!(false), "an anonymous caller too");
+            assert_eq!(auth["auth"]["clientIp"], json!("203.0.113.7"));
+            assert_eq!(auth["auth"]["userAgent"], json!("Mozilla/5.0 (iPhone)"));
+        })
+        .await;
+        // Outside a request (an event run's own context has none of the two either).
+        let auth = result(run(&Core(GetAuthentication::default()), json!({})).await.0);
+        assert_eq!((auth["auth"]["clientIp"].clone(), auth["auth"]["userAgent"].clone()), (json!(""), json!("")));
     }
 
     #[tokio::test]

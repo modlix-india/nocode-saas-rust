@@ -256,6 +256,17 @@ async fn send_email_renders_the_template_and_sends_by_smtp() {
     assert!(msg.contains("Subject: Bonjour Ann"), "{msg}");
     assert!(msg.contains("To: ann@example.com"), "{msg}");
 
+    // The step's address and the template's `toExpression` naming the same person: one `To`, one
+    // envelope recipient (CXZ-1202).
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", Some(&json!(["Ann@Example.com"])), &d, &Default::default(), &Default::default())
+        .await
+        .unwrap();
+    assert_eq!(sent, Some(true));
+    let msg = s.accepted.lock()[1].clone();
+    let to_line = msg.lines().find(|l| l.starts_with("To: ")).unwrap_or_default().to_string();
+    assert_eq!(to_line.trim_end(), "To: Ann@Example.com", "{msg}");
+    assert_eq!(s.rcpts.lock().iter().filter(|r| r.eq_ignore_ascii_case("ann@example.com")).count(), 2, "once per send");
+
     // Outside a KIRun runtime the function reports not sent.
     let mut outside = caller();
     outside.in_kirun = false;
