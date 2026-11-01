@@ -82,6 +82,8 @@ pub(crate) async fn request_context(st: &AppState, h: &HeaderMap) -> Result<Arc<
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("true")),
         debug: caller.debug.clone(),
+        client_ip: context::client_ip(h),
+        user_agent: context::user_agent(h),
         raised: Default::default(),
     }))
 }

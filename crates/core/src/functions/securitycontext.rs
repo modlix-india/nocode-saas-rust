@@ -81,9 +81,16 @@ impl CoreFunction for GetAuthentication {
     }
 
     /// The `ContextAuthentication` as Gson writes it, without `accessToken` and
-    /// `accessTokenExpiryAt`.
+    /// `accessTokenExpiryAt`. Rust only: with the caller's `clientIp` and `userAgent` (empty
+    /// for event and webhook runs, and outside a request).
     async fn internal_execute(&self, _args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
-        Ok(output("auth", context::authentication().authentication_json()))
+        let mut auth = context::authentication().authentication_json();
+        if let Value::Object(m) = &mut auth {
+            let req = context::request();
+            m.insert("clientIp".into(), Value::String(req.as_ref().map(|r| r.client_ip.clone()).unwrap_or_default()));
+            m.insert("userAgent".into(), Value::String(req.as_ref().map(|r| r.user_agent.clone()).unwrap_or_default()));
+        }
+        Ok(output("auth", auth))
     }
 }
 

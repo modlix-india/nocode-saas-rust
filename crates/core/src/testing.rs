@@ -54,7 +54,7 @@ pub fn request(auth: Authentication, draft: bool, debug: Option<&str>) -> Arc<Re
         forwarded_port: "8080".into(),
         draft,
         debug: debug.map(String::from),
-        raised: Default::default(),
+        ..Default::default()
     })
 }
 

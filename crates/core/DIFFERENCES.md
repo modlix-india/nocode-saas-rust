@@ -264,6 +264,27 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   in and the caller's own client; another `appCode` or `clientCode` is 403
   `CORE.SCHEDULE_STATE_FORBIDDEN`. `exists` is false for an event the app does not have or one
   without a schedule.
+- **D47 `TemplateToPdf`'s `fileData.sha256`** (2026-11-01, Rust only). The output's `fileData`
+  (the files service's details) also carries `sha256`: the SHA-256 of the PDF bytes core uploaded,
+  64 lower-case hex digits, whichever renderer drew them (pdf-render or the text fallback). A
+  signed form records the fingerprint of the unsigned one it was made from (CXZ-1318).
+- **D48 `GetAuthentication`'s `clientIp` and `userAgent`** (2026-11-01, Rust only). The `auth`
+  object has two more strings, signed in or not: `clientIp`, the address our own proxies wrote
+  (`X-Real-IP`, which the load balancer's nginx sets from `$remote_addr` after its Cloudflare
+  real-ip rule; else the last `X-Forwarded-For` hop, the one the gateway appended; never the
+  first, which the browser can write; only a value that parses as an IP address), and
+  `userAgent`, the `User-Agent` header trimmed to 300 characters. Both are empty for event and
+  webhook runs. The `Security.Context.ContextAuthentication` schema lists them.
+- **D49 contact codes for a caller who is not signed in** (2026-11-01, Rust only).
+  `SendContactCode` and `VerifyContactCode` take `subjectKey`. A server function that has already
+  checked something the caller holds (a sign link it found by its token, still live) passes its
+  key; the codes then belong to that subject of the URL's client, not to a user, and only the same
+  key checks them. Without a user and without a key the answer stays `SIGN_IN`; both still run
+  only inside a server function. Limits for a subject: one code per target every 30 s, five an
+  hour per subject, five an hour to one target over all subjects, five wrong tries, once, the app's
+  OTP expiry. security-internal keeps a subject's rows in `security_otp` with no `USER_ID` and
+  `PURPOSE` `CONTACT_SUBJECT:<sha256 of client code and key>`. The send also records the caller's
+  address (D48) in `IP_ADDRESS`.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
