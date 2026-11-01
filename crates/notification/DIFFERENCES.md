@@ -241,8 +241,11 @@ A third channel, `push`, reaches the recipients' registered browsers (Web Push),
 - **Credentials.** Web Push always signs with the platform's VAPID keys. FCM and APNs use the
   client's PUSH connection (`fcm.credentials`, the service account JSON; `apns.{teamId, keyId,
   privateKey}`) when its Firebase project or Apple team matches the one the device was built
-  against (`providerAccount`), else the platform's (`[push]`). A tenant-signed iOS app needs the
-  tenant's own APNs key: the platform's only serves the platform team's bundles.
+  against (`providerAccount`), else the platform's (`[push]`) when that matches, else nothing.
+  The project and team follow the mobile app's developer accounts (ui's `publishMode`): an app
+  on the platform's accounts is built against the platform's Firebase project and Apple team,
+  one on the client's own accounts against the client's, so the platform's keys never serve a
+  client's own app.
 - **Web Push endpoints** are URLs the browser hands in, so only `https` on the known push
   services (`fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com`,
   `push.apple.com` and their subdomains) are taken or posted to.

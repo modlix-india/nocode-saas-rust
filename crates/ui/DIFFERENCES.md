@@ -391,3 +391,14 @@ The write path is the `overridable` crate's, so its differences hold here too
     sweep of thousands of empty clients does not keep the environment's caches cold.
     Who may purge (2026-10-26): a client only by a client that manages it (security's
     `doesClientManageClientCode`), never by itself and never SYSTEM; an app only by SYSTEM.
+43. **Push notifications on mobile apps (Rust only).** A mobile app's `details` gain
+    `pushNotifications` and `publishMode`, and the app gains `firebaseAndroid` (`apiKey`,
+    `appId`, `projectId`, `messagingSenderId`) and `iosPushReady`. `publishMode` is one choice
+    of developer accounts for both stores (`PLATFORM_ACCOUNT` or `TENANT_ACCOUNT`); Java has only
+    `iosPublishMode`, which is kept equal to it (an app saved before reads its `iosPublishMode`).
+    With push on, an app on the platform's accounts gets its Android package registered in the
+    platform's Firebase project (`editor.firebase_credentials`, Firebase Management API) and,
+    on iOS, Push Notifications turned on for its bundle with a new App Store profile, once. An
+    app on the client's own accounts must carry the client's own complete Firebase values, and
+    never the platform's project (`UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE`, 400); nothing is
+    registered for it.
