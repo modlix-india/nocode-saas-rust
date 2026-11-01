@@ -188,6 +188,14 @@ java = "mobile_app_unable_to_gen_keystore"
 when = "Making the Android keystore of a new mobile app fails."
 audience = "signed-in"
 
+[UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE]
+status = 400
+text = "Push notifications for an Android app on your own developer accounts need your own Firebase project."
+action = "Fill in your Firebase project id, app id, API key and sender id under Android signing, or turn push notifications off."
+java_text = "Android push on the client's own developer account needs the client's own Firebase values"
+when = "Saving an Android mobile app with push on, on the client's own developer accounts, without a complete set of Firebase values or with Modlix's project in them."
+audience = "signed-in"
+
 [UI.INTERNAL_ONLY]
 status = 403
 text = "Only the platform's own organisation can do this."

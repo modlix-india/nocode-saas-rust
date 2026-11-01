@@ -1,8 +1,9 @@
 //! The platform's Firebase project, for Android push (Rust only): a mobile app with push gets
 //! its Android package registered there (Firebase Management API), and the values the app
 //! starts Firebase with (`firebaseAndroid`: `apiKey`, `appId`, `projectId`,
-//! `messagingSenderId`) for the build machine to write into it. A tenant that uses its own
-//! Firebase project fills those values itself, and nothing is registered here.
+//! `messagingSenderId`) for the build machine to write into it. Only apps on the platform's
+//! developer accounts (`publishMode` PLATFORM_ACCOUNT) are registered here; an app on its
+//! client's own accounts carries the client's Firebase values and never touches this project.
 
 use std::time::Duration;
 
@@ -86,6 +87,11 @@ impl Firebase {
 
     pub fn configured(&self) -> bool {
         !self.credentials.trim().is_empty()
+    }
+
+    /// The platform's Firebase project, when its credentials are configured and read.
+    pub fn project_id(&self) -> Option<String> {
+        self.configured().then(|| account(&self.credentials).ok().map(|a| a.project_id)).flatten()
     }
 
     async fn token(&self, a: &Account) -> Result<String> {
