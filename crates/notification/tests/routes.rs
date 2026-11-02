@@ -16,7 +16,7 @@ use common::{context, local_stack, with_scratch, Answer, Fake, AUTH_PATH};
 use futures::StreamExt;
 use notification::calls::{CoreClient, DirectoryClient};
 use notification::config::PushSection;
-use notification::dao::Dao;
+use notification::dao::{Dao, DeviceRow};
 use notification::handlers::{router, AppState};
 use notification::inapp::{InAppService, InAppSink};
 use notification::push::Push;
@@ -626,13 +626,49 @@ async fn push_devices_register_move_and_leave() {
         .to_string();
         // An app without notifications (a site): push is off, and nothing is kept for it.
         r.security.answer("GET", "/api/core/notifications/internal/app/quietsite", Answer::json(json!({"count": 0})));
-        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=quietsite").await.json(), json!({"enabled": false, "vapidPublicKey": VAPID_PUBLIC}));
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=quietsite").await.json(), json!({"enabled": false, "vapidPublicKey": null}));
+        assert_eq!(dao.app_vapid_key("quietsite").await.unwrap(), None, "no key is made for an app without push");
         assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=quietsite", &web).await.json()["registered"], false);
         assert!(dao.devices_of("quietsite", &[142]).await.unwrap().is_empty());
 
         // An app with notifications.
         r.security.answer("GET", "/api/core/notifications/internal/app/rsapp", Answer::json(json!({"count": 2})));
-        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json()["enabled"], true);
+        let config = get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json();
+        assert_eq!(config["enabled"], true);
+        // Until someone allowed to change the app makes its own key, browsers get the platform's.
+        assert_eq!(config["vapidPublicKey"], VAPID_PUBLIC);
+        assert_eq!(dao.app_vapid_key("rsapp").await.unwrap(), None, "using the app makes no key");
+
+        // Making it needs application write ...
+        const APP_KEY: &str = "/api/notification/push/app-key?appCode=rsapp";
+        const WRITE: &str = "/api/security/applications/internal/hasWriteAccess";
+        const MANAGES: &str = "/api/security/clients/internal/doesClientManageClientCode";
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["code"], "COMMON.PERMISSION_REQUIRED");
+        let mut writer = context(true);
+        writer["user"]["stringAuthorities"] = json!(["Authorities.Logged_IN", "Authorities.Application_UPDATE"]);
+        r.security.answer("GET", AUTH_PATH, Answer::json(writer));
+        // ... and write access to the app for the caller's client ...
+        r.security.answer("GET", WRITE, Answer::json(json!(false)));
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["code"], "COMMON.FORBIDDEN");
+        assert!(r.security.calls_to(WRITE).last().unwrap().query.contains("clientCode=SYSTEM"));
+        // ... or, for another client, one the caller's client manages and that has write access.
+        r.security.answer("GET", WRITE, Answer::json(json!(true)));
+        r.security.answer("GET", MANAGES, Answer::json(json!(false)));
+        assert_eq!(post(&r.app, APP_KEY, r#"{"clientCode": "TENANT1"}"#).await.json()["code"], "COMMON.FORBIDDEN");
+        r.security.answer("GET", MANAGES, Answer::json(json!(true)));
+        let made = post(&r.app, APP_KEY, r#"{"clientCode": "TENANT1"}"#).await;
+        assert_eq!(made.status, StatusCode::OK, "{}", made.body);
+        assert!(r.security.calls_to(WRITE).last().unwrap().query.contains("clientCode=TENANT1"));
+        let app_key = made.json()["publicKey"].as_str().unwrap().to_string();
+        assert_ne!(app_key, VAPID_PUBLIC);
+        assert_eq!(dao.app_vapid_key("rsapp").await.unwrap().map(|k| k.0), Some(app_key.clone()));
+        // Made once: asking again keeps it. Browsers get it from now on.
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["publicKey"], app_key.as_str());
+        assert_eq!(get(&r.app, APP_KEY).await.json()["publicKey"], app_key.as_str());
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json()["vapidPublicKey"], app_key.as_str());
+        let fresh = PushService::new(dao.clone(), CoreClient::new(Upstream::fixed(&["http://127.0.0.1:9"]), Duration::from_secs(1)).unwrap(), &vapid()).unwrap();
+        assert_eq!(fresh.web_key("rsapp").await.unwrap().public_key(), app_key, "another instance reads the same key");
+        assert_eq!(fresh.web_key("otherapp").await.unwrap().public_key(), VAPID_PUBLIC, "an app without its own");
         for _ in 0..2 {
             assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &web).await.json()["registered"], true);
         }
@@ -642,6 +678,25 @@ async fn push_devices_register_move_and_leave() {
         assert_eq!(mine.len(), 2, "registering again refreshes the row");
         assert_eq!(mine[1].apns_env.as_deref(), Some("production"));
         assert_eq!(mine[1].provider_account.as_deref(), Some("TEAM1"));
+        // A browser is kept with the key it subscribed with, and is sent with that key: the
+        // app's, or the platform's for one registered before the app had its own.
+        let browser = mine[0].clone();
+        assert_eq!(browser.provider_account.as_deref(), Some(app_key.as_str()));
+        let key_of = |account: Option<&str>| {
+            let d = DeviceRow { provider_account: account.map(str::to_string), ..browser.clone() };
+            let fresh = &fresh;
+            async move { fresh.web_key_of(&d).await.map(|k| k.public_key().to_string()) }
+        };
+        assert_eq!(key_of(Some(&app_key)).await.as_deref(), Some(app_key.as_str()));
+        assert_eq!(key_of(None).await.as_deref(), Some(VAPID_PUBLIC));
+        assert_eq!(key_of(Some(VAPID_PUBLIC)).await.as_deref(), Some(VAPID_PUBLIC));
+        assert_eq!(key_of(Some("BSomeOtherKey")).await, None, "a key this service never handed out");
+        // Replaced: the new key from now on, and the old subscriptions get nothing (they
+        // subscribe again at their next sign-in), even on an instance that read the old one.
+        let replaced = post(&r.app, APP_KEY, r#"{"replace": true}"#).await.json()["publicKey"].as_str().unwrap().to_string();
+        assert_ne!(replaced, app_key);
+        assert_eq!(key_of(Some(&replaced)).await.as_deref(), Some(replaced.as_str()));
+        assert_eq!(key_of(Some(&app_key)).await, None);
         // The count is kept: core was asked once per app.
         assert_eq!(r.security.calls_to("/api/core/notifications/internal/app/rsapp").len(), 1);
 
