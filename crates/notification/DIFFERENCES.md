@@ -67,8 +67,8 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   connection and there is an `email` template, in-app when the connection allows it and there is an
   `inapp` template; recipients from security's `users/internal/notification` with Java's
   `UsersListRequest` per target type (`User Id`, `Client Id`, `Client Code`; anything else asks
-  for the whole app); email to every recipient first, then in-app; a failure anywhere stops the
-  rest (an email error means no in-app).
+  for the whole app); email to every recipient first, then in-app. Java's first failed send
+  stopped the rest (an email error meant no further mail and no in-app); see N18.
 - **Preferences are never read when sending.** `getInternalNotificationPreferecene` exists in Java
   but nothing calls it; the Rust port has no such read either.
 - **Templates** (`AbstractTemplateService`): the notification's own language rule (the default
@@ -191,6 +191,13 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   digit strings) or `{"all": true}` marks the caller's own unread rows in that app and answers
   `{"read": <rows changed>}`; other users' rows and other apps are left alone; a body naming
   neither is a 400 `COMMON.PARAM_MISSING`, ids that are not whole numbers a 400.
+- **N18. One failed send never stops the others** (Kiran, 2026-11-02: "We cannot drop others
+  emails just one fails"). Java ended the run at the first mail the email service refused, so the
+  later recipients, the in-app rows and (now) the push were lost, and the message was acked. Each
+  send is now on its own: a refused mail is logged with the user id and the run goes on to the next
+  recipient, an in-app failure is logged and push still runs, a push failure is logged. Each failure
+  counts once in `Outcome::Sent.failed` and in `notification_failed_total{reason="send"}`. Failures
+  before the sends (connection, definition, recipients, choices) still end the run with an error.
 
 ## Data notifications (Rust only, 2026-10-22)
 
@@ -224,8 +231,8 @@ A third channel, `push`, reaches the recipients' registered browsers (Web Push),
   `inapp` fallback uses `title`, `description`, `image`, `url` (and `body` when there is no
   `description`, as the template editor names it). Preferences apply as for any
   channel (`channels.push`, `categories.<c>.push`, `channelEnabled.push`).
-- **Order and failure.** Push runs after email and in-app. Its failures are logged and counted
-  (`notification_push_total{platform,outcome}`), and never fail the message
+- **Order and failure.** Push runs after email and in-app, and runs even when they failed (N18).
+  Its failures are logged and counted (`notification_push_total{platform,outcome}`), and never fail the message
   (`Outcome::Sent.pushed` counts the devices that took it).
 - **Devices.** The `notification_push_device` table (`sql/notification/V5__Push devices.sql` at the
   repository root, applied by CI before the deploy; rollback in `sql/rollback/notification/`)
@@ -254,9 +261,14 @@ A third channel, `push`, reaches the recipients' registered browsers (Web Push),
   (`NOTIF.PUSH_KEY_NOT_FIREBASE`, `NOTIF.PUSH_KEY_NOT_APPLE`), and kept in
   `notification_push_key` (`sql/notification/V6__Push keys.sql`), one per app, platform and
   account. The first client to give an account's key owns it; another client is refused
-  (`NOTIF.PUSH_KEY_TAKEN`). `GET /push/keys?appCode=` lists the caller's client's keys without
+  (`NOTIF.PUSH_KEY_TAKEN`). Ownership is not checked with Google or Apple (a Firebase project id
+  and an Apple Team ID are both public), so a disputed account is settled by hand (Kiran,
+  2026-11-02): support confirms who owns it, deletes the other client's row
+  (`DELETE FROM notification_push_key WHERE APP_CODE = ? AND PLATFORM = ? AND ACCOUNT = ?`), and
+  the owner uploads again. `GET /push/keys?appCode=` lists the caller's client's keys without
   the secrets. Keys never leave this service: no internal route hands them out, because
-  internal routes are reachable through the gateway. The sender keeps a key it read for
+  internal routes are reachable through the gateway (nginx refuses `/internal` paths from
+  outside; this keeps them off the inside too). The sender keeps a key it read for
   `app_check_seconds`; an upload forgets it on the instance that took it.
 - **Web Push endpoints** are URLs the browser hands in, so only `https` on the known push
   services (`fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com`,

@@ -11,10 +11,13 @@
 //! 4. Each recipient's choices for the app ([`crate::choices`], Rust only: Java read none):
 //!    per channel and the message's category, else the definition's `channelEnabled` default.
 //! 5. Email to each recipient who wants it, then in-app to all who want it, then push to the
-//!    devices of all who want it. A push failure is logged and never fails the message.
+//!    devices of all who want it. A failed send is logged and counted and the rest still go
+//!    (Rust only: Java's first failed mail ended the run, so later recipients, the in-app rows
+//!    and the push were all lost).
 //!
-//! A missing definition or no recipients ends the run quietly (logged). Anything that fails
-//! ends it with an error, which the listener logs; the message is acked either way.
+//! A missing definition or no recipients ends the run quietly (logged). A failure before the
+//! sends (connection, definition, recipients, choices) ends it with an error, which the
+//! listener logs; the message is acked either way.
 //!
 //! A data notification (`kind: DATA`, Rust only) skips steps 1, 2 and 4: once it is found not
 //! expired, the recipients come from the same security call, and one frame, `event:<eventName>` with
@@ -47,9 +50,10 @@ pub enum Outcome {
     NoNotification,
     NoChannel,
     NoUsers,
-    /// Mails attempted (each `false` or `true` as the email service answered), whether the
-    /// in-app channel ran, and how many devices took the push.
-    Sent { emails: usize, in_app: bool, pushed: usize },
+    /// Mails that ended without an error (each `false` or `true` as the email service answered), whether the in-app
+    /// rows were stored, how many devices took the push, and how many sends failed: one per
+    /// recipient whose mail failed, one for the in-app rows, one for the push.
+    Sent { emails: usize, in_app: bool, pushed: usize, failed: usize },
     /// A data notification handed to the open streams of this many recipients.
     Pushed { users: usize },
     /// A data notification that arrived after its `expiresAt`: dropped.
@@ -143,18 +147,29 @@ impl SendService {
 
         let empty = Map::new();
         let payload = qob.payload.as_ref().unwrap_or(&empty);
-        let mut emails = 0;
+        let (mut emails, mut failed) = (0, 0);
         if is_email {
             let mail = conn.mail.as_ref().expect("checked above");
             for user in &wanting(EMAIL_TEMPLATE_NAME) {
-                self.email.send_email(user, mail, &notification, payload).await?;
-                emails += 1;
+                match self.email.send_email(user, mail, &notification, payload).await {
+                    Ok(_) => emails += 1,
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!("email to user {} failed for {}: {e:#}", user.id.unwrap_or_default(), qob.describe());
+                    }
+                }
             }
         }
         let in_app_users = if is_in_app { wanting(INAPP_TEMPLATE_NAME) } else { Vec::new() };
-        let in_app = !in_app_users.is_empty();
-        if in_app {
-            self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await?;
+        let mut in_app = false;
+        if !in_app_users.is_empty() {
+            match self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await {
+                Ok(()) => in_app = true,
+                Err(e) => {
+                    failed += 1;
+                    tracing::error!("in-app failed for {}: {e:#}", qob.describe());
+                }
+            }
         }
         let mut pushed = 0;
         let app = qob.app_code.as_deref().filter(|a| !a.is_empty());
@@ -163,11 +178,14 @@ impl SendService {
             if !push_users.is_empty() {
                 match devices.send_push(&push_users, &notification, app, push, payload).await {
                     Ok(n) => pushed = n,
-                    Err(e) => tracing::error!("push failed for {}: {e:#}", qob.describe()),
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!("push failed for {}: {e:#}", qob.describe());
+                    }
                 }
             }
         }
-        Ok(Outcome::Sent { emails, in_app, pushed })
+        Ok(Outcome::Sent { emails, in_app, pushed, failed })
     }
 
     /// The recipients' preference maps in the message's app; none without a source or an app.

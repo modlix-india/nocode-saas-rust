@@ -68,7 +68,7 @@ const BODY: &[u8] = br#"{"appCode":"app","clientCode":"SYSTEM","urlClientCode":"
 #[tokio::test]
 async fn deliveries_are_settled_as_spring_settles_them() {
     let (s, fake, seen) = service().await;
-    assert_eq!(handle(&s, Some("application/json"), BODY).await, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true, pushed: 0 })));
+    assert_eq!(handle(&s, Some("application/json"), BODY).await, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 0 })));
     assert_eq!(*seen.0.lock(), ["n:1"]);
     // Unreadable, or not declared as JSON: rejected for good.
     assert_eq!(handle(&s, Some("application/json"), b"not json").await, Settle::Drop);

@@ -140,7 +140,7 @@ async fn data_and_in_app_notifications_reach_both_instances_through_redis() {
         let body = json!({"appCode": "rsapp", "clientCode": "SYSTEM", "urlClientCode": "SYSTEM", "targetType": "User Id",
             "targetId": 142, "notificationName": "hello", "connectionName": "c", "draft": false, "payload": {"who": "Ann"}});
         let settled = handle(&service, Some("application/json"), body.to_string().as_bytes()).await;
-        assert_eq!(settled, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true, pushed: 0 })));
+        assert_eq!(settled, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 0 })));
         for tab in [&mut tab_a, &mut tab_b] {
             let frame = next(tab, 3000).await.expect("the in-app notification arrived");
             assert!(frame.starts_with("event:notification\ndata:{\n") && frame.contains("data:  \"title\" : \"Hi Ann\",\n"), "{frame}");

@@ -72,7 +72,7 @@ audience = "signed-in"
 [NOTIF.PUSH_KEY_TAKEN]
 status = 403
 text = "Another organisation has already given the push key for this Firebase project or Apple team in this app."
-action = "Check the Firebase project or Apple team id. If the project or team is yours, contact support."
+action = "Check the Firebase project or Apple team id. If the project or team is yours, contact support: they confirm who owns it and remove the other organisation's key, then upload yours again."
 java_text = "Push key owned by another client"
 when = "Uploading a push key for an app, Firebase project or Apple team whose key another client uploaded first."
 audience = "signed-in"
