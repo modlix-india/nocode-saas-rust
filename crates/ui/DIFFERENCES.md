@@ -401,4 +401,6 @@ The write path is the `overridable` crate's, so its differences hold here too
     on iOS, Push Notifications turned on for its bundle with a new App Store profile, once. An
     app on the client's own accounts must carry the client's own complete Firebase values, and
     never the platform's project (`UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE`, 400); nothing is
-    registered for it.
+    registered for it. Its push keys (the Firebase service account, the Apple `.p8`) are not on
+    the mobile app: the screens upload them to notification's `POST /api/notification/push/keys`,
+    which keeps them (crates/notification/DIFFERENCES.md, "Uploaded keys").

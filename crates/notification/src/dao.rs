@@ -162,6 +162,31 @@ pub struct NewDevice<'a> {
     pub user_agent: Option<&'a str>,
 }
 
+/// A `notification_push_key` row: a client's own Firebase service account (Android) or Apple
+/// push key (iOS) for an app. No `Debug`, so the secret never reaches a log.
+#[derive(Clone)]
+pub struct PushKeyRow {
+    pub client_id: u64,
+    pub platform: Platform,
+    /// The Firebase project id or Apple team id.
+    pub account: String,
+    pub key_id: Option<String>,
+    pub secret: String,
+}
+
+const PUSH_KEY_COLUMNS: &str = "CLIENT_ID, PLATFORM, ACCOUNT, KEY_ID, SECRET";
+
+fn push_key_row(r: &sqlx::mysql::MySqlRow) -> Result<PushKeyRow> {
+    let platform: String = r.try_get("PLATFORM")?;
+    Ok(PushKeyRow {
+        client_id: r.try_get("CLIENT_ID")?,
+        platform: Platform::parse(&platform).ok_or_else(|| anyhow::anyhow!("unknown push platform {platform}"))?,
+        account: r.try_get("ACCOUNT")?,
+        key_id: r.try_get("KEY_ID")?,
+        secret: r.try_get("SECRET")?,
+    })
+}
+
 /// The unique key of a device: SHA-256 hex of `PLATFORM:token` (the token is too long to index).
 pub fn token_hash(platform: Platform, token: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -440,6 +465,40 @@ impl Dao {
             q = q.bind(*id);
         }
         Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// The key the app's devices built against this project or team are reached with.
+    pub async fn push_key(&self, app_code: &str, platform: Platform, account: &str) -> Result<Option<PushKeyRow>> {
+        let sql = format!("SELECT {PUSH_KEY_COLUMNS} FROM notification_push_key WHERE APP_CODE = ? AND PLATFORM = ? AND ACCOUNT = ?");
+        let row = sqlx::query(&sql).bind(app_code).bind(platform.name()).bind(account).fetch_optional(&self.pool).await?;
+        row.as_ref().map(push_key_row).transpose()
+    }
+
+    /// The keys a client uploaded for the app.
+    pub async fn push_keys_of(&self, client_id: u64, app_code: &str) -> Result<Vec<PushKeyRow>> {
+        let sql = format!("SELECT {PUSH_KEY_COLUMNS} FROM notification_push_key WHERE CLIENT_ID = ? AND APP_CODE = ? ORDER BY ID");
+        sqlx::query(&sql).bind(client_id).bind(app_code).fetch_all(&self.pool).await?.iter().map(push_key_row).collect()
+    }
+
+    /// Stores the key for the app and account, replacing the one there. The caller checks that
+    /// a key already there is the same client's.
+    pub async fn save_push_key(&self, client_id: u64, app_code: &str, key: &PushKeyRow, by: u64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO notification_push_key (CLIENT_ID, APP_CODE, PLATFORM, ACCOUNT, KEY_ID, SECRET, CREATED_BY, UPDATED_BY) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             ON DUPLICATE KEY UPDATE KEY_ID = VALUES(KEY_ID), SECRET = VALUES(SECRET), UPDATED_BY = VALUES(UPDATED_BY)",
+        )
+        .bind(client_id)
+        .bind(app_code)
+        .bind(key.platform.name())
+        .bind(&key.account)
+        .bind(key.key_id.as_deref())
+        .bind(&key.secret)
+        .bind(by)
+        .bind(by)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 
