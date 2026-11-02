@@ -256,6 +256,11 @@ fn bool_attr(v: Option<&JValue>, default: bool) -> bool {
     }
 }
 
+/// The beacon, held back until the visitor grants analytics: a `text/plain` script is
+/// neither fetched nor run, so a visitor who chose only the necessary cookies causes no
+/// request to the analytics host. The client (`activateConsentedScripts` in nocode-ui)
+/// swaps it for a live tag when analytics is granted, and at start on a later visit when
+/// the stored choice grants it. The SSR renderer writes the same tag.
 fn analytics_snippet(props: &JMap, ingestion_host: &str) -> String {
     if ingestion_host.trim().is_empty() {
         return String::new();
@@ -270,7 +275,7 @@ fn analytics_snippet(props: &JMap, ingestion_host: &str) -> String {
         _ => None,
     };
     format!(
-        "<script>window.mlx=window.mlx||function(){{(window.mlx.q=window.mlx.q||[]).push(arguments)}};</script><script async src=\"{host}/a.js\" data-autocapture=\"{}\" data-pageviews=\"{}\" data-pageleaves=\"{}\" data-scroll=\"{}\" data-heatmaps=\"{}\" data-consent=\"required\"></script>",
+        "<script>window.mlx=window.mlx||function(){{(window.mlx.q=window.mlx.q||[]).push(arguments)}};</script><script type=\"text/plain\" data-mlx-consent=\"analytics\" data-mlx-beacon=\"shell\" data-src=\"{host}/a.js\" data-autocapture=\"{}\" data-pageviews=\"{}\" data-pageleaves=\"{}\" data-scroll=\"{}\" data-heatmaps=\"{}\" data-consent=\"required\"></script>",
         bool_attr(a.get("autocapture"), true),
         bool_attr(a.get("capturePageviews"), true),
         bool_attr(a.get("capturePageleaves"), true),
@@ -505,7 +510,7 @@ mod tests {
         assert!(h.contains("<link rel=\"manifest\" href=\"api/manifest/manifest.json\" />"));
         assert!(h.contains("<link font/>"));
         assert!(h.contains("<link href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css\" rel=\"stylesheet\" />\n<link own/>") || h.contains("<link own/>\n<link href=\"https://cdnjs"));
-        assert!(h.contains("<script async src=\"https://engine.local.modlix.com/a.js\" data-autocapture=\"true\" data-pageviews=\"true\" data-pageleaves=\"true\" data-scroll=\"false\" data-heatmaps=\"true\" data-consent=\"required\"></script><i>bh</i></head><body><i>ab</i><div id=\"app\"><p>loading</p></div>"));
+        assert!(h.contains("<script type=\"text/plain\" data-mlx-consent=\"analytics\" data-mlx-beacon=\"shell\" data-src=\"https://engine.local.modlix.com/a.js\" data-autocapture=\"true\" data-pageviews=\"true\" data-pageleaves=\"true\" data-scroll=\"false\" data-heatmaps=\"true\" data-consent=\"required\"></script><i>bh</i></head><body><i>ab</i><div id=\"app\"><p>loading</p></div>"));
         assert!(h.contains("window.cdnPrefix='cdn-local.modlix.com';window.cdnStripAPIPrefix='true';window.cdnReplacePlus=true;window.cdnResizeOptionsType='none';window.domainAppCode='demo';window.domainClientCode='SYSTEM';window.__SOCIAL_LOGIN_HOST__='authzump.local.modlix.com';window.__SSO_BEACON_HOST__='authzump.local.modlix.com';</script>"));
         assert!(h.ends_with("<script src=\"https://cdn-local.modlix.com/js/dist/a.js\"></script><i>end</i></body></html>"));
         assert_eq!(p.headers.len(), 1, "an empty report policy is no header");
