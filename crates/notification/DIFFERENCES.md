@@ -245,7 +245,22 @@ A third channel, `push`, reaches the recipients' registered browsers (Web Push),
   `GET /api/core/notifications/internal/app/{appCode}` counts at least one definition with an
   `inapp` or `push` channel (kept `[push] app_check_seconds`, 10 min). A site without
   notifications never registers a service worker.
-- **Credentials.** Web Push always signs with the platform's VAPID keys. FCM and APNs use the
+- **Web push keys per app** (Kiran, 2026-11-02). An app may have its own VAPID pair
+  (`notification_push_app_key`, `sql/notification/V7__Push app keys.sql`), made by
+  `POST /push/app-key?appCode=` (`{"clientCode"?, "replace"?: true}`; `GET` answers
+  `{publicKey}`, never the private half). Making or replacing it needs `Application_UPDATE` and
+  write access to the app (security's `hasWriteAccess`) for the caller's client, or for a client
+  the caller's client manages (`doesClientManageClientCode`); otherwise 403
+  `COMMON.PERMISSION_REQUIRED` or `COMMON.FORBIDDEN`. Using the app never makes one.
+  `GET /push/config` hands out the app's public key, else the platform's (`[push] vapid_*`), and
+  a browser's registration keeps the key it was handed as its `PROVIDER_ACCOUNT`; each
+  subscription is sent with its own key, so one made before the app had its own still gets the
+  platform's (a row without an account is the platform's). After a replace, the old
+  subscriptions get nothing until the browser subscribes again, which the page does quietly at
+  the next sign-in (it compares the key it is handed with its subscription's). In the browser
+  the service worker is scoped to the app's path on a shared host (`/<app>/<client>/`), so apps
+  there keep separate subscriptions; the one an app registered for `/` before is dropped then.
+- **Credentials.** Web Push signs with the key its subscription was made with (above). FCM and APNs use the
   first whose Firebase project or Apple team matches the one the device was built against
   (`providerAccount`): the client's PUSH connection (`fcm.credentials`, the service account
   JSON; `apns.{teamId, keyId, privateKey}`), then the platform's (`[push]`), then the key the

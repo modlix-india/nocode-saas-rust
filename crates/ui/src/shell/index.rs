@@ -365,7 +365,9 @@ pub fn index_html(
     s.push_str(&open_graph(props.get("og"), &title, &mut said));
     tag_type(&mut s, &props, "metas", "meta", &META_FIELDS, &said)?;
     if matches!(props.get("manifest"), Some(JValue::Object(m)) if !m.is_empty()) {
-        s.push_str(&format!("<link rel=\"manifest\" href=\"{app_code}/{client_code}/manifest/manifest.json\" />"));
+        // Relative and under /api/, like the app's icon links: nginx forwards only /api/ paths,
+        // and the gateway cuts whatever comes before /api/.
+        s.push_str("<link rel=\"manifest\" href=\"api/manifest/manifest.json\" />");
     }
     s.push_str(&packs(props.get("fontPacks"), false));
     s.push_str(&packs(props.get("iconPacks"), true));
@@ -500,7 +502,7 @@ mod tests {
         assert!(h.contains("<meta property=\"og:locale:alternate\" content=\"en_GB\"/> \n<meta property=\"og:locale:alternate\" content=\"fr_FR\"/> \n<meta property=\"og:determiner\" content=\"the\"/> \n<meta name=\"twitter:card\" content=\"summary_large_image\"/> \n<meta name=\"twitter:site\" content=\"@demo\"/> \n<meta property=\"fb:app_id\" content=\"42\"/> \n"));
         assert!(h.contains("<meta name=\"description\" content=\"It&#39;s &lt;ok&gt;\"/> \n"));
         assert!(!h.contains("dropped"));
-        assert!(h.contains("<link rel=\"manifest\" href=\"demo/SYSTEM/manifest/manifest.json\" />"));
+        assert!(h.contains("<link rel=\"manifest\" href=\"api/manifest/manifest.json\" />"));
         assert!(h.contains("<link font/>"));
         assert!(h.contains("<link href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css\" rel=\"stylesheet\" />\n<link own/>") || h.contains("<link own/>\n<link href=\"https://cdnjs"));
         assert!(h.contains("<script async src=\"https://engine.local.modlix.com/a.js\" data-autocapture=\"true\" data-pageviews=\"true\" data-pageleaves=\"true\" data-scroll=\"false\" data-heatmaps=\"true\" data-consent=\"required\"></script><i>bh</i></head><body><i>ab</i><div id=\"app\"><p>loading</p></div>"));

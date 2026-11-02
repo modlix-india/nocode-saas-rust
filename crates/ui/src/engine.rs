@@ -272,7 +272,8 @@ impl<'a> Engine<'a> {
         let size_before = props.len();
         let mut p = props;
         p.shift_remove("mobileApps");
-        p.shift_remove("manifest");
+        // Rust only: Java removed `manifest` here too, so no app could ever serve a PWA
+        // manifest. It is kept: the page heads (this shell, SSR, the dev server) link it.
         let mut uid = r.unique_id.clone();
         if let Some(f) = &filler {
             uid.push_str(&f.unique_id);
