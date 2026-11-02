@@ -5,6 +5,7 @@
 //! |---|---|
 //! | `clients/internal/**`, `applications/internal/**`, `clienturls/internal/**` | yes |
 //! | `users/internal/**`, `app/profiles/internal/**`, `internal/billing/**` | yes |
+//! | `internal/contactCodes/**` (Rust only) | yes |
 //! | `internal/cache/**`, `ssl/internal/certificates` | no |
 
 use std::sync::Arc;
@@ -77,6 +78,9 @@ pub fn router(state: State_) -> Router {
         .route("/api/security/internal/billing/reconcile", post(reconcile))
         .route("/api/security/internal/billing/serving-status", get(serving_status))
         // SecurityCacheController
+        // Contact codes (Rust only): core's SendContactCode / VerifyContactCode
+        .route("/api/security/internal/contactCodes", post(contact_code_issue))
+        .route("/api/security/internal/contactCodes/verify", post(contact_code_verify))
         .route("/api/security/internal/cache", get(cache_names).delete(cache_evict_all))
         .route("/api/security/internal/cache/stats", get(cache_stats))
         .route("/api/security/internal/cache/{cacheName}", delete(cache_evict))
@@ -111,6 +115,7 @@ fn users_list_body(bytes: &[u8]) -> AuthResult<UsersListRequest> {
         client_code: opt_text(v.get("clientCode"))?,
         client_id: opt_i64(v.get("clientId"))?,
         app_code: opt_text(v.get("appCode"))?,
+        filter_authorization: opt_text(v.get("filterAuthorization"))?.filter(|f| !f.trim().is_empty()),
     })
 }
 
@@ -155,6 +160,18 @@ macro_rules! route_path {
         $crate::web_route_path!($name, State_, $path, $protected, |$s, $r, $ca, $p| $body);
     };
 }
+
+// ---- Contact codes (Rust only; see `super::contact`) ----
+
+route!(contact_code_issue, "/internal/contactCodes", false, |s, r, ca| {
+    let v: Value = body(&r.body)?;
+    Ok(json(&s.contact_code_issue(&v).await?))
+});
+
+route!(contact_code_verify, "/internal/contactCodes/verify", false, |s, r, ca| {
+    let v: Value = body(&r.body)?;
+    Ok(json(&s.contact_code_verify(&v).await?))
+});
 
 // ---- ProfileController ----
 
@@ -495,7 +512,12 @@ route!(certificates, "/ssl/internal/certificates", true, |s, r, ca| {
         return Err(AuthError::msg(StatusCode::INTERNAL_SERVER_ERROR, ONLY_SYS_USER_CERTS, &[]));
     }
     let updated = s.certificates_last_updated().await?;
-    if r.info.header("If-None-Match").as_deref() == Some(updated.as_str()) {
+    // The ETag goes out quoted, as HTTP has it, and nginxconf.js sends it back as it came, so compare
+    // the tag inside the quotes (a weak `W/` prefix too). Comparing the raw header never matched, so
+    // every LB run got a 200 and restarted nginx: a refused connection every 5 minutes (QA-0469).
+    let sent = r.info.header("If-None-Match");
+    let sent = sent.as_deref().map(|v| v.trim().trim_start_matches("W/").trim_matches('"'));
+    if sent == Some(updated.as_str()) {
         return Ok(empty(StatusCode::NOT_MODIFIED));
     }
     let list = s.certificates().await?;

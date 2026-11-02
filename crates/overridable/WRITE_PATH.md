@@ -103,6 +103,9 @@ the base class's behaviour as their default):
 | `after_evict_draft(cx, app, client, name)` | end of `evictDraft` | ui OUI/SSR, Application caches, URIPath pattern |
 | `after_delete_everything(cx, app, client)` | end of `deleteEverything` | Application caches; core `dropDraftData` |
 | `after_read(cx, ca, entity)` | end of `read(id)` | Connection hides credentials |
+| `redact(entity)` | every reply carrying the kind's document (object, draft, eager list `data`) | core Connection masks its credentials (Rust only) |
+| `keep_withheld(&mut incoming, current)` | start of `create` (`None`), `update` (the stored document) and draft saves (the draft replaced, else the document) | core Connection keeps stored credentials sent back masked (Rust only) |
+| `filterable(field)` | list filters and sorts | core Connection refuses `connectionDetails` (Rust only) |
 | `transport_dependencies(&e)` / `strip_transport_dependencies(&e)` | transport import | Schema `SchemaRefs.collect`, Storage relations |
 
 `Commons` gives hooks `evict_all(name)`, `evict(name, key)`, `publish(channel, message)` (the

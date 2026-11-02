@@ -139,6 +139,9 @@ impl<K: Kind> OverridableService<K> {
             if IGNORED.contains(&k) {
                 continue;
             }
+            if !self.kind().filterable(k) {
+                return Ok(None);
+            }
             let values = params.all(k);
             conditions.push(Condition::Filter(match values.as_slice() {
                 [one] => FilterCondition::new(k, Operator::StringLooseEqual, JValue::Str(one.to_string())),
@@ -150,6 +153,9 @@ impl<K: Kind> OverridableService<K> {
 
     async fn compute_lro(&self, ca: &ContextAuthentication, eager: bool, client_only: bool, pageable: &Pageable, params: &Params, app: &str) -> AppResult<LroPage> {
         let listed = self.list_access(ca, app, params.first("clientCode"), false).await?;
+        if pageable.sort.0.iter().any(|o| !self.kind().filterable(&o.property)) {
+            return Ok(LroPage { content: Vec::new(), total: 0 });
+        }
         let Some((condition, inheritance)) = self.param_to_condition_lro(ca, params, app).await? else {
             return Ok(LroPage { content: Vec::new(), total: 0 });
         };
@@ -242,12 +248,14 @@ impl<K: Kind> OverridableService<K> {
 
     /// `readToTransport`: the version and id of the client's own row of `name`, for an import
     /// to update rather than create; `None` when there is none or the caller may not create.
-    pub async fn read_to_transport(&self, ca: &ContextAuthentication, name: &str, app: &str, client: &str) -> AppResult<Option<(i64, String)>> {
+    /// A nameless object (`name` None) finds the stored `name: null` row: looking it up as ""
+    /// misses it, and the create that follows then 409s on every import.
+    pub async fn read_to_transport(&self, ca: &ContextAuthentication, name: Option<&str>, app: &str, client: &str) -> AppResult<Option<(i64, String)>> {
         if !self.access_check(ca, crate::write::kind::Method::Create, Some(app), Some(client), true).await? {
             return Ok(None);
         }
         Ok(self
-            .find_one(name, app, client)
+            .find_one_named(name, app, client)
             .await?
             .map(|e| (crate::write::service::version_of(&e), str_field(&e, "id").unwrap_or_default().to_string())))
     }

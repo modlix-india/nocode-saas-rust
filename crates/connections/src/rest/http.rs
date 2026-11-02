@@ -236,8 +236,23 @@ impl JsonTarget {
 /// `webClient.method(m).uri(uri).retrieve().bodyToMono(target)`: a 4xx/5xx is an error, the
 /// body must be JSON (Jackson's decoder), and an empty body is no value.
 pub async fn retrieve_json(client: &HttpClient, method: &str, uri: &str, target: JsonTarget) -> ConnResult<Option<serde_json::Value>> {
-    let headers = Vec::new();
-    let body = if method == "POST" { Some(Vec::new()) } else { None };
+    retrieve_json_with(client, method, uri, Vec::new(), None, target).await
+}
+
+/// [`retrieve_json`] with request headers and a body (a POST without one sends an empty body).
+pub async fn retrieve_json_with(
+    client: &HttpClient,
+    method: &str,
+    uri: &str,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+    target: JsonTarget,
+) -> ConnResult<Option<serde_json::Value>> {
+    let body = match body {
+        Some(b) => Some(b),
+        None if method == "POST" => Some(Vec::new()),
+        None => None,
+    };
     let response = client.send(OutboundRequest { method: method.into(), uri: uri.into(), headers, body }).await?;
     let status = response.status;
     if status >= 400 {

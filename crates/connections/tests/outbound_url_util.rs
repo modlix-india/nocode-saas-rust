@@ -129,6 +129,62 @@ async fn an_smtp_host_is_a_bare_host_and_is_still_checked() {
     assert!(outbound::validate_connection_details(Some(&details(json!({"mailProps": {"mail.smtp.host": "smtp.sendgrid.net"}})))).await.is_ok());
 }
 
+// --- `[connections] block_private_targets` at save time (Rust only)
+
+async fn saved(v: Value, block_private_targets: bool) -> Result<(), ConnError> {
+    outbound::validate_connection_details_with(Some(&details(v)), block_private_targets).await
+}
+
+#[tokio::test]
+async fn with_the_guard_on_the_save_check_is_unchanged() {
+    for v in [
+        json!({"mailProps": {"mail.smtp.host": "localhost"}}),
+        json!({"mailProps": {"mail.smtp.host": "127.0.0.1"}}),
+        json!({"mailProps": {"mail.smtp.host": "mailpit.local"}}),
+        json!({"baseUrl": "http://localhost:16040/api"}),
+        json!({"baseUrl": "http://10.1.2.3/x"}),
+        json!({"url": "mongodb://127.0.0.1:27017/db"}),
+        json!({"tokenDetails": {"url": "http://[::1]/token"}}),
+    ] {
+        let strict = outbound::validate_connection_details(Some(&details(v.clone()))).await.unwrap_err();
+        let on = saved(v.clone(), true).await.unwrap_err();
+        assert_eq!((on.status(), on.message()), (strict.status(), strict.message()), "{v}");
+        assert_eq!(on.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_TARGET_REFUSED"));
+    }
+    assert!(saved(json!({"mailProps": {"mail.smtp.host": "smtp.sendgrid.net"}}), true).await.is_ok());
+}
+
+#[tokio::test]
+async fn with_the_guard_off_private_and_loopback_hosts_can_be_saved() {
+    for v in [
+        json!({"mailProps": {"mail.smtp.host": "localhost", "mail.smtp.port": "16040"}}),
+        json!({"mailProps": {"mail.smtp.host": "127.0.0.1"}}),
+        json!({"mailProps": {"mail.smtp.host": "mailpit.local"}}),
+        json!({"host": "192.168.1.20"}),
+        json!({"baseUrl": "http://localhost:16040/api"}),
+        json!({"baseUrl": "http://10.1.2.3/x"}),
+        json!({"url": "mongodb://127.0.0.1:27017/db"}),
+        json!({"tokenDetails": {"url": "http://[::1]/token"}}),
+    ] {
+        assert!(saved(v.clone(), false).await.is_ok(), "{v}");
+    }
+}
+
+#[tokio::test]
+async fn with_the_guard_off_the_other_save_rules_still_refuse() {
+    for v in [
+        json!({"baseUrl": "file:///etc/passwd"}),
+        json!({"baseUrl": "gopher://localhost:70/x"}),
+        json!({"baseUrl": "ftp://10.0.0.1/x"}),
+        json!({"baseUrl": "jar:file:/app.jar!/x"}),
+        json!({"baseUrl": "http:///nohost"}),
+        json!({"url": "mongodb:///db"}),
+        json!({"mailProps": {"mail.smtp.host": "   ."}}),
+    ] {
+        assert!(saved(v.clone(), false).await.is_err(), "{v}");
+    }
+}
+
 #[tokio::test]
 async fn ordinary_non_url_values_are_left_alone() {
     let d = details(json!({

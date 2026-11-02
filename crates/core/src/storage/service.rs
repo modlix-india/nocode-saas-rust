@@ -66,7 +66,11 @@ pub trait EventSink: Send + Sync {
 /// The MySQL engine's own operations, which have no Mongo counterpart.
 #[async_trait]
 pub trait MySqlAdmin: Send + Sync {
-    async fn migration_status(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<TenantProgress>>;
+    /// The tenant schemas that hold the storage's table.
+    async fn migration_tenants(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<String>>;
+    /// How far each of these tenants got, with its client and newest issues.
+    async fn migration_status_of(&self, conn: &Connection, app_code: &str, storage: &Storage, tenants: &[String])
+        -> appdata::AppDataResult<Vec<TenantProgress>>;
     async fn drift(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<Report>>;
     async fn repair_drift(&self, conn: &Connection, app_code: &str, storage: &Storage, approved: bool)
         -> appdata::AppDataResult<Vec<DriftRepair>>;
@@ -74,8 +78,12 @@ pub trait MySqlAdmin: Send + Sync {
 
 #[async_trait]
 impl MySqlAdmin for appdata::mysql::MySqlAppDataService {
-    async fn migration_status(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<TenantProgress>> {
-        appdata::mysql::MySqlAppDataService::migration_status(self, Some(conn), app_code, storage).await
+    async fn migration_tenants(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<String>> {
+        appdata::mysql::MySqlAppDataService::migration_tenants(self, Some(conn), app_code, storage).await
+    }
+    async fn migration_status_of(&self, conn: &Connection, app_code: &str, storage: &Storage, tenants: &[String])
+        -> appdata::AppDataResult<Vec<TenantProgress>> {
+        appdata::mysql::MySqlAppDataService::migration_status_of(self, Some(conn), app_code, storage, tenants).await
     }
     async fn drift(&self, conn: &Connection, app_code: &str, storage: &Storage) -> appdata::AppDataResult<Vec<Report>> {
         appdata::mysql::MySqlAppDataService::drift(self, Some(conn), app_code, storage).await
@@ -617,7 +625,9 @@ impl AppDataService {
         if let Some(e) = existing {
             event.insert(EXISTING_DATA_OBJECT_KEY.into(), Value::Object(e));
         }
-        self.events.create_event(app, client, &event_name, event).await?;
+        if let Some(event) = batch::defer(app, client, &event_name, event) {
+            self.events.create_event(app, client, &event_name, event).await?;
+        }
         Ok(data)
     }
 
@@ -993,6 +1003,35 @@ impl AppDataService {
             })
             .await?;
         Ok((t.storage.expect("gated"), rows))
+    }
+
+    // ------------------------------------------------------------------ fields
+
+    /// The fields of a storage (`CoreServices.Storage.GetFields`): each property's schema in
+    /// the Gson form a schema is served in. The storage resolves and is gated as a read is
+    /// (the app and client defaulted the same way, `onlyThruKIRun`, `readAuth`), on the
+    /// request's surface; no rows are read, so no connection or engine is picked. A top-level
+    /// `ref` is followed through the schemas the write validator checks rows against (core's,
+    /// then the app's as the storage's client resolves them, its own copy first); properties
+    /// written beside the ref win over the referenced ones, as `getResolvedSchema` merges them.
+    /// Relation fields are not part of the schema and are not added.
+    pub async fn storage_fields(&self, app_code: Option<&str>, client_code: Option<&str>, storage_name: &str)
+        -> CoreResult<serde_json::Map<String, serde_json::Value>> {
+        let app = Self::app_code(app_code);
+        let client = self.client_code(client_code).await?;
+        let storage = self.storage_with_kirun_validation(storage_name, &app, &client).await?;
+        let s = self.generic(storage.as_ref(), Gate::Read, |s| async move { Ok(s.clone()) }).await?;
+        let raw = s
+            .schema
+            .as_ref()
+            .and_then(|r| crate::java_model::gson_schema(&r.to_json()))
+            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+        let schemas = self.defs.schema_source(&s.app_code, &s.client_code).await?;
+        let resolved = follow_schema_ref(&raw, schemas.as_ref(), &s.name).await?;
+        Ok(match resolved.get("properties") {
+            Some(serde_json::Value::Object(p)) => p.clone(),
+            _ => serde_json::Map::new(),
+        })
     }
 
     // ------------------------------------------------------------------ eager relations
@@ -1424,9 +1463,10 @@ impl AppDataService {
         Ok(out)
     }
 
-    /// `migrationStatus`: readAuth; on MySQL the engine's journal. Built with `flatMapMono`, so
-    /// an app with no appData connection (every Mongo app), or a storage that does not
-    /// resolve, completes empty (`None`): a 200 with no body.
+    /// `migrationStatus`: readAuth; on MySQL the engine's journal and issues, one row per tenant
+    /// schema of a client the caller may see (its own, and the ones it manages). Built with
+    /// `flatMapMono`, so an app with no appData connection (every Mongo app), or a storage that
+    /// does not resolve, completes empty (`None`): a 200 with no body.
     pub async fn migration_status(&self, app_code: Option<&str>, client_code: Option<&str>, storage_name: &str)
         -> CoreResult<Option<Vec<TenantProgress>>> {
         let app = Self::app_code(app_code);
@@ -1439,12 +1479,33 @@ impl AppDataService {
         };
         self.generic(Some(&storage), Gate::Read, |s| async {
             if conn.connection_sub_type == Some(appdata::model::ConnectionSubType::MySql) {
-                Ok(Some(self.engines.mysql_admin.migration_status(&conn, &app, s).await?))
+                let tenants = self.engines.mysql_admin.migration_tenants(&conn, &app, s).await?;
+                let visible = self.visible_tenants(&app, tenants).await?;
+                Ok(Some(self.engines.mysql_admin.migration_status_of(&conn, &app, s, &visible).await?))
             } else {
                 Ok(Some(Vec::new()))
             }
         })
         .await
+    }
+
+    /// Of these tenant schemas, the ones whose client the caller may see: its own client and the
+    /// clients it manages (one call to security for all of them).
+    async fn visible_tenants(&self, app: &str, tenants: Vec<String>) -> CoreResult<Vec<String>> {
+        let own = context::authentication().client_code().unwrap_or_default().to_string();
+        let mut codes: Vec<String> = tenants.iter().map(|d| appdata::mysql::service::client_code_of(d, app)).collect();
+        codes.sort();
+        codes.dedup();
+        codes.retain(|c| *c != own);
+        let managed: std::collections::HashSet<String> =
+            self.security.filter_managed_client_codes(&own, &codes).await.map_err(CoreError::from)?.into_iter().collect();
+        Ok(tenants
+            .into_iter()
+            .filter(|d| {
+                let c = appdata::mysql::service::client_code_of(d, app);
+                c == own || managed.contains(&c)
+            })
+            .collect())
     }
 
     /// `drift`: write access to the app; every MySQL server the app uses.
@@ -1539,6 +1600,96 @@ fn no_null_update(data: DataObject) -> CoreResult<DataObject> {
         ));
     }
     Ok(data)
+}
+
+/// A storage schema (Gson form) with its top-level `ref` chain followed, as
+/// `SchemaRefResolver` follows it (at most [`appdata::schema_refs::MAX_DEPTH`] hops, a repeat
+/// stops), and the properties written beside the ref merged over the referenced ones. A ref
+/// that names no schema is refused rather than read as a storage with no fields.
+async fn follow_schema_ref(
+    raw: &serde_json::Value,
+    schemas: &dyn crate::repos::SchemaSource,
+    storage: &str,
+) -> CoreResult<serde_json::Value> {
+    fn reference(s: &serde_json::Value) -> Option<String> {
+        s.get("ref").and_then(serde_json::Value::as_str).map(str::trim).filter(|r| !r.is_empty()).map(str::to_string)
+    }
+    let mut current = raw.clone();
+    let mut seen = IndexSet::new();
+    let mut depth = 0;
+    while let Some(r) = reference(&current) {
+        if depth >= appdata::schema_refs::MAX_DEPTH || !seen.insert(r.clone()) {
+            break;
+        }
+        let Some(resolved) = schema_json_from_ref(&current, schemas, &r).await? else {
+            return Err(CoreError::coded(
+                StatusCode::NOT_FOUND,
+                "CORE.STORAGE_SCHEMA_REF_NOT_FOUND",
+                format!("Schema {r} referenced by storage {storage} not found"),
+            )
+            .param("schema", &r)
+            .param("storage", storage));
+        };
+        let again = reference(&resolved).is_some() && resolved != current;
+        current = resolved;
+        if !again {
+            break;
+        }
+        depth += 1;
+    }
+    if current == *raw {
+        return Ok(current);
+    }
+    if let Some(serde_json::Value::Object(local)) = raw.get("properties").filter(|p| p.as_object().is_some_and(|p| !p.is_empty())) {
+        let mut merged = match current.get("properties") {
+            Some(serde_json::Value::Object(p)) => p.clone(),
+            _ => serde_json::Map::new(),
+        };
+        for (k, v) in local {
+            merged.insert(k.clone(), v.clone());
+        }
+        if let serde_json::Value::Object(c) = &mut current {
+            c.insert("properties".into(), serde_json::Value::Object(merged));
+        }
+    }
+    Ok(current)
+}
+
+/// `ReactiveSchemaUtil.getSchemaFromRef` on Gson-form JSON: `Namespace.Name` from the schemas
+/// (a `#` ref is the schema itself), then a `/` path through `$defs` and properties.
+async fn schema_json_from_ref(
+    current: &serde_json::Value,
+    schemas: &dyn crate::repos::SchemaSource,
+    reference: &str,
+) -> CoreResult<Option<serde_json::Value>> {
+    let parts: Vec<&str> = reference.split('/').collect();
+    let mut s = if reference.starts_with('#') {
+        current.clone()
+    } else {
+        let full = parts[0];
+        let Some(dot) = full.rfind('.') else { return Ok(None) };
+        let (ns, name) = (&full[..dot], &full[dot + 1..]);
+        if ns.is_empty() || name.is_empty() {
+            return Ok(None);
+        }
+        match schemas.find(Some(ns), name).await? {
+            Some(f) => f.json.clone(),
+            None => return Ok(None),
+        }
+    };
+    let mut i = 1;
+    while i < parts.len() {
+        let next = if parts[i] == "$defs" {
+            i += 1;
+            parts.get(i).and_then(|p| s.get("$defs")?.get(*p))
+        } else {
+            s.get("properties").and_then(|p| p.get(parts[i]))
+        };
+        let Some(next) = next.cloned() else { return Ok(None) };
+        s = next;
+        i += 1;
+    }
+    Ok(Some(s))
 }
 
 /// `gson.toJsonTree(row)`.
@@ -1721,6 +1872,10 @@ pub fn draft_copy_order(storages: &IndexMap<String, Storage>, filters: &IndexMap
     }
     Ok(order)
 }
+
+#[path = "batch.rs"]
+mod batch;
+pub use batch::{conflict_of, BatchConflict, BatchOp, BatchOutcome, ConflictKind, NamedOp, OnConflict, UpdateIfOutcome};
 
 #[cfg(test)]
 #[path = "service_tests.rs"]

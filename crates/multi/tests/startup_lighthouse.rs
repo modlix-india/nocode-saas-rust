@@ -55,9 +55,9 @@ async fn configured_and_registered_by_lighthouse() {
     std::env::set_var("CONFIG_FILE", "/nonexistent/multi.toml");
     std::env::set_var("LIGHTHOUSE_URLS", &lighthouse);
     std::env::set_var("LIGHTHOUSE_REQUIRED", "true");
-    std::env::set_var("MODLIX__EUREKA__REGISTER", "true");
-    std::env::set_var("MODLIX__EUREKA__REGISTER_AS", "MULTI");
-    std::env::set_var("MODLIX__EUREKA__INSTANCE_IP", "127.0.0.1");
+    std::env::set_var("MODLIX__REGISTRY__REGISTER", "true");
+    std::env::set_var("MODLIX__REGISTRY__REGISTER_AS", "MULTI");
+    std::env::set_var("MODLIX__REGISTRY__INSTANCE_IP", "127.0.0.1");
 
     let task = tokio::spawn(multi::run());
     let mut registered = None;

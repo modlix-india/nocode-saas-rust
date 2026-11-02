@@ -1,9 +1,10 @@
 //! `CloudflareCustomHostnameService`: a LIVE client URL's hostname registered (or removed) as a
 //! Cloudflare for SaaS custom hostname, validated by TXT record.
 //!
-//! Configured only with an API token and a zone id; without them (local, dev, stage, and this
-//! unit until its configuration carries them) nothing is called and every call answers `false`,
-//! exactly as Java does. Failures are logged and answered `false`, never raised.
+//! Configured only with an API token and a zone id (`[cloudflare] api_token`, `zone_id`,
+//! `own_domains`: Java's `security.cloudflare.*`); without them (local, dev, stage) nothing is
+//! called and every call answers `false`, exactly as Java does. Failures are logged and answered
+//! `false`, never raised. security-admin builds one at startup ([`super::hosting::Hosting`]).
 
 use serde_json::{json, Value};
 
@@ -37,6 +38,12 @@ impl CustomHostnames {
     /// No token, no zone: the environments that must never touch the shared zone.
     pub fn unconfigured() -> Self {
         Self::new("", "", OWN_DOMAINS, API_BASE)
+    }
+
+    /// From the unit's `[cloudflare]` section, against Cloudflare's API.
+    pub fn from_config(cfg: &crate::config::CloudflareConfig) -> Self {
+        let own: Vec<&str> = cfg.own_domains.iter().map(String::as_str).collect();
+        Self::new(&cfg.api_token, &cfg.zone_id, &own, API_BASE)
     }
 
     /// `isConfigured()`.

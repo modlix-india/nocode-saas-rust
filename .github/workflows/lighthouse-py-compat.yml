@@ -1,25 +1,20 @@
 # Lighthouse against the real py_eureka_client 0.11.10 (what the ai service registers with):
-# build the lighthouse binary, start it, run tools/compat_py_eureka.py, stop it. Nothing is
+# build the lighthouse binary, start it, run tools/compat_py_client.py, stop it. Nothing is
 # deployed or pushed.
 
 name: lighthouse-py-compat
 
 on:
+  # Pushes to master only: the environment branches (oci-development, oci-stage, oci-production)
+  # receive what master already passed, so the check is not repeated there.
   push:
+    branches:
+      - master
     paths:
       - 'crates/lighthouse/**'
       - 'crates/lighthouse-client/**'
       - 'crates/platform/**'
-      - 'tools/compat_py_eureka.py'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/lighthouse-py-compat.yml'
-  pull_request:
-    paths:
-      - 'crates/lighthouse/**'
-      - 'crates/lighthouse-client/**'
-      - 'crates/platform/**'
-      - 'tools/compat_py_eureka.py'
+      - 'tools/compat_py_client.py'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/lighthouse-py-compat.yml'
@@ -81,11 +76,11 @@ jobs:
           MODLIX__TELEMETRY__LOG_FORMAT=pretty \
             ./target/debug/lighthouse > lighthouse.log 2>&1 &
           echo $! > lighthouse.pid
-          for i in $(seq 1 100); do
+          for _ in $(seq 1 100); do
             curl -sf -o /dev/null http://127.0.0.1:8761/readyz && break
             sleep 0.2
           done
-          python tools/compat_py_eureka.py http://127.0.0.1:8761/eureka/
+          python tools/compat_py_client.py http://127.0.0.1:8761/eureka/
 
       - name: Stop lighthouse and show its log
         if: always()

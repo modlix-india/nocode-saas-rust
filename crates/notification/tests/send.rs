@@ -12,8 +12,11 @@ use common::{Answer, Fake, CONN_PATH, NOTIF_PATH, USERS_PATH};
 use notification::calls::{CoreClient, DirectoryClient};
 use notification::email::EmailSink;
 use notification::inapp::InAppSink;
-use notification::model::{CoreNotification, MailConnection, NotificationUser, QueueMessage};
+use notification::model::{CoreNotification, MailConnection, NotificationUser, PushConnection, QueueMessage};
+use notification::push::Push;
+use notification::push_send::PushSink;
 use notification::send::{Outcome, SendService};
+use notification::sse::Hub;
 use parking_lot::Mutex;
 use platform::upstream::Upstream;
 use serde_json::{json, Map, Value};
@@ -22,13 +25,29 @@ use serde_json::{json, Map, Value};
 struct Sinks {
     emails: Mutex<Vec<(Option<i64>, Option<String>)>>,
     in_app: Mutex<Vec<(usize, Option<String>, Option<String>, Value)>>,
-    fail_email: Mutex<bool>,
+    /// The recipient whose mail the email service refuses.
+    fail_email: Mutex<Option<i64>>,
+    fail_in_app: Mutex<bool>,
+    /// Each push: the recipients' ids, the app, and the client's PUSH connection details.
+    pushes: Mutex<Vec<(Vec<Option<i64>>, String, Option<Map<String, Value>>)>>,
+    fail_push: Mutex<bool>,
+}
+
+#[async_trait]
+impl PushSink for Sinks {
+    async fn send_push(&self, users: &[NotificationUser], _: &CoreNotification, app: &str, c: &PushConnection, _: &Map<String, Value>) -> Result<usize> {
+        if *self.fail_push.lock() {
+            anyhow::bail!("FCM is down");
+        }
+        self.pushes.lock().push((users.iter().map(|u| u.id).collect(), app.to_string(), c.details.clone()));
+        Ok(users.len())
+    }
 }
 
 #[async_trait]
 impl EmailSink for Sinks {
     async fn send_email(&self, user: &NotificationUser, mail: &MailConnection, _: &CoreNotification, _: &Map<String, Value>) -> Result<bool> {
-        if *self.fail_email.lock() {
+        if user.id.is_some() && *self.fail_email.lock() == user.id {
             anyhow::bail!("SendGrid refused");
         }
         self.emails.lock().push((user.id, mail.connection_sub_type.clone()));
@@ -46,6 +65,9 @@ impl InAppSink for Sinks {
         category: Option<&str>,
         payload: &Map<String, Value>,
     ) -> Result<()> {
+        if *self.fail_in_app.lock() {
+            anyhow::bail!("the in-app table is locked");
+        }
         self.in_app.lock().push((users.len(), app_code.map(str::to_string), category.map(str::to_string), Value::Object(payload.clone())));
         Ok(())
     }
@@ -69,6 +91,9 @@ async fn rig() -> Rig {
         directory: DirectoryClient::new(Upstream::fixed(&[&sec_base]), t).unwrap(),
         email: sinks.clone(),
         in_app: sinks.clone(),
+        push: Push::local(Hub::new(8)),
+        prefs: None,
+        devices: None,
     };
     // Only the in-app channel: which channel fires is not what the draft tests are about.
     core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true})));
@@ -213,17 +238,17 @@ async fn channels_are_chosen_from_connection_and_templates() {
     let r = rig().await;
     // A mail connection but only an in-app template: in-app only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 0 });
 
     // Both templates, both channels; every recipient gets mail, then in-app runs once.
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
     r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2, "emailId": "b@x.com"}])));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 0 });
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(1), Some("SMTP".into())), (Some(2), Some("SMTP".into()))]);
 
     // The connection does not allow in-app: email only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": false, "mail": {"connectionSubType": "SENDGRID"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0, failed: 0 });
 
     // No mail connection and no in-app: nothing to send, and no recipients asked for.
     r.security.clear();
@@ -244,14 +269,63 @@ async fn channels_are_chosen_from_connection_and_templates() {
     assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::NoChannel);
 }
 
+/// A source of preference maps answering from a fixed table.
+struct Prefs(std::collections::HashMap<u64, Map<String, Value>>);
+
+#[async_trait]
+impl notification::choices::PreferenceSource for Prefs {
+    async fn preferences(&self, app: &str, ids: &[u64]) -> Result<std::collections::HashMap<u64, Map<String, Value>>> {
+        assert_eq!(app, "testapp");
+        Ok(self.0.iter().filter(|(k, _)| ids.contains(k)).map(|(k, v)| (*k, v.clone())).collect())
+    }
+}
+
 #[tokio::test]
-async fn a_failed_mail_stops_the_rest() {
+async fn each_recipient_gets_the_channels_they_chose() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
+    // Email is opt in for this notification; in-app keeps the default (on).
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}, "channelEnabled": {"email": false}})));
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}, {"id": 3}, {"clientId": 9}])));
+    let obj = |v: Value| v.as_object().unwrap().clone();
+    let prefs = Prefs(
+        [
+            (2, obj(json!({"channels": {"email": true}}))),
+            (3, obj(json!({"categories": {"SYSTEM": {"email": true, "inapp": false}}}))),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let service = SendService { prefs: Some(Arc::new(prefs)), ..r.service };
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 0 });
+    assert_eq!(*r.sinks.emails.lock(), vec![(Some(2), Some("SMTP".into())), (Some(3), Some("SMTP".into()))]);
+    assert_eq!(r.sinks.in_app.lock()[0].0, 3, "users 1, 2 and the one without an id; 3 turned in-app off");
+
+    // Nobody wants in-app: it does not run.
+    r.sinks.in_app.lock().clear();
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 3}])));
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false, pushed: 0, failed: 0 });
+    assert!(r.sinks.in_app.lock().is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_send_never_stops_the_others() {
     let r = rig().await;
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SENDGRID"}})));
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
-    *r.sinks.fail_email.lock() = true;
-    assert!(r.service.send(&message(false)).await.is_err());
-    assert!(r.sinks.in_app.lock().is_empty(), "in-app never ran");
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}, {"id": 3}])));
+    // The second recipient's mail is refused: the first and third still get theirs, and the
+    // in-app rows are stored for all three.
+    *r.sinks.fail_email.lock() = Some(2);
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 1 });
+    assert_eq!(r.sinks.emails.lock().iter().map(|e| e.0).collect::<Vec<_>>(), vec![Some(1), Some(3)]);
+    assert_eq!(r.sinks.in_app.lock().first().map(|i| i.0), Some(3));
+
+    // In-app failing too: the mails still went, and the run still ends without an error.
+    r.sinks.emails.lock().clear();
+    *r.sinks.fail_in_app.lock() = true;
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0, failed: 2 });
+    assert_eq!(r.sinks.emails.lock().len(), 2);
 }
 
 #[tokio::test]
@@ -286,6 +360,39 @@ async fn targets_become_the_users_request() {
     assert_eq!(out.unwrap(), Outcome::NoUsers);
 }
 
+/// A normal (bell and email) notification asks security only for the users holding its
+/// `filterAuthorization` (DIFFERENCES N15), and both channels go to exactly those users.
+#[tokio::test]
+async fn the_authority_filter_narrows_a_normal_notification() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
+    // Security answers the users that meet the filter: one of the client's users.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 7}])));
+    let m = QueueMessage {
+        target_type: Some("Client Id".into()),
+        target_id: Some(3),
+        filter_authorization: Some("Authorities.Calls".into()),
+        ..message(false)
+    };
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true, pushed: 0, failed: 0 });
+    let asked = r.security.calls_to(USERS_PATH);
+    assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "testapp", "filterAuthorization": "Authorities.Calls"}));
+    assert_eq!(*r.sinks.emails.lock(), vec![(Some(7), Some("SMTP".into()))]);
+    assert_eq!(r.sinks.in_app.lock()[0].0, 1, "the in-app rows are for the filtered users only");
+
+    // A blank filter is no filter.
+    r.security.clear();
+    r.service.send(&QueueMessage { filter_authorization: Some("  ".into()), ..m.clone() }).await.unwrap();
+    assert_eq!(r.security.calls_to(USERS_PATH)[0].json(), json!({"clientId": 3, "appCode": "testapp"}));
+
+    // Nobody meets it: nothing more is sent.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([])));
+    let (emails, in_app) = (r.sinks.emails.lock().len(), r.sinks.in_app.lock().len());
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::NoUsers);
+    assert_eq!((r.sinks.emails.lock().len(), r.sinks.in_app.lock().len()), (emails, in_app));
+}
+
 #[tokio::test]
 async fn the_connection_read_can_have_its_own_upstream() {
     let r = rig().await;
@@ -309,4 +416,131 @@ async fn payload_reaches_the_sinks() {
     let m = QueueMessage { payload: Some(json!({"who": "Ann"}).as_object().unwrap().clone()), notification_category: None, ..message(false) };
     r.service.send(&m).await.unwrap();
     assert_eq!(r.sinks.in_app.lock()[0], (1, Some("testapp".into()), None, json!({"who": "Ann"})));
+}
+
+// ----------------------------------------------------------------- data notifications
+
+/// A data notification for the users of client 3 holding `Authorities.Calls`.
+fn data_message(expires_at: Option<i128>) -> QueueMessage {
+    QueueMessage {
+        app_code: Some("leadzumptwo".into()),
+        client_code: Some("FIN".into()),
+        target_type: Some("Client Id".into()),
+        target_id: Some(3),
+        filter_authorization: Some("Authorities.Calls".into()),
+        kind: Some("DATA".into()),
+        event_name: Some("incomingCall".into()),
+        data: Some(json!({"from": "+9180", "lead": {"id": 9}})),
+        expires_at,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_data_notification_reaches_the_open_streams_and_nothing_else() {
+    use futures::StreamExt;
+    let r = rig().await;
+    let hub = Hub::new(8);
+    let service = SendService { push: Push::local(hub.clone()), ..r.service };
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 142, "clientId": 3}, {"id": 143, "clientId": 3}, {"id": 142, "clientId": 3}, {"clientId": 3}])));
+    let mut a = hub.subscribe("142-leadzumptwo".into());
+    let mut b = hub.subscribe("143-leadzumptwo".into());
+    let mut other_app = hub.subscribe("142-leadzump".into());
+    for s in [&mut a, &mut b, &mut other_app] {
+        let _ = s.next().await;
+    }
+    let now = 1_792_634_021_000;
+    let outcome = service.send_data(&data_message(Some(now + 60_000)), now).await.unwrap();
+    assert_eq!(outcome, Outcome::Pushed { users: 2 }, "each user once");
+
+    let frame = String::from_utf8(a.next().await.unwrap().unwrap().to_vec()).unwrap();
+    assert!(frame.starts_with("event:incomingCall\ndata:{\"event\":\"incomingCall\",\"data\":{\"from\":\"+9180\",\"lead\":{\"id\":9}},\"id\":\""), "{frame}");
+    let data_line = frame.lines().nth(1).unwrap().strip_prefix("data:").unwrap();
+    let body: Value = serde_json::from_str(data_line).unwrap();
+    assert_eq!(body["sentAt"], json!(now as i64));
+    assert_eq!(frame.lines().nth(2).unwrap(), format!("id:{}", body["id"].as_str().unwrap()));
+    assert!(frame.ends_with("\nretry:5000\n\n"));
+    assert_eq!(String::from_utf8(b.next().await.unwrap().unwrap().to_vec()).unwrap(), frame);
+    assert!(tokio::time::timeout(Duration::from_millis(50), other_app.next()).await.is_err(), "another app's stream hears nothing");
+
+    // No definition was read, nothing went to email or in-app; recipients were asked for with
+    // the authority filter.
+    assert!(r.core.calls.lock().is_empty());
+    assert!(r.sinks.emails.lock().is_empty() && r.sinks.in_app.lock().is_empty());
+    let asked = r.security.calls_to(USERS_PATH);
+    assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "leadzumptwo", "filterAuthorization": "Authorities.Calls"}));
+
+    // Through `send`, as the queue runs it: the clock is the real one.
+    let far = i128::from(chrono::Utc::now().timestamp_millis()) + 60_000;
+    assert_eq!(service.send(&data_message(Some(far))).await.unwrap(), Outcome::Pushed { users: 2 });
+    assert_eq!(service.send(&data_message(None)).await.unwrap(), Outcome::Pushed { users: 2 }, "no expiry: delivered");
+}
+
+#[tokio::test]
+async fn data_notifications_that_end_early() {
+    let r = rig().await;
+    let service = SendService { push: Push::local(Hub::new(8)), ..r.service };
+    let now = 1_792_634_021_000;
+    // Expired: dropped before anyone is asked.
+    assert_eq!(service.send_data(&data_message(Some(now - 1)), now).await.unwrap(), Outcome::Expired);
+    assert!(r.security.calls_to(USERS_PATH).is_empty());
+    // Nobody to tell.
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([])));
+    assert_eq!(service.send_data(&data_message(Some(now)), now).await.unwrap(), Outcome::NoUsers);
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"clientId": 3}])));
+    assert_eq!(service.send_data(&data_message(None), now).await.unwrap(), Outcome::NoUsers, "users without ids");
+    // Unusable messages fail (and are acked by the listener).
+    let no_event = QueueMessage { event_name: None, ..data_message(None) };
+    assert!(service.send_data(&no_event, now).await.unwrap_err().to_string().contains("event name"));
+    let no_app = QueueMessage { app_code: Some(String::new()), ..data_message(None) };
+    assert!(service.send_data(&no_app, now).await.unwrap_err().to_string().contains("app code"));
+    r.security.answer("POST", USERS_PATH, Answer::json(json!({"not": "a list"})));
+    assert!(service.send_data(&data_message(None), now).await.is_err());
+    let unknown = QueueMessage { kind: Some("LATER".into()), ..data_message(None) };
+    assert!(service.send(&unknown).await.unwrap_err().to_string().contains("Unknown notification kind: LATER"));
+    assert!(r.core.calls.lock().is_empty());
+}
+
+#[tokio::test]
+async fn push_goes_to_who_wants_it_and_never_fails_the_message() {
+    let r = rig().await;
+    let service = SendService { devices: Some(r.sinks.clone()), ..r.service };
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}])));
+    // Push only, with the platform's credentials, from the inapp template.
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}}})));
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: false, pushed: 2, failed: 0 });
+    assert!(r.sinks.in_app.lock().is_empty(), "the connection has no inApp");
+    assert_eq!(r.sinks.pushes.lock()[0], (vec![Some(1), Some(2)], "testapp".to_string(), None));
+
+    // The client's own PUSH connection reaches the sink; in-app and push both run.
+    r.sinks.pushes.lock().clear();
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "push": {"connectionDetails": {"apns": {"teamId": "T"}}}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "push": {}}, "channelEnabled": {"push": false}})));
+    let prefs = Prefs([(2, json!({"channels": {"push": true}}).as_object().unwrap().clone())].into_iter().collect());
+    let chooser = SendService { prefs: Some(Arc::new(prefs)), ..service };
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 1, failed: 0 });
+    let pushes = r.sinks.pushes.lock().clone();
+    assert_eq!(pushes[0].0, vec![Some(2)], "push is opt in here: only 2 turned it on");
+    assert_eq!(pushes[0].2.as_ref().unwrap()["apns"]["teamId"], "T");
+
+    // A failing push service is logged; the message still went out.
+    *r.sinks.fail_push.lock() = true;
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 1 });
+    *r.sinks.fail_push.lock() = false;
+
+    // An email-only definition has nothing to push.
+    r.sinks.pushes.lock().clear();
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"email": {}}})));
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::NoChannel);
+    assert!(r.sinks.pushes.lock().is_empty());
+}
+
+#[tokio::test]
+async fn without_a_push_sink_push_is_no_channel() {
+    let r = rig().await;
+    r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
+    r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}}})));
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::NoChannel);
 }

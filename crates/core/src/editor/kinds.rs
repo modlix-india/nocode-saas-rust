@@ -25,6 +25,7 @@ use platform::security::ContextAuthentication;
 use crate::docs::{ConnectionDoc, EventActionDoc, EventDefinitionDoc, FunctionDoc, SchemaDoc, StorageDoc, TemplateDoc};
 use crate::editor::beans::{self, T};
 use crate::editor::docs::{self as edocs, ActionDoc, NotificationDoc, WorkflowDoc};
+use crate::editor::secrets;
 use crate::editor::storage::StorageOps;
 
 /// core's own message ids (`CoreMessageResourceService`).
@@ -173,7 +174,7 @@ impl CoreObject {
             CoreObject::EventDefinition => &["schema", "schedule"],
             CoreObject::EventAction => &["tasks"],
             CoreObject::Action => &["functionName", "functionNamespace", "properties"],
-            CoreObject::Connection => &["connectionSubType", "connectionDetails", "isAppLevel", "onlyThruKIRun"],
+            CoreObject::Connection => &["connectionSubType", "connectionDetails", "isAppLevel", "onlyThruKIRun", "consentAuth"],
             _ => &[],
         }
     }
@@ -183,11 +184,20 @@ impl CoreObject {
 pub struct CoreKind {
     pub object: CoreObject,
     pub storage: Arc<StorageOps>,
+    /// `[connections] block_private_targets` for a saved connection's addresses (on unless
+    /// configured off, which only a local stack does).
+    pub block_private_targets: bool,
 }
 
 impl CoreKind {
     pub fn new(object: CoreObject, storage: Arc<StorageOps>) -> Self {
-        Self { object, storage }
+        Self { object, storage, block_private_targets: true }
+    }
+
+    /// The save-time private-target rule as `[connections] block_private_targets` sets it.
+    pub fn with_block_private_targets(mut self, block_private_targets: bool) -> Self {
+        self.block_private_targets = block_private_targets;
+        self
     }
 }
 
@@ -295,13 +305,14 @@ fn normalize_typed(object: CoreObject, e: &mut JMap) -> AppResult<()> {
     Ok(())
 }
 
-/// `OutboundUrlUtil.validateConnectionDetails`: a connection may not point inside the network.
-async fn outbound_check(e: &JMap) -> AppResult<()> {
+/// `OutboundUrlUtil.validateConnectionDetails`: a connection may not point inside the network,
+/// unless `[connections] block_private_targets` is off (Rust only, local development).
+async fn outbound_check(e: &JMap, block_private_targets: bool) -> AppResult<()> {
     let details = map_field(e, "connectionDetails").map(|m| match crate::editor::storage::gson_of(m) {
         serde_json::Value::Object(o) => o,
         _ => serde_json::Map::new(),
     });
-    connections::outbound::validate_connection_details(details.as_ref())
+    connections::outbound::validate_connection_details_with(details.as_ref(), block_private_targets)
         .await
         .map_err(|err| {
             let status = StatusCode::from_u16(err.status().as_u16()).unwrap_or(StatusCode::BAD_REQUEST);
@@ -333,7 +344,7 @@ impl Kind for CoreKind {
                 None => return Err(cx.error(StatusCode::BAD_REQUEST, msg::NAME_MISSING, &[])),
             },
             CoreObject::Storage => self.storage.before_create(cx, ca, e).await?,
-            CoreObject::Connection => outbound_check(e).await?,
+            CoreObject::Connection => outbound_check(e, self.block_private_targets).await?,
             CoreObject::Workflow => {
                 if e.get("trigger").is_none_or(JValue::is_null) {
                     return Err(cx.error(StatusCode::INTERNAL_SERVER_ERROR, WORKFLOW_TRIGGER_MISSING, &[]));
@@ -396,7 +407,7 @@ impl Kind for CoreKind {
                 }
             }
             CoreObject::Connection => {
-                outbound_check(incoming).await?;
+                outbound_check(incoming, self.block_private_targets).await?;
                 for f in self.object.updatable() {
                     existing.insert(f.to_string(), incoming.get(*f).cloned().unwrap_or_default());
                 }
@@ -470,6 +481,30 @@ impl Kind for CoreKind {
             entity.insert("connectionDetails".into(), back);
         }
         Ok(entity)
+    }
+
+    /// A connection's credentials never leave core-editor (see [`secrets`]).
+    fn redact(&self, entity: JMap) -> JMap {
+        match self.object {
+            CoreObject::Connection => secrets::masked(entity),
+            _ => entity,
+        }
+    }
+
+    /// A connection saved back with its credentials withheld keeps the stored ones; one with
+    /// nothing stored to keep leaves the withheld ones out rather than storing the mask.
+    fn keep_withheld(&self, incoming: &mut JMap, current: Option<&JMap>) {
+        if self.object != CoreObject::Connection {
+            return;
+        }
+        if let Some(c) = current {
+            secrets::keep_stored(incoming, c);
+        }
+        secrets::drop_withheld(incoming);
+    }
+
+    fn filterable(&self, field: &str) -> bool {
+        self.object != CoreObject::Connection || secrets::filterable(field, "")
     }
 
     fn transport_dependencies(&self, e: &JMap) -> Vec<String> {

@@ -151,7 +151,7 @@ async fn github_by_etag_and_tarball() {
     assert_eq!(env["version"], SHA1);
     assert_eq!(env["propertySources"][0]["name"], "https://github.com/o/r.git/security-ocidev.yml");
     assert_eq!(env["propertySources"][3]["name"], "https://github.com/o/r.git/application.yml (document #1)");
-    let view: Value = get(format!("{}/v1/config", n.url), None).await.json().await.unwrap();
+    let view: Value = get(format!("{}/v1/config", n.url), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     assert_eq!((view["source"]["kind"].as_str(), view["source"]["where"].as_str()), (Some("github"), Some("o/r")));
     assert_eq!(view["snapshot"]["from"], "github");
 
@@ -175,7 +175,7 @@ async fn github_by_etag_and_tarball() {
     // GitHub's head stays that commit (a 304 now): the error stays shown.
     assert!(!cs.poll_once().await);
     assert!(cs.status().last_error.unwrap().contains("is not served"));
-    let view: Value = get(format!("{}/v1/config", n.url), None).await.json().await.unwrap();
+    let view: Value = get(format!("{}/v1/config", n.url), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     assert_eq!(view["rejectedCommit"], SHA3);
 
     // The last good snapshot was kept, readable by Lighthouse only.
@@ -248,7 +248,7 @@ async fn a_directory_is_read_again() {
     std::fs::write(dir.join("application.yml"), "a: [1\n").unwrap();
     assert!(!cs.poll_once().await);
     assert_eq!(version(&n, "multi").await, after);
-    let view: Value = get(format!("{url}/v1/config"), None).await.json().await.unwrap();
+    let view: Value = get(format!("{url}/v1/config"), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     assert!(view["lastError"].as_str().unwrap().contains("application.yml"), "{view}");
     std::fs::remove_dir_all(&dir).unwrap();
 }

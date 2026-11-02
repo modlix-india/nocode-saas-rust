@@ -56,7 +56,7 @@ pub trait AnyService: Send + Sync {
     async fn publish(&self, ca: &ContextAuthentication, id: &str, message: Option<&str>) -> AppResult<JMap>;
     async fn delete_everything(&self, ca: &ContextAuthentication, app: &str, client: &str) -> AppResult<Option<bool>>;
     async fn read_for_transport(&self, ca: &ContextAuthentication, app: &str, client: &str, names: Option<&[String]>) -> AppResult<Vec<JMap>>;
-    async fn read_to_transport(&self, ca: &ContextAuthentication, name: &str, app: &str, client: &str) -> AppResult<Option<(i64, String)>>;
+    async fn read_to_transport(&self, ca: &ContextAuthentication, name: Option<&str>, app: &str, client: &str) -> AppResult<Option<(i64, String)>>;
     async fn create(&self, ca: &ContextAuthentication, entity: JMap) -> AppResult<JMap>;
     async fn update(&self, ca: &ContextAuthentication, entity: JMap) -> AppResult<JMap>;
     /// `makeEntity`: a transport's map as the class (Jackson `convertValue`), when the type
@@ -90,7 +90,7 @@ impl<K: Kind> AnyService for OverridableService<K> {
         OverridableService::read_for_transport(self, ca, app, client, names).await
     }
 
-    async fn read_to_transport(&self, ca: &ContextAuthentication, name: &str, app: &str, client: &str) -> AppResult<Option<(i64, String)>> {
+    async fn read_to_transport(&self, ca: &ContextAuthentication, name: Option<&str>, app: &str, client: &str) -> AppResult<Option<(i64, String)>> {
         OverridableService::read_to_transport(self, ca, name, app, client).await
     }
 

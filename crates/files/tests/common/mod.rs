@@ -774,3 +774,68 @@ where
     }
     panic!("timed out waiting for {what}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// File names with special characters (CXZ-1138)
+// ---------------------------------------------------------------------------------------------
+
+/// Names that have broken file URLs before: each must upload, read, key, list and delete.
+/// Distinct under the `utf8mb4_unicode_ci` collation (`é` = `e`, trailing spaces ignored), so
+/// no two of them are one row.
+pub fn special_names() -> Vec<String> {
+    let mut names: Vec<String> = [
+        "Money Apartment_11_A-142costsheet.pdf",
+        "plus+sign.pdf",
+        "space and+plus.pdf",
+        "100% sure.pdf",
+        "literal%20twenty.pdf",
+        "Q&A notes.pdf",
+        "C# guide.pdf",
+        "what?.pdf",
+        "a=b;c.pdf",
+        "Cost Sheet (1).pdf",
+        "[draft] {v2}.pdf",
+        "one, two, three.pdf",
+        "Owner's copy.pdf",
+        "नक्शा.pdf",
+        "café menu.pdf",
+        "🏠 floor plan.pdf",
+        "report.final.v2.tar.gz",
+        " leading space.pdf",
+        "trailing space .pdf",
+        "ends in a space.pdf ",
+        "Money%2BApartment%281%29.pdf",
+        "tab~tilde!star*.pdf",
+        "dollar$at@colon:.pdf",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    // Long: 200 characters, past what any UI field shows.
+    names.push(format!("{}.pdf", "long name ".repeat(20).trim_end()));
+    names
+}
+
+/// `encodeURIComponent`: what a browser page builds by hand (space `%20`, `+` `%2B`).
+pub fn uri_component(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Each segment of `path` as the service's own `url` spells a name (`URLEncoder`: space `+`).
+pub fn java_path(path: &str) -> String {
+    path.split('/').map(files::spring::url_encode).collect::<Vec<_>>().join("/")
+}
+
+/// Each segment of `path` as `encodeURIComponent`.
+pub fn component_path(path: &str) -> String {
+    path.split('/').map(uri_component).collect::<Vec<_>>().join("/")
+}

@@ -1,0 +1,509 @@
+//! Push notifications (Rust only): to the browsers (Web Push), Android phones (FCM) and iPhones
+//! (APNs) the recipients registered in the app. Not to be confused with [`crate::push`], which
+//! carries SSE frames between instances.
+//!
+//! A notification goes out as push when its NOTIFICATION connection has `push` and it has a
+//! `push` template, or, without one, an `inapp` template (whose `title`, `description`, `image`
+//! and `url` are used). Each device is reached with the credentials of the account it was built
+//! against: the client's own (the PUSH connection) when the account matches, otherwise the
+//! platform's ([`crate::config::PushSection`]) when that matches, otherwise the key the client
+//! uploaded for the app and that account (`notification_push_key`). Devices the push services
+//! call gone are deleted; any other failure is logged and never stops the notification.
+
+pub mod apns;
+pub mod fcm;
+pub mod keys;
+pub mod webpush;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use async_trait::async_trait;
+use futures::StreamExt;
+use parking_lot::Mutex;
+use serde_json::{json, Map, Value};
+
+use crate::calls::CoreClient;
+use crate::config::PushSection;
+use crate::dao::{Dao, DeviceRow, Platform, PushKeyRow};
+use crate::inapp::INAPP_TEMPLATE_NAME;
+use crate::model::{CoreNotification, NotificationUser, PushConnection};
+use crate::template::{language, processed_template};
+
+use apns::{Apns, ApnsAccount};
+use fcm::{Fcm, FcmAccount};
+use webpush::{Vapid, WebPush};
+
+pub const PUSH_TEMPLATE_NAME: &str = "push";
+
+/// Devices reached at once for one notification.
+const PARALLEL: usize = 16;
+
+/// What a push service made of one device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Delivery {
+    Sent,
+    /// The device will never take a push again (unsubscribed, uninstalled, bad token).
+    Gone(String),
+    Failed(String),
+}
+
+/// What every platform shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushMessage {
+    pub title: String,
+    pub body: String,
+    pub image: Option<String>,
+    /// Opened on a tap.
+    pub url: Option<String>,
+    /// Collapses repeats of the same notification on the device.
+    pub notification_id: String,
+    pub app_code: String,
+}
+
+impl PushMessage {
+    /// The fields a tap needs, as strings (FCM data takes nothing else).
+    pub fn data(&self) -> Vec<(&'static str, String)> {
+        let mut d = vec![("notificationId", self.notification_id.clone()), ("appCode", self.app_code.clone())];
+        if let Some(u) = &self.url {
+            d.push(("url", u.clone()));
+        }
+        d
+    }
+
+    /// The Web Push payload the service worker reads.
+    pub fn web_json(&self) -> Value {
+        json!({"title": self.title, "body": self.body, "image": self.image, "url": self.url,
+               "notificationId": self.notification_id, "appCode": self.app_code})
+    }
+}
+
+fn filled(s: Option<&String>) -> Option<String> {
+    s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
+/// The message from the `push` template, or from the `inapp` one when there is none; `None`
+/// when it renders without a title and a body.
+pub fn render(notification: &CoreNotification, payload: &Map<String, Value>, app_code: &str) -> Result<Option<PushMessage>> {
+    let own = notification.channel(PUSH_TEMPLATE_NAME);
+    let template = own.or_else(|| notification.channel(INAPP_TEMPLATE_NAME));
+    if template.is_none() {
+        return Ok(None);
+    }
+    let lang = language(notification, payload)?;
+    let parts = processed_template(lang.as_deref(), template, payload)?;
+    // `body` first in a push template, `description` first in an inapp one (what the in-app
+    // channel stores); either takes the other, as the template editor writes inapp's as `body`.
+    let (first, second) = if own.is_some() { ("body", "description") } else { ("description", "body") };
+    let body = filled(parts.get(first)).or_else(|| filled(parts.get(second)));
+    let title = filled(parts.get("title"));
+    if title.is_none() && body.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(PushMessage {
+        title: title.unwrap_or_default(),
+        body: body.unwrap_or_default(),
+        image: filled(parts.get("image")),
+        url: filled(parts.get("url")),
+        notification_id: uuid::Uuid::new_v4().to_string(),
+        app_code: app_code.to_string(),
+    }))
+}
+
+/// Where the send service hands push (tests fake it).
+#[async_trait]
+pub trait PushSink: Send + Sync {
+    /// Answers how many devices took it.
+    async fn send_push(
+        &self,
+        users: &[NotificationUser],
+        notification: &CoreNotification,
+        app_code: &str,
+        connection: &PushConnection,
+        payload: &Map<String, Value>,
+    ) -> Result<usize>;
+}
+
+/// The client's own accounts from its PUSH connection: `fcm.credentials` (the service account
+/// JSON) and `apns.{teamId, keyId, privateKey}`. A part that does not parse is logged and left
+/// out, so those devices fall back to the platform's keys.
+pub fn client_accounts(details: Option<&Map<String, Value>>) -> (Option<FcmAccount>, Option<ApnsAccount>) {
+    let Some(d) = details else { return (None, None) };
+    let fcm = d.get("fcm").and_then(|f| f.get("credentials")).and_then(|c| match FcmAccount::from_json(c) {
+        Ok(a) => Some(a),
+        Err(e) => {
+            tracing::error!("PUSH connection fcm: {e:#}");
+            None
+        }
+    });
+    let apns = d.get("apns").and_then(Value::as_object).and_then(|a| {
+        let s = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or("");
+        match ApnsAccount::new(s("teamId"), s("keyId"), s("privateKey")) {
+            Ok(acc) => Some(acc),
+            Err(e) => {
+                tracing::error!("PUSH connection apns: {e:#}");
+                None
+            }
+        }
+    });
+    (fcm, apns)
+}
+
+/// The account for a device built against `account`: the client's when it matches, else the
+/// platform's when that matches; a device that names none takes the client's, else the
+/// platform's.
+pub fn pick<'a, T>(account: Option<&str>, own: Option<&'a T>, platform: Option<&'a T>, id: impl Fn(&T) -> &str) -> Option<&'a T> {
+    match account.map(str::trim).filter(|a| !a.is_empty()) {
+        Some(acc) => own.into_iter().chain(platform).find(|t| id(t) == acc),
+        None => own.or(platform),
+    }
+}
+
+/// A key a client uploaded, ready to sign with.
+#[derive(Clone)]
+pub enum Uploaded {
+    Fcm(Arc<FcmAccount>),
+    Apns(Arc<ApnsAccount>),
+}
+
+impl Uploaded {
+    /// The row's key, checked: a service account JSON for Android, a `.p8` key for iOS.
+    pub fn of(row: &PushKeyRow) -> Result<Self> {
+        Ok(match row.platform {
+            Platform::Android => Self::Fcm(Arc::new(FcmAccount::from_json(&Value::String(row.secret.clone()))?)),
+            Platform::Ios => Self::Apns(Arc::new(ApnsAccount::new(&row.account, row.key_id.as_deref().unwrap_or(""), &row.secret)?)),
+            Platform::Web => anyhow::bail!("Web Push signs with the platform's keys only"),
+        })
+    }
+}
+
+type KeyOf = (String, Platform, String);
+
+pub struct PushService {
+    pub dao: Dao,
+    pub core: CoreClient,
+    pub web: WebPush,
+    /// The platform's web push key from config: what browsers subscribed with before their app
+    /// had its own, and the key handed out when an app's own cannot be read or made.
+    pub platform_vapid: Option<Arc<Vapid>>,
+    pub fcm: Fcm,
+    pub apns: Apns,
+    pub platform_fcm: Option<Arc<FcmAccount>>,
+    pub platform_apns: Option<Arc<ApnsAccount>>,
+    /// Per app: whether it has notifications, and since when that is known.
+    apps: Mutex<HashMap<String, (bool, Instant)>>,
+    app_check: Duration,
+    /// Per app, platform and account: the uploaded key (or none), and since when that is known.
+    uploaded: Mutex<HashMap<KeyOf, (Option<Uploaded>, Instant)>>,
+    /// Per app: its own web push key (or none), and since when that is known.
+    app_vapid: Mutex<HashMap<String, (Option<Arc<Vapid>>, Instant)>>,
+}
+
+impl PushService {
+    /// From the `[push]` section. A credential that does not parse turns that platform off
+    /// (logged), rather than stopping the unit.
+    pub fn new(dao: Dao, core: CoreClient, cfg: &PushSection) -> Result<Self> {
+        let timeout = Duration::from_secs(cfg.timeout_seconds.max(1));
+        let platform_vapid = if cfg.vapid_public_key.is_empty() || cfg.vapid_private_key.is_empty() {
+            None
+        } else {
+            Vapid::new(&cfg.vapid_public_key, &cfg.vapid_private_key)
+                .map_err(|e| tracing::error!("[push] VAPID keys: {e:#}; only apps' own keys are used"))
+                .ok()
+                .map(Arc::new)
+        };
+        let platform_fcm = (!cfg.fcm_credentials.trim().is_empty())
+            .then(|| FcmAccount::from_json(&Value::String(cfg.fcm_credentials.clone())))
+            .and_then(|r| r.map_err(|e| tracing::error!("[push] fcm_credentials: {e:#}")).ok())
+            .map(Arc::new);
+        let platform_apns = (!cfg.apns_private_key.trim().is_empty())
+            .then(|| ApnsAccount::new(&cfg.apns_team_id, &cfg.apns_key_id, &cfg.apns_private_key))
+            .and_then(|r| r.map_err(|e| tracing::error!("[push] apns keys: {e:#}")).ok())
+            .map(Arc::new);
+        Ok(Self {
+            dao,
+            core,
+            web: WebPush::new(&cfg.vapid_subject, timeout)?,
+            platform_vapid,
+            fcm: Fcm::new(timeout)?,
+            apns: Apns::new(timeout)?,
+            platform_fcm,
+            platform_apns,
+            apps: Mutex::new(HashMap::new()),
+            app_check: Duration::from_secs(cfg.app_check_seconds),
+            uploaded: Mutex::new(HashMap::new()),
+            app_vapid: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// The app's own web push key, if someone allowed to change the app has made one; kept
+    /// `app_check_seconds` on this instance. A failed read is logged, not kept, and answers
+    /// none (the platform's key is used meanwhile).
+    pub async fn app_vapid(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        if let Some((k, at)) = self.app_vapid.lock().get(app_code) {
+            if at.elapsed() < self.app_check {
+                return k.clone();
+            }
+        }
+        self.read_app_vapid(app_code).await
+    }
+
+    async fn read_app_vapid(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        let read = async {
+            match self.dao.app_vapid_key(app_code).await? {
+                Some((_, private)) => Vapid::stored(&private).map(|k| Some(Arc::new(k))),
+                None => Ok(None),
+            }
+        };
+        match read.await {
+            Ok(k) => {
+                self.app_vapid.lock().insert(app_code.to_string(), (k.clone(), Instant::now()));
+                k
+            }
+            Err(e) => {
+                tracing::error!("web push key of {app_code}: {e:#}");
+                None
+            }
+        }
+    }
+
+    /// Makes the app's own web push key; with `replace`, a new one even when it has one (every
+    /// browser subscribed with the old one gets nothing until it subscribes again, which it does
+    /// quietly at its next sign-in). The caller has checked the person may change the app.
+    pub async fn make_app_vapid(&self, app_code: &str, replace: bool) -> Result<Arc<Vapid>> {
+        let (made, private) = Vapid::generate()?;
+        self.dao.add_app_vapid_key(app_code, made.public_key(), &private, replace).await?;
+        // Without `replace`, another request may have made one first: whichever was kept is it.
+        self.read_app_vapid(app_code).await.ok_or_else(|| anyhow::anyhow!("the web push key of {app_code} was not kept"))
+    }
+
+    /// The key a browser of this app subscribes with now: the app's own, else the platform's;
+    /// `None` when there is neither (no Web Push).
+    pub async fn web_key(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        match self.app_vapid(app_code).await {
+            Some(k) => Some(k),
+            None => self.platform_vapid.clone(),
+        }
+    }
+
+    /// The key a browser subscription was made with: the one whose public half the device was
+    /// registered with, and the platform's for a device registered before apps had their own.
+    pub async fn web_key_of(&self, d: &DeviceRow) -> Option<Arc<Vapid>> {
+        let Some(public) = d.provider_account.as_deref().filter(|a| !a.is_empty()) else { return self.platform_vapid.clone() };
+        if let Some(k) = self.platform_vapid.as_ref().filter(|k| k.public_key() == public) {
+            return Some(k.clone());
+        }
+        match self.app_vapid(&d.app_code).await.filter(|k| k.public_key() == public) {
+            Some(k) => Some(k),
+            // Made or replaced on another instance since this one last read it.
+            None => self.read_app_vapid(&d.app_code).await.filter(|k| k.public_key() == public),
+        }
+    }
+
+    /// Whether the app has a notification that reaches the screen; push is offered only then,
+    /// so a site without notifications never registers a service worker. Kept for
+    /// `app_check_seconds`; a failed check answers no and is not kept.
+    pub async fn app_has_notifications(&self, app_code: &str) -> bool {
+        if let Some((yes, at)) = self.apps.lock().get(app_code) {
+            if at.elapsed() < self.app_check {
+                return *yes;
+            }
+        }
+        match self.core.app_notification_count(app_code).await {
+            Ok(n) => {
+                self.apps.lock().insert(app_code.to_string(), (n > 0, Instant::now()));
+                n > 0
+            }
+            Err(e) => {
+                tracing::warn!("could not check the notifications of {app_code}: {e:#}");
+                false
+            }
+        }
+    }
+
+    /// The key uploaded for the device's app and account, kept `app_check_seconds` on this
+    /// instance (an upload here forgets it at once). A key that no longer parses is logged and
+    /// taken as none; a failed read is not kept.
+    pub async fn uploaded(&self, d: &DeviceRow) -> Option<Uploaded> {
+        let account = d.provider_account.as_deref().map(str::trim).filter(|a| !a.is_empty())?;
+        let at: KeyOf = (d.app_code.clone(), d.platform, account.to_string());
+        if let Some((k, when)) = self.uploaded.lock().get(&at) {
+            if when.elapsed() < self.app_check {
+                return k.clone();
+            }
+        }
+        let key = match self.dao.push_key(&d.app_code, d.platform, account).await {
+            Ok(row) => row.and_then(|r| {
+                Uploaded::of(&r).map_err(|e| tracing::error!("push key of {} {} {account}: {e:#}", d.app_code, d.platform.name())).ok()
+            }),
+            Err(e) => {
+                tracing::warn!("could not read the push key of {} {account}: {e:#}", d.app_code);
+                return None;
+            }
+        };
+        self.uploaded.lock().insert(at, (key.clone(), Instant::now()));
+        key
+    }
+
+    /// After an upload: the next push reads the key again.
+    pub fn forget_uploaded(&self, app_code: &str, platform: Platform, account: &str) {
+        self.uploaded.lock().remove(&(app_code.to_string(), platform, account.to_string()));
+    }
+
+    async fn deliver_to(&self, d: &DeviceRow, m: &PushMessage, own_fcm: Option<&FcmAccount>, own_apns: Option<&ApnsAccount>) -> (u64, Platform, Delivery) {
+        (d.id, d.platform, self.deliver(d, m, own_fcm, own_apns).await)
+    }
+
+    async fn deliver(&self, d: &DeviceRow, m: &PushMessage, own_fcm: Option<&FcmAccount>, own_apns: Option<&ApnsAccount>) -> Delivery {
+        match d.platform {
+            Platform::Web => match self.web_key_of(d).await {
+                Some(k) => self.web.send(&k, &d.token, d.web_p256dh.as_deref(), d.web_auth.as_deref(), m.web_json().to_string().as_bytes()).await,
+                None => Delivery::Failed("no web push key for this subscription".into()),
+            },
+            Platform::Android => {
+                let found = pick(d.provider_account.as_deref(), own_fcm, self.platform_fcm.as_deref(), |a| a.project_id.as_str());
+                let uploaded = if found.is_none() { self.uploaded(d).await } else { None };
+                let upl = match &uploaded {
+                    Some(Uploaded::Fcm(a)) => Some(a.as_ref()),
+                    _ => None,
+                };
+                match found.or(upl) {
+                    Some(a) => self.fcm.send(a, &d.token, m).await,
+                    None => Delivery::Failed(format!("no FCM credentials for project {:?}", d.provider_account)),
+                }
+            }
+            Platform::Ios => {
+                let Some(topic) = d.app_identifier.as_deref().filter(|t| !t.is_empty()) else {
+                    return Delivery::Gone("iOS device without a bundle id".into());
+                };
+                let found = pick(d.provider_account.as_deref(), own_apns, self.platform_apns.as_deref(), |a| a.team_id.as_str());
+                let uploaded = if found.is_none() { self.uploaded(d).await } else { None };
+                let upl = match &uploaded {
+                    Some(Uploaded::Apns(a)) => Some(a.as_ref()),
+                    _ => None,
+                };
+                match found.or(upl) {
+                    Some(a) => self.apns.send(a, &d.token, topic, d.apns_env.as_deref() == Some("sandbox"), m).await,
+                    None => Delivery::Failed(format!("no APNs key for team {:?}", d.provider_account)),
+                }
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl PushSink for PushService {
+    async fn send_push(
+        &self,
+        users: &[NotificationUser],
+        notification: &CoreNotification,
+        app_code: &str,
+        connection: &PushConnection,
+        payload: &Map<String, Value>,
+    ) -> Result<usize> {
+        let Some(message) = render(notification, payload, app_code)? else { return Ok(0) };
+        let ids: Vec<u64> = users.iter().filter_map(|u| u.id).filter_map(|id| u64::try_from(id).ok()).collect();
+        let devices = self.dao.devices_of(app_code, &ids).await?;
+        if devices.is_empty() {
+            return Ok(0);
+        }
+        let (own_fcm, own_apns) = client_accounts(connection.details.as_ref());
+        // Collected first: a lazy `map` held across the await trips async_trait's `Send` bound.
+        let sends: Vec<_> = devices.iter().map(|d| self.deliver_to(d, &message, own_fcm.as_ref(), own_apns.as_ref())).collect();
+        let results: Vec<(u64, Platform, Delivery)> = futures::stream::iter(sends).buffer_unordered(PARALLEL).collect().await;
+
+        let mut sent = 0;
+        let mut gone = Vec::new();
+        for (id, platform, delivery) in results {
+            let label = platform.name();
+            let outcome = match delivery {
+                Delivery::Sent => {
+                    sent += 1;
+                    "sent"
+                }
+                Delivery::Gone(why) => {
+                    tracing::info!("push device {id} ({label}) is gone: {why}");
+                    gone.push(id);
+                    "gone"
+                }
+                Delivery::Failed(why) => {
+                    tracing::warn!("push to device {id} ({label}) failed: {why}");
+                    "failed"
+                }
+            };
+            metrics::counter!("notification_push_total", "platform" => label, "outcome" => outcome).increment(1);
+        }
+        self.dao.delete_devices(&gone).await?;
+        Ok(sent)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn notification(v: Value) -> CoreNotification {
+        CoreNotification::from_json(&v).unwrap()
+    }
+
+    fn data() -> Map<String, Value> {
+        json!({"who": "Ann", "id": 7}).as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn own_template_first_then_inapp() {
+        let both = notification(json!({"channelTemplates": {
+            "inapp": {"templateParts": {"en": {"title": "In-app ${who}", "description": "long text"}}},
+            "push": {"templateParts": {"en": {"title": "Push ${who}", "body": "short", "url": "/page/leads/${id}"}}}
+        }}));
+        let m = render(&both, &data(), "app").unwrap().unwrap();
+        assert_eq!((m.title.as_str(), m.body.as_str(), m.url.as_deref()), ("Push Ann", "short", Some("/page/leads/7")));
+        assert_eq!(m.app_code, "app");
+
+        let inapp = notification(json!({"channelTemplates": {
+            "inapp": {"templateParts": {"en": {"title": "Hi ${who}", "description": "3 new", "image": " ", "url": "/page/x"}}}
+        }}));
+        let m = render(&inapp, &data(), "app").unwrap().unwrap();
+        assert_eq!((m.title.as_str(), m.body.as_str(), m.image.as_deref(), m.url.as_deref()), ("Hi Ann", "3 new", None, Some("/page/x")));
+
+        let edited = notification(json!({"channelTemplates": {"inapp": {"templateParts": {"en": {"title": "T", "body": "from the editor"}}}}}));
+        assert_eq!(render(&edited, &data(), "app").unwrap().unwrap().body, "from the editor");
+
+        let email = notification(json!({"channelTemplates": {"email": {"templateParts": {"en": {"subject": "s"}}}}}));
+        assert_eq!(render(&email, &data(), "app").unwrap(), None);
+        let blank = notification(json!({"channelTemplates": {"push": {"templateParts": {"en": {"title": " ", "url": "/x"}}}}}));
+        assert_eq!(render(&blank, &data(), "app").unwrap(), None);
+    }
+
+    #[test]
+    fn data_has_the_tap_fields() {
+        let m = PushMessage { title: "t".into(), body: "b".into(), image: None, url: None, notification_id: "n".into(), app_code: "a".into() };
+        assert_eq!(m.data(), vec![("notificationId", "n".to_string()), ("appCode", "a".to_string())]);
+        assert_eq!(m.web_json()["url"], Value::Null);
+    }
+
+    #[test]
+    fn accounts_by_what_the_device_was_built_against() {
+        let (own, platform) = ("own".to_string(), "plat".to_string());
+        fn id(s: &String) -> &str {
+            s
+        }
+        assert_eq!(pick(Some("own"), Some(&own), Some(&platform), id), Some(&own));
+        assert_eq!(pick(Some("plat"), Some(&own), Some(&platform), id), Some(&platform));
+        assert_eq!(pick(Some("other"), Some(&own), Some(&platform), id), None);
+        assert_eq!(pick(None, Some(&own), Some(&platform), id), Some(&own));
+        assert_eq!(pick(Some(" "), None, Some(&platform), id), Some(&platform));
+        assert_eq!(pick::<String>(None, None, None, id), None);
+    }
+
+    #[test]
+    fn client_accounts_skip_what_does_not_parse() {
+        let d = json!({"fcm": {"credentials": {"project_id": "p"}}, "apns": {"teamId": "T"}});
+        let (f, a) = client_accounts(d.as_object());
+        assert!(f.is_none() && a.is_none());
+        let (f, a) = client_accounts(None);
+        assert!(f.is_none() && a.is_none());
+    }
+}

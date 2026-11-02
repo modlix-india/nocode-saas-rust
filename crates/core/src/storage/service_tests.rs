@@ -614,7 +614,11 @@ async fn builder_operations() {
         assert!(f.svc.migration_status(None, None, "empty").await.unwrap().unwrap().is_empty());
         *f.catalog.connection.lock() =
             Some(Connection { id: "c".into(), connection_sub_type: Some(ConnectionSubType::MySql), ..Default::default() });
-        assert_eq!(f.svc.migration_status(None, None, "empty").await.unwrap().unwrap()[0].attempt, 3);
+        // only the caller's own client (FIN) and the ones it manages (BP1): SYSTEM and STRANGER
+        // are left out
+        let seen = f.svc.migration_status(None, None, "empty").await.unwrap().unwrap();
+        assert_eq!(seen.iter().map(|t| t.client_code.as_str()).collect::<Vec<_>>(), ["FIN", "BP1"]);
+        assert_eq!(seen[0].attempt, 3);
         assert!(f.svc.migration_status(None, None, "nope").await.unwrap().is_none());
         assert!(f.svc.drift(None, None, "empty").await.unwrap().is_empty());
         assert!(f.svc.drift(None, None, "nope").await.unwrap().is_empty());

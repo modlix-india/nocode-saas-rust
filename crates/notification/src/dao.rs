@@ -1,10 +1,13 @@
 //! `notification_inapp` and `notification_preference`, with the statements jOOQ runs for the
-//! Java services.
+//! Java services, and `notification_push_device` (Rust only, V5 in the repository's
+//! `sql/notification`).
 //!
 //! Tables are named without a schema (Java's generated code writes `notification`.`...`), so a
 //! pool on any schema with the same DDL works, which is how the tests use scratch schemas.
 //! Timestamps are read as epoch seconds (`CommonsSerializationModule` writes a `LocalDateTime`
 //! as its UTC epoch second) and written as the current instant in the session's UTC.
+
+use std::collections::HashMap;
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
@@ -98,6 +101,115 @@ impl<'a> Bind<'a> {
 pub struct PreferenceRow {
     pub id: u64,
     pub preference: Option<String>,
+}
+
+/// Where a push device is reached: Web Push, FCM or APNs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Platform {
+    Web,
+    Android,
+    Ios,
+}
+
+impl Platform {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Web => "WEB",
+            Self::Android => "ANDROID",
+            Self::Ios => "IOS",
+        }
+    }
+
+    /// The column's value, any case.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_uppercase().as_str() {
+            "WEB" => Some(Self::Web),
+            "ANDROID" => Some(Self::Android),
+            "IOS" => Some(Self::Ios),
+            _ => None,
+        }
+    }
+}
+
+/// A `notification_push_device` row, as the sender reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceRow {
+    pub id: u64,
+    pub user_id: u64,
+    pub app_code: String,
+    pub platform: Platform,
+    pub token: String,
+    pub web_p256dh: Option<String>,
+    pub web_auth: Option<String>,
+    pub app_identifier: Option<String>,
+    pub provider_account: Option<String>,
+    pub apns_env: Option<String>,
+}
+
+/// A device to register.
+#[derive(Debug, Clone)]
+pub struct NewDevice<'a> {
+    pub user_id: u64,
+    pub client_id: u64,
+    pub app_code: &'a str,
+    pub platform: Platform,
+    pub token: &'a str,
+    pub web_p256dh: Option<&'a str>,
+    pub web_auth: Option<&'a str>,
+    pub app_identifier: Option<&'a str>,
+    pub provider_account: Option<&'a str>,
+    pub apns_env: Option<&'a str>,
+    pub user_agent: Option<&'a str>,
+}
+
+/// A `notification_push_key` row: a client's own Firebase service account (Android) or Apple
+/// push key (iOS) for an app. No `Debug`, so the secret never reaches a log.
+#[derive(Clone)]
+pub struct PushKeyRow {
+    pub client_id: u64,
+    pub platform: Platform,
+    /// The Firebase project id or Apple team id.
+    pub account: String,
+    pub key_id: Option<String>,
+    pub secret: String,
+}
+
+const PUSH_KEY_COLUMNS: &str = "CLIENT_ID, PLATFORM, ACCOUNT, KEY_ID, SECRET";
+
+fn push_key_row(r: &sqlx::mysql::MySqlRow) -> Result<PushKeyRow> {
+    let platform: String = r.try_get("PLATFORM")?;
+    Ok(PushKeyRow {
+        client_id: r.try_get("CLIENT_ID")?,
+        platform: Platform::parse(&platform).ok_or_else(|| anyhow::anyhow!("unknown push platform {platform}"))?,
+        account: r.try_get("ACCOUNT")?,
+        key_id: r.try_get("KEY_ID")?,
+        secret: r.try_get("SECRET")?,
+    })
+}
+
+/// The unique key of a device: SHA-256 hex of `PLATFORM:token` (the token is too long to index).
+pub fn token_hash(platform: Platform, token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(format!("{}:{token}", platform.name()).as_bytes()))
+}
+
+const DEVICE_COLUMNS: &str =
+    "ID, USER_ID, APP_CODE, PLATFORM, TOKEN, WEB_P256DH, WEB_AUTH, APP_IDENTIFIER, PROVIDER_ACCOUNT, APNS_ENV";
+
+fn device_row(r: &sqlx::mysql::MySqlRow) -> Result<DeviceRow> {
+    let platform: String = r.try_get("PLATFORM")?;
+    Ok(DeviceRow {
+        id: r.try_get("ID")?,
+        user_id: r.try_get("USER_ID")?,
+        app_code: r.try_get("APP_CODE")?,
+        platform: Platform::parse(&platform).ok_or_else(|| anyhow::anyhow!("unknown push platform {platform}"))?,
+        token: r.try_get("TOKEN")?,
+        web_p256dh: r.try_get("WEB_P256DH")?,
+        web_auth: r.try_get("WEB_AUTH")?,
+        app_identifier: r.try_get("APP_IDENTIFIER")?,
+        provider_account: r.try_get("PROVIDER_ACCOUNT")?,
+        apns_env: r.try_get("APNS_ENV")?,
+    })
 }
 
 #[derive(Clone)]
@@ -195,6 +307,46 @@ impl Dao {
         Ok(q.execute(&self.pool).await?.rows_affected())
     }
 
+    /// The rows of these users that are theirs and still unread, or all of the user's unread
+    /// rows in the app when `ids` is `None`, marked read now. Answers how many changed.
+    pub async fn mark_read_of(&self, app_code: &str, user_id: u64, ids: Option<&[u64]>) -> Result<u64> {
+        let mut sql = String::from("UPDATE notification_inapp SET READ_AT = CURRENT_TIMESTAMP WHERE APP_CODE = ? AND USER_ID = ? AND READ_AT IS NULL");
+        if let Some(ids) = ids {
+            if ids.is_empty() {
+                return Ok(0);
+            }
+            sql.push_str(&format!(" AND ID IN ({})", vec!["?"; ids.len()].join(", ")));
+        }
+        let mut q = sqlx::query(&sql).bind(app_code).bind(user_id);
+        for id in ids.unwrap_or_default() {
+            q = q.bind(*id);
+        }
+        Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// The preference maps of these users in the app, for the sender. Where a user has more
+    /// than one row (there is no unique key), the newest wins.
+    pub async fn preferences_of(&self, app_code: &str, user_ids: &[u64]) -> Result<HashMap<u64, Map<String, Value>>> {
+        let mut out = HashMap::new();
+        if user_ids.is_empty() {
+            return Ok(out);
+        }
+        let sql = format!(
+            "SELECT USER_ID, CAST(PREFERENCE AS CHAR) AS P FROM notification_preference WHERE APP_CODE = ? AND USER_ID IN ({}) ORDER BY ID",
+            vec!["?"; user_ids.len()].join(", ")
+        );
+        let mut q = sqlx::query(&sql).bind(app_code);
+        for id in user_ids {
+            q = q.bind(*id);
+        }
+        for r in q.fetch_all(&self.pool).await? {
+            let uid: u64 = r.try_get("USER_ID")?;
+            let p: Option<String> = r.try_get("P")?;
+            out.insert(uid, preference_map(p.as_deref()));
+        }
+        Ok(out)
+    }
+
     /// `getNotificationPreferenceRecord`: jOOQ's `fetchOne` fails when more than one row
     /// matches (there is no unique key on user and app).
     pub async fn preference(&self, app_code: &str, user_id: u64) -> Result<Option<PreferenceRow>> {
@@ -246,6 +398,137 @@ impl Dao {
     }
 }
 
+impl Dao {
+    /// Registers a device for the user, or refreshes it. A token already registered (by this user
+    /// or another, as on a shared phone or browser) moves to this user and app: a device reaches
+    /// only whoever registered it last.
+    pub async fn upsert_device(&self, d: &NewDevice<'_>) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO notification_push_device (USER_ID, CLIENT_ID, APP_CODE, PLATFORM, TOKEN, TOKEN_HASH, WEB_P256DH, WEB_AUTH, \
+             APP_IDENTIFIER, PROVIDER_ACCOUNT, APNS_ENV, USER_AGENT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON DUPLICATE KEY UPDATE USER_ID = VALUES(USER_ID), CLIENT_ID = VALUES(CLIENT_ID), APP_CODE = VALUES(APP_CODE), \
+             WEB_P256DH = VALUES(WEB_P256DH), WEB_AUTH = VALUES(WEB_AUTH), APP_IDENTIFIER = VALUES(APP_IDENTIFIER), \
+             PROVIDER_ACCOUNT = VALUES(PROVIDER_ACCOUNT), APNS_ENV = VALUES(APNS_ENV), USER_AGENT = VALUES(USER_AGENT), \
+             LAST_SEEN_AT = CURRENT_TIMESTAMP",
+        )
+        .bind(d.user_id)
+        .bind(d.client_id)
+        .bind(d.app_code)
+        .bind(d.platform.name())
+        .bind(d.token)
+        .bind(token_hash(d.platform, d.token))
+        .bind(d.web_p256dh)
+        .bind(d.web_auth)
+        .bind(d.app_identifier)
+        .bind(d.provider_account)
+        .bind(d.apns_env)
+        .bind(d.user_agent)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The user's own device with this token removed (sign-out); another user's is left alone.
+    pub async fn delete_device(&self, user_id: u64, platform: Platform, token: &str) -> Result<u64> {
+        let done = sqlx::query("DELETE FROM notification_push_device WHERE TOKEN_HASH = ? AND USER_ID = ?")
+            .bind(token_hash(platform, token))
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected())
+    }
+
+    /// The devices of these users in the app.
+    pub async fn devices_of(&self, app_code: &str, user_ids: &[u64]) -> Result<Vec<DeviceRow>> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {DEVICE_COLUMNS} FROM notification_push_device WHERE APP_CODE = ? AND USER_ID IN ({}) ORDER BY ID",
+            vec!["?"; user_ids.len()].join(", ")
+        );
+        let mut q = sqlx::query(&sql).bind(app_code);
+        for id in user_ids {
+            q = q.bind(*id);
+        }
+        q.fetch_all(&self.pool).await?.iter().map(device_row).collect()
+    }
+
+    /// Devices the push services said are gone.
+    pub async fn delete_devices(&self, ids: &[u64]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let sql = format!("DELETE FROM notification_push_device WHERE ID IN ({})", vec!["?"; ids.len()].join(", "));
+        let mut q = sqlx::query(&sql);
+        for id in ids {
+            q = q.bind(*id);
+        }
+        Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// The app's web push key pair: its public half and its stored private half.
+    pub async fn app_vapid_key(&self, app_code: &str) -> Result<Option<(String, String)>> {
+        let row = sqlx::query("SELECT PUBLIC_KEY, PRIVATE_KEY FROM notification_push_app_key WHERE APP_CODE = ?")
+            .bind(app_code)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|r| Ok((r.try_get("PUBLIC_KEY")?, r.try_get("PRIVATE_KEY")?))).transpose()
+    }
+
+    /// Keeps a new pair for the app: unless it already has one (two requests may race: the
+    /// first one kept wins), or in place of the one it has with `replace`.
+    pub async fn add_app_vapid_key(&self, app_code: &str, public: &str, private: &str, replace: bool) -> Result<()> {
+        let sql = if replace {
+            "INSERT INTO notification_push_app_key (APP_CODE, PUBLIC_KEY, PRIVATE_KEY) VALUES (?, ?, ?) \
+             ON DUPLICATE KEY UPDATE PUBLIC_KEY = VALUES(PUBLIC_KEY), PRIVATE_KEY = VALUES(PRIVATE_KEY), CREATED_AT = CURRENT_TIMESTAMP"
+        } else {
+            "INSERT IGNORE INTO notification_push_app_key (APP_CODE, PUBLIC_KEY, PRIVATE_KEY) VALUES (?, ?, ?)"
+        };
+        sqlx::query(sql)
+            .bind(app_code)
+            .bind(public)
+            .bind(private)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The key the app's devices built against this project or team are reached with.
+    pub async fn push_key(&self, app_code: &str, platform: Platform, account: &str) -> Result<Option<PushKeyRow>> {
+        let sql = format!("SELECT {PUSH_KEY_COLUMNS} FROM notification_push_key WHERE APP_CODE = ? AND PLATFORM = ? AND ACCOUNT = ?");
+        let row = sqlx::query(&sql).bind(app_code).bind(platform.name()).bind(account).fetch_optional(&self.pool).await?;
+        row.as_ref().map(push_key_row).transpose()
+    }
+
+    /// The keys a client uploaded for the app.
+    pub async fn push_keys_of(&self, client_id: u64, app_code: &str) -> Result<Vec<PushKeyRow>> {
+        let sql = format!("SELECT {PUSH_KEY_COLUMNS} FROM notification_push_key WHERE CLIENT_ID = ? AND APP_CODE = ? ORDER BY ID");
+        sqlx::query(&sql).bind(client_id).bind(app_code).fetch_all(&self.pool).await?.iter().map(push_key_row).collect()
+    }
+
+    /// Stores the key for the app and account, replacing the one there. The caller checks that
+    /// a key already there is the same client's.
+    pub async fn save_push_key(&self, client_id: u64, app_code: &str, key: &PushKeyRow, by: u64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO notification_push_key (CLIENT_ID, APP_CODE, PLATFORM, ACCOUNT, KEY_ID, SECRET, CREATED_BY, UPDATED_BY) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             ON DUPLICATE KEY UPDATE KEY_ID = VALUES(KEY_ID), SECRET = VALUES(SECRET), UPDATED_BY = VALUES(UPDATED_BY)",
+        )
+        .bind(client_id)
+        .bind(app_code)
+        .bind(key.platform.name())
+        .bind(&key.account)
+        .bind(key.key_id.as_deref())
+        .bind(&key.secret)
+        .bind(by)
+        .bind(by)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 /// `JSONMysqlMapConvertor.from`: the column's JSON as a map in MySQL's key order; a null or
 /// unreadable value is an empty map.
 pub fn preference_map(stored: Option<&str>) -> Map<String, Value> {
@@ -270,6 +553,16 @@ mod tests {
         assert!(preference_map(Some("nope")).is_empty());
         let m = preference_map(Some(r#"{"b": 1, "aa": {"x": null}}"#));
         assert_eq!(m.keys().collect::<Vec<_>>(), ["b", "aa"]);
+    }
+
+    #[test]
+    fn device_keys() {
+        assert_eq!(Platform::parse(" ios "), Some(Platform::Ios));
+        assert_eq!(Platform::parse("WEB").map(Platform::name), Some("WEB"));
+        assert_eq!(Platform::parse("sms"), None);
+        let h = token_hash(Platform::Android, "t");
+        assert_eq!(h.len(), 64);
+        assert_ne!(h, token_hash(Platform::Ios, "t"), "the platform is part of the key");
     }
 
     #[test]

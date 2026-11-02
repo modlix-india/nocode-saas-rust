@@ -11,13 +11,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use dashmap::DashMap;
 use kirun::function::Function;
 use kirun::json::schema::Schema;
 use mongodb::bson::{doc, Bson};
 use overridable::pojo::str_field;
 use overridable::{DocType, Store};
-use platform::cache::LocalCaches;
+use platform::cache::{CacheService, LocalCaches};
 use platform::security::SecurityClient;
 use serde_json::Value;
 
@@ -36,13 +35,39 @@ pub struct Definitions {
     /// caches them (evicted by the Java services' messages).
     dependencies: Arc<LocalCaches<String, Arc<Vec<String>>>>,
     /// Parsed definitions by the resolved document's content id, so a cached read is not
-    /// parsed again for every execution.
-    functions: DashMap<String, Arc<DefinitionFunction>>,
-    schemas: DashMap<String, Arc<FoundSchema>>,
+    /// parsed again for every execution. The id is new every time the document's cache is
+    /// filled, so the copies under old ids are dead weight: they go when unused for the cache
+    /// lifetime or when the family's budget needs the room.
+    functions: Arc<LocalCaches<String, Parsed<DefinitionFunction>>>,
+    schemas: Arc<LocalCaches<String, Parsed<FoundSchema>>>,
     timeout: Duration,
 }
 
-const PARSED_CACHE_LIMIT: usize = 20_000;
+/// The cache name the parsed copies are kept under. Rust only: no Java service evicts it.
+const PARSED: &str = "parsedDefinition";
+
+/// A parsed definition and its estimated size: twice the stored document's, as the parsed form
+/// is not measured and keeps about as much again (FoundSchema keeps the JSON as well).
+pub struct Parsed<T> {
+    value: Arc<T>,
+    bytes: usize,
+}
+
+impl<T> Clone for Parsed<T> {
+    fn clone(&self) -> Self {
+        Self { value: self.value.clone(), bytes: self.bytes }
+    }
+}
+
+impl<T> Parsed<T> {
+    fn new(value: Arc<T>, source: Option<&overridable::JValue>) -> Self {
+        Self { value, bytes: 2 * source.map_or(0, overridable::JValue::heap_bytes) }
+    }
+}
+
+fn parsed_families(cache: &CacheService) -> (Arc<LocalCaches<String, Parsed<DefinitionFunction>>>, Arc<LocalCaches<String, Parsed<FoundSchema>>>) {
+    (cache.family_weighed(|p: &Parsed<DefinitionFunction>| p.bytes), cache.family_weighed(|p: &Parsed<FoundSchema>| p.bytes))
+}
 
 impl Definitions {
     pub fn new(
@@ -51,7 +76,16 @@ impl Definitions {
         dependencies: Arc<LocalCaches<String, Arc<Vec<String>>>>,
         timeout: Duration,
     ) -> Self {
-        Self { store, security, dependencies, functions: DashMap::new(), schemas: DashMap::new(), timeout }
+        // Bounded and timed even when no service's caches are given (tests).
+        let own = CacheService::new("cmn", "evictionChannel", None).expect("a cache service without redis");
+        let (functions, schemas) = parsed_families(&own);
+        Self { store, security, dependencies, functions, schemas, timeout }
+    }
+
+    /// Keeps the parsed definitions in `cache`'s families: its budget, lifetime and metrics.
+    pub fn with_parsed_caches(mut self, cache: &CacheService) -> Self {
+        (self.functions, self.schemas) = parsed_families(cache);
+        self
     }
 
     pub fn store(&self) -> &Store {
@@ -89,8 +123,8 @@ impl Definitions {
         let Some(r) = self.read(&FunctionDoc, name, app_code, client_code).await? else {
             return Ok(None);
         };
-        if let Some(f) = self.functions.get(&r.unique_id) {
-            return Ok(Some(f.clone()));
+        if let Some(f) = self.functions.get(PARSED, &r.unique_id).await {
+            return Ok(Some(f.value));
         }
         let definition = r.entity.get("definition").map(to_serde).unwrap_or(Value::Null);
         let f = Arc::new(
@@ -102,10 +136,7 @@ impl Definitions {
             )
             .map_err(CoreError::from)?,
         );
-        if self.functions.len() > PARSED_CACHE_LIMIT {
-            self.functions.clear();
-        }
-        self.functions.insert(r.unique_id.clone(), f.clone());
+        self.functions.insert(PARSED, r.unique_id.clone(), Parsed::new(f.clone(), r.entity.get("definition"))).await;
         Ok(Some(f))
     }
 
@@ -113,16 +144,13 @@ impl Definitions {
         let Some(r) = self.read(&SchemaDoc, name, app_code, client_code).await? else {
             return Ok(None);
         };
-        if let Some(s) = self.schemas.get(&r.unique_id) {
-            return Ok(Some(s.clone()));
+        if let Some(s) = self.schemas.get(PARSED, &r.unique_id).await {
+            return Ok(Some(s.value));
         }
         let json = r.entity.get("definition").map(to_serde).and_then(|d| gson_schema(&d)).unwrap_or(Value::Null);
         let schema = Schema::from_value(&json).map_err(CoreError::from)?.unwrap_or_default();
         let found = Arc::new(FoundSchema { schema: Arc::new(schema), json });
-        if self.schemas.len() > PARSED_CACHE_LIMIT {
-            self.schemas.clear();
-        }
-        self.schemas.insert(r.unique_id.clone(), found.clone());
+        self.schemas.insert(PARSED, r.unique_id.clone(), Parsed::new(found.clone(), r.entity.get("definition"))).await;
         Ok(Some(found))
     }
 

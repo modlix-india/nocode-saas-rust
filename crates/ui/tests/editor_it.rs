@@ -559,6 +559,18 @@ async fn uri_paths_are_named_validated_and_clear_the_pattern_cache() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert_eq!(str_field(&r.obj(), "pathString"), Some("/api/x/2"));
     assert!(!e.is_warm("URIPatternCache", "testapp-SYSTEM").await);
+    // The webhook flag (Rust only): kept on create, set by an update, a boolean or nothing.
+    assert!(m.get("webhook").is_none_or(JValue::is_null));
+    let mut body = r.obj();
+    body.insert("webhook".into(), JValue::Bool(true));
+    let r = e.call("PUT", &format!("/api/ui/uripaths/{}", made.id()), &to_compact(&JValue::Object(body))).await;
+    assert_eq!(r.obj().get("webhook"), Some(&JValue::Bool(true)), "{}", r.text());
+    let mut body = r.obj();
+    body.insert("webhook".into(), s("yes"));
+    let r = e.call("PUT", &format!("/api/ui/uripaths/{}", made.id()), &to_compact(&JValue::Object(body))).await;
+    assert!(r.obj().get("webhook").is_none_or(JValue::is_null), "not a boolean: not a webhook");
+    let hook = post(format!(r#"{{"name":"/api/hook","appCode":"testapp","clientCode":"SYSTEM","pathString":"/api/hook","webhook":true,"pathDefinitions":{KIRUN_GET}}}"#)).await;
+    assert_eq!(hook.obj().get("webhook"), Some(&JValue::Bool(true)), "{}", hook.text());
 
     e.warm("URIPatternCache", "testapp-SYSTEM").await;
     let d = e.call("DELETE", &format!("/api/ui/uripaths/{}", made.id()), "").await;
@@ -1256,6 +1268,124 @@ async fn a_draft_for_a_target_is_an_unpublished_copy_then_that_copys_draft() {
     assert_eq!(path(&merged, &["componentDefinition", "txt", "properties", "text"]), Some(&s("Draft text")));
 }
 
+// ── A client's page draft published over a SYSTEM page that moved (Rust only) ──
+// QA-0637 (NAGEN5): the client's draft held the whole merged page, and its publish stored every
+// change SYSTEM shipped while the draft was open as the client's override: old styles, and
+// deletions of the components SYSTEM added. Only the client's own edits may be stored.
+
+fn color_style(color: &str) -> String {
+    format!(r#"{{"styleProperties":{{"s1":{{"resolutions":{{"ALL":{{"color":{{"value":"{color}"}}}}}}}}}}}}"#)
+}
+
+fn txt_color(page: &JMap) -> Option<JValue> {
+    path(page, &["componentDefinition", "txt", "styleProperties", "s1", "resolutions", "ALL", "color", "value"]).cloned()
+}
+
+/// SYSTEM's page with a styled text, and CP_MID's published copy overriding the button label.
+async fn system_and_client_copy(e: &Env) -> (String, String) {
+    let base = system_page(e);
+    assert_eq!(patch_for(e, SYSTEM, &base, "txt", &color_style("red"), "").await.status, StatusCode::OK);
+    assert_eq!(patch_for(e, SYSTEM, &base, "btn", &label_data("Client label"), &format!("?clientCode={CP_MID}")).await.status, StatusCode::OK);
+    let mid = str_field(&stored_for(e, CP_MID)[0], "id").unwrap().to_string();
+    (base, mid)
+}
+
+/// The client's editor: reads its draft view, changes it, saves it as the whole page.
+async fn client_draft(e: &Env, mid: &str, change: impl FnOnce(&mut JMap)) {
+    let r = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}?draft=true"), "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let mut page = r.obj();
+    change(&mut page);
+    let r = e.as_client(CP_MID, "PUT", &format!("/api/ui/pages/{mid}?draft=true"), &to_compact(&JValue::Object(page))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+}
+
+/// SYSTEM ships after the client's draft started: a style change and a new component.
+async fn system_ships(e: &Env, base: &str) {
+    assert_eq!(patch_for(e, SYSTEM, base, "txt", &color_style("blue"), "").await.status, StatusCode::OK);
+    let add = r#"{"componentKey":"extra","componentData":{"type":"Text","name":"extra","properties":{"text":"New from SYSTEM"}},"parentKey":"root","message":"m"}"#;
+    assert_eq!(e.call("POST", &format!("/api/ui/pages/{base}/components"), add).await.status, StatusCode::OK);
+}
+
+async fn publish_as_client(e: &Env, mid: &str) -> JMap {
+    let r = e.as_client(CP_MID, "POST", &format!("/api/ui/pages/{mid}/publish"), "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}"), "").await.obj()
+}
+
+fn comp_mut<'a>(page: &'a mut JMap, key: &str) -> &'a mut JMap {
+    page.get_mut("componentDefinition").and_then(|c| c.as_object_mut()).and_then(|c| c.get_mut(key)).and_then(|c| c.as_object_mut()).unwrap()
+}
+
+#[tokio::test]
+async fn a_client_draft_publish_stores_only_the_clients_edit_and_system_changes_show_through() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        comp_mut(p, "txt").insert("properties".into(), JValue::Object(obj(r#"{"text":"Client text"}"#)));
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert_eq!(txt_color(&merged), Some(s("blue")), "SYSTEM's style change shows through");
+    assert_eq!(path(&merged, &["componentDefinition", "extra", "properties", "text"]), Some(&s("New from SYSTEM")));
+    assert_eq!(path(&merged, &["componentDefinition", "root", "children", "extra"]), Some(&JValue::Bool(true)));
+    assert_eq!(path(&merged, &["componentDefinition", "txt", "properties", "text"]), Some(&s("Client text")));
+    assert_eq!(btn_label(&merged), Some(s("Client label")), "the client's earlier override survives");
+    let stored = &stored_for(&e, CP_MID)[0];
+    assert_eq!(component_keys(stored), vec!["btn", "txt"], "no SYSTEM component pinned, none deleted");
+    let txt = path(stored, &["componentDefinition", "txt"]).and_then(JValue::as_object).unwrap();
+    assert!(map_is_empty(txt.get("styleProperties")), "the old style is not stored: {:?}", txt.get("styleProperties"));
+    // A later SYSTEM change still reaches the client.
+    assert_eq!(patch_for(&e, SYSTEM, &base, "txt", &color_style("green"), "").await.status, StatusCode::OK);
+    let again = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{mid}"), "").await.obj();
+    assert_eq!(txt_color(&again), Some(s("green")));
+}
+
+#[tokio::test]
+async fn a_client_draft_deleting_a_component_keeps_the_deletion_and_systems_addition() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        p.get_mut("componentDefinition").and_then(|c| c.as_object_mut()).unwrap().shift_remove("btn");
+        comp_mut(p, "root").get_mut("children").and_then(|c| c.as_object_mut()).unwrap().shift_remove("btn");
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert!(path(&merged, &["componentDefinition", "btn"]).is_none(), "the client's deletion is kept");
+    assert!(path(&merged, &["componentDefinition", "root", "children", "btn"]).is_none());
+    assert_eq!(path(&merged, &["componentDefinition", "root", "children", "extra"]), Some(&JValue::Bool(true)), "SYSTEM's new child is not deleted");
+    assert!(path(&merged, &["componentDefinition", "extra"]).is_some());
+    assert_eq!(txt_color(&merged), Some(s("blue")));
+}
+
+#[tokio::test]
+async fn a_client_draft_changing_what_system_also_changed_wins() {
+    let e = client_patch_env();
+    let (base, mid) = system_and_client_copy(&e).await;
+    client_draft(&e, &mid, |p| {
+        let style = obj(&color_style("purple"));
+        comp_mut(p, "txt").insert("styleProperties".into(), style["styleProperties"].clone());
+    })
+    .await;
+    system_ships(&e, &base).await;
+    let merged = publish_as_client(&e, &mid).await;
+    assert_eq!(txt_color(&merged), Some(s("purple")), "the client's own change wins");
+    assert!(path(&merged, &["componentDefinition", "extra"]).is_some(), "the rest of SYSTEM's ship shows through");
+    let stored = &stored_for(&e, CP_MID)[0];
+    assert_eq!(component_keys(stored), vec!["btn", "txt"]);
+    assert!(str_field(stored, "message").unwrap_or("").contains("draft kept over live at componentDefinition.txt.styleProperties"), "{:?}", stored.get("message"));
+}
+
+fn map_is_empty(v: Option<&JValue>) -> bool {
+    match v {
+        None | Some(JValue::Null) => true,
+        Some(JValue::Object(m)) => m.is_empty(),
+        _ => false,
+    }
+}
+
 #[tokio::test]
 async fn the_seed_is_read_as_the_page_service_reads_it() {
     let e = client_patch_env();
@@ -1666,6 +1796,10 @@ struct FakeApple {
     calls: Mutex<Vec<String>>,
     refuse_bundle_create: Mutex<bool>,
     refuse_profile: Mutex<Option<String>>,
+    /// A capability Apple already has on: 409.
+    push_already_on: Mutex<bool>,
+    /// Profiles deleted so far: a profile made after a delete is "PROFILE<n>".
+    deleted: Mutex<usize>,
 }
 
 async fn certificates(State(f): State<Arc<FakeApple>>, h: HeaderMap) -> axum::response::Response {
@@ -1707,7 +1841,8 @@ async fn profiles(State(f): State<Arc<FakeApple>>) -> Json<serde_json::Value> {
         .lock()
         .unwrap()
         .iter()
-        .map(|(b, c)| serde_json::json!({"attributes": {"profileContent": c}, "relationships": {"bundleId": {"data": {"id": b}}}}))
+        .enumerate()
+        .map(|(i, (b, c))| serde_json::json!({"id": format!("P{i}"), "attributes": {"profileContent": c}, "relationships": {"bundleId": {"data": {"id": b}}}}))
         .collect();
     Json(serde_json::json!({"data": rows}))
 }
@@ -1719,8 +1854,29 @@ async fn create_profile(State(f): State<Arc<FakeApple>>, Json(b): Json<serde_jso
     if let Some(err) = f.refuse_profile.lock().unwrap().clone() {
         return (StatusCode::CONFLICT, err).into_response();
     }
-    f.profiles.lock().unwrap().push((bundle, "PROFILE".into()));
-    Json(serde_json::json!({"data": {"attributes": {"profileContent": "PROFILE"}}})).into_response()
+    let n = *f.deleted.lock().unwrap();
+    let content = if n == 0 { "PROFILE".to_string() } else { format!("PROFILE{n}") };
+    f.profiles.lock().unwrap().push((bundle, content.clone()));
+    Json(serde_json::json!({"data": {"attributes": {"profileContent": content}}})).into_response()
+}
+
+async fn delete_profile(State(f): State<Arc<FakeApple>>, axum::extract::Path(id): axum::extract::Path<String>) -> StatusCode {
+    f.calls.lock().unwrap().push(format!("delete {id}"));
+    let i: usize = id.trim_start_matches('P').parse().unwrap();
+    f.profiles.lock().unwrap().remove(i);
+    *f.deleted.lock().unwrap() += 1;
+    StatusCode::NO_CONTENT
+}
+
+async fn capabilities(State(f): State<Arc<FakeApple>>, Json(b): Json<serde_json::Value>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let bundle = b["data"]["relationships"]["bundleId"]["data"]["id"].as_str().unwrap_or("").to_string();
+    let kind = b["data"]["attributes"]["capabilityType"].as_str().unwrap_or("").to_string();
+    f.calls.lock().unwrap().push(format!("{kind} {bundle}"));
+    if *f.push_already_on.lock().unwrap() {
+        return (StatusCode::CONFLICT, r#"{"errors":[{"code":"ENTITY_ERROR"}]}"#).into_response();
+    }
+    Json(serde_json::json!({"data": {"id": "CAP1"}})).into_response()
 }
 
 async fn fake_apple() -> (Arc<FakeApple>, String) {
@@ -1729,6 +1885,8 @@ async fn fake_apple() -> (Arc<FakeApple>, String) {
         .route("/v1/certificates", get(certificates))
         .route("/v1/bundleIds", get(bundle_ids).post(create_bundle))
         .route("/v1/profiles", get(profiles).post(create_profile))
+        .route("/v1/profiles/{id}", axum::routing::delete(delete_profile))
+        .route("/v1/bundleIdCapabilities", axum::routing::post(capabilities))
         .with_state(f.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1844,6 +2002,200 @@ async fn apple_refusals_are_explained() {
     assert_eq!(r.obj().get("iosBundleId"), Some(&s("com.modlix.apps.system.shop")));
 }
 
+#[tokio::test]
+async fn an_ios_app_with_push_gets_the_capability_and_a_new_profile_once() {
+    let (fake, url) = fake_apple().await;
+    let e = env_with(apple_cfg(&url, "C1"));
+    let ios = r#"{"details":{"name":"Shop App","ios":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let made = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], ios).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    let m = made.obj();
+    assert_eq!(m.get("iosPushReady"), Some(&JValue::Bool(true)));
+    assert_eq!(m.get("iosProvisioningProfile"), Some(&s("PROFILE1")), "the profile made after push was turned on");
+    assert_eq!(
+        *fake.calls.lock().unwrap(),
+        names(&[
+            "find com.modlix.apps.system.shopapp",
+            "create com.modlix.apps.system.shopapp",
+            "profiles",
+            "profile B1",
+            "find com.modlix.apps.system.shopapp",
+            "PUSH_NOTIFICATIONS B1",
+            "profiles",
+            "delete P0",
+            "profile B1",
+        ])
+    );
+    assert_eq!(fake.profiles.lock().unwrap().len(), 1, "the profile without push is gone");
+
+    // Later saves leave Apple alone, even when the request forgets the marker.
+    fake.calls.lock().unwrap().clear();
+    let mut forgot = made.obj();
+    forgot.shift_remove("iosPushReady");
+    let again = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &to_compact(&JValue::Object(forgot))).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text());
+    assert_eq!(again.obj().get("iosPushReady"), Some(&JValue::Bool(true)));
+    assert!(!fake.calls.lock().unwrap().iter().any(|c| c.starts_with("PUSH_NOTIFICATIONS")));
+
+    // A bundle that already has push is fine.
+    *fake.push_already_on.lock().unwrap() = true;
+    let other = r#"{"details":{"name":"Other","ios":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], other).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.obj().get("iosPushReady"), Some(&JValue::Bool(true)));
+}
+
+// ── Firebase (Android push) ─────────────────────────────────────────
+
+#[derive(Default)]
+struct FakeFirebase {
+    /// package -> Firebase app id
+    apps: Mutex<HashMap<String, String>>,
+    pending: Mutex<Option<String>>,
+    calls: Mutex<Vec<String>>,
+}
+
+async fn fb_token(State(f): State<Arc<FakeFirebase>>, body: String) -> Json<serde_json::Value> {
+    assert!(body.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant%2Dtype%3Ajwt%2Dbearer"), "{body}");
+    f.calls.lock().unwrap().push("token".into());
+    Json(serde_json::json!({"access_token": "AT", "expires_in": 3600}))
+}
+
+async fn fb_list(State(f): State<Arc<FakeFirebase>>, h: HeaderMap) -> Json<serde_json::Value> {
+    assert_eq!(h.get("authorization").unwrap(), "Bearer AT");
+    f.calls.lock().unwrap().push("list".into());
+    let apps: Vec<serde_json::Value> = f.apps.lock().unwrap().iter().map(|(p, id)| serde_json::json!({"packageName": p, "appId": id})).collect();
+    Json(serde_json::json!({"apps": apps}))
+}
+
+async fn fb_create(State(f): State<Arc<FakeFirebase>>, Json(b): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let package = b["packageName"].as_str().unwrap().to_string();
+    f.calls.lock().unwrap().push(format!("create {package}"));
+    *f.pending.lock().unwrap() = Some(package);
+    Json(serde_json::json!({"name": "operations/op1", "done": false}))
+}
+
+async fn fb_operation(State(f): State<Arc<FakeFirebase>>) -> Json<serde_json::Value> {
+    f.calls.lock().unwrap().push("poll".into());
+    let package = f.pending.lock().unwrap().take().unwrap();
+    f.apps.lock().unwrap().insert(package, "1:99:android:new".into());
+    Json(serde_json::json!({"name": "operations/op1", "done": true, "response": {"appId": "1:99:android:new"}}))
+}
+
+async fn fb_config(State(f): State<Arc<FakeFirebase>>, axum::extract::Path((_, app)): axum::extract::Path<(String, String)>) -> Json<serde_json::Value> {
+    f.calls.lock().unwrap().push(format!("config {app}"));
+    let package = f.apps.lock().unwrap().iter().find(|(_, id)| **id == app).map(|(p, _)| p.clone()).unwrap();
+    let gs = serde_json::json!({
+        "project_info": {"project_number": "99", "project_id": "modlix-push"},
+        "client": [{"client_info": {"mobilesdk_app_id": app, "android_client_info": {"package_name": package}}, "api_key": [{"current_key": "KEY99"}]}]
+    });
+    Json(serde_json::json!({"configFilename": "google-services.json", "configFileContents": overridable::write::transport::base64_encode(gs.to_string().as_bytes())}))
+}
+
+async fn fake_firebase() -> (Arc<FakeFirebase>, String) {
+    let f = Arc::new(FakeFirebase::default());
+    let app = Router::new()
+        .route("/token", axum::routing::post(fb_token))
+        .route("/v1beta1/projects/{project}/androidApps", get(fb_list).post(fb_create))
+        .route("/v1beta1/operations/{op}", get(fb_operation))
+        .route("/v1beta1/projects/{project}/androidApps/{app}/config", get(fb_config))
+        .with_state(f.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    (f, format!("http://{addr}"))
+}
+
+fn firebase_cfg(url: &str) -> EditorConfig {
+    use rsa::pkcs8::EncodePrivateKey;
+    let key = rsa::RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap().to_string();
+    let mut cfg = EditorConfig::default();
+    cfg.editor.firebase_api_url = url.into();
+    cfg.editor.firebase_credentials = serde_json::json!({
+        "type": "service_account", "project_id": "modlix-push", "client_email": "push@modlix-push.iam.gserviceaccount.com",
+        "private_key": pem, "token_uri": format!("{url}/token")
+    })
+    .to_string();
+    cfg
+}
+
+#[tokio::test]
+async fn an_android_app_with_push_is_registered_in_the_platform_firebase_project() {
+    let (fake, url) = fake_firebase().await;
+    let e = env_with(firebase_cfg(&url));
+    let android = r#"{"details":{"name":"Shop App","android":true,"publishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let made = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], android).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    let fb = made.obj().get("firebaseAndroid").cloned().unwrap();
+    assert_eq!(
+        to_compact(&fb),
+        r#"{"apiKey":"KEY99","appId":"1:99:android:new","projectId":"modlix-push","messagingSenderId":"99"}"#
+    );
+    assert_eq!(
+        *fake.calls.lock().unwrap(),
+        names(&["token", "list", "create com.modlix.nocodemobile.system.shop_app", "poll", "config 1:99:android:new"])
+    );
+
+    // Saved again: the values are kept and Firebase is not asked.
+    fake.calls.lock().unwrap().clear();
+    let mut forgot = made.obj();
+    forgot.shift_remove("firebaseAndroid");
+    let again = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &to_compact(&JValue::Object(forgot))).await;
+    assert_eq!(again.obj().get("firebaseAndroid"), Some(&fb));
+    assert!(fake.calls.lock().unwrap().is_empty());
+
+    // On the client's own accounts: its own Firebase values, used as they are, and the
+    // platform's project is never asked.
+    let tenant_fb = r#""firebaseAndroid":{"apiKey":"A","appId":"1:5:android:z","projectId":"tenant-fb","messagingSenderId":"5"}"#;
+    let own = format!(r#"{{"details":{{"name":"Own","android":true,"pushNotifications":true,"publishMode":"TENANT_ACCOUNT"}},{tenant_fb}}}"#);
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &own).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
+    assert!(fake.calls.lock().unwrap().is_empty());
+    // No choice at all is Modlix's accounts (both stores): saved as such, and the app's
+    // already registered package is looked up in the platform's project.
+    let unsaid = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], unsaid).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(path(&r.obj(), &["details", "publishMode"]), Some(&s("PLATFORM_ACCOUNT")));
+    assert_eq!(path(&r.obj(), &["details", "iosPublishMode"]), Some(&s("PLATFORM_ACCOUNT")));
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("modlix-push")));
+    fake.calls.lock().unwrap().clear();
+    // ... without them, or with the platform's, the save is refused.
+    let platform_fb = r#""firebaseAndroid":{"apiKey":"KEY99","appId":"1:99:android:new","projectId":"modlix-push","messagingSenderId":"99"}"#;
+    for extra in ["", &format!(",{platform_fb}"), r#","firebaseAndroid":{"projectId":"tenant-fb"}"#] {
+        let body = format!(r#"{{"details":{{"name":"Own","android":true,"publishMode":"TENANT_ACCOUNT","pushNotifications":true}}{extra}}}"#);
+        let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &body).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{extra}");
+        assert_eq!(path(&r.obj(), &["code"]), Some(&s("UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE")));
+    }
+    assert!(fake.calls.lock().unwrap().is_empty());
+    // An iOS-only app on the client's accounts asks nothing of Firebase or Apple.
+    let ios_own = r#"{"details":{"name":"Own","ios":true,"publishMode":"TENANT_ACCOUNT","pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], ios_own).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(fake.calls.lock().unwrap().is_empty());
+
+    // Moved onto the platform's accounts with some other project's values: registered in the
+    // platform's project.
+    let moved = format!(r#"{{"details":{{"name":"Shop App","android":true,"publishMode":"PLATFORM_ACCOUNT","pushNotifications":true}},{tenant_fb}}}"#);
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &moved).await;
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("modlix-push")));
+    fake.calls.lock().unwrap().clear();
+
+    // An app already registered is found, not registered twice; without push nothing is asked.
+    // An app saved before `publishMode` existed reads its `iosPublishMode`.
+    let lookup = r#"{"details":{"name":"Shop App","android":true,"iosPublishMode":"PLATFORM_ACCOUNT","pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], lookup).await;
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "appId"]), Some(&s("1:99:android:new")));
+    assert_eq!(*fake.calls.lock().unwrap(), names(&["token", "list", "config 1:99:android:new"]));
+    fake.calls.lock().unwrap().clear();
+    let quiet = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], r#"{"details":{"name":"Q","android":true}}"#).await;
+    assert!(quiet.obj().get("firebaseAndroid").is_none_or(JValue::is_null));
+    assert!(fake.calls.lock().unwrap().is_empty());
+}
+
 // ── The commons routes on the ui kinds ──────────────────────────────
 
 #[tokio::test]
@@ -1889,4 +2241,82 @@ async fn publish_versions_and_transport_cover_every_ui_kind() {
     }
     let resp = e.router.clone().oneshot(req.body(Body::from(json.body.clone())).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+// ── Page change sets (`PATCH /api/ui/pages/{id}/changes`) ───────────
+// Several components, event functions and fields of a page in one write FOR a client: the
+// client's copy holds only what changed, never the whole page.
+
+async fn changes_for(e: &Env, id: &str, body: &str, query: &str) -> Answer {
+    e.call("PATCH", &format!("/api/ui/pages/{id}/changes{query}"), body).await
+}
+
+#[tokio::test]
+async fn a_change_set_for_a_client_stores_only_the_changed_entries() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let body = r#"{"components":{"btn":{"key":"btn","name":"btn","type":"Button","properties":{"label":"Go MID"}},"txt":null},
+        "eventFunctions":{"onGo":{"name":"onGo","steps":{}}},"fields":{"title":"MID title"},"message":"m"}"#;
+    let r = changes_for(&e, &base, body, &format!("?clientCode={CP_MID}")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let system = &stored_for(&e, SYSTEM)[0];
+    assert_eq!(btn_label(system), Some(s("Submit")), "the base page is untouched");
+    assert_eq!(component_keys(system), vec!["btn", "root", "txt"]);
+    let mid = &stored_for(&e, CP_MID)[0];
+    assert_eq!(str_field(mid, "baseClientCode"), Some(SYSTEM));
+    assert!(!component_keys(mid).contains(&"root".to_string()), "an unchanged component is not stored: {:?}", component_keys(mid));
+    let merged = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{}", str_field(mid, "id").unwrap()), "").await.obj();
+    assert_eq!(btn_label(&merged), Some(s("Go MID")));
+    assert_eq!(component_keys(&merged), vec!["btn", "root"], "the removed component is gone from the client's page");
+    assert!(path(&merged, &["eventFunctions", "onGo"]).is_some());
+    assert_eq!(str_field(&merged, "title"), Some("MID title"));
+    // A later SYSTEM change to a component the client never changed still reaches the client.
+    assert_eq!(e.call("PATCH", &format!("/api/ui/pages/{base}/components/root"), r#"{"componentData":{"properties":{"gap":"8px"}}}"#).await.status, StatusCode::OK);
+    let merged = e.as_client(CP_MID, "GET", &format!("/api/ui/pages/{}", str_field(mid, "id").unwrap()), "").await.obj();
+    assert_eq!(path(&merged, &["componentDefinition", "root", "properties", "gap"]), Some(&s("8px")));
+}
+
+#[tokio::test]
+async fn a_change_set_on_a_clients_draft_checks_and_answers_the_draft_version() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let q = format!("?clientCode={CP_MID}&draft=true");
+    let one = r#"{"components":{"btn":{"key":"btn","type":"Button","properties":{"label":"Draft MID"}}}}"#;
+    let first = changes_for(&e, &base, one, &q).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text());
+    let mid = &stored_for(&e, CP_MID)[0];
+    assert_eq!(mid.get("published"), Some(&JValue::Bool(false)));
+    let mid_id = str_field(mid, "id").unwrap().to_string();
+    let read = e.call("GET", &format!("/api/ui/pages/{mid_id}?draft=true"), "").await;
+    let seen: i64 = read.headers["x-draft-version"].to_str().unwrap().parse().unwrap();
+    let two = r#"{"components":{"txt":{"key":"txt","type":"Text","properties":{"text":"Draft text"}}}}"#;
+    let stale = changes_for(&e, &base, two, &format!("{q}&draftVersion={}", seen + 5)).await;
+    assert_eq!(stale.status, StatusCode::PRECONDITION_FAILED, "{}", stale.text());
+    let ok = changes_for(&e, &base, two, &format!("{q}&draftVersion={seen}")).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    let next: i64 = ok.headers["x-draft-version"].to_str().unwrap().parse().unwrap();
+    assert!(next > seen, "{next} after {seen}");
+    assert_eq!(btn_label(&ok.obj()), Some(s("Draft MID")));
+    assert_eq!(path(&ok.obj(), &["componentDefinition", "txt", "properties", "text"]), Some(&s("Draft text")));
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("Submit")));
+}
+
+#[tokio::test]
+async fn a_change_set_refuses_identity_fields_stale_entries_and_nothing() {
+    let e = client_patch_env();
+    let base = system_page(&e);
+    let r = changes_for(&e, &base, r#"{"fields":{"clientCode":"X"}}"#, "").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    let r = changes_for(&e, &base, r#"{"components":{"btn":"x"}}"#, "").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(changes_for(&e, &base, "{}", "").await.status, StatusCode::BAD_REQUEST);
+    // One patch gives the page component versions; a change made from an older one is refused.
+    assert_eq!(patch_for(&e, SYSTEM, &base, "btn", &label_data("v2"), "").await.status, StatusCode::OK);
+    let stale = r#"{"components":{"btn":{"key":"btn","properties":{"label":"old"}}},"expectedComponentVersions":{"btn":1}}"#;
+    assert_eq!(changes_for(&e, &base, stale, "").await.status, StatusCode::PRECONDITION_FAILED);
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("v2")));
+    let current = r#"{"components":{"btn":{"key":"btn","properties":{"label":"v3"}}},"expectedComponentVersions":{"btn":2}}"#;
+    let r = changes_for(&e, &base, current, "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(btn_label(&stored_for(&e, SYSTEM)[0]), Some(s("v3")));
 }

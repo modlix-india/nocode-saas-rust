@@ -89,7 +89,10 @@ pub struct Caches {
     pub hierarchies: Arc<LocalCaches<String, Arc<ClientHierarchy>>>,
     pub type_levels: Arc<LocalCaches<String, Arc<(String, String, String)>>>,
     pub clients: Arc<LocalCaches<String, Arc<Client>>>,
-    pub url_patterns: Arc<LocalCaches<String, Arc<UrlPattern>>>,
+    /// `uri`: the pattern a scheme + host + port resolves to, or none. "None" is cached too: most
+    /// lookups are internal calls on a host no client names, and every change to client URLs
+    /// evicts this cache everywhere.
+    pub url_patterns: Arc<LocalCaches<String, Option<Arc<UrlPattern>>>>,
     pub url_lists: Arc<LocalCaches<String, Arc<Vec<UrlPattern>>>>,
     pub apps: Arc<LocalCaches<String, Arc<App>>>,
     pub flags: Arc<LocalCaches<String, bool>>,

@@ -27,7 +27,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 
 use crate::config::GatewayConfig;
@@ -45,45 +45,48 @@ pub async fn run() -> Result<()> {
     loaded.log_source(NAME);
     let cfg = loaded.config;
     platform::messages::configure(&cfg.messages)?;
-    let (app, eureka) = build(&cfg).await?;
+    let (app, registry) = build(&cfg).await?;
 
     // Ready as soon as it listens: a pool with no healthy instance is that service's outage,
     // reported by `gateway_pool_healthy_instances`, and must not take the edge out of rotation.
     let health = Health::new(telemetry.metrics.clone());
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: false }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: false }
         .run(app)
         .await
 }
 
 /// The proxy router for a configuration, with its pools' health checks running.
-pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Eureka>)> {
+pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Registry>)> {
     messages::register();
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
 
     let mut pools = BTreeMap::new();
     for (name, p) in &cfg.pools {
-        let pool = Pool::new(name, p, eureka.as_ref())?;
+        let pool = Pool::new(name, p, registry.as_ref())?;
         pool.spawn_background();
         pools.insert(name.clone(), pool);
     }
     let routes = Routes::build(&cfg.routes, &pools)?;
 
     // Security's evictions of the host cache reach us on the shared channel.
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let hosts = cache.family();
+    // Whether URL codes in front of `/api/` name a real app and client (`resolve`).
+    let access = cache.family();
     cache.spawn_eviction_listener();
 
     let resolver = Resolver::new(
         // Host and draft resolution are security-internal routes: `internal_upstream` when set.
         // Always the security units themselves, never this gateway: the gateway asks security
         // before it can route anything, so going through itself would loop.
-        platform::security::security_upstream(&cfg.security, eureka.as_ref())?,
+        platform::security::security_upstream(&cfg.security, registry.as_ref())?,
         hosts,
+        access,
         cfg.resolution.draft_trust_seconds,
     )?;
 
@@ -104,5 +107,5 @@ pub async fn build(cfg: &GatewayConfig) -> Result<(Router, Option<Eureka>)> {
     });
 
     let app = Router::new().fallback(proxy::handle).with_state(gateway);
-    Ok((app, eureka))
+    Ok((app, registry))
 }

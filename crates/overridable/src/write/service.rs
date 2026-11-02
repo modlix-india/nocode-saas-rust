@@ -56,6 +56,12 @@ impl Commons {
         Self { store, cache, messages: Arc::new(messages), drafts, versions }
     }
 
+    /// The commons whose version history replies hold back what `redactions` say.
+    pub fn with_version_redactions(mut self, redactions: &'static [crate::write::version::VersionRedaction]) -> Self {
+        self.versions = self.versions.with_redactions(redactions);
+        self
+    }
+
     pub fn backend(&self) -> &Arc<dyn Backend> {
         self.store.backend()
     }
@@ -122,7 +128,7 @@ impl<K: Kind> Clone for OverridableService<K> {
 
 impl<K: Kind> OverridableService<K> {
     pub fn new(kind: K, cx: Commons) -> Self {
-        let lro = cx.cache.family();
+        let lro = cx.cache.family_weighed(|v: &Arc<LroPage>| v.content.iter().map(crate::json::map_heap_bytes).sum::<usize>());
         Self { inner: Arc::new(Inner { kind, cx, lro }) }
     }
 
@@ -193,6 +199,12 @@ impl<K: Kind> OverridableService<K> {
 
     /// `findOneByNameAndAppCodeAndClientCode`.
     pub async fn find_one(&self, name: &str, app: &str, client: &str) -> AppResult<Option<JMap>> {
+        self.find_one_named(Some(name), app, client).await
+    }
+
+    /// `find_one` for a name that may be missing: `None` matches a stored `name: null`, as the
+    /// Java derived query does, and as `check_if_exists` filters.
+    pub async fn find_one_named(&self, name: Option<&str>, app: &str, client: &str) -> AppResult<Option<JMap>> {
         let d = self
             .commons()
             .backend()
@@ -321,6 +333,7 @@ impl<K: Kind> OverridableService<K> {
     /// `create`. The id is never taken from the body (see `DIFFERENCES.md`).
     pub async fn create(&self, ca: &ContextAuthentication, mut entity: JMap) -> AppResult<JMap> {
         let clock = Clock::now();
+        self.kind().keep_withheld(&mut entity, None);
         self.kind().before_create(self.commons(), ca, &mut entity).await?;
         entity.insert("id".into(), JValue::Null);
         if entity.get("clientCode").is_none_or(JValue::is_null) {
@@ -420,6 +433,7 @@ impl<K: Kind> OverridableService<K> {
         if !allowed {
             return Err(self.forbidden_permission(ca));
         }
+        self.kind().keep_withheld(&mut entity, Some(&stored));
         for f in ["appCode", "clientCode", "name", "baseClientCode"] {
             entity.insert(f.into(), stored.get(f).cloned().unwrap_or_default());
         }

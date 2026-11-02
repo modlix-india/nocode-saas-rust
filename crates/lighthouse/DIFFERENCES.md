@@ -15,7 +15,7 @@ real oci-config checked locally with `cmp`, never printed).
 
 - **Only what is configured is served.** The Java server answered any app and any profile to
   anyone who could reach it. Lighthouse serves the apps listed in `[config.spring.apps]`, the
-  profiles of `[config.spring] profiles` (default `oci<env>`), and refuses `eureka` and `v1` as
+  profiles of `[config.spring] profiles` (default `oci<env>`), and refuses `registry` and `v1` as
   app names. An app's keys can be limited to some prefixes (each source stays, so ssr-server
   still reads the right first source), or folded into one source (`merge_sources`).
 - **A token is required** (scope `ai` or `ops`, Bearer or Basic), except for apps marked

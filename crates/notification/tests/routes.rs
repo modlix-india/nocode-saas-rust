@@ -14,10 +14,13 @@ use axum::response::Response;
 use axum::Router;
 use common::{context, local_stack, with_scratch, Answer, Fake, AUTH_PATH};
 use futures::StreamExt;
-use notification::calls::DirectoryClient;
-use notification::dao::Dao;
+use notification::calls::{CoreClient, DirectoryClient};
+use notification::config::PushSection;
+use notification::dao::{Dao, DeviceRow};
 use notification::handlers::{router, AppState};
 use notification::inapp::{InAppService, InAppSink};
+use notification::push::Push;
+use notification::push_send::{PushService, Uploaded};
 use notification::model::{CoreNotification, NotificationUser};
 use notification::preference::PreferenceService;
 use notification::sse::Hub;
@@ -45,7 +48,7 @@ async fn rig(pool: MySqlPool) -> Rig {
     let dao = Dao::new(pool.clone());
     let st = Arc::new(AppState {
         security: SecurityClient::new(Upstream::fixed(&[&base]), 0).unwrap(),
-        inapp: InAppService { dao: dao.clone(), hub: hub.clone() },
+        inapp: InAppService { dao: dao.clone(), push: Push::local(hub.clone()) },
         prefs: PreferenceService {
             dao: dao.clone(),
             directory: DirectoryClient::new(Upstream::fixed(&[&base]), Duration::from_secs(5)).unwrap(),
@@ -53,8 +56,9 @@ async fn rig(pool: MySqlPool) -> Rig {
         },
         hub: hub.clone(),
         server_port: 8114,
+        devices: Some(Arc::new(PushService::new(dao.clone(), CoreClient::new(Upstream::fixed(&[&base]), Duration::from_secs(5)).unwrap(), &vapid()).unwrap())),
     });
-    Rig { app: with_scope(router(st)), security, hub: hub.clone(), inapp: InAppService { dao, hub }, pool }
+    Rig { app: with_scope(router(st)), security, hub: hub.clone(), inapp: InAppService { dao, push: Push::local(hub) }, pool }
 }
 
 /// The routes with the message scope the service runs them in (`platform::app::Service`).
@@ -121,6 +125,17 @@ async fn get(app: &Router, uri: &str) -> Got {
 
 async fn post(app: &Router, uri: &str, body: &str) -> Got {
     call(app, req("POST", uri).header("content-type", "application/json").body(Body::from(body.to_string())).unwrap()).await
+}
+
+async fn delete(app: &Router, uri: &str, body: &str) -> Got {
+    call(app, req("DELETE", uri).header("content-type", "application/json").body(Body::from(body.to_string())).unwrap()).await
+}
+
+/// RFC 8291 appendix A's application server key pair, as the platform's VAPID keys.
+const VAPID_PUBLIC: &str = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
+fn vapid() -> PushSection {
+    PushSection { vapid_public_key: VAPID_PUBLIC.into(), vapid_private_key: "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw".into(), ..Default::default() }
 }
 
 fn notification() -> CoreNotification {
@@ -214,7 +229,7 @@ async fn the_security_gate_and_spring_answers() {
         // Security unreachable: a 500.
         let dead = Arc::new(AppState {
             security: SecurityClient::new(Upstream::fixed(&["http://127.0.0.1:1"]), 0).unwrap(),
-            inapp: InAppService { dao: Dao::new(r.pool.clone()), hub: r.hub.clone() },
+            inapp: InAppService { dao: Dao::new(r.pool.clone()), push: Push::local(r.hub.clone()) },
             prefs: PreferenceService {
                 dao: Dao::new(r.pool.clone()),
                 directory: DirectoryClient::new(Upstream::fixed(&["http://127.0.0.1:1"]), Duration::from_secs(1)).unwrap(),
@@ -222,6 +237,7 @@ async fn the_security_gate_and_spring_answers() {
             },
             hub: r.hub.clone(),
             server_port: 8114,
+            devices: None,
         });
         assert!(get(&with_scope(router(dead)), "/api/notification/new").await.is_internal_500());
     })
@@ -300,6 +316,73 @@ async fn in_app_notifications_count_list_and_mark_read() {
             .await
             .unwrap();
         assert_eq!(unread.0, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn an_app_can_keep_rows_unread_and_mark_them_one_by_one_or_all() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        for who in ["Ann", "Bob", "Cy"] {
+            r.inapp.send_in_app(&users(&[142, 7]), &notification(), Some("rsapp"), None, &payload(who)).await.unwrap();
+        }
+        r.inapp.send_in_app(&users(&[142]), &notification(), Some("otherapp"), None, &payload("Dee")).await.unwrap();
+
+        // markRead=false lists without reading.
+        let g = get(&r.app, "/api/notification/notifications?appCode=rsapp&markRead=false").await;
+        let ids: Vec<u64> = g.json()["content"].as_array().unwrap().iter().map(|c| c["id"].as_u64().unwrap()).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "3");
+
+        // One read; an id twice, as a string, and an already read one count once.
+        let p = post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [ids[0]]}).to_string()).await;
+        assert_eq!((p.status, p.json()), (StatusCode::OK, json!({"read": 1})));
+        let p = post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [ids[0], ids[1].to_string()]}).to_string()).await;
+        assert_eq!(p.json(), json!({"read": 1}));
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "1");
+
+        // Another user's row cannot be marked by this caller.
+        let theirs: (u64,) = sqlx::query_as("SELECT ID FROM notification_inapp WHERE USER_ID = 7 LIMIT 1").fetch_one(&r.pool).await.unwrap();
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", &json!({"ids": [theirs.0]}).to_string()).await.json(), json!({"read": 0}));
+
+        // All: the rest of this app only.
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", r#"{"all": true}"#).await.json(), json!({"read": 1}));
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "0");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=otherapp").await.body, "1");
+        let unread: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM notification_inapp WHERE USER_ID = 7 AND READ_AT IS NULL")
+            .fetch_one(&r.pool)
+            .await
+            .unwrap();
+        assert_eq!(unread.0, 3);
+
+        // A body that names nothing, or not numbers, is refused; GET is not allowed.
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", "{}").await.status, StatusCode::BAD_REQUEST);
+        assert_eq!(post(&r.app, "/api/notification/read?appCode=rsapp", r#"{"ids": ["x"]}"#).await.status, StatusCode::BAD_REQUEST);
+        assert_eq!(get(&r.app, "/api/notification/read?appCode=rsapp").await.status, StatusCode::METHOD_NOT_ALLOWED);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn the_sender_reads_the_saved_choices() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let choice = json!({"channels": {"email": true}, "categories": {"comment": {"inapp": false}}});
+        assert_eq!(post(&r.app, "/api/notification/preference?appCode=rsapp", &choice.to_string()).await.status, StatusCode::OK);
+        post(&r.app, "/api/notification/preference?appCode=otherapp", r#"{"channels": {"email": false}}"#).await;
+        let found = Dao::new(r.pool.clone()).preferences_of("rsapp", &[142, 7]).await.unwrap();
+        assert_eq!(found.len(), 1, "7 saved nothing");
+        assert_eq!(Value::Object(found[&142].clone()), choice);
+        assert!(Dao::new(r.pool.clone()).preferences_of("rsapp", &[]).await.unwrap().is_empty());
     })
     .await;
 }
@@ -518,6 +601,210 @@ async fn another_users_preference_needs_the_management_check() {
         assert!(get(&r.app, "/api/notification/preference?appCode=rsapp&userId=-5").await.is_internal_500());
         // The caller's own id named explicitly.
         assert_eq!(get(&r.app, "/api/notification/preference?appCode=rsapp&userId=142").await.body, "{ }");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn push_devices_register_move_and_leave() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let dao = Dao::new(r.pool.clone());
+        // The worker goes to anyone, allowed to control the whole site.
+        let anonymous = Request::builder().uri("/api/notification/push/sw.js").header("host", "localhost:8114").body(Body::empty()).unwrap();
+        let g = call(&r.app, anonymous).await;
+        assert_eq!(g.status, StatusCode::OK);
+        assert_eq!(g.header("service-worker-allowed"), Some("/"));
+        assert!(g.body.contains("notificationclick"));
+
+        let web = json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc",
+                         "keys": {"p256dh": "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", "auth": "BTBZMqHH6r4Tts7J_aSIgg"}})
+        .to_string();
+        // An app without notifications (a site): push is off, and nothing is kept for it.
+        r.security.answer("GET", "/api/core/notifications/internal/app/quietsite", Answer::json(json!({"count": 0})));
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=quietsite").await.json(), json!({"enabled": false, "vapidPublicKey": null}));
+        assert_eq!(dao.app_vapid_key("quietsite").await.unwrap(), None, "no key is made for an app without push");
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=quietsite", &web).await.json()["registered"], false);
+        assert!(dao.devices_of("quietsite", &[142]).await.unwrap().is_empty());
+
+        // An app with notifications.
+        r.security.answer("GET", "/api/core/notifications/internal/app/rsapp", Answer::json(json!({"count": 2})));
+        let config = get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json();
+        assert_eq!(config["enabled"], true);
+        // Until someone allowed to change the app makes its own key, browsers get the platform's.
+        assert_eq!(config["vapidPublicKey"], VAPID_PUBLIC);
+        assert_eq!(dao.app_vapid_key("rsapp").await.unwrap(), None, "using the app makes no key");
+
+        // Making it needs application write ...
+        const APP_KEY: &str = "/api/notification/push/app-key?appCode=rsapp";
+        const WRITE: &str = "/api/security/applications/internal/hasWriteAccess";
+        const MANAGES: &str = "/api/security/clients/internal/doesClientManageClientCode";
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["code"], "COMMON.PERMISSION_REQUIRED");
+        let mut writer = context(true);
+        writer["user"]["stringAuthorities"] = json!(["Authorities.Logged_IN", "Authorities.Application_UPDATE"]);
+        r.security.answer("GET", AUTH_PATH, Answer::json(writer));
+        // ... and write access to the app for the caller's client ...
+        r.security.answer("GET", WRITE, Answer::json(json!(false)));
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["code"], "COMMON.FORBIDDEN");
+        assert!(r.security.calls_to(WRITE).last().unwrap().query.contains("clientCode=SYSTEM"));
+        // ... or, for another client, one the caller's client manages and that has write access.
+        r.security.answer("GET", WRITE, Answer::json(json!(true)));
+        r.security.answer("GET", MANAGES, Answer::json(json!(false)));
+        assert_eq!(post(&r.app, APP_KEY, r#"{"clientCode": "TENANT1"}"#).await.json()["code"], "COMMON.FORBIDDEN");
+        r.security.answer("GET", MANAGES, Answer::json(json!(true)));
+        let made = post(&r.app, APP_KEY, r#"{"clientCode": "TENANT1"}"#).await;
+        assert_eq!(made.status, StatusCode::OK, "{}", made.body);
+        assert!(r.security.calls_to(WRITE).last().unwrap().query.contains("clientCode=TENANT1"));
+        let app_key = made.json()["publicKey"].as_str().unwrap().to_string();
+        assert_ne!(app_key, VAPID_PUBLIC);
+        assert_eq!(dao.app_vapid_key("rsapp").await.unwrap().map(|k| k.0), Some(app_key.clone()));
+        // Made once: asking again keeps it. Browsers get it from now on.
+        assert_eq!(post(&r.app, APP_KEY, "{}").await.json()["publicKey"], app_key.as_str());
+        assert_eq!(get(&r.app, APP_KEY).await.json()["publicKey"], app_key.as_str());
+        assert_eq!(get(&r.app, "/api/notification/push/config?appCode=rsapp").await.json()["vapidPublicKey"], app_key.as_str());
+        let fresh = PushService::new(dao.clone(), CoreClient::new(Upstream::fixed(&["http://127.0.0.1:9"]), Duration::from_secs(1)).unwrap(), &vapid()).unwrap();
+        assert_eq!(fresh.web_key("rsapp").await.unwrap().public_key(), app_key, "another instance reads the same key");
+        assert_eq!(fresh.web_key("otherapp").await.unwrap().public_key(), VAPID_PUBLIC, "an app without its own");
+        for _ in 0..2 {
+            assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &web).await.json()["registered"], true);
+        }
+        let ios = json!({"platform": "IOS", "token": "ABCDEF0123", "appIdentifier": "com.modlix.apps.system.rs", "providerAccount": "TEAM1"}).to_string();
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &ios).await.json()["registered"], true);
+        let mine = dao.devices_of("rsapp", &[142]).await.unwrap();
+        assert_eq!(mine.len(), 2, "registering again refreshes the row");
+        assert_eq!(mine[1].apns_env.as_deref(), Some("production"));
+        assert_eq!(mine[1].provider_account.as_deref(), Some("TEAM1"));
+        // A browser is kept with the key it subscribed with, and is sent with that key: the
+        // app's, or the platform's for one registered before the app had its own.
+        let browser = mine[0].clone();
+        assert_eq!(browser.provider_account.as_deref(), Some(app_key.as_str()));
+        let key_of = |account: Option<&str>| {
+            let d = DeviceRow { provider_account: account.map(str::to_string), ..browser.clone() };
+            let fresh = &fresh;
+            async move { fresh.web_key_of(&d).await.map(|k| k.public_key().to_string()) }
+        };
+        assert_eq!(key_of(Some(&app_key)).await.as_deref(), Some(app_key.as_str()));
+        assert_eq!(key_of(None).await.as_deref(), Some(VAPID_PUBLIC));
+        assert_eq!(key_of(Some(VAPID_PUBLIC)).await.as_deref(), Some(VAPID_PUBLIC));
+        assert_eq!(key_of(Some("BSomeOtherKey")).await, None, "a key this service never handed out");
+        // Replaced: the new key from now on, and the old subscriptions get nothing (they
+        // subscribe again at their next sign-in), even on an instance that read the old one.
+        let replaced = post(&r.app, APP_KEY, r#"{"replace": true}"#).await.json()["publicKey"].as_str().unwrap().to_string();
+        assert_ne!(replaced, app_key);
+        assert_eq!(key_of(Some(&replaced)).await.as_deref(), Some(replaced.as_str()));
+        assert_eq!(key_of(Some(&app_key)).await, None);
+        // The count is kept: core was asked once per app.
+        assert_eq!(r.security.calls_to("/api/core/notifications/internal/app/rsapp").len(), 1);
+
+        // What is refused.
+        for bad in [
+            json!({"platform": "WEB", "token": "https://10.0.0.5/x", "keys": {"p256dh": "a", "auth": "b"}}),
+            json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc"}),
+            json!({"platform": "IOS", "token": "not-hex", "appIdentifier": "b"}),
+            json!({"platform": "IOS", "token": "ab"}),
+            json!({"platform": "IOS", "token": "ab", "appIdentifier": "b", "apnsEnv": "staging"}),
+            json!({"platform": "PAGER", "token": "ab"}),
+        ] {
+            let g = post(&r.app, "/api/notification/push/devices?appCode=rsapp", &bad.to_string()).await;
+            assert_eq!(g.status, StatusCode::BAD_REQUEST, "{bad}: {}", g.body);
+        }
+        assert_eq!(post(&r.app, "/api/notification/push/devices", &web).await.status, StatusCode::OK, "the appCode header is enough");
+
+        // Someone else signs in on the same browser: the device moves to them.
+        let mut other = context(true);
+        other["user"]["id"] = json!(143);
+        r.security.answer("GET", AUTH_PATH, Answer::json(other));
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &web).await.json()["registered"], true);
+        assert_eq!(dao.devices_of("rsapp", &[142]).await.unwrap().len(), 1, "only the phone stays with 142");
+        assert_eq!(dao.devices_of("rsapp", &[143]).await.unwrap()[0].platform.name(), "WEB");
+
+        // Signing out removes only the caller's own device.
+        let key = json!({"platform": "IOS", "token": "ABCDEF0123"}).to_string();
+        assert_eq!(delete(&r.app, "/api/notification/push/devices?appCode=rsapp", &key).await.json()["removed"], 0);
+        let web_key = json!({"platform": "WEB", "token": "https://fcm.googleapis.com/fcm/send/abc"}).to_string();
+        assert_eq!(delete(&r.app, "/api/notification/push/devices?appCode=rsapp", &web_key).await.json()["removed"], 1);
+        assert!(dao.devices_of("rsapp", &[143]).await.unwrap().is_empty());
+        assert_eq!(dao.devices_of("rsapp", &[142]).await.unwrap().len(), 1);
+    })
+    .await;
+}
+
+/// A fresh P-256 key as Apple hands out a `.p8`, then base64 of the file as the screens send it.
+fn apple_key_upload() -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+    let der = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &ring::rand::SystemRandom::new()).unwrap();
+    let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", STANDARD.encode(der.as_ref()));
+    STANDARD.encode(pem)
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn push_keys_upload_list_and_stay_with_their_client() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let as_client = |client: u64, can: bool| {
+            let mut c = context(true);
+            c["user"]["clientId"] = json!(client);
+            if can {
+                c["user"]["stringAuthorities"] = json!(["Authorities.Logged_IN", "Authorities.ROLE_MobileApp_CREATE"]);
+            }
+            Answer::json(c)
+        };
+        let ios = json!({"platform": "IOS", "teamId": "TEAMX", "keyId": "KEY1", "privateKey": apple_key_upload()}).to_string();
+
+        // Only whoever may make the app's mobile apps.
+        r.security.answer("GET", AUTH_PATH, as_client(1, false));
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.coded(), is(StatusCode::FORBIDDEN, "COMMON.PERMISSION_REQUIRED"));
+
+        r.security.answer("GET", AUTH_PATH, as_client(1, true));
+        let g = post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await;
+        assert_eq!(g.json(), json!({"platform": "IOS", "account": "TEAMX", "keyId": "KEY1"}), "{}", g.body);
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.status, StatusCode::OK, "the owner replaces it");
+        let listed = get(&r.app, "/api/notification/push/keys?appCode=rsapp").await;
+        assert_eq!(listed.json(), json!([{"platform": "IOS", "account": "TEAMX", "keyId": "KEY1"}]));
+        assert!(!listed.body.contains("PRIVATE"), "never the secret");
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&platform=IOS&account=TEAMX").await.json().as_array().map(Vec::len), Some(1));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&platform=ANDROID").await.json(), json!([]));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&account=TEAMY").await.json(), json!([]));
+
+        // What is refused.
+        for (bad, code) in [
+            (json!({"platform": "ANDROID", "serviceAccount": "not a key"}), "NOTIF.PUSH_KEY_NOT_FIREBASE"),
+            (json!({"platform": "ANDROID", "serviceAccount": "{\"project_id\": \"p\"}"}), "NOTIF.PUSH_KEY_NOT_FIREBASE"),
+            (json!({"platform": "IOS", "teamId": "TEAMX", "privateKey": apple_key_upload()}), "NOTIF.PUSH_KEY_NOT_APPLE"),
+            (json!({"platform": "IOS", "teamId": "TEAMX", "keyId": "K", "privateKey": "aGVsbG8="}), "NOTIF.PUSH_KEY_NOT_APPLE"),
+            (json!({"platform": "WEB"}), "COMMON.PARAM_INVALID"),
+        ] {
+            let g = post(&r.app, "/api/notification/push/keys?appCode=rsapp", &bad.to_string()).await;
+            assert_eq!(g.coded(), is(StatusCode::BAD_REQUEST, code), "{bad}");
+        }
+
+        // Another client can neither replace nor see it.
+        r.security.answer("GET", AUTH_PATH, as_client(2, true));
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.coded(), is(StatusCode::FORBIDDEN, "NOTIF.PUSH_KEY_TAKEN"));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp").await.json(), json!([]));
+
+        // The sender finds it for a device of the app built against that team, and only then.
+        let push = PushService::new(Dao::new(r.pool.clone()), CoreClient::new(Upstream::fixed(&["http://127.0.0.1:9"]), Duration::from_secs(1)).unwrap(), &vapid()).unwrap();
+        r.security.answer("GET", "/api/core/notifications/internal/app/rsapp", Answer::json(json!({"count": 1})));
+        let phone = json!({"platform": "IOS", "token": "ABCD", "appIdentifier": "com.client.app", "providerAccount": "TEAMX"}).to_string();
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &phone).await.json()["registered"], true);
+        let mut device = Dao::new(r.pool.clone()).devices_of("rsapp", &[142]).await.unwrap().remove(0);
+        assert!(matches!(push.uploaded(&device).await, Some(Uploaded::Apns(a)) if a.team_id == "TEAMX"));
+        device.provider_account = Some("TEAMY".into());
+        assert!(push.uploaded(&device).await.is_none());
+        device.app_code = "otherapp".into();
+        device.provider_account = Some("TEAMX".into());
+        assert!(push.uploaded(&device).await.is_none(), "keys are per app");
     })
     .await;
 }

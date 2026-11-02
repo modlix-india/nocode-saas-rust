@@ -32,6 +32,11 @@ pub const REDIS_ERRORS: &str = "redis_errors_total";
 pub const TOKIO_WORKERS: &str = "tokio_runtime_workers";
 pub const TOKIO_ALIVE_TASKS: &str = "tokio_runtime_alive_tasks";
 pub const TOKIO_GLOBAL_QUEUE: &str = "tokio_runtime_global_queue_depth";
+/// The container's memory limit, what it uses that the kernel cannot reclaim (cAdvisor's names),
+/// and how often the kernel killed a process of it for memory. Read from the unit's own cgroup.
+pub const CONTAINER_MEMORY_LIMIT: &str = "container_memory_limit_bytes";
+pub const CONTAINER_MEMORY_WORKING_SET: &str = "container_memory_working_set_bytes";
+pub const CONTAINER_MEMORY_OOM_KILLS: &str = "container_memory_oom_kills";
 
 type Collector = Box<dyn Fn() + Send + Sync>;
 
@@ -94,6 +99,7 @@ pub fn collect() {
     }
     collect_mysql();
     collect_mongo();
+    collect_cgroup();
     for c in lock(&COLLECTORS).iter() {
         c();
     }
@@ -113,12 +119,67 @@ fn describe() {
     describe_gauge!(TOKIO_GLOBAL_QUEUE, Unit::Count, "Tasks waiting in the Tokio runtime's global queue.");
     describe_gauge!(DB_CONNECTIONS, Unit::Count, "Open connections of a database pool, by state (idle, used).");
     describe_gauge!(DB_CONNECTIONS_MAX, Unit::Count, "The most connections a database pool opens.");
+    describe_gauge!(CONTAINER_MEMORY_LIMIT, Unit::Bytes, "The container's memory limit (absent when it has none).");
+    describe_gauge!(CONTAINER_MEMORY_WORKING_SET, Unit::Bytes, "Memory the container uses that the kernel cannot reclaim: usage less inactive file pages.");
+    describe_gauge!(CONTAINER_MEMORY_OOM_KILLS, Unit::Count, "Processes of the container the kernel killed for memory, since the cgroup was made (a restart makes a new one).");
     describe_histogram!(HTTP_DURATION, Unit::Seconds, "Requests this service answered, by method, route template and status.");
     describe_histogram!(HTTP_CLIENT_DURATION, Unit::Seconds, "Calls to other services until their response headers, by target, method and status.");
     describe_counter!(REDIS_ERRORS, Unit::Count, "Redis connections and commands that failed, by operation.");
     describe_counter!(crate::error::CODED_ERRORS, Unit::Count, "Coded errors this service answered with, by code and status.");
     describe_counter!(crate::cache::CACHE_GETS, Unit::Count, "Local cache lookups, by cache and result (hit, miss).");
     describe_counter!(crate::cache::CACHE_EVICTIONS, Unit::Count, "Local cache entries dropped for size or age, by cache.");
+}
+
+// ----------------------------------------------------------------------------------- cgroup ---
+
+/// The container's memory as its cgroup reports it.
+#[derive(Debug, Default, PartialEq)]
+pub struct CgroupMemory {
+    pub limit: Option<u64>,
+    pub working_set: Option<u64>,
+    pub oom_kills: Option<u64>,
+}
+
+/// Limits at or above this are "no limit": cgroup v1 writes the largest page-aligned i64.
+const NO_LIMIT: u64 = 1 << 62;
+
+fn stat_value(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix(' ')?.trim().parse().ok())
+}
+
+/// Reads `<root>`: cgroup v2 (`memory.max`, `memory.current`, `memory.stat`, `memory.events`)
+/// when `memory.max` is there, else v1 under `<root>/memory` (`memory.limit_in_bytes`,
+/// `memory.usage_in_bytes`, `memory.stat`, `memory.oom_control`). Docker mounts the container's
+/// own cgroup at /sys/fs/cgroup.
+pub fn cgroup_memory(root: &std::path::Path) -> CgroupMemory {
+    let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok();
+    let (limit, usage, stat, events, inactive, kills) = if let Some(max) = read(root.join("memory.max")) {
+        (max, read(root.join("memory.current")), read(root.join("memory.stat")), read(root.join("memory.events")), "inactive_file", "oom_kill")
+    } else {
+        let v1 = root.join("memory");
+        let Some(max) = read(v1.join("memory.limit_in_bytes")) else { return CgroupMemory::default() };
+        (max, read(v1.join("memory.usage_in_bytes")), read(v1.join("memory.stat")), read(v1.join("memory.oom_control")), "total_inactive_file", "oom_kill")
+    };
+    let usage = usage.and_then(|u| u.trim().parse::<u64>().ok());
+    let inactive = stat.as_deref().and_then(|s| stat_value(s, inactive)).unwrap_or(0);
+    CgroupMemory {
+        limit: limit.trim().parse::<u64>().ok().filter(|l| *l < NO_LIMIT),
+        working_set: usage.map(|u| u.saturating_sub(inactive)),
+        oom_kills: events.as_deref().and_then(|e| stat_value(e, kills)),
+    }
+}
+
+fn collect_cgroup() {
+    let m = cgroup_memory(std::path::Path::new("/sys/fs/cgroup"));
+    if let Some(v) = m.limit {
+        metrics::gauge!(CONTAINER_MEMORY_LIMIT).set(v as f64);
+    }
+    if let Some(v) = m.working_set {
+        metrics::gauge!(CONTAINER_MEMORY_WORKING_SET).set(v as f64);
+    }
+    if let Some(v) = m.oom_kills {
+        metrics::gauge!(CONTAINER_MEMORY_OOM_KILLS).set(v as f64);
+    }
 }
 
 // ------------------------------------------------------------------------------------ pools ---
@@ -317,6 +378,46 @@ pub fn sample(text: &str, name: &str, labels: &[(&str, &str)]) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cgroup_dir(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("cgroup-{}-{}", std::process::id(), files.len() + files[0].0.len()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (path, text) in files {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn reads_cgroup_v1_memory() {
+        // As on the dev and stage hosts (Oracle Linux 8, cgroup v1), ui-engine with mem_limit 1g.
+        let dir = cgroup_dir(&[
+            ("memory/memory.limit_in_bytes", "1073741824\n"),
+            ("memory/memory.usage_in_bytes", "900000000\n"),
+            ("memory/memory.stat", "cache 120000000\ntotal_inactive_file 100000000\ntotal_active_file 5\n"),
+            ("memory/memory.oom_control", "oom_kill_disable 0\nunder_oom 0\noom_kill 1\n"),
+        ]);
+        let m = cgroup_memory(&dir);
+        assert_eq!(m, CgroupMemory { limit: Some(1 << 30), working_set: Some(800_000_000), oom_kills: Some(1) });
+        let unlimited = cgroup_dir(&[("memory/memory.limit_in_bytes", "9223372036854771712\n"), ("memory/memory.usage_in_bytes", "10\n")]);
+        assert_eq!(cgroup_memory(&unlimited), CgroupMemory { limit: None, working_set: Some(10), oom_kills: None });
+    }
+
+    #[test]
+    fn reads_cgroup_v2_memory_and_nothing_elsewhere() {
+        let dir = cgroup_dir(&[
+            ("memory.max", "2147483648\n"),
+            ("memory.current", "500\n"),
+            ("memory.stat", "anon 400\ninactive_file 100\n"),
+            ("memory.events", "low 0\nhigh 0\nmax 3\noom 1\noom_kill 2\n"),
+        ]);
+        assert_eq!(cgroup_memory(&dir), CgroupMemory { limit: Some(2 << 30), working_set: Some(400), oom_kills: Some(2) });
+        let max = cgroup_dir(&[("memory.max", "max\n"), ("memory.current", "7\n"), ("memory.events.local", "")]);
+        assert_eq!(cgroup_memory(&max).limit, None);
+        assert_eq!(cgroup_memory(std::path::Path::new("/nonexistent/cgroup")), CgroupMemory::default());
+    }
 
     #[test]
     fn commits_and_build_info() {

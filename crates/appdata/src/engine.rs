@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::error::AppDataResult;
+use crate::error::{AppDataError, AppDataResult};
 use crate::model::{AggregateQuery, Connection, DataObject, DraftCopyFilter, Page, Query, Schema, Storage, StorageRelation};
 use crate::schema_refs::{HybridRepository, KirunSystemSchemas, SchemaRepository};
 use crate::value::Document;
@@ -22,6 +22,58 @@ pub const CACHE_SUFFIX_FOR_INDEX_CREATION: &str = "_index_creation";
 pub const CACHE_SUFFIX_FOR_TABLE_CREATION: &str = "_table_creation";
 pub const CACHE_SUFFIX_FOR_FOREIGN_KEYS: &str = "_foreign_keys";
 pub const DRAFT_DB_SUFFIX: &str = "_draft";
+
+/// Rust only. Database (schema) names a whole-database drop never touches, even when they look
+/// like `<client>_<app>`: the servers' own and the platform services' (compared ignoring case).
+pub const PROTECTED_DATABASES: &[&str] = &[
+    "admin",
+    "config",
+    "local",
+    "ui",
+    "core",
+    "security",
+    "files",
+    "notification",
+    "multi",
+    "information_schema",
+    "mysql",
+    "performance_schema",
+    "sys",
+    "entity_processor",
+    "entity_collector",
+];
+
+/// Rust only. Server and platform schemas named `<word>_<more>` (`mysql_audit` on dev,
+/// `performance_schema`, `entity_processor`): the part before the first `_` is one of these
+/// words, compared ignoring case. No client code is one of them, so no tenant database is lost.
+pub const PROTECTED_DATABASE_PREFIXES: &[&str] = &["mysql", "sys", "performance", "information", "entity"];
+
+/// Rust only, for the admin purge: whether `name` can be a tenant database
+/// (`<CLIENT>_<app>[_draft]`): ASCII letters, digits and `_`, at most 64 long, a client part of
+/// letters and digits before the first `_` and something after it, and not a protected name.
+pub fn is_tenant_database_name(name: &str) -> bool {
+    let Some((client, rest)) = name.split_once('_') else { return false };
+    !client.is_empty()
+        && client.bytes().all(|b| b.is_ascii_alphanumeric())
+        && !rest.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && !PROTECTED_DATABASES.iter().any(|p| p.eq_ignore_ascii_case(name))
+        && !PROTECTED_DATABASE_PREFIXES.iter().any(|p| p.eq_ignore_ascii_case(client))
+}
+
+/// Rust only. Every cache the two engines keep per storage (tables and version tables made,
+/// foreign keys read, indexes managed), each keyed by tenant database: what must go when a
+/// tenant database is dropped under them, or a later write would skip creating its table.
+pub fn storage_cache_names(unique_name: &str) -> Vec<String> {
+    let version = crate::mysql::version_table::name_for(unique_name);
+    vec![
+        format!("{unique_name}{CACHE_SUFFIX_FOR_TABLE_CREATION}"),
+        format!("{version}{CACHE_SUFFIX_FOR_TABLE_CREATION}"),
+        format!("{unique_name}{CACHE_SUFFIX_FOR_FOREIGN_KEYS}"),
+        format!("{unique_name}{CACHE_SUFFIX_FOR_INDEX_CREATION}"),
+    ]
+}
 
 /// Who is calling and on which surface.
 #[derive(Clone, Default)]
@@ -194,6 +246,45 @@ pub trait AppDataEngine: Send + Sync {
     async fn read(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
         -> AppDataResult<Document>;
 
+    /// Rust only. Creates everything a write to the storage needs (table, version table, counters)
+    /// ahead of time, so a transaction that writes it never meets DDL midway (MySQL 1412 "Table
+    /// definition has changed" when a table is created after the transaction began).
+    async fn prepare(&self, _cx: &Ctx, _client_code: &str, _conn: Option<&Connection>, _storage: &Storage) -> AppDataResult<()> {
+        Ok(())
+    }
+
+    /// Rust only. Whether this engine can run a batch as one transaction in this deployment;
+    /// when it cannot, a batch undoes its own writes on failure and says it was not atomic.
+    async fn transactional(&self, _conn: Option<&Connection>) -> bool {
+        false
+    }
+
+    /// Rust only. The row read for a compare-and-set: locked until the surrounding transaction
+    /// ends where the engine has one (MySQL `SELECT ... FOR UPDATE`), a plain read otherwise.
+    /// `None` when there is no such row.
+    async fn lock_row(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
+        -> AppDataResult<Option<Document>> {
+        match self.read(cx, client_code, conn, storage, id).await {
+            Ok(row) => Ok(Some(row)),
+            Err(e) if e.is_object_not_found() => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Rust only. The next value of the counter `key` kept beside the storage's rows (same
+    /// tenant and surface): `start` the first time, then one more each call, atomically.
+    async fn next_sequence(
+        &self,
+        _cx: &Ctx,
+        _client_code: &str,
+        _conn: Option<&Connection>,
+        _storage: &Storage,
+        _key: &str,
+        _start: i64,
+    ) -> AppDataResult<i64> {
+        Err(AppDataError::unsupported_on_backend("sequences", self.backend()))
+    }
+
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)
         -> AppDataResult<Page<Document>>;
 
@@ -293,6 +384,24 @@ pub trait AppDataEngine: Send + Sync {
 
     async fn drop_draft_database(&self, conn: Option<&Connection>, app_code: &str, client_code: &str) -> AppDataResult<bool>;
 
+    /// Rust only, for the admin purge: every database (schema) name on the connection's server
+    /// (`None`: the engine's default server).
+    async fn database_names(&self, _conn: Option<&Connection>) -> AppDataResult<Vec<String>> {
+        Err(AppDataError::unsupported_on_backend("listing databases", self.backend()))
+    }
+
+    /// Rust only, for the admin purge: the rows in a whole database (MySQL: the tables'
+    /// `table_rows` estimate; Mongo: `dbStats.objects`).
+    async fn database_rows(&self, _conn: Option<&Connection>, _name: &str) -> AppDataResult<i64> {
+        Err(AppDataError::unsupported_on_backend("counting a database", self.backend()))
+    }
+
+    /// Rust only, for the admin purge: drops a whole tenant database by its exact name. A name
+    /// [`is_tenant_database_name`] refuses is never dropped (an error).
+    async fn drop_database(&self, _conn: Option<&Connection>, _name: &str) -> AppDataResult<bool> {
+        Err(AppDataError::unsupported_on_backend("dropping a database", self.backend()))
+    }
+
     async fn copy_live_to_draft(
         &self,
         cx: &Ctx,
@@ -315,4 +424,31 @@ pub trait AppDataEngine: Send + Sync {
         filter: Option<&DraftCopyFilter>,
         followed: &HashMap<String, Storage>,
     ) -> AppDataResult<i64>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tenant_database_names() {
+        for ok in ["ZZPURGE1_zzpurgeapp", "ZZPURGE1_zzpurgeapp_draft", "SYSTEM_appbuilder", "ABC_my_app"] {
+            assert!(is_tenant_database_name(ok), "{ok}");
+        }
+        for no in [
+            "", "core", "ui", "admin", "_x", "ABC_", "ABC", "AB-C_app", "ABC_app-x", "entity_processor", "ENTITY_PROCESSOR",
+            "performance_schema", "information_schema", "mysql_audit", "MySQL_audit", "sys_config", "entity_anything",
+        ] {
+            assert!(!is_tenant_database_name(no), "{no}");
+        }
+        assert!(!is_tenant_database_name(&format!("A_{}", "x".repeat(63))));
+    }
+
+    #[test]
+    fn storage_caches_cover_both_engines() {
+        assert_eq!(
+            storage_cache_names("s1"),
+            ["s1_table_creation", "s1_version_table_creation", "s1_foreign_keys", "s1_index_creation"]
+        );
+    }
 }

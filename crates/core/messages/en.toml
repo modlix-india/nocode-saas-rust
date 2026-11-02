@@ -57,6 +57,22 @@ java_text = "Function execution timed out : $. Please try again later."
 when = "A stored function runs longer than the time core allows one run."
 audience = "anyone"
 
+[CORE.EXECUTION_TIME_LIMIT]
+status = 422
+params = ["function", "seconds"]
+text = "The function[ {function}] ran longer than one call may[ ({seconds} seconds)] and was stopped."
+action = "Make the function do less in one call (smaller pages, fewer rows per loop), or run long work as an event in parts."
+when = "One execution (the function called, with every function and trigger it runs) goes past [kirun] max_execution_seconds of the unit. Rust only: Java's own timeout is FUNCTION_TIMED_OUT, five minutes per stored function, and could not stop a function that never waits."
+audience = "anyone"
+
+[CORE.EXECUTION_STEP_LIMIT]
+status = 422
+params = ["function", "steps"]
+text = "The function[ {function}] ran more steps than one call may[ ({steps})] and was stopped."
+action = "Make the function do less in one call (smaller pages, fewer rows per loop), or run long work as an event in parts."
+when = "One execution runs more steps than [kirun] max_steps of the unit (off unless set). Rust only."
+audience = "anyone"
+
 [CORE.FUNCTION_STEP_FAILED]
 status = 500
 params = ["step", "stepFunction", "function", "reason"]
@@ -326,12 +342,48 @@ audience = "signed-in"
 
 # ---- Messages and schedules ----
 
+[CORE.MESSAGE_SERVICE_RETIRED]
+status = 410
+params = ["function"]
+text = "The function[ {function}] no longer works: the message service it called has been retired."
+action = "Send messages and place calls through the app's own server functions and REST connections to the provider."
+java_text = "$ called the message service, which has been retired"
+when = "Any CoreServices.Message function (SendWhatsapp, MakeCall, the WhatsApp number functions): it fails at once, without calling anything."
+audience = "anyone"
+
+[CORE.DATA_NOTIFICATION_EVENT_INVALID]
+status = 400
+params = ["event"]
+text = "The event name[ {event}] can't be used for a data notification: it must be 1 to 64 letters, digits, underscores, dots or hyphens."
+action = "Use a short name such as incomingCall or task.changed."
+java_text = "Event name '$' must be 1 to 64 letters, digits, '_', '.' or '-'"
+when = "CoreServices.Notification.SendDataNotification with an empty event name, one longer than 64 characters, or one with other characters."
+audience = "anyone"
+
+[CORE.DATA_NOTIFICATION_EVENT_RESERVED]
+status = 400
+params = ["event"]
+text = "The event name[ {event}] can't be used for a data notification: the notification stream uses it itself."
+action = "Pick another name; init and notification are taken."
+java_text = "Event name '$' is reserved"
+when = "CoreServices.Notification.SendDataNotification with the event name init or notification (in any case)."
+audience = "anyone"
+
+[CORE.DATA_NOTIFICATION_TOO_LARGE]
+status = 400
+params = ["size", "limit"]
+text = "The data notification's data is too large[ ({size} bytes)]: at most[ {limit}] bytes can be pushed."
+action = "Send less: an id or a short summary the page can read the rest with."
+java_text = "Data notification data is $ bytes, more than the $ allowed"
+when = "CoreServices.Notification.SendDataNotification whose data, written as JSON, is over 64 KB."
+audience = "anyone"
+
 [CORE.WHATSAPP_OWN_CLIENT_ONLY]
 status = 403
 params = ["own", "client"]
 text = "You can manage only your own organisation's WhatsApp numbers."
 java_text = "Only client $ may manage its own WhatsApp numbers, not $"
-when = "A CoreServices.Message WhatsApp-number function aimed at another client."
+when = "A CoreServices.Message WhatsApp-number function aimed at another client. Not raised by the Rust units since the message service was retired (2026-10-22): those functions answer CORE.MESSAGE_SERVICE_RETIRED."
 audience = "signed-in"
 
 [CORE.MESSAGE_APP_FORBIDDEN]
@@ -340,7 +392,7 @@ params = ["app"]
 text = "You can't send messages for the app[ {app}]."
 action = "Send messages only for apps your organisation can use."
 java_text = "Not allowed to message for app $"
-when = "A CoreServices.Message function for an app the caller's client has no access to."
+when = "A CoreServices.Message function for an app the caller's client has no access to. Not raised by the Rust units since the message service was retired (2026-10-22): those functions answer CORE.MESSAGE_SERVICE_RETIRED."
 audience = "signed-in"
 
 [CORE.MESSAGE_CLIENT_FORBIDDEN]
@@ -349,7 +401,7 @@ params = ["client"]
 text = "You can't send messages for [the client {client}|that client]: it is not your organisation or one it manages."
 action = "Send messages only for your organisation or one it manages."
 java_text = "Not allowed to message on behalf of client $"
-when = "A CoreServices.Message function on behalf of a client the caller's client does not manage."
+when = "A CoreServices.Message function on behalf of a client the caller's client does not manage. Not raised by the Rust units since the message service was retired (2026-10-22): those functions answer CORE.MESSAGE_SERVICE_RETIRED."
 audience = "signed-in"
 
 [CORE.WHATSAPP_NOT_LINKED]
@@ -358,7 +410,7 @@ params = ["client", "app"]
 text = "No WhatsApp number is linked[ for {client}][ in {app}]."
 action = "Link a WhatsApp number in the app's messaging settings first."
 java_text = "No WhatsApp number is linked for $ in $"
-when = "CoreServices.Message.SendWhatsapp for a client with no linked WhatsApp number."
+when = "CoreServices.Message.SendWhatsapp for a client with no linked WhatsApp number. Not raised by the Rust units since the message service was retired (2026-10-22): those functions answer CORE.MESSAGE_SERVICE_RETIRED."
 audience = "signed-in"
 
 [CORE.SCHEDULE_CLIENT_FORBIDDEN]
@@ -368,6 +420,15 @@ text = "You can't schedule events for [the client {client}|that client]: it is n
 action = "Schedule events only for your organisation or one it manages."
 java_text = "Not allowed to schedule events for client $"
 when = "A CoreServices.Schedule function for a client the caller's client does not manage."
+audience = "signed-in"
+
+[CORE.SCHEDULE_STATE_FORBIDDEN]
+status = 403
+params = ["client", "app"]
+text = "You can read a schedule only for your own organisation, in the app the function runs in[, not for {client}][, not in {app}]."
+action = "Leave clientCode and appCode empty to read your own organisation's schedule."
+java_text = "Not allowed to read the schedule state for client $ in app $"
+when = "CoreServices.Event.GetScheduleState with a clientCode other than the caller's own client, or an appCode other than the app it runs in. Rust only."
 audience = "signed-in"
 
 # ---- Storage: who may read and write ----
@@ -433,6 +494,14 @@ text = "We couldn't change the row[ in {storage}]: it is no longer there."
 action = "Reload the data and try again."
 java = "forbidden_update_storage"
 when = "Changing a row of a MySQL storage that was deleted before the change was saved (Java answers it with the update refusal)."
+audience = "signed-in"
+
+[CORE.STORAGE_SCHEMA_REF_NOT_FOUND]
+status = 404
+params = ["schema", "storage"]
+text = "We couldn't find the schema[ {schema}] that the storage[ {storage}] takes its fields from."
+action = "Check the storage's schema reference, or create that schema in the app."
+when = "Reading the fields of a storage (CoreServices.Storage.GetFields) whose schema reference names no schema the client can read."
 audience = "signed-in"
 
 [CORE.STORAGE_BUILDER_ONLY]
@@ -507,6 +576,14 @@ text = "A row with [id {id}|this id] already exists[ in {storage}]."
 action = "Leave out _id to add a new row, or update the existing row instead."
 java = "storage_object_id_exists"
 when = "Adding a row whose _id is already taken."
+audience = "anyone"
+
+[CORE.DUPLICATE_KEY]
+status = 409
+params = ["storage", "index"]
+text = "That is already taken[ ({index})]."
+action = "Choose another value, or change the row that already holds it[ in {storage}]."
+when = "Adding or changing a row whose value is already held by another row under a unique index (MySQL error 1062, Mongo E11000). Rust only: Java let the driver's error escape as a 500. Storage.Batch with onConflict report answers it as a conflict instead."
 audience = "anyone"
 
 [CORE.ROW_ID_REQUIRED]
@@ -764,6 +841,40 @@ java_text = "Authorization URL is required"
 when = "Starting the OAuth consent flow for a connection without an authorization URL."
 audience = "signed-in"
 
+[CORE.CONNECTION_CONSENT_FORBIDDEN]
+status = 403
+params = ["connection"]
+text = "You can't connect {connection|this connection} for your business: your account is not allowed to."
+action = "Ask someone who manages your business's connected accounts to connect it, or to give your account that permission."
+java_text = "Consent for the connection $ is not allowed: the caller does not satisfy its consentAuth"
+when = "Starting the OAuth consent flow for a connection whose consentAuth the caller's authorities do not satisfy. Rust only: Java had no consentAuth."
+audience = "signed-in"
+
+[CORE.CONNECTION_REVOKE_FORBIDDEN]
+status = 403
+params = ["connection"]
+text = "You can't disconnect {connection|this connection} for your business: your account is not allowed to."
+action = "Ask someone who manages your business's connected accounts to disconnect it, or to give your account that permission."
+java_text = "Revoking the token of the connection $ is not allowed: the caller does not satisfy its consentAuth"
+when = "Revoking the OAuth token (GET /api/core/connections/oauth/revoke) of a connection whose consentAuth the caller's authorities do not satisfy. Rust only: Java had no consentAuth."
+audience = "signed-in"
+
+[CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING]
+status = 400
+text = "The connection can't sign in with Basic client authentication: its client id or client secret is missing."
+action = "Add clientId and clientSecret to the connection's token details, or remove clientAuthentication."
+java_text = "Basic client authentication needs clientId and clientSecret in the connection's tokenDetails"
+when = "A client-credentials token request for a connection whose tokenDetails ask for Basic client authentication without a client id and secret."
+audience = "anyone"
+
+[CORE.CONNECTION_TOKEN_BODY_INVALID]
+status = 400
+text = "The connection's token request body is not usable: it must be a set of names and values."
+action = "Set tokenDetails.body to an object of names and values, such as grant_type and scope."
+java_text = "The connection's tokenDetails.body must be an object of the values to send"
+when = "A client-credentials token request for a connection whose tokenDetails.body is not an object."
+audience = "anyone"
+
 [CORE.NOT_ABLE_TO_CREATE_TOKEN]
 status = 400
 params = ["connection", "reason"]
@@ -833,6 +944,15 @@ text = "We couldn't send the e-mail[: {reason}]."
 action = "Check the mail connection's settings and the addresses, then try again."
 java = "mail_send_error"
 when = "Sending an e-mail fails (no addresses, a SendGrid connection without an API key, the mail server refusing it)."
+audience = "anyone"
+
+[CORE.MAIL_ADDRESS_INVALID]
+status = 400
+params = ["address"]
+text = "The copy address[ {address}] is not an e-mail address, so the e-mail was not sent."
+action = "Correct the CC or BCC address and try again."
+java_text = "Unable to send the email: Not an email address: $"
+when = "CoreServices.Email.SendEmail with a cc or bcc value that is not an e-mail address."
 audience = "anyone"
 
 [CORE.UNABLE_AI_CONNECTION]

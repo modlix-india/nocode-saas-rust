@@ -1,7 +1,7 @@
 //! The request bodies `BasicRestService` sends: the payload as JSON (`JsonUtil.toMap` through
-//! Jackson), as `application/x-www-form-urlencoded` (every value as its JSON text, quotes and
-//! all, as Java does), or as `multipart/form-data` (with `data:<type>;name:<file>;base64,...`
-//! values turned into file parts).
+//! Jackson), as `application/x-www-form-urlencoded` (plain values: see [`form_body`]), or as
+//! `multipart/form-data` (with `data:<type>;name:<file>;base64,...` values turned into file
+//! parts).
 
 use base64::Engine;
 use serde_json::Value;
@@ -21,8 +21,10 @@ pub fn json_body(payload: &Value) -> Vec<u8> {
     json::jackson(&map).into_bytes()
 }
 
-/// `getURLFormDataFromJson` then `FormHttpMessageWriter`: `name=value` pairs, both
-/// `URLEncoder`-encoded, the value being the member's JSON text.
+/// `name=value` pairs, both `URLEncoder`-encoded, as a form posts them: a string as it is
+/// (no quotes), a number or boolean as its text, null as an empty value, and a nested object or
+/// array as its JSON text. Java sent every value as its JSON text, so a provider received
+/// `From="+9180..."` (DIFFERENCES.md #20).
 pub fn form_body(payload: &Value) -> Vec<u8> {
     let Value::Object(m) = payload else { return Vec::new() };
     let mut out = String::new();
@@ -32,9 +34,18 @@ pub fn form_body(payload: &Value) -> Vec<u8> {
         }
         out.push_str(&url_encode_form(k));
         out.push('=');
-        out.push_str(&url_encode_form(&json::gson_element(v)));
+        out.push_str(&url_encode_form(&form_value(v)));
     }
     out.into_bytes()
+}
+
+/// One form value as a form posts it (see [`form_body`]).
+pub fn form_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => json::gson_element(other),
+    }
 }
 
 /// One part of a multipart body.
@@ -165,9 +176,15 @@ mod tests {
     }
 
     #[test]
-    fn form_values_are_json_text() {
+    fn form_values_are_plain() {
         let body = String::from_utf8(form_body(&json!({"grant_type": "client credentials", "n": 5}))).unwrap();
-        assert_eq!(body, "grant_type=%22client+credentials%22&n=5");
+        assert_eq!(body, "grant_type=client+credentials&n=5");
+        let body = String::from_utf8(form_body(&json!({
+            "From": "+918012345678", "f": 1.5, "t": true, "z": null, "o": {"a": "b"}, "l": [1, "x"], "e": ""
+        })))
+        .unwrap();
+        assert_eq!(body, "From=%2B918012345678&f=1.5&t=true&z=&o=%7B%22a%22%3A%22b%22%7D&l=%5B1%2C%22x%22%5D&e=");
+        assert!(form_body(&json!("not an object")).is_empty());
     }
 
     #[test]

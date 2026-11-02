@@ -113,7 +113,13 @@ async fn send_file(
     let local = store
         .get_as_file(path, detail.last_modified, options.no_cache)
         .await
-        .map_err(AppError::Internal)?;
+        .map_err(|e| {
+            if crate::store::is_missing_object(&e) {
+                crate::errors::status(StatusCode::NOT_FOUND, crate::errors::OBJECT_NOT_FOUND, &["File", path])
+            } else {
+                AppError::Internal(e)
+            }
+        })?;
 
     if options.has_no_modification() {
         let len = tokio::fs::metadata(&local).await.map_err(anyhow::Error::from)?.len();

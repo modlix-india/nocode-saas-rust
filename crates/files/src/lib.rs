@@ -4,7 +4,7 @@
 //!   its own; 93% of files traffic.
 //! - `files-manage`: everything else (upload, delete, folders, zip import/export, transforms,
 //!   access paths, billing, cleanup), plus the read routes, so the Java services that call
-//!   `FILES` through Feign reach one place. Registers in Eureka as `FILES` while Java callers
+//!   `FILES` through Feign reach one place. Registers in Lighthouse as `FILES` while Java callers
 //!   remain.
 //!
 //! Both read the same MySQL schema and R2 buckets as the Java service, and take part in its
@@ -43,7 +43,7 @@ use anyhow::Result;
 use axum::Router;
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::security::SecurityClient;
 
@@ -88,11 +88,7 @@ pub async fn run(unit: Unit) -> Result<()> {
     let static_store = Store::new(s3.clone(), format!("{}-static", cfg.storage.bucket_prefix), &temp_base)?;
     let secured_store = Store::new(s3, format!("{}-secured", cfg.storage.bucket_prefix), &temp_base)?;
 
-    let cache = CacheService::new(
-        &cfg.redis.cache_prefix,
-        &cfg.redis.eviction_channel,
-        Some(cfg.redis.url.as_str()),
-    )?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let details = cache.family();
     let exists = cache.family();
     let lists = cache.family();
@@ -100,12 +96,12 @@ pub async fn run(unit: Unit) -> Result<()> {
     let hierarchies = cache.family();
     cache.spawn_eviction_listener();
 
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
-    let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, registry.as_ref())?;
 
     let health = Health::new(telemetry.metrics.clone());
     {
@@ -142,7 +138,7 @@ pub async fn run(unit: Unit) -> Result<()> {
         server: cfg.server.clone(),
         telemetry,
         health,
-        eureka,
+        registry,
         cors: true,
     }
     .run(app)

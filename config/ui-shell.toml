@@ -23,8 +23,8 @@ auth_upstream = "http://localhost:8101"
 internal_upstream = "http://localhost:8112"
 
 [core]
-# The URI path routes run their KIRun functions on the core service.
-upstream = "eureka:CORE"
+# URI path routes run their KIRun functions on core-exec (/api/core/function/execute).
+upstream = "lighthouse:CORE-EXEC"
 timeout_seconds = 60
 
 [mongo]
@@ -47,7 +47,7 @@ analytics_ingestion_host = "https://engine.local.modlix.com"
 analytics_engine_url = "http://localhost:8096"
 ssr_channel = "ssr:cache:invalidation"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "UI-SHELL"

@@ -167,6 +167,37 @@ impl AppDataError {
         Self::new(StatusCode::NOT_FOUND, msg::CONNECTION_NOT_AVAILABLE, &[backend])
     }
 
+    /// A write refused by a unique index (409, `CORE.DUPLICATE_KEY`, Rust only). The text names
+    /// the index, never the value (it can be a person's e-mail); the engine that knows the
+    /// storage adds it with [`AppDataError::in_storage`].
+    pub fn duplicate_key(index: &str) -> Self {
+        crate::catalogue::register();
+        let index = index.trim();
+        let mut c = Coded::new(DUPLICATE_KEY);
+        if !index.is_empty() {
+            c = c.param("index", index);
+        }
+        let message = if index.is_empty() { "Duplicate entry for a unique key".to_string() } else { format!("Duplicate entry for key '{index}'") };
+        AppDataError::Message { status: StatusCode::CONFLICT, message, kind: ErrorKind::Generic, code: Some(Box::new(c)) }
+    }
+
+    /// Names the storage on a duplicate key (its text and its `storage` value); any other error
+    /// is returned as it is.
+    pub fn in_storage(self, storage: &str) -> Self {
+        match self {
+            AppDataError::Message { status, message, kind, code: Some(c) } if c.code == DUPLICATE_KEY => {
+                let message = if message.contains(" in storage ") { message } else { format!("{message} in storage {storage}") };
+                AppDataError::Message { status, message, kind, code: Some(Box::new(c.param("storage", storage))) }
+            }
+            other => other,
+        }
+    }
+
+    /// Whether a unique index refused the write.
+    pub fn is_duplicate_key(&self) -> bool {
+        self.code().is_some_and(|c| c.code == DUPLICATE_KEY)
+    }
+
     pub fn storage_object_id_exists(id: &str, storage: &str) -> Self {
         Self::new(StatusCode::CONFLICT, msg::STORAGE_OBJECT_ID_EXISTS, &[id, storage])
     }
@@ -212,15 +243,69 @@ impl From<AppDataError> for AppError {
     }
 }
 
+/// A MySQL duplicate key (error 1062, or 1586 when the key is named, SQLSTATE 23000) becomes
+/// [`AppDataError::duplicate_key`], a 409 a KIRun function can tell apart (Java let the R2DBC
+/// `DataIntegrityViolationException` escape as a 500). Every other driver error stays internal.
 impl From<sqlx::Error> for AppDataError {
     fn from(e: sqlx::Error) -> Self {
+        if let Some(d) = e.as_database_error() {
+            let number = d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>().map(|m| m.number());
+            if let Some(index) = mysql_duplicate_key(number, d.code().as_deref(), d.message()) {
+                return AppDataError::duplicate_key(&index);
+            }
+        }
         AppDataError::Internal(anyhow::Error::new(e))
     }
 }
 
+/// Mongo's E11000 (codes 11000, 11001, 12582, Spring's `DuplicateKeyException`) becomes
+/// [`AppDataError::duplicate_key`], as on MySQL.
 impl From<mongodb::error::Error> for AppDataError {
     fn from(e: mongodb::error::Error) -> Self {
+        if let Some(index) = mongo_error_duplicate_key(&e) {
+            return AppDataError::duplicate_key(&index);
+        }
         AppDataError::Internal(anyhow::Error::new(e))
+    }
+}
+
+/// The code of a duplicate key, on both backends.
+pub const DUPLICATE_KEY: &str = "CORE.DUPLICATE_KEY";
+
+/// The unique index a MySQL error names when it is a duplicate key: error 1062 (or 1586), or
+/// SQLSTATE 23000 with MySQL's "Duplicate entry '<value>' for key '<index>'" text. MySQL 8.0.19
+/// and later write the key as `<table>.<index>`; the table is dropped. Empty when the text
+/// names no key. `None` for every other error (a foreign key or a NOT NULL refusal is 23000 too).
+pub fn mysql_duplicate_key(number: Option<u16>, sql_state: Option<&str>, message: &str) -> Option<String> {
+    let duplicate = matches!(number, Some(1062 | 1586)) || (number.is_none() && sql_state == Some("23000") && message.starts_with("Duplicate entry"));
+    if !duplicate {
+        return None;
+    }
+    let key = message.rfind(" for key '").map(|i| &message[i + " for key '".len()..]).unwrap_or("");
+    let key = key.strip_suffix('\'').unwrap_or(key);
+    Some(key.rsplit('.').next().unwrap_or(key).to_string())
+}
+
+/// The unique index a Mongo write error names when it is a duplicate key (codes 11000, 11001,
+/// 12582): "E11000 duplicate key error collection: <db>.<coll> index: <index> dup key: {...}".
+/// Empty when the text names no index.
+pub fn mongo_duplicate_key(code: i32, message: &str) -> Option<String> {
+    if !matches!(code, 11000 | 11001 | 12582) {
+        return None;
+    }
+    let index = message.find(" index: ").map(|i| &message[i + " index: ".len()..]).unwrap_or("");
+    Some(index.split_whitespace().next().unwrap_or("").to_string())
+}
+
+/// The duplicate key a Mongo driver error carries: a single write's, a command's, or the first
+/// failed insert of an `insert_many`.
+fn mongo_error_duplicate_key(e: &mongodb::error::Error) -> Option<String> {
+    use mongodb::error::{ErrorKind, WriteFailure};
+    match e.kind.as_ref() {
+        ErrorKind::Write(WriteFailure::WriteError(w)) => mongo_duplicate_key(w.code, &w.message),
+        ErrorKind::Command(c) => mongo_duplicate_key(c.code, &c.message),
+        ErrorKind::InsertMany(m) => m.write_errors.iter().flatten().find_map(|w| mongo_duplicate_key(w.code, &w.message)),
+        _ => None,
     }
 }
 
@@ -287,6 +372,53 @@ mod tests {
         assert!(AppDataError::Empty.code().is_none());
         assert_eq!(AppDataError::Empty.with_code("X").status(), StatusCode::FORBIDDEN);
         assert!(AppDataError::internal("x").param("a", 1).code().is_none());
+    }
+
+    /// MySQL's 1062 and Mongo's E11000 name the index; the value never reaches the text.
+    #[test]
+    fn duplicate_keys_are_recognised_on_both_backends() {
+        // MySQL 8.0.19+ names the key `<table>.<index>`; older servers the index alone.
+        let m8 = "Duplicate entry 'P1|2026-10-23T10:00|1' for key 'cxCallBooking.claimKey_unique'";
+        assert_eq!(mysql_duplicate_key(Some(1062), Some("23000"), m8).as_deref(), Some("claimKey_unique"));
+        assert_eq!(mysql_duplicate_key(Some(1062), Some("23000"), "Duplicate entry 'x' for key 'claimKey_unique'").as_deref(), Some("claimKey_unique"));
+        assert_eq!(mysql_duplicate_key(Some(1062), Some("23000"), "Duplicate entry '7' for key 'PRIMARY'").as_deref(), Some("PRIMARY"));
+        // A value holding the same words does not confuse the key.
+        let tricky = "Duplicate entry 'a for key 'b' for key 't.uk_x'";
+        assert_eq!(mysql_duplicate_key(Some(1062), None, tricky).as_deref(), Some("uk_x"));
+        // Without the server's number, the state and the text decide.
+        assert_eq!(mysql_duplicate_key(None, Some("23000"), m8).as_deref(), Some("claimKey_unique"));
+        // Other integrity refusals share SQLSTATE 23000 and stay what they were.
+        assert_eq!(mysql_duplicate_key(Some(1451), Some("23000"), "Cannot delete or update a parent row: a foreign key constraint fails"), None);
+        assert_eq!(mysql_duplicate_key(Some(1048), Some("23000"), "Column 'name' cannot be null"), None);
+        assert_eq!(mysql_duplicate_key(None, Some("42S02"), "Table 'x.y' doesn't exist"), None);
+        assert_eq!(mysql_duplicate_key(Some(1062), Some("23000"), "Duplicate entry").as_deref(), Some(""));
+
+        let e11000 = "E11000 duplicate key error collection: app_SYSTEM.cxCase index: claimKey_unique dup key: { claimKey: \"p|a@b.c\" }";
+        assert_eq!(mongo_duplicate_key(11000, e11000).as_deref(), Some("claimKey_unique"));
+        assert_eq!(mongo_duplicate_key(11001, "E11001 duplicate key on update index: email_1 dup key").as_deref(), Some("email_1"));
+        assert_eq!(mongo_duplicate_key(12582, "duplicate key insert for unique index of capped collection").as_deref(), Some(""));
+        assert_eq!(mongo_duplicate_key(26, "ns not found"), None);
+
+        let e = AppDataError::duplicate_key("claimKey_unique");
+        assert!(e.is_duplicate_key());
+        assert_eq!(e.status(), StatusCode::CONFLICT);
+        assert_eq!(e.message(), "Duplicate entry for key 'claimKey_unique'");
+        assert_eq!(e.code().unwrap().english().message, "That is already taken (claimKey_unique).");
+        let e = e.in_storage("cxCase");
+        assert_eq!(e.message(), "Duplicate entry for key 'claimKey_unique' in storage cxCase");
+        assert_eq!(
+            e.code().unwrap().params,
+            vec![("index".to_string(), "claimKey_unique".to_string()), ("storage".to_string(), "cxCase".to_string())]
+        );
+        assert_eq!(e.code().unwrap().english().action.as_deref(), Some("Choose another value, or change the row that already holds it in cxCase."));
+        // Naming the storage twice keeps one mention; other errors pass through.
+        assert_eq!(e.in_storage("cxCase").message(), "Duplicate entry for key 'claimKey_unique' in storage cxCase");
+        assert!(!AppDataError::object_not_found("s", "1").in_storage("s").is_duplicate_key());
+        let blank = AppDataError::duplicate_key(" ");
+        assert_eq!(blank.code().unwrap().english().message, "That is already taken.");
+        assert!(blank.code().unwrap().params.is_empty());
+        // A plain driver error that is not a database error stays internal.
+        assert!(matches!(AppDataError::from(sqlx::Error::RowNotFound), AppDataError::Internal(_)));
     }
 
     #[test]

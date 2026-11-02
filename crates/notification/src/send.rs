@@ -4,23 +4,40 @@
 //!    the message was raised on (`x-draft: true` only for a draft message).
 //! 2. The channels: email when the connection names a MAIL connection and the notification has
 //!    an `email` template; in-app when the connection allows it and there is an `inapp`
-//!    template. Neither: nothing is sent.
-//! 3. The recipients from security's real user directory (never the draft surface).
-//! 4. Email to each recipient, then in-app to all of them.
+//!    template; push (Rust only) when the connection has `push` and there is a `push` or an
+//!    `inapp` template ([`crate::push_send`]). None of them: nothing is sent.
+//! 3. The recipients from security's real user directory (never the draft surface), only those
+//!    holding `filterAuthorization` when the message names one (Rust only).
+//! 4. Each recipient's choices for the app ([`crate::choices`], Rust only: Java read none):
+//!    per channel and the message's category, else the definition's `channelEnabled` default.
+//! 5. Email to each recipient who wants it, then in-app to all who want it, then push to the
+//!    devices of all who want it. A failed send is logged and counted and the rest still go
+//!    (Rust only: Java's first failed mail ended the run, so later recipients, the in-app rows
+//!    and the push were all lost).
 //!
-//! A missing definition or no recipients ends the run quietly (logged). Anything that fails
-//! ends it with an error, which the listener logs; the message is acked either way. User
-//! preferences play no part: Java reads none when sending.
+//! A missing definition or no recipients ends the run quietly (logged). A failure before the
+//! sends (connection, definition, recipients, choices) ends it with an error, which the
+//! listener logs; the message is acked either way.
+//!
+//! A data notification (`kind: DATA`, Rust only) skips steps 1, 2 and 4: once it is found not
+//! expired, the recipients come from the same security call, and one frame, `event:<eventName>` with
+//! `{"event","data","id","sentAt"}`, goes to their open streams. Nothing is stored, and it is
+//! never retried: a user who is not online misses it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::calls::{CoreClient, DefinitionRead, DirectoryClient};
+use crate::choices::{wants, PreferenceSource};
 use crate::email::{EmailSink, EMAIL_TEMPLATE_NAME};
 use crate::inapp::{InAppSink, INAPP_TEMPLATE_NAME};
 use crate::model::{CoreNotification, NotificationConnection, NotificationUser, QueueMessage, UsersListRequest};
+use crate::push::Push;
+use crate::push_send::{PushSink, PUSH_TEMPLATE_NAME};
+use crate::sse::{event_frame, key};
 
 pub const USER_ID: &str = "User Id";
 pub const CLIENT_ID: &str = "Client Id";
@@ -33,9 +50,14 @@ pub enum Outcome {
     NoNotification,
     NoChannel,
     NoUsers,
-    /// Mails attempted (each `false` or `true` as the email service answered), and whether the
-    /// in-app channel ran.
-    Sent { emails: usize, in_app: bool },
+    /// Mails that ended without an error (each `false` or `true` as the email service answered), whether the in-app
+    /// rows were stored, how many devices took the push, and how many sends failed: one per
+    /// recipient whose mail failed, one for the in-app rows, one for the push.
+    Sent { emails: usize, in_app: bool, pushed: usize, failed: usize },
+    /// A data notification handed to the open streams of this many recipients.
+    Pushed { users: usize },
+    /// A data notification that arrived after its `expiresAt`: dropped.
+    Expired,
 }
 
 pub struct SendService {
@@ -43,10 +65,33 @@ pub struct SendService {
     pub directory: DirectoryClient,
     pub email: Arc<dyn EmailSink>,
     pub in_app: Arc<dyn InAppSink>,
+    /// Where data notifications go.
+    pub push: Arc<Push>,
+    /// The recipients' choices; `None` sends to everyone as Java did (tests).
+    pub prefs: Option<Arc<dyn PreferenceSource>>,
+    /// Push to the recipients' devices; `None` sends none (tests).
+    pub devices: Option<Arc<dyn PushSink>>,
+}
+
+/// Now, in epoch milliseconds.
+fn now_millis() -> i128 {
+    i128::from(chrono::Utc::now().timestamp_millis())
+}
+
+/// A data notification's frame: `event:<eventName>` with `{"event","data","id","sentAt"}`.
+pub fn data_frame(event_name: &str, data: &Value, id: &str, sent_at: i128) -> bytes::Bytes {
+    let body = json!({"event": event_name, "data": data, "id": id, "sentAt": sent_at as i64});
+    event_frame(event_name, &body.to_string(), id, 5000)
 }
 
 impl SendService {
     pub async fn send(&self, qob: &QueueMessage) -> Result<Outcome> {
+        if qob.is_data() {
+            return self.send_data(qob, now_millis()).await;
+        }
+        if let Some(kind) = &qob.kind {
+            return Err(anyhow!("Unknown notification kind: {kind}"));
+        }
         // Definition lookups follow the surface the notification was raised on; recipient
         // resolution below deliberately does not.
         let draft = qob.draft.then_some("true");
@@ -78,11 +123,84 @@ impl SendService {
         };
         let is_email = conn.mail.is_some() && has(EMAIL_TEMPLATE_NAME)?;
         let is_in_app = conn.in_app && has(INAPP_TEMPLATE_NAME)?;
-        if !is_email && !is_in_app {
+        let is_push = self.devices.is_some() && conn.push.is_some() && (has(PUSH_TEMPLATE_NAME)? || has(INAPP_TEMPLATE_NAME)?);
+        if !is_email && !is_in_app && !is_push {
             tracing::error!("Notification channel and templates are not found: {}, {conn:?}, {notification:?}", qob.describe());
             return Ok(Outcome::NoChannel);
         }
 
+        let users = self.recipients(qob).await?;
+        if users.is_empty() {
+            tracing::error!("Users not found: {}", qob.describe());
+            return Ok(Outcome::NoUsers);
+        }
+
+        let prefs = self.choices(qob, &users).await?;
+        let category = qob.notification_category.as_deref();
+        let wanting = |channel: &str| -> Vec<NotificationUser> {
+            users
+                .iter()
+                .filter(|u| wants(u.id.and_then(|id| prefs.get(&(id as u64))), channel, category, &notification))
+                .cloned()
+                .collect()
+        };
+
+        let empty = Map::new();
+        let payload = qob.payload.as_ref().unwrap_or(&empty);
+        let (mut emails, mut failed) = (0, 0);
+        if is_email {
+            let mail = conn.mail.as_ref().expect("checked above");
+            for user in &wanting(EMAIL_TEMPLATE_NAME) {
+                match self.email.send_email(user, mail, &notification, payload).await {
+                    Ok(_) => emails += 1,
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!("email to user {} failed for {}: {e:#}", user.id.unwrap_or_default(), qob.describe());
+                    }
+                }
+            }
+        }
+        let in_app_users = if is_in_app { wanting(INAPP_TEMPLATE_NAME) } else { Vec::new() };
+        let mut in_app = false;
+        if !in_app_users.is_empty() {
+            match self.in_app.send_in_app(&in_app_users, &notification, qob.app_code.as_deref(), category, payload).await {
+                Ok(()) => in_app = true,
+                Err(e) => {
+                    failed += 1;
+                    tracing::error!("in-app failed for {}: {e:#}", qob.describe());
+                }
+            }
+        }
+        let mut pushed = 0;
+        let app = qob.app_code.as_deref().filter(|a| !a.is_empty());
+        if let (true, Some(devices), Some(push), Some(app)) = (is_push, &self.devices, &conn.push, app) {
+            let push_users = wanting(PUSH_TEMPLATE_NAME);
+            if !push_users.is_empty() {
+                match devices.send_push(&push_users, &notification, app, push, payload).await {
+                    Ok(n) => pushed = n,
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!("push failed for {}: {e:#}", qob.describe());
+                    }
+                }
+            }
+        }
+        Ok(Outcome::Sent { emails, in_app, pushed, failed })
+    }
+
+    /// The recipients' preference maps in the message's app; none without a source or an app.
+    async fn choices(&self, qob: &QueueMessage, users: &[NotificationUser]) -> Result<HashMap<u64, Map<String, Value>>> {
+        let (Some(source), Some(app)) = (&self.prefs, qob.app_code.as_deref().filter(|a| !a.is_empty())) else {
+            return Ok(HashMap::new());
+        };
+        let ids: Vec<u64> = users.iter().filter_map(|u| u.id).filter(|id| *id >= 0).map(|id| id as u64).collect();
+        source.preferences(app, &ids).await
+    }
+
+    /// The recipients from security's user directory, as Java's `UsersListRequest` per target
+    /// type asks for them, narrowed to the users holding the message's `filterAuthorization`
+    /// when it has one (Rust only: Java's stored notifications ignored it, DIFFERENCES N15).
+    async fn recipients(&self, qob: &QueueMessage) -> Result<Vec<NotificationUser>> {
         let target_type = qob
             .target_type
             .as_deref()
@@ -92,7 +210,11 @@ impl SendService {
                 .map(|t| t as i64)
                 .ok_or_else(|| anyhow!("Cannot invoke \"java.math.BigInteger.longValue()\" because the target id is null"))
         };
-        let mut request = UsersListRequest { app_code: qob.app_code.clone(), ..Default::default() };
+        let mut request = UsersListRequest {
+            app_code: qob.app_code.clone(),
+            filter_authorization: qob.filter_authorization.clone(),
+            ..Default::default()
+        };
         match target_type {
             USER_ID => request.user_ids = Some(vec![target_long()?]),
             CLIENT_ID => request.client_id = Some(target_long()?),
@@ -104,31 +226,36 @@ impl SendService {
             .users_for_notification(&request, qob.x_debug.as_deref())
             .await?
             .ok_or_else(|| anyhow!("Cannot invoke \"java.util.List.isEmpty()\" because \"users\" is null"))?;
-        let users: Vec<NotificationUser> = match users {
-            Value::Array(a) => a.iter().map(NotificationUser::from_json).collect::<Result<_, _>>().map_err(|e| anyhow!(e.0))?,
-            _ => return Err(anyhow!("Error while extracting response for type [java.util.List<NotificationUser>]")),
-        };
-        if users.is_empty() {
-            tracing::error!("Users not found: {}", qob.describe());
-            return Ok(Outcome::NoUsers);
+        match users {
+            Value::Array(a) => a.iter().map(NotificationUser::from_json).collect::<Result<_, _>>().map_err(|e| anyhow!(e.0)),
+            _ => Err(anyhow!("Error while extracting response for type [java.util.List<NotificationUser>]")),
         }
+    }
 
-        let empty = Map::new();
-        let payload = qob.payload.as_ref().unwrap_or(&empty);
-        let mut emails = 0;
-        if is_email {
-            let mail = conn.mail.as_ref().expect("checked above");
-            for user in &users {
-                self.email.send_email(user, mail, &notification, payload).await?;
-                emails += 1;
+    /// A data notification at `now` (epoch milliseconds): no connection, definition, template
+    /// or row; the recipients' open streams only.
+    pub async fn send_data(&self, qob: &QueueMessage, now: i128) -> Result<Outcome> {
+        if qob.expires_at.is_some_and(|e| e < now) {
+            tracing::debug!("Data notification expired before delivery: {}", qob.describe());
+            return Ok(Outcome::Expired);
+        }
+        let event = qob.event_name.as_deref().filter(|e| !e.is_empty()).ok_or_else(|| anyhow!("A data notification without an event name"))?;
+        let app = qob.app_code.as_deref().filter(|a| !a.is_empty()).ok_or_else(|| anyhow!("A data notification without an app code"))?;
+        let users = self.recipients(qob).await?;
+        let mut keys: Vec<String> = Vec::with_capacity(users.len());
+        for id in users.iter().filter_map(|u| u.id) {
+            let k = key(id, app);
+            if !keys.contains(&k) {
+                keys.push(k);
             }
         }
-        if !is_in_app {
-            return Ok(Outcome::Sent { emails, in_app: false });
+        if keys.is_empty() {
+            tracing::debug!("Data notification has no recipients: {}", qob.describe());
+            return Ok(Outcome::NoUsers);
         }
-        self.in_app
-            .send_in_app(&users, &notification, qob.app_code.as_deref(), qob.notification_category.as_deref(), payload)
-            .await?;
-        Ok(Outcome::Sent { emails, in_app: true })
+        let id = uuid::Uuid::new_v4().to_string();
+        let frame = data_frame(event, qob.data.as_ref().unwrap_or(&Value::Null), &id, now);
+        self.push.deliver(&keys, &frame).await;
+        Ok(Outcome::Pushed { users: keys.len() })
     }
 }

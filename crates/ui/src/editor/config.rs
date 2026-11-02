@@ -1,7 +1,7 @@
 //! ui-editor configuration: `config/ui-editor.toml`; secrets (`MODLIX__MONGO__URI`,
 //! `MODLIX__REDIS__URL`, `MODLIX__EDITOR__APPLE_API_KEY_CONTENT`) from the environment.
 
-use platform::config::{EurekaConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
+use platform::config::{RegistryConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{UiConfig, UiSection};
@@ -11,7 +11,7 @@ use crate::config::{UiConfig, UiSection};
 pub struct EditorConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     pub mongo: MongoConfig,
@@ -24,7 +24,7 @@ impl Default for EditorConfig {
         Self {
             server: ServerConfig { port: 8107, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig { cache_prefix: "cmn".into(), ..Default::default() },
             security: SecurityConfig::default(),
             mongo: MongoConfig::default(),
@@ -40,7 +40,7 @@ impl EditorConfig {
         UiConfig {
             server: self.server.clone(),
             telemetry: self.telemetry.clone(),
-            eureka: self.eureka.clone(),
+            registry: self.registry.clone(),
             redis: self.redis.clone(),
             security: self.security.clone(),
             mongo: self.mongo.clone(),
@@ -67,6 +67,11 @@ pub struct EditorSection {
     pub apple_certificate_id: String,
     /// The App Store Connect API (a test points it elsewhere).
     pub apple_api_url: String,
+    /// The service account JSON of the platform's Firebase project (Rust only): mobile apps with
+    /// push get their Android package registered there. Empty: tenants give their own values.
+    pub firebase_credentials: String,
+    /// The Firebase Management API (a test points it elsewhere).
+    pub firebase_api_url: String,
 }
 
 impl Default for EditorSection {
@@ -81,6 +86,8 @@ impl Default for EditorSection {
             apple_team_id: String::new(),
             apple_certificate_id: String::new(),
             apple_api_url: "https://api.appstoreconnect.apple.com".into(),
+            firebase_credentials: String::new(),
+            firebase_api_url: "https://firebase.googleapis.com".into(),
         }
     }
 }

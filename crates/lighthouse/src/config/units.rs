@@ -109,7 +109,7 @@ impl<'a> Renderer<'a> {
         let for_gateway = self.manifest.unit(unit).is_some_and(|u| u.service == "gateway");
         Ok(Literal::List(match self.discovery() {
             Discovery::Alias => vec![format!("http://{}:{}", t.name, t.port)],
-            Discovery::Lighthouse if for_gateway => vec![format!("eureka:{}", t.registry_name())],
+            Discovery::Lighthouse if for_gateway => vec![format!("lighthouse:{}", t.registry_name())],
             Discovery::Lighthouse if self.manifest.gateway_pair.is_empty() => {
                 bail!("{unit}.toml: discovery is lighthouse but the manifest has no gateway_pair")
             }
@@ -907,7 +907,7 @@ mod tests {
         let templates = [("gateway-rust", "[a]\nu = \"<urls:multi>\"\n"), ("multi", "[a]\nu = \"<urls:core-exec>\"\n")];
         let out = rendered(&snapshot(&lh, &[], &templates)).unwrap();
         let text = |u: &str| out.units.iter().find(|(n, _, _)| n == u).unwrap().1.clone();
-        assert_eq!(text("gateway-rust"), "[a]\nu = [\"eureka:MULTI\"]\n");
+        assert_eq!(text("gateway-rust"), "[a]\nu = [\"lighthouse:MULTI\"]\n");
         assert_eq!(text("multi"), "[a]\nu = [\"http://gateway-1:8080\", \"http://gateway-2:8080\"]\n");
         let no_pair = lh.replacen("gateway_pair = [\"http://gateway-1:8080\", \"http://gateway-2:8080\"]", "gateway_pair = []", 1);
         let e = rendered(&snapshot(&no_pair, &[], &templates)).err().unwrap();

@@ -34,6 +34,9 @@ pub struct UsersListRequest {
     pub client_code: Option<String>,
     pub client_id: Option<i64>,
     pub app_code: Option<String>,
+    /// Only the users whose authorities in the app meet this expression (Rust only: the
+    /// notification service sends it for data notifications; Java's request has no such field).
+    pub filter_authorization: Option<String>,
 }
 
 impl Db {

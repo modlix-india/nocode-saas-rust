@@ -574,7 +574,7 @@ async fn auth_upstream_takes_the_authentication_controller_calls() {
 
     // A registry name needs the registry.
     let cfg = platform::config::SecurityConfig {
-        auth_upstream: platform::config::UpstreamConfig::One("eureka:SECURITY-AUTH".into()),
+        auth_upstream: platform::config::UpstreamConfig::One("lighthouse:SECURITY-AUTH".into()),
         ..cfg
     };
     assert!(SecurityClient::from_config(&cfg, None).is_err());
@@ -674,13 +674,13 @@ fn auth_upstream_from_toml_and_environment() {
             security: platform::config::SecurityConfig,
         }
         jail.create_dir("config")?;
-        jail.create_file("config/split.toml", "[security]\nupstream = \"eureka:SECURITY\"\n")?;
+        jail.create_file("config/split.toml", "[security]\nupstream = \"lighthouse:SECURITY\"\n")?;
         jail.set_env("MODLIX__SECURITY__AUTH_UPSTREAM", "http://localhost:8101");
         jail.set_env("MODLIX__SECURITY__INTERNAL_UPSTREAM", "http://localhost:8112");
         let c: C = platform::config::load("split").map_err(|e| e.to_string())?;
         assert_eq!(c.security.auth_upstream.entries(), vec!["http://localhost:8101"]);
         assert_eq!(c.security.internal_upstream.entries(), vec!["http://localhost:8112"]);
-        assert_eq!(c.security.upstream.entries(), vec!["eureka:SECURITY"]);
+        assert_eq!(c.security.upstream.entries(), vec!["lighthouse:SECURITY"]);
         Ok(())
     });
 }

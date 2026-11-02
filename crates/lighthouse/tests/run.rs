@@ -1,5 +1,5 @@
 //! `lighthouse::run` end to end, as the binary starts it: its own config (defaults and
-//! `MODLIX__` environment), `/readyz` once the registry is ready, the Eureka API, and a SIGTERM
+//! `MODLIX__` environment), `/readyz` once the registry is ready, the Lighthouse API, and a SIGTERM
 //! shutdown. One test: telemetry and signal handlers are process-wide.
 
 use std::time::Duration;

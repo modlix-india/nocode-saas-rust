@@ -21,6 +21,10 @@ use tower::ServiceExt;
 struct Fake {
     host_calls: AtomicUsize,
     draft_calls: AtomicUsize,
+    access_calls: AtomicUsize,
+    /// "<appCode>:<clientCode>" pairs whose client owns the app or has access to it.
+    access: Mutex<Vec<String>>,
+    access_down: Mutex<bool>,
     /// host -> [clientCode, appCode, surface]
     hosts: Mutex<BTreeMap<String, Value>>,
     /// draft answer: [allowed, expiresAt, appCode, clientCode]
@@ -85,6 +89,17 @@ fn fake_app(f: F) -> Router {
                     return Json(json!([false, "0", "", ""])).into_response();
                 }
                 Json(answer).into_response()
+            }),
+        )
+        .route(
+            "/api/security/applications/internal/hasReadAccess",
+            get(|State(f): State<F>, Query(q): Query<BTreeMap<String, String>>| async move {
+                f.access_calls.fetch_add(1, Ordering::SeqCst);
+                if *f.access_down.lock().unwrap() {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+                let key = format!("{}:{}", q.get("appCode").cloned().unwrap_or_default(), q.get("clientCode").cloned().unwrap_or_default());
+                Json(json!(f.access.lock().unwrap().contains(&key))).into_response()
             }),
         )
         .route("/health", get(|| async { "ok" }))
@@ -175,6 +190,18 @@ async fn setup() -> (Router, F) {
         },
         route("dead", "/api/dead", "dead"),
         route("closer", "/api/closer", "closer"),
+        RouteConfig {
+            id: "website-intake".into(),
+            prefix: "/api/entity/processor/entry/website".into(),
+            exact: true,
+            methods: vec!["POST".into()],
+            pool: "echo".into(),
+            rewrite: Some("/api/open/intake/website".into()),
+            app_code: Some("leadzumptwo".into()),
+            client_code: Some("SYSTEM".into()),
+            anonymous: true,
+            ..Default::default()
+        },
         route("api", "/api", "echo"),
         route("sse", "/sse", "echo"),
     ];
@@ -264,6 +291,125 @@ async fn caller_codes_and_url_codes() {
 }
 
 #[tokio::test]
+async fn a_fixed_codes_route_rewrites_and_serves_every_host_anonymously() {
+    let (app, fake) = setup().await;
+    fake.hosts.lock().unwrap().insert("site.example".into(), json!(["FIN", "somesite", "LIVE"]));
+    let before = fake.host_calls.load(Ordering::SeqCst);
+    // A live site posts its form to its own host, from a page with path parts, signed in or not.
+    let (s, _, b) = call(
+        &app,
+        req(
+            "POST",
+            "/page/home/api/entity/processor/entry/website?x=1",
+            &[
+                ("host", "site.example"),
+                ("x-forwarded-host", "site.example"),
+                ("authorization", "Bearer someone"),
+                ("clientcode", "FIN"),
+                ("appcode", "somesite"),
+                ("x-draft", "true"),
+                ("cookie", "_fbp=fb.1.2.3"),
+            ],
+            "{\"phone\":\"1\"}",
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let v = j(&b);
+    assert_eq!(v["path"], "/api/open/intake/website");
+    assert_eq!(v["query"], "x=1");
+    assert_eq!(v["body"], "{\"phone\":\"1\"}");
+    assert_eq!(codes_of(&b), ("leadzumptwo".to_string(), "SYSTEM".to_string()), "the route's codes beat the caller's");
+    let hd = &v["headers"];
+    assert!(hd.get("authorization").is_none(), "anonymous: the caller's token is not forwarded");
+    assert!(hd.get("x-draft").is_none());
+    assert_eq!(hd["cookie"], "_fbp=fb.1.2.3");
+    assert_eq!(hd["x-forwarded-host"], "site.example,site.example", "the site host reaches the service as for any route");
+    assert_eq!(fake.host_calls.load(Ordering::SeqCst), before, "the host is not resolved");
+
+    // The same path with another method is an ordinary request for the host's app.
+    let (_, _, b) = call(&app, req("GET", "/api/entity/processor/entry/website", &[("host", "site.example")], "")).await;
+    assert_eq!(j(&b)["path"], "/api/entity/processor/entry/website");
+    assert_eq!(codes_of(&b), ("somesite".to_string(), "FIN".to_string()));
+}
+
+fn codes_of(b: &[u8]) -> (String, String) {
+    let hd = &j(b)["headers"];
+    (hd["appcode"].as_str().unwrap_or("").to_string(), hd["clientcode"].as_str().unwrap_or("").to_string())
+}
+
+#[tokio::test]
+async fn url_codes_in_front_of_api_count_for_a_real_app_and_client() {
+    let (app, fake) = setup().await;
+    fake.hosts.lock().unwrap().insert("leadzump.ai".into(), json!(["HOST", "leadzump", "LIVE"]));
+    fake.access.lock().unwrap().extend(["leadzump:FIN".to_string(), "leadzump:SYSTEM".to_string()]);
+    let get = |path: &str| req("POST", path, &[("host", "leadzump.ai")], "{}");
+    let calls = || fake.access_calls.load(Ordering::SeqCst);
+
+    // A tenant with access (and the owner): the URL's codes, the path from /api/ on.
+    let (_, _, b) = call(&app, get("/leadzump/FIN/api/webhooks/whatsapp")).await;
+    assert_eq!(codes_of(&b), ("leadzump".into(), "FIN".into()));
+    assert_eq!(j(&b)["path"], "/api/webhooks/whatsapp");
+    let (_, _, b) = call(&app, get("/leadzump/SYSTEM/api/ui/page/home")).await;
+    assert_eq!(codes_of(&b), ("leadzump".into(), "SYSTEM".into()), "a /page/ after /api/ changes nothing");
+    assert_eq!(j(&b)["path"], "/api/ui/page/home");
+
+    // The answer is cached: the same codes again ask nothing.
+    let before = calls();
+    call(&app, get("/leadzump/FIN/api/webhooks/whatsapp")).await;
+    assert_eq!(calls(), before);
+
+    // Unknown app, unknown client, a client without access, junk: the host decides.
+    for path in ["/nosuchapp/FIN/api/x", "/leadzump/NOPE/api/x", "/leadzump/NOACCESS/api/x", "/x/y/api/ui/application"] {
+        let (_, _, b) = call(&app, get(path)).await;
+        assert_eq!(codes_of(&b), ("leadzump".into(), "HOST".into()), "{path}");
+    }
+    // A cached `false` is not asked again either.
+    let before = calls();
+    call(&app, get("/leadzump/NOACCESS/api/x")).await;
+    assert_eq!(calls(), before);
+
+    // Nothing to ask about: one segment, blank segments, characters no code has.
+    let before = calls();
+    for path in ["/assets/api/x", "//api/x", "/leadzump//api/x", "/static.files/FIN/api/x", "/api/x"] {
+        let (s, _, b) = call(&app, get(path)).await;
+        assert_eq!(s, StatusCode::OK, "{path}");
+        assert_eq!(codes_of(&b), ("leadzump".into(), "HOST".into()), "{path}");
+    }
+    assert_eq!(calls(), before, "no lookup for codes that can not be real");
+
+    // /page/ before /api/: the codes count unchecked, as in Java.
+    let before = calls();
+    let (_, _, b) = call(&app, get("/other/ANY/page/api/x")).await;
+    assert_eq!(codes_of(&b), ("other".into(), "ANY".into()));
+    assert_eq!(calls(), before);
+
+    // The caller's own headers still win over the URL's codes.
+    let (_, _, b) = call(&app, req("POST", "/leadzump/FIN/api/x", &[("host", "leadzump.ai"), ("clientcode", "MINE")], "{}")).await;
+    assert_eq!(codes_of(&b), ("leadzump".into(), "MINE".into()));
+
+    // An internal call that names its codes passes through without any lookup.
+    let before = calls();
+    let (_, _, b) = call(
+        &app,
+        req("GET", "/leadzump/OTHER/api/core/internal/x", &[("host", "leadzump.ai"), ("clientcode", "C"), ("appcode", "a")], ""),
+    )
+    .await;
+    assert_eq!(codes_of(&b), ("a".into(), "C".into()));
+    assert_eq!(calls(), before);
+
+    // Security failing: the host decides, and the failure is not cached.
+    *fake.access_down.lock().unwrap() = true;
+    let (s, _, b) = call(&app, get("/leadzump/NEW/api/x")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(codes_of(&b), ("leadzump".into(), "HOST".into()));
+    *fake.access_down.lock().unwrap() = false;
+    fake.access.lock().unwrap().push("leadzump:NEW".into());
+    let (_, _, b) = call(&app, get("/leadzump/NEW/api/x")).await;
+    assert_eq!(codes_of(&b), ("leadzump".into(), "NEW".into()));
+}
+
+#[tokio::test]
 async fn draft_hosts() {
     let (app, fake) = setup().await;
     let host = "t-0123456789abcdef0123456789abcdef.apps.example";
@@ -277,6 +423,13 @@ async fn draft_hosts() {
     let calls = fake.draft_calls.load(Ordering::SeqCst);
     call(&app, req("GET", "/api/x", &[("host", host)], "")).await;
     assert_eq!(fake.draft_calls.load(Ordering::SeqCst), calls, "cached within the trust window");
+
+    // Codes in front of /api/ without /page/: draft hosts keep Java's rule and never read them.
+    let before = fake.access_calls.load(Ordering::SeqCst);
+    let (_, _, b) = call(&app, req("GET", "/other/ELSE/api/x", &[("host", host)], "")).await;
+    let hd = &j(&b)["headers"];
+    assert_eq!((hd["clientcode"].as_str(), hd["appcode"].as_str()), (Some("FIN"), Some("leadzump")));
+    assert_eq!(fake.access_calls.load(Ordering::SeqCst), before);
 
     // Codes naming another app: served live, not draft.
     let (_, _, b) = call(&app, req("GET", "/api/x", &[("host", host), ("appcode", "other")], "")).await;
@@ -386,9 +539,9 @@ async fn bad_config_is_refused() {
     cfg.pools.insert("p".into(), pool(&["http://127.0.0.1:1"], "/h"));
     assert!(gateway::build(&cfg).await.is_err(), "no routes");
 
-    cfg.pools.insert("e".into(), PoolConfig { upstreams: UpstreamConfig::One("eureka:X".into()), ..Default::default() });
+    cfg.pools.insert("e".into(), PoolConfig { upstreams: UpstreamConfig::One("lighthouse:X".into()), ..Default::default() });
     cfg.routes = vec![route("x", "/", "p")];
-    assert!(gateway::build(&cfg).await.is_err(), "eureka pool without eureka zones");
+    assert!(gateway::build(&cfg).await.is_err(), "lighthouse pool without lighthouse zones");
 
     let d = GatewayConfig::default();
     assert_eq!(d.server.port, 8180);

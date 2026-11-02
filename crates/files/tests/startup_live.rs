@@ -30,7 +30,7 @@ async fn files_manage_starts_and_serves() {
             ("MODLIX__STORAGE__BUCKET_PREFIX", "test".to_string()),
             ("MODLIX__STORAGE__TEMP_DIR", fakes.dir.display().to_string()),
             ("MODLIX__SECURITY__UPSTREAM", fakes.sec_url.clone()),
-            // No Redis and no Eureka: nothing outside this test is touched.
+            // No Redis and no Lighthouse: nothing outside this test is touched.
             ("MODLIX__REDIS__URL", String::new()),
             ("MODLIX__TELEMETRY__LOG_LEVEL", "warn".to_string()),
         ] {

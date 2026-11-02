@@ -54,7 +54,7 @@ pub fn request(auth: Authentication, draft: bool, debug: Option<&str>) -> Arc<Re
         forwarded_port: "8080".into(),
         draft,
         debug: debug.map(String::from),
-        raised: Default::default(),
+        ..Default::default()
     })
 }
 
@@ -124,7 +124,6 @@ pub async fn offline_deps(security_base: &str, storage: Arc<crate::storage::serv
         )
         .expect("integrations"),
     );
-    let message = Arc::new(crate::message_calls::MessageCalls::new(Upstream::fixed(&["http://127.0.0.1:1"])).expect("message"));
     let platform = Arc::new(
         crate::platform_calls::PlatformCalls::new(crate::platform_calls::Upstreams::all(Upstream::fixed(&["http://127.0.0.1:1"])))
             .expect("platform"),
@@ -136,7 +135,6 @@ pub async fn offline_deps(security_base: &str, storage: Arc<crate::storage::serv
         mongo,
         cache,
         integrations,
-        message,
         files,
         scheduler: Default::default(),
         platform,
@@ -177,6 +175,9 @@ mod doubles {
         pub events: Mutex<HashMap<String, JMap>>,
         pub lookups: Mutex<Vec<String>>,
         pub fail_storage: Mutex<Option<CoreError>>,
+        /// The app's schemas by client: `(clientCode, definition)`, the definition as stored
+        /// (`namespace`, `name`, ...). A client reads its own copy, else SYSTEM's.
+        pub schemas: Mutex<Vec<(String, serde_json::Value)>>,
     }
 
     impl MemoryCatalog {
@@ -189,11 +190,17 @@ mod doubles {
 
     #[async_trait]
     impl Catalog for MemoryCatalog {
-        async fn storage(&self, name: &str, _app: &str, _client: &str) -> Result<Option<Storage>, CoreError> {
+        async fn storage(&self, name: &str, _app: &str, client: &str) -> Result<Option<Storage>, CoreError> {
             if let Some(e) = self.fail_storage.lock().clone() {
                 return Err(e);
             }
-            Ok(self.storages.lock().iter().find(|s| s.name == name).cloned())
+            let storages = self.storages.lock();
+            // A client's own copy first, as the overridable read prefers it.
+            Ok(storages
+                .iter()
+                .find(|s| s.name == name && s.client_code == client)
+                .or_else(|| storages.iter().find(|s| s.name == name))
+                .cloned())
         }
         async fn connection(&self, _: &str, _: &str, _: &str, _: &str) -> Result<Option<Connection>, CoreError> {
             Ok(self.connection.lock().clone())
@@ -226,8 +233,37 @@ mod doubles {
             self.lookups.lock().push(format!("{app}/{client}/{name}"));
             Ok(self.events.lock().get(name).cloned())
         }
-        async fn schema_source(&self, _: &str, _: &str) -> Result<Arc<dyn SchemaSource>, CoreError> {
-            Ok(crate::state::Builtins::core_schemas())
+        async fn schema_source(&self, _: &str, client: &str) -> Result<Arc<dyn SchemaSource>, CoreError> {
+            let schemas = self.schemas.lock().clone();
+            if schemas.is_empty() {
+                return Ok(crate::state::Builtins::core_schemas());
+            }
+            let app: Arc<dyn SchemaSource> = Arc::new(MemorySchemas { client: client.to_string(), schemas });
+            Ok(Arc::new(crate::repos::Hybrid::new(vec![crate::state::Builtins::core_schemas(), app])))
+        }
+    }
+
+    /// One client's view of [`MemoryCatalog::schemas`].
+    struct MemorySchemas {
+        client: String,
+        schemas: Vec<(String, serde_json::Value)>,
+    }
+
+    #[async_trait]
+    impl SchemaSource for MemorySchemas {
+        async fn find(&self, namespace: Option<&str>, name: &str) -> Result<Option<Arc<crate::repos::FoundSchema>>, CoreError> {
+            let named = |d: &serde_json::Value| {
+                d.get("namespace").and_then(serde_json::Value::as_str) == namespace && d.get("name").and_then(serde_json::Value::as_str) == Some(name)
+            };
+            let pick = |client: &str| self.schemas.iter().find(|(c, d)| c == client && named(d)).map(|(_, d)| d.clone());
+            let Some(definition) = pick(&self.client).or_else(|| pick("SYSTEM")) else { return Ok(None) };
+            let json = crate::java_model::gson_schema(&definition).unwrap_or_default();
+            let schema = kirun::json::schema::Schema::from_value(&json).map_err(CoreError::from)?.unwrap_or_default();
+            Ok(Some(Arc::new(crate::repos::FoundSchema { schema: Arc::new(schema), json })))
+        }
+
+        async fn filter(&self, _: &str) -> Result<Vec<String>, CoreError> {
+            Ok(Vec::new())
         }
     }
 
@@ -291,6 +327,23 @@ mod doubles {
             self.rows.lock().get(storage).map(IndexMap::len).unwrap_or(0)
         }
 
+        /// The storage's unique indexes, as MySQL keeps them: a row whose fields of a unique
+        /// index are all set may not repeat another row's values (a null or missing field is
+        /// never a duplicate, as MySQL allows many NULLs). Answers the engines' 409.
+        fn check_unique(&self, rows: &IndexMap<String, Document>, storage: &Storage, id: &str, row: &Document) -> AppDataResult<()> {
+            let values = |r: &Document, fields: &[String]| -> Option<Vec<String>> {
+                fields.iter().map(|f| r.get(f).filter(|v| !v.is_null()).map(Value::java_string)).collect()
+            };
+            for (name, index) in storage.indexes.iter().flatten().filter(|(_, i)| i.unique) {
+                let fields: Vec<String> = index.fields.iter().filter_map(|f| f.field_name.clone()).collect();
+                let Some(mine) = values(row, &fields) else { continue };
+                if rows.iter().any(|(other, r)| other != id && values(r, &fields).as_ref() == Some(&mine)) {
+                    return Err(AppDataError::duplicate_key(name).in_storage(&storage.name));
+                }
+            }
+            Ok(())
+        }
+
         fn page(&self, storage: &str, query: &Query) -> AppDataResult<Page<Document>> {
             let rows = self.list(storage, query);
             let total = rows.len() as i64;
@@ -342,7 +395,10 @@ mod doubles {
                 }
             };
             row.insert("_id".into(), Value::String(id.clone()));
-            self.rows.lock().entry(key(cx, storage)).or_default().insert(id, row.clone());
+            let mut all = self.rows.lock();
+            let rows = all.entry(key(cx, storage)).or_default();
+            self.check_unique(rows, storage, &id, &row)?;
+            rows.insert(id, row.clone());
             Ok(row)
         }
 
@@ -359,20 +415,25 @@ mod doubles {
             self.updates.lock().push((row.clone(), override_));
             let id = row.get("_id").map(Value::java_string).unwrap_or_default();
             let mut all = self.rows.lock();
-            let Some(existing) = all.entry(key(cx, storage)).or_default().get_mut(&id) else {
+            let rows = all.entry(key(cx, storage)).or_default();
+            let Some(existing) = rows.get(&id) else {
                 if *self.empty_update.lock() {
                     return Err(AppDataError::Empty);
                 }
                 return Err(AppDataError::object_not_found_to_update(&storage.name, &id));
             };
-            if override_ == Some(true) {
-                *existing = row.clone();
+            let next = if override_ == Some(true) {
+                row.clone()
             } else {
+                let mut merged = existing.clone();
                 for (k, v) in row {
-                    existing.insert(k, v);
+                    merged.insert(k, v);
                 }
-            }
-            Ok(existing.clone())
+                merged
+            };
+            self.check_unique(rows, storage, &id, &next)?;
+            rows.insert(id, next.clone());
+            Ok(next)
         }
 
         async fn read(&self, cx: &Ctx, _: &str, _: Option<&Connection>, storage: &Storage, id: &str) -> AppDataResult<Document> {
@@ -605,8 +666,9 @@ mod doubles {
         axum::Json(body).into_response()
     }
 
-    /// Security's two internal answers the policy layer asks for: `doesClientManageClientCode`
-    /// (`managing>client` pairs; `GHOST` answers nothing) and `hasWriteAccess` (apps listed).
+    /// Security's internal answers the policy layer asks for: `doesClientManageClientCode` and
+    /// `filterManagedClientCodes` (`managing>client` pairs; `GHOST` answers nothing) and
+    /// `hasWriteAccess` (apps listed).
     pub async fn security_stub(manages: &'static [(&'static str, &'static str)], writable: &'static [&'static str]) -> String {
         let pairs = move |q: Option<String>| -> std::collections::HashMap<String, String> {
             crate::exec::parse_query(q.as_deref()).into_iter().collect()
@@ -622,6 +684,19 @@ mod doubles {
                         return String::new();
                     }
                     (m == c || manages.iter().any(|(a, b)| *a == m && *b == c)).to_string()
+                }),
+            )
+            .route(
+                "/api/security/clients/internal/filterManagedClientCodes",
+                axum::routing::post(move |RawQuery(q): RawQuery, body: String| async move {
+                    let p = pairs(q);
+                    let m = p.get("managingClientCode").cloned().unwrap_or_default();
+                    let codes: Vec<String> = serde_json::from_str(&body).unwrap_or_default();
+                    let kept: Vec<String> = codes
+                        .into_iter()
+                        .filter(|c| *c == m || manages.iter().any(|(a, b)| *a == m && b == c))
+                        .collect();
+                    axum::Json(kept)
                 }),
             )
             .route(
@@ -656,15 +731,25 @@ mod doubles {
 
     #[async_trait]
     impl crate::storage::service::MySqlAdmin for NoMySql {
-        async fn migration_status(&self, _: &Connection, app: &str, _: &Storage)
+        /// Schemas of SYSTEM, FIN, a client FIN manages in the service tests (`BP1`) and one
+        /// nobody does (`STRANGER`).
+        async fn migration_tenants(&self, _: &Connection, app: &str, _: &Storage) -> AppDataResult<Vec<String>> {
+            Ok(["SYSTEM", "FIN", "BP1", "STRANGER"].iter().map(|c| format!("{c}_{app}")).collect())
+        }
+        async fn migration_status_of(&self, _: &Connection, app: &str, _: &Storage, tenants: &[String])
             -> AppDataResult<Vec<appdata::mysql::migration::TenantProgress>> {
-            Ok(vec![appdata::mysql::migration::TenantProgress {
-                database: format!("SYSTEM_{app}"),
-                state: Some(appdata::mysql::journal::MigrationState::Failed),
-                statement_index: 1,
-                total: 2,
-                attempt: 3,
-            }])
+            Ok(tenants
+                .iter()
+                .map(|d| appdata::mysql::migration::TenantProgress {
+                    database: d.clone(),
+                    client_code: d.trim_end_matches(&format!("_{app}")).to_string(),
+                    state: Some(appdata::mysql::journal::MigrationState::Failed),
+                    statement_index: 1,
+                    total: 2,
+                    attempt: 3,
+                    ..Default::default()
+                })
+                .collect())
         }
         async fn drift(&self, _: &Connection, _: &str, _: &Storage) -> AppDataResult<Vec<appdata::mysql::drift::Report>> {
             Ok(Vec::new())

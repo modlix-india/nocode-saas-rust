@@ -795,7 +795,10 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     assert!(other.find(Some("CoreServices.Platform"), "Meter").await.unwrap().is_none());
     assert!(other.find(Some("CoreServices"), "Platform.Meter").await.unwrap().is_none());
     assert!(other.find(Some("CoreServices.Hash"), "HashData").await.unwrap().is_some());
-    assert_eq!(other.filter("").await.unwrap().len(), 72);
+    // The 72 Java has, SendDataNotification, Storage.GetFields, Storage.Batch / UpdateIf /
+    // NextSequence, Event.GetScheduleState and Security.SendContactCode / VerifyContactCode.
+    assert_eq!(other.filter("").await.unwrap().len(), 80);
+    assert_eq!(other.filter("senddatanotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);
     assert!(other.filter("platform").await.unwrap().is_empty());
     let mine = listed(core.clone(), "platform");
     assert!(mine.find(Some("CoreServices.Platform"), "Meter").await.unwrap().is_some());
@@ -807,6 +810,11 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     let find_q = "namespace=CoreServices.Platform&name=Meter";
     let (st, body) = c.send("GET", &format!("/api/core/functions/repositoryFind?appCode=leadzumptwo&clientCode=SYSTEM&{find_q}"), "leadzumptwo", true, None).await;
     assert_eq!((st, body), (200, Value::String(String::new())));
+    let data_q = "namespace=CoreServices.Notification&name=SendDataNotification";
+    let (st, body) = c.send("GET", &format!("/api/core/functions/repositoryFind?appCode=leadzumptwo&clientCode=SYSTEM&{data_q}"), "leadzumptwo", true, None).await;
+    assert_eq!(st, 200);
+    assert_eq!(body["definition"]["name"], json!("SendDataNotification"));
+    assert_eq!(body["definition"]["parameters"]["ttlSeconds"]["schema"]["defaultValue"], json!(60));
     let (st, body) = c.send("GET", &format!("/api/core/functions/repositoryFind?appCode=platform&clientCode=SYSTEM&{find_q}"), "platform", true, None).await;
     assert_eq!(st, 200);
     assert_eq!((body["definition"]["namespace"].clone(), body["definition"]["name"].clone()), (json!("CoreServices.Platform"), json!("Meter")));

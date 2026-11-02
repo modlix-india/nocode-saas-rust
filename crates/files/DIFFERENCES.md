@@ -84,6 +84,10 @@ split. A missing file's empty 404 stays empty.
 
 - An unknown `downloadFileByKey` key is a 404 `invalid_key`; Java dereferences the missing row
   and answers 500.
+- A file whose row exists but whose object is gone from the bucket (S3 `NoSuchKey`, as after
+  a database copy without the bucket) is a 404 `object_not_found` ("File with id <path> not
+  found"); it was a 500. The FileBrowser fetched secured thumbnails of such files and every 500
+  broke the page (local, 2026-10-22).
 - A bad query value (an unknown `fit`/`gravity`/`format`, a non-number `width`) is a 400; Java
   answers its catch-all 500.
 - An unsatisfiable `Range` is a 416 with `Content-Range: bytes */<len>`; Java's 416 is eaten by
@@ -156,6 +160,17 @@ split. A missing file's empty 404 stays empty.
 - **Method mismatch** on a known path is an empty 405; Spring's `ControllerAdvice` answers
   500.
 - **Transform without multipart** is an empty 415; Java 500.
+
+- **The admin purge (new, 2026-10-26, no Java counterpart).** `DELETE /api/files/purge/client/{clientCode}`
+  and `DELETE /api/files/purge/app/{appCode}` on files-manage, `dryRun` true unless `dryRun=false`,
+  called by multi's purge. A client: every object under `<client>/` in both buckets, its
+  `files_file_system` rows, its access paths, upload records, retention rules and the secured
+  access keys under `<client>/`; only by a client that manages it (security's
+  `doesClientManageClientCode`) with `Client_DELETE`, never by itself, never SYSTEM. An app:
+  every root folder named exactly the app code, under every client and in both buckets, with
+  its objects and rows, and the app's retention rules; SYSTEM with `Application_DELETE` only.
+  Answers `{dryRun, objects: {STATIC|SECURED: n}, rows: {table: n}, errors}`; refusals are
+  `FILES.PURGE_FORBIDDEN` (403) and `FILES.PURGE_BAD_CODE` (400).
 
 ## Known, kept
 

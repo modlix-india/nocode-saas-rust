@@ -16,6 +16,7 @@ use platform::error::{AppError, AppResult};
 use platform::security::ContextAuthentication;
 
 use crate::editor::apple::Apple;
+use crate::editor::firebase::{android_package, Firebase, ANDROID_KEYS};
 use crate::editor::jks;
 use crate::editor::kinds::{INTERNAL_ONLY, MOBILE_APP_BAD_REQUEST, MOBILE_APP_UNABLE_TO_GEN_KEYSTORE};
 
@@ -50,6 +51,10 @@ pub const MOBILE_APP: Pojo = Pojo {
             Field::new("iosProvisioningProfile", K::Str, C::Copy),
             Field::new("iosTeamId", K::Str, C::Copy),
             Field::new("iosBundleId", K::Str, C::Copy),
+            // Rust only: push. The Android app's Firebase values (the platform's project, or the
+            // tenant's own), and whether the iOS profile was made with Push Notifications on.
+            Field::new("firebaseAndroid", K::MapString, C::Copy),
+            Field::new("iosPushReady", K::BoxBool, C::Copy),
         ],
     ],
 };
@@ -67,6 +72,11 @@ pub const APP_DETAILS: Pojo = Pojo {
         Field::new("icon", K::Str, C::Copy),
         Field::new("splashScreen", K::Object, C::Copy),
         Field::new("version", K::PrimInt(0), C::Copy),
+        // Rust only: the app registers for push notifications.
+        Field::new("pushNotifications", K::BoxBool, C::Copy),
+        // Rust only: whose developer accounts the app is on, for both stores and for push
+        // (`iosPublishMode` is kept equal to it for the build machine and older readers).
+        Field::new("publishMode", K::Str, C::Copy),
     ]],
 };
 
@@ -112,6 +122,12 @@ fn check_enum(m: &JMap, field: &str, allowed: &[&str]) -> AppResult<()> {
     }
 }
 
+/// The app's `publishMode`, or for an app saved before it existed its `iosPublishMode`; neither
+/// means Modlix's accounts for both stores (Kiran, 2026-11-02).
+fn publish_mode(details: &JMap) -> &str {
+    str_field(details, "publishMode").or_else(|| str_field(details, "iosPublishMode")).unwrap_or("PLATFORM_ACCOUNT")
+}
+
 /// The details as the class reads them (unknown keys dropped, defaults for the primitives).
 fn details_of(v: Option<&JValue>) -> AppResult<Option<JMap>> {
     match v {
@@ -119,6 +135,10 @@ fn details_of(v: Option<&JValue>) -> AppResult<Option<JMap>> {
         Some(JValue::Object(d)) => {
             let mut details = convert_json(&APP_DETAILS, d);
             check_enum(&details, "iosPublishMode", &PUBLISH_MODES)?;
+            check_enum(&details, "publishMode", &PUBLISH_MODES)?;
+            let mode = JValue::Str(publish_mode(&details).to_string());
+            details.insert("publishMode".into(), mode.clone());
+            details.insert("iosPublishMode".into(), mode);
             details.insert(
                 "splashScreen".into(),
                 match d.get("splashScreen") {
@@ -148,6 +168,9 @@ pub fn decode(d: &mongodb::bson::Document) -> JMap {
     let mut app = decode_bson(&MOBILE_APP, d);
     if let Some(JValue::Object(details)) = app.get("details").cloned() {
         let mut dd = convert_json(&APP_DETAILS, &details);
+        let mode = JValue::Str(publish_mode(&dd).to_string());
+        dd.insert("publishMode".into(), mode.clone());
+        dd.insert("iosPublishMode".into(), mode);
         if let Some(JValue::Object(s)) = details.get("splashScreen") {
             dd.insert("splashScreen".into(), JValue::Object(convert_json(&SPLASH_SCREEN, s)));
         }
@@ -201,6 +224,8 @@ pub struct MobileApps {
     pub directory: Arc<dyn Directory>,
     pub messages: Arc<Messages>,
     pub apple: Apple,
+    /// The platform's Firebase project, for Android push.
+    pub firebase: Firebase,
     /// `security.appCodeSuffix`, for the default start URL.
     pub app_code_suffix: String,
     /// The RSA key size of a new keystore (2048; tests use less).
@@ -315,8 +340,14 @@ impl MobileApps {
         map_field(app, "details")
     }
 
+    /// On Modlix's developer accounts: Modlix signs and publishes it, and its push goes through
+    /// Modlix's Firebase project and Apple key. Any other app uses only its client's own.
+    fn platform_account(app: &JMap) -> bool {
+        Self::details(app).map_or("PLATFORM_ACCOUNT", publish_mode) == "PLATFORM_ACCOUNT"
+    }
+
     fn platform_ios(app: &JMap) -> bool {
-        Self::details(app).is_some_and(|d| d.get("ios") == Some(&JValue::Bool(true)) && str_field(d, "iosPublishMode") == Some("PLATFORM_ACCOUNT"))
+        Self::platform_account(app) && Self::details(app).is_some_and(|d| d.get("ios") == Some(&JValue::Bool(true)))
     }
 
     fn app_name(app: &JMap) -> String {
@@ -356,6 +387,7 @@ impl MobileApps {
                     app.insert("iosProvisioningProfile".into(), JValue::Str(profile));
                 }
             }
+            self.prepare_push(&mut app, None, &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         };
@@ -382,6 +414,7 @@ impl MobileApps {
             if !profile.trim().is_empty() {
                 app.insert("iosProvisioningProfile".into(), JValue::Str(profile));
             }
+            self.prepare_push(&mut app, Some(&existing), &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         }
@@ -404,10 +437,11 @@ impl MobileApps {
             if !made.trim().is_empty() {
                 app.insert("iosProvisioningProfile".into(), JValue::Str(made));
             }
+            self.prepare_push(&mut app, Some(&existing), &client).await?;
             self.save(&mut app).await?;
             return Ok(Some(to_json(&app)));
         }
-        if Self::details(&app).is_some_and(|d| str_field(d, "iosPublishMode") == Some("PLATFORM_ACCOUNT")) {
+        if Self::platform_account(&app) {
             for f in ["iosBundleId", "iosTeamId", "iosProvisioningProfile"] {
                 if has(&existing, f) {
                     app.insert(f.into(), existing[f].clone());
@@ -415,8 +449,74 @@ impl MobileApps {
             }
         }
         Self::set_details_version(&mut app, &existing)?;
+        self.prepare_push(&mut app, Some(&existing), &client).await?;
         self.save(&mut app).await?;
         Ok(Some(to_json(&app)))
+    }
+
+    /// Push for an app that has `pushNotifications` (Rust only), before it is saved. The keys
+    /// follow the developer accounts the app is on, never mixed:
+    /// - Android on the platform's account: the platform's Firebase values, registering the
+    ///   package there the first time (or when the values are some other project's), unless the
+    ///   platform has no Firebase project configured.
+    /// - Android on the client's account: the client's own Firebase values, which must be
+    ///   complete and must not be the platform's project.
+    /// - iOS on the platform's account: Push Notifications turned on for the bundle and the
+    ///   App Store profile made again (a profile made before carries no `aps-environment`), once:
+    ///   `iosPushReady` remembers it. A client's account needs its own profile with push.
+    async fn prepare_push(&self, app: &mut JMap, existing: Option<&JMap>, client: &str) -> AppResult<()> {
+        // Kept from the stored app when the request leaves them out.
+        if let Some(old) = existing {
+            for f in ["firebaseAndroid", "iosPushReady"] {
+                if app.get(f).is_none_or(JValue::is_null) {
+                    if let Some(v) = old.get(f).filter(|v| !v.is_null()) {
+                        app.insert(f.into(), v.clone());
+                    }
+                }
+            }
+        }
+        let wants = |m: &JMap, k: &str| Self::details(m).is_some_and(|d| d.get(k) == Some(&JValue::Bool(true)));
+        if !wants(app, "pushNotifications") {
+            return Ok(());
+        }
+        let name = Self::app_name(app);
+        let firebase = map_field(app, "firebaseAndroid");
+        let complete = firebase.is_some_and(|m| ANDROID_KEYS.iter().all(|k| str_field(m, k).is_some_and(|v| !v.trim().is_empty())));
+        let platform_project = self.firebase.project_id();
+        let on_platform_project = complete && firebase.and_then(|m| str_field(m, "projectId")) == platform_project.as_deref();
+        if wants(app, "android") && Self::platform_account(app) {
+            if !on_platform_project && self.firebase.configured() {
+                let values = self
+                    .firebase
+                    .android_config(&android_package(client, &name), &format!("{name} - {client}"))
+                    .await
+                    .map_err(|e| Self::ios_failure(e, "Failed to register the mobile app with Firebase"))?;
+                let m: JMap = values.into_iter().map(|(k, v)| (k, JValue::Str(v.as_str().unwrap_or("").to_string()))).collect();
+                app.insert("firebaseAndroid".into(), JValue::Object(m));
+            }
+        } else if wants(app, "android") && (!complete || on_platform_project) {
+            return Err(crate::catalogue::literal(
+                "UI.MOBILE_APP_PUSH_NEEDS_OWN_FIREBASE",
+                StatusCode::BAD_REQUEST,
+                "Android push on the client's own developer account needs the client's own Firebase values",
+            )
+            .into());
+        }
+        let ready = app.get("iosPushReady") == Some(&JValue::Bool(true));
+        if Self::platform_ios(app) && !ready && self.apple.configured_for_bundle_id() {
+            let made = async {
+                let (_, apple_id) = self.apple.get_or_create_bundle_id(client, &name).await?;
+                self.apple.enable_push(&apple_id).await?;
+                self.apple.replace_profile(&apple_id, &format!("{name} - {client} - App Store")).await
+            }
+            .await
+            .map_err(|e| Self::ios_failure(e, "Failed to turn on push notifications for the iOS app"))?;
+            if !made.trim().is_empty() {
+                app.insert("iosProvisioningProfile".into(), JValue::Str(made));
+            }
+            app.insert("iosPushReady".into(), JValue::Bool(true));
+        }
+        Ok(())
     }
 
     /// `deleteMobileApp`: the app's client needs write access to the app.
@@ -483,6 +583,17 @@ mod tests {
         assert_eq!(d["splashScreen"].as_object().unwrap()["fullScreen"], JValue::Bool(false));
         assert!(read_body(br#"{"status":"NOPE"}"#).is_err());
         assert!(read_body(br#"{"details":{"iosPublishMode":"X"}}"#).is_err());
+        assert!(read_body(br#"{"details":{"publishMode":"X"}}"#).is_err());
+        // One mode for both stores: `publishMode` wins and `iosPublishMode` follows it.
+        let mode = |b: &[u8]| {
+            let d = read_body(b).unwrap()["details"].as_object().unwrap().clone();
+            (str_field(&d, "publishMode").map(str::to_string), str_field(&d, "iosPublishMode").map(str::to_string))
+        };
+        let p = || Some("PLATFORM_ACCOUNT".to_string());
+        assert_eq!(mode(br#"{"details":{"publishMode":"PLATFORM_ACCOUNT","iosPublishMode":"TENANT_ACCOUNT"}}"#), (p(), p()));
+        assert_eq!(mode(br#"{"details":{"iosPublishMode":"PLATFORM_ACCOUNT"}}"#), (p(), p()));
+        // Neither: Modlix's accounts for both stores.
+        assert_eq!(mode(br#"{"details":{"name":"N"}}"#), (p(), p()));
         assert!(read_body(br#"{"details":3}"#).is_err());
         assert!(read_body(br#"{"details":{"splashScreen":3}}"#).is_err());
         assert!(read_body(b"[]").is_err());
@@ -490,7 +601,7 @@ mod tests {
         let o = json.as_object().unwrap();
         assert_eq!(o.keys().cloned().collect::<Vec<_>>(), vec!["appCode", "status", "details"]);
         let details = o["details"].as_object().unwrap();
-        assert_eq!(details.keys().cloned().collect::<Vec<_>>(), vec!["name", "android", "ios", "iosPublishMode", "splashScreen", "version"]);
+        assert_eq!(details.keys().cloned().collect::<Vec<_>>(), vec!["name", "android", "ios", "iosPublishMode", "splashScreen", "version", "publishMode"]);
         assert_eq!(details["splashScreen"].as_object().unwrap().keys().cloned().collect::<Vec<_>>(), vec!["color", "fullScreen"]);
         let stored = stored_nested(&APP_DETAILS, details);
         assert!(!stored.contains_key("description"));

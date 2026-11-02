@@ -36,6 +36,8 @@ auth_upstream = "http://localhost:8101"
 internal_upstream = "http://localhost:8112"
 
 [core]
+# Core's own internal routes for the platform jobs (core-editor).
+upstream = "lighthouse:CORE-EDITOR"
 function_timeout_seconds = 300
 java_zone_offset = "+05:30"
 
@@ -44,11 +46,14 @@ java_zone_offset = "+05:30"
 enabled = true
 
 [mq]
-# A scratch exchange: never the real `events` while Java core consumes it.
+# Local RabbitMQ (docker `rabbitmq`), same broker settings as core-events. Without a host, publishing
+# is off and every tick and one-off is dropped. Java core no longer consumes `events` locally.
+host = "localhost"
+username = "guest"
 events_exchange = "events"
 events_routing_keys = "events1,events2,events3"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "CORE-SCHEDULER"

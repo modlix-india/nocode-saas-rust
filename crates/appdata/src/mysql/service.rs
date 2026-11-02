@@ -13,7 +13,8 @@ use tokio::sync::Mutex;
 
 use super::column::MySqlColumn;
 use super::column_names::{self, PhysicalSchema};
-use super::db::{self, count, count_raw, execute, execute_raw, fetch, Credentials};
+use super::db::{self, count_raw, execute_raw, Credentials};
+use super::tx::{self, count, execute, fetch};
 use super::drift::{self, DriftRepair, Report};
 use super::field_resolver::FieldResolver;
 use super::filter_builder::{self, bind_of, FilterError};
@@ -44,6 +45,11 @@ use crate::value::{Document, Value};
 
 const BACKEND: &str = "MySQL";
 const VERSION_PURGE_BATCH: usize = 500;
+/// How long a first use waits for another run's DDL on the same table before going on without
+/// the lock (the DDL tolerates the race either way).
+const DDL_LOCK_WAIT_SECONDS: u32 = 30;
+/// Rounds of reading the keys and applying what differs when a concurrent run keeps winning.
+const FOREIGN_KEY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct MySqlEngineConfig {
@@ -522,6 +528,20 @@ impl MySqlAppDataService {
         Ok(pool)
     }
 
+    /// The pool of a connection's server; `None` is the configured default server (the admin
+    /// purge lists and drops tenant schemas there too).
+    async fn server_pool(&self, conn: Option<&Connection>) -> AppDataResult<MySqlPool> {
+        match conn {
+            Some(c) => self.pool(Some(c)).await,
+            None => {
+                let mut details = Document::new();
+                details.insert("useDefaultConnection".into(), Value::Bool(true));
+                let default = Connection { id: "__default__".into(), connection_details: Some(details), ..Default::default() };
+                self.pool(Some(&default)).await
+            }
+        }
+    }
+
     /// `database(clientCode, storage)`: the data client's schema on the request's surface.
     fn database(&self, cx: &Ctx, client_code: &str, storage: &Storage) -> AppDataResult<String> {
         database_name(&data_client_code(cx, client_code, storage), &storage.app_code, cx.draft)
@@ -544,7 +564,15 @@ impl MySqlAppDataService {
         let key = format!("{db_name}{}", storage.version);
         self.flags
             .get_or_load(&cache_name, key, || async {
-                self.create_table(cx, pool, &db_name, storage).await?;
+                // Two first uses at once (two requests, or two units) would both add the same
+                // keys and indexes; the lock lines them up per schema and table, and the
+                // second finds nothing left to do.
+                let lock = db::NamedLock::take(pool, &db::ddl_lock_name(&db_name, &storage.unique_name), DDL_LOCK_WAIT_SECONDS).await;
+                let made = self.create_table(cx, pool, &db_name, storage).await;
+                if let Some(lock) = lock {
+                    lock.release().await;
+                }
+                made?;
                 Ok::<_, AppDataError>(Some(true))
             })
             .await?;
@@ -565,10 +593,27 @@ impl MySqlAppDataService {
     }
 
     async fn sync_indexes(&self, pool: &MySqlPool, db_name: &str, storage: &Storage, schema: &PhysicalSchema) -> AppDataResult<()> {
+        let mut raced = Vec::new();
         for sql in self.planned_index_statements(pool, db_name, storage, schema).await? {
             // One index failing is not a reason to fail the write that triggered it.
             if let Err(e) = execute_raw(pool, &sql).await {
-                tracing::error!(db = db_name, table = storage.unique_name, sql, error = %e, "could not apply index");
+                if db::is_concurrent_ddl_error(&e) {
+                    raced.push(sql);
+                } else {
+                    tracing::error!(db = db_name, table = storage.unique_name, sql, error = %e, "could not apply index");
+                }
+            }
+        }
+        if raced.is_empty() {
+            return Ok(());
+        }
+        // Lost to the same DDL run elsewhere: done when the table now has what was planned.
+        let left = self.planned_index_statements(pool, db_name, storage, schema).await?;
+        for sql in raced {
+            if left.contains(&sql) {
+                tracing::error!(db = db_name, table = storage.unique_name, sql, "could not apply index: a concurrent change left it unapplied");
+            } else {
+                tracing::debug!(db = db_name, table = storage.unique_name, sql, "index already applied by a concurrent run");
             }
         }
         Ok(())
@@ -692,15 +737,46 @@ impl MySqlAppDataService {
         Ok(())
     }
 
+    /// Brings the table's keys in line with its relations. A statement that loses to the same
+    /// DDL run elsewhere (1826 "Duplicate foreign key constraint name" and the like) is not an
+    /// error: the keys are read again and only what still differs is planned, so a key that
+    /// now exists as desired counts as done, and one that exists differently is replaced.
     async fn sync_foreign_keys(&self, cx: &Ctx, pool: &MySqlPool, db_name: &str, storage: &Storage) -> AppDataResult<()> {
         let desired = self.desired_foreign_keys(cx, pool, db_name, storage).await?;
         let table = &storage.unique_name;
-        let existing = self.existing_keys(pool, db_name, table).await?;
-        let statements = foreign_keys::sync(db_name, table, &existing, &desired);
-        if statements.is_empty() {
-            return Ok(());
+        let mut changed = false;
+        let mut outcome = Ok(());
+        for _ in 0..FOREIGN_KEY_ATTEMPTS {
+            let existing = match self.existing_keys(pool, db_name, table).await {
+                Ok(k) => k,
+                Err(e) => {
+                    outcome = Err(e);
+                    break;
+                }
+            };
+            let statements = foreign_keys::sync(db_name, table, &existing, &desired);
+            if statements.is_empty() {
+                outcome = Ok(());
+                break;
+            }
+            changed = true;
+            outcome = self.apply_foreign_keys(pool, db_name, table, &desired, &statements).await;
+            match &outcome {
+                Err(e) if db::is_concurrent_ddl_error(e) => {
+                    tracing::info!(db = db_name, table, error = %e, "foreign keys changed concurrently; reading them again");
+                }
+                _ => break,
+            }
         }
-        for sql in &statements {
+        if changed {
+            self.cache.evict_all_everywhere(&foreign_key_cache(storage)).await;
+        }
+        outcome
+    }
+
+    async fn apply_foreign_keys(&self, pool: &MySqlPool, db_name: &str, table: &str, desired: &[ForeignKey], statements: &[String])
+        -> AppDataResult<()> {
+        for sql in statements {
             let adding = desired.iter().find(|fk| sql.contains(&format!("`{}`", fk.name)));
             match adding {
                 Some(fk) if sql.contains("ADD CONSTRAINT") => {
@@ -723,7 +799,6 @@ impl MySqlAppDataService {
                 }
             }
         }
-        self.cache.evict_all_everywhere(&foreign_key_cache(storage)).await;
         Ok(())
     }
 
@@ -1295,9 +1370,8 @@ impl MySqlAppDataService {
         if tenants.is_empty() {
             return Ok(FanOutReport::default());
         }
-        let desired = self.desired_by_tenant(app_code, storage, &tenants).await;
+        let (desired, unresolved) = self.desired_by_tenant(app_code, storage, &tenants).await;
 
-        let unresolved: Vec<String> = tenants.iter().filter(|d| !desired.contains_key(*d)).cloned().collect();
         let live: Vec<String> = tenants.iter().filter(|d| desired.contains_key(*d) && !is_draft(d)).cloned().collect();
         let draft: Vec<String> = tenants.iter().filter(|d| desired.contains_key(*d) && is_draft(d)).cloned().collect();
 
@@ -1305,11 +1379,11 @@ impl MySqlAppDataService {
         let live_report = self.surface(&pool, &live, &desired, storage, &table_name, version, "LIVE", applied_by).await?;
         let draft_report = self.surface(&pool, &draft, &desired, storage, &table_name, version, "DRAFT", applied_by).await?;
         let mut report = FanOutReport::merge(live_report, draft_report);
-        for db_name in unresolved {
-            report.by_tenant.insert(
-                db_name.clone(),
-                MigrationOutcome::needs_attention("no storage definition resolves for this client"),
-            );
+        let issue = |surface: &str| migration::Issue::new(&storage.name, &table_name, Some(surface), applied_by).version(version);
+        let surface_of = |db_name: &str| if is_draft(db_name) { "DRAFT" } else { "LIVE" };
+        for (db_name, why) in unresolved {
+            migration::record_issue(&pool, &db_name, &issue(surface_of(&db_name)).kind(migration::IssueKind::NoDefinition).detail(&why)).await;
+            report.by_tenant.insert(db_name.clone(), MigrationOutcome::needs_attention(&why));
             report.blocked.push(db_name);
         }
 
@@ -1329,7 +1403,8 @@ impl MySqlAppDataService {
             }
             .await;
             if let Err(e) = synced {
-                tracing::error!(storage = storage.name, db = db_name, error = %e, "could not sync indexes");
+                let detail = format!("could not sync indexes: {e}");
+                migration::record_issue(&pool, db_name, &issue(surface_of(db_name)).kind(migration::IssueKind::IndexSync).detail(&detail)).await;
             }
         }
         for db_name in &tenants {
@@ -1346,7 +1421,8 @@ impl MySqlAppDataService {
             }
             .await;
             if let Err(e) = synced {
-                tracing::error!(storage = storage.name, db = db_name, error = %e, "could not sync foreign keys");
+                let detail = format!("could not sync foreign keys: {e}");
+                migration::record_issue(&pool, db_name, &issue(surface_of(db_name)).kind(migration::IssueKind::ForeignKeySync).detail(&detail)).await;
             }
         }
         Ok(report)
@@ -1372,21 +1448,33 @@ impl MySqlAppDataService {
         out
     }
 
-    async fn desired_by_tenant(&self, app_code: &str, storage: &Storage, tenants: &[String]) -> IndexMap<String, Vec<MySqlColumn>> {
+    /// Each tenant's columns, and why for the tenants that have none.
+    async fn desired_by_tenant(&self, app_code: &str, storage: &Storage, tenants: &[String])
+        -> (IndexMap<String, Vec<MySqlColumn>>, IndexMap<String, String>) {
         let mut out = IndexMap::new();
+        let mut unresolved = IndexMap::new();
         for db_name in tenants {
             let ts = self
                 .hooks
                 .read_for_tenant(&storage.name, app_code, &client_code_of(db_name, app_code), is_draft(db_name))
                 .await;
-            if let Ok(Some(ts)) = ts {
-                let schema = self.physical_schema(&ts, is_draft(db_name)).await;
-                if let Ok(cols) = mapped_columns(&schema, defs(&ts).as_ref()) {
-                    out.insert(db_name.clone(), cols);
+            let why = match ts {
+                Ok(Some(ts)) => {
+                    let schema = self.physical_schema(&ts, is_draft(db_name)).await;
+                    match mapped_columns(&schema, defs(&ts).as_ref()) {
+                        Ok(cols) => {
+                            out.insert(db_name.clone(), cols);
+                            continue;
+                        }
+                        Err(e) => format!("the storage's schema does not map to columns: {e}"),
+                    }
                 }
-            }
+                Ok(None) => "no storage definition resolves for this client".to_string(),
+                Err(e) => format!("the storage definition could not be read for this client: {e}"),
+            };
+            unresolved.insert(db_name.clone(), why);
         }
-        out
+        (out, unresolved)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1404,8 +1492,30 @@ impl MySqlAppDataService {
         if tenants.is_empty() {
             return Ok(FanOutReport::default());
         }
-        let plans = migration::plan_tenants(pool, tenants, table_name, version, desired).await?;
-        migration::apply(pool, &plans, &storage.name, table_name, None, version, surface, applied_by).await
+        // Planned one tenant at a time, so a tenant whose table cannot be read is that
+        // tenant's issue and the others still migrate.
+        let mut plans = Vec::new();
+        let mut unplanned = IndexMap::new();
+        for db_name in tenants {
+            match migration::plan_tenants(pool, std::slice::from_ref(db_name), table_name, version, desired).await {
+                Ok(p) => plans.extend(p),
+                Err(e) => {
+                    let detail = format!("could not plan the change: {}", db::message(&e));
+                    let issue = migration::Issue::new(&storage.name, table_name, Some(surface), applied_by)
+                        .version(version)
+                        .kind(migration::IssueKind::PlanFailed)
+                        .detail(&detail);
+                    migration::record_issue(pool, db_name, &issue).await;
+                    unplanned.insert(db_name.clone(), MigrationOutcome::failed(&detail, 0, 0));
+                }
+            }
+        }
+        let mut report = migration::apply(pool, &plans, &storage.name, table_name, None, version, surface, applied_by).await?;
+        for (db_name, o) in unplanned {
+            report.blocked.push(db_name.clone());
+            report.by_tenant.insert(db_name, o);
+        }
+        Ok(report)
     }
 
     /// Finish any migration on this connection that nobody is driving.
@@ -1420,12 +1530,32 @@ impl MySqlAppDataService {
     /// How far each tenant got, from its own journal.
     pub async fn migration_status(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage)
         -> AppDataResult<Vec<TenantProgress>> {
+        let tenants = self.migration_tenants(conn, app_code, storage).await?;
+        self.migration_status_of(conn, app_code, storage, &tenants).await
+    }
+
+    /// The tenant schemas that hold this storage's table.
+    pub async fn migration_tenants(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage)
+        -> AppDataResult<Vec<String>> {
         if conn.is_none() {
             return Ok(Vec::new());
         }
         let pool = self.pool(conn).await?;
-        let tenants = migration::tenants_with_table(&pool, app_code, &storage.unique_name).await?;
-        migration::status(&pool, &tenants, &storage.name).await
+        migration::tenants_with_table(&pool, app_code, &storage.unique_name).await
+    }
+
+    /// How far each of these tenants got, with its client and newest issues.
+    pub async fn migration_status_of(&self, conn: Option<&Connection>, app_code: &str, storage: &Storage, tenants: &[String])
+        -> AppDataResult<Vec<TenantProgress>> {
+        if conn.is_none() || tenants.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pool = self.pool(conn).await?;
+        let mut out = migration::status(&pool, tenants, &storage.name).await?;
+        for t in &mut out {
+            t.client_code = client_code_of(&t.database, app_code);
+        }
+        Ok(out)
     }
 
     /// What every tenant's table has that its definition does not, and the reverse.
@@ -1569,7 +1699,8 @@ impl AppDataEngine for MySqlAppDataService {
         let decoding = Decoding::of(&resolved, d.as_ref())?;
         let encoded = value_codec::encode(&row, &decoding.json, &decoding.dates, &decoding.decimals);
         let values: Vec<(String, Bind)> = encoded.iter().map(|(k, v)| Ok((k.clone(), write_bind(v)?))).collect::<AppDataResult<_>>()?;
-        execute(&pool, &sql::insert(&table(&db_name, storage), &values)).await?;
+        // A unique index that refuses the row is a 409 naming the storage (`CORE.DUPLICATE_KEY`).
+        execute(&pool, &sql::insert(&table(&db_name, storage), &values)).await.map_err(|e| e.in_storage(&storage.name))?;
 
         let saved = self
             .read_row(&pool, &db_name, storage, &resolved, &id)
@@ -1626,7 +1757,7 @@ impl AppDataEngine for MySqlAppDataService {
                 let field = resolved.field_names().get(&column).cloned().unwrap_or(column);
                 return Err(AppDataError::field_cannot_be_null(&field, &storage.name));
             }
-            return Err(e);
+            return Err(e.in_storage(&storage.name));
         }
         let saved = self.read_row(&pool, &db_name, storage, &resolved, &id).await?.ok_or(AppDataError::Empty)?;
         self.add_version(cx, &pool, &db_name, storage, &id, "UPDATE", &saved, data.message.as_deref()).await?;
@@ -1641,6 +1772,45 @@ impl AppDataEngine for MySqlAppDataService {
         self.read_row(&pool, &db_name, storage, &schema, id)
             .await?
             .ok_or_else(|| AppDataError::object_not_found(&storage.name, id))
+    }
+
+    async fn transactional(&self, _conn: Option<&Connection>) -> bool {
+        true
+    }
+
+    async fn prepare(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage) -> AppDataResult<()> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        self.ensure_version_table(&pool, &db_name, storage).await?;
+        tx::ensure_sequence_table(&pool, &db_name).await
+    }
+
+    async fn lock_row(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, id: &str)
+        -> AppDataResult<Option<Document>> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        let schema = self.physical_schema(storage, cx.draft).await;
+        let decoding = Decoding::of(&schema, defs(storage).as_ref())?;
+        let select = Select::star(table(&db_name, storage))
+            .filter(id_field().equal(Sql::param(Bind::Text(id.into()))))
+            .to_sql()
+            .then(" FOR UPDATE");
+        let rows = fetch(&pool, &select).await?;
+        Ok(rows.into_iter().next().map(|r| decoding.row(r, &schema)))
+    }
+
+    async fn next_sequence(
+        &self,
+        cx: &Ctx,
+        client_code: &str,
+        conn: Option<&Connection>,
+        storage: &Storage,
+        key: &str,
+        start: i64,
+    ) -> AppDataResult<i64> {
+        let pool = self.pool(conn).await?;
+        let db_name = self.ensure_table(cx, &pool, client_code, storage).await?;
+        tx::next_sequence(&pool, &db_name, &format!("{}:{key}", storage.unique_name), start).await
     }
 
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)
@@ -1936,6 +2106,33 @@ impl AppDataEngine for MySqlAppDataService {
         Ok(execute_raw(&pool, &format!("DROP DATABASE IF EXISTS `{name}`")).await.is_ok())
     }
 
+    async fn database_names(&self, conn: Option<&Connection>) -> AppDataResult<Vec<String>> {
+        let pool = self.server_pool(conn).await?;
+        let names: Vec<String> =
+            sqlx::query_scalar("SELECT CAST(schema_name AS CHAR) FROM information_schema.schemata").fetch_all(&pool).await?;
+        Ok(names)
+    }
+
+    async fn database_rows(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<i64> {
+        let pool = self.server_pool(conn).await?;
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT CAST(COALESCE(SUM(table_rows), 0) AS SIGNED) FROM information_schema.tables WHERE table_schema = ?",
+        )
+        .bind(name)
+        .fetch_one(&pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn drop_database(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<bool> {
+        if !crate::engine::is_tenant_database_name(name) {
+            return Err(AppDataError::internal(format!("IllegalArgumentException: not a tenant schema: {name}")));
+        }
+        let pool = self.server_pool(conn).await?;
+        execute_raw(&pool, &format!("DROP DATABASE IF EXISTS `{name}`")).await?;
+        Ok(true)
+    }
+
     async fn copy_live_to_draft(
         &self,
         cx: &Ctx,
@@ -1962,11 +2159,24 @@ impl AppDataEngine for MySqlAppDataService {
         if columns.is_empty() {
             return Ok(0);
         }
-        let cols = columns.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ");
+        // Key checks off, as for the whole-app copy: one storage is copied on its own, so its
+        // rows may point at draft rows not copied yet, and replacing a storage other draft rows
+        // point at would be refused by a RESTRICT key (DIFFERENCES.md, QA-0483).
+        let target = Sql::name(&[&draft_db, &t]);
+        let fields: Vec<Sql> = columns.iter().map(|c| Sql::name(&[c])).collect();
+        let mut statements = Vec::new();
         if replace == Some(true) {
-            execute_raw(&pool, &format!("DELETE FROM `{draft_db}`.`{t}`")).await?;
+            statements.push(sql::delete(&target, &Cond::None));
         }
-        execute_raw(&pool, &format!("INSERT INTO `{draft_db}`.`{t}` ({cols}) SELECT {cols} FROM `{live_db}`.`{t}`")).await?;
+        statements.push(
+            Sql::raw("insert into ")
+                .then_sql(&target)
+                .then(" (")
+                .then_sql(&Sql::join(&fields, ", "))
+                .then(") ")
+                .then_sql(&Select::fields(fields.clone(), Sql::name(&[&live_db, &t])).to_sql()),
+        );
+        self.without_foreign_key_checks(&pool, &statements).await?;
         Ok(total)
     }
 

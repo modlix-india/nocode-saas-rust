@@ -949,3 +949,36 @@ async fn preview_from_cached_rows() {
     assert_eq!(h.get(&format!("{base}&days=5"), Some("other")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(h.get(&format!("{base}&path=docs/a"), Some("other")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+/// CXZ-1138: `createKey` checks the DECODED path, and refuses one that steps out of its folder,
+/// plain or encoded, before anything is written.
+#[tokio::test]
+async fn create_key_refuses_paths_that_leave_their_folder() {
+    let h = manage().await;
+    for path in [
+        "CLIA/_withInClient/../CHILD/a.pdf",
+        "CLIA/_withInClient/./a.pdf",
+        "CLIA/_withInClient/%2E%2E/CHILD/a.pdf",
+        "CLIA/_withInClient/x%2F..%2F..%2FCHILD%2Fa.pdf",
+        "CLIA/_withInClient/..%2fCHILD%2fa.pdf",
+        "CLIA/_withInClient/..",
+    ] {
+        let r = h.get(&format!("/api/files/secured/createKey/file/{path}"), Some("clia")).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{path}");
+    }
+    // The message names the decoded path, the one that was checked.
+    let r = h.get("/api/files/secured/createKey/file/CLIA/_withInClient/%2E%2E/x.pdf", Some("clia")).await;
+    assert_eq!(r.message(), "Permission to SECURED resource in the path CLIA/_withInClient/../x.pdf is forbidden");
+    // CHILD may not read CLIA's `_withInClient`, however the name is spelled.
+    for spelled in ["a+b.pdf", "a%20b.pdf", "a%2Bb.pdf", "%E0%A4%A8.pdf"] {
+        let r = h.get(&format!("/api/files/secured/createKey/file/CLIA/_withInClient/{spelled}"), Some("child")).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{spelled}");
+    }
+    // An encoded folder name is the folder: `_withIn%43lient` is `_withInClient`, so CLIA passes
+    // the check and reaches the insert (the dead database).
+    let r = h.get("/api/files/secured/createKey/file/CLIA/_withIn%43lient/a+b.pdf", Some("clia")).await;
+    assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR);
+    let r = h.get("/api/files/secured/createKey/file/CLIA/_withIn%43lient/a+b.pdf", Some("child")).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.message(), "Permission to SECURED resource in the path CLIA/_withInClient/a b.pdf is forbidden");
+}

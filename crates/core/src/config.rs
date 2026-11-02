@@ -2,7 +2,7 @@
 //! `MODLIX__REDIS__URL`, a credentialed `MODLIX__MONGO__URI`) from the environment.
 
 use platform::config::{
-    EurekaConfig, MongoConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
+    RegistryConfig, MongoConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct CoreConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     /// The `core` Mongo database (`core.mongo.uri` of the Java service).
@@ -20,13 +20,13 @@ pub struct CoreConfig {
     /// rest of core's tables.
     pub database: MySqlConfig,
     pub entity_processor: EntityProcessorConfig,
-    /// The message service, for `CoreServices.Message.*` (Feign name `message`).
-    pub message: MessageConfig,
     /// The files service, for `CoreServices.File.*` and REST downloads (Feign name `files`).
     pub files: FilesConfig,
     /// The ui service, for `CoreServices.Platform.CleanupTransports` (Feign name `ui`).
     pub ui: UiConfig,
     pub core: CoreSection,
+    /// `[kirun]`: how long and how many steps one function execution may run.
+    pub kirun: crate::exec_limit::KirunSection,
     /// The storage policy layer and the app-data engines under it.
     pub appdata: AppDataSection,
     /// Outbound connections (`core.rest.*`, the provider endpoints).
@@ -35,6 +35,10 @@ pub struct CoreConfig {
     pub mq: MqSection,
     /// The events consumer of core-events (`events.mq.queues`).
     pub events: EventsSection,
+    /// `[runs]`: the thread pool function runs execute on, apart from the health routes.
+    pub runs: crate::run_pool::RunsSection,
+    /// The HTML to PDF renderer (`crate::pdf_render`): the pdf-render sidecar, else text.
+    pub pdf: crate::pdf_render::PdfConfig,
 }
 
 impl Default for CoreConfig {
@@ -42,20 +46,22 @@ impl Default for CoreConfig {
         Self {
             server: ServerConfig { port: 8105, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig { cache_prefix: "cmn".into(), ..Default::default() },
             security: SecurityConfig::default(),
             mongo: MongoConfig { database: "core".into(), ..Default::default() },
             database: MySqlConfig { database: "core".into(), ..Default::default() },
             entity_processor: EntityProcessorConfig::default(),
-            message: MessageConfig::default(),
             files: FilesConfig::default(),
             ui: UiConfig::default(),
             core: CoreSection::default(),
+            kirun: crate::exec_limit::KirunSection::default(),
             appdata: AppDataSection::default(),
             connections: ConnectionsSection::default(),
             mq: MqSection::default(),
             events: EventsSection::default(),
+            runs: crate::run_pool::RunsSection::default(),
+            pdf: crate::pdf_render::PdfConfig::default(),
         }
     }
 }
@@ -66,7 +72,8 @@ impl Default for CoreConfig {
 pub struct EventsSection {
     /// Comma-separated, as Java's property.
     pub queues: String,
-    /// Deliveries in flight on the consumer's channel (Java's is unbounded).
+    /// Deliveries in flight on the consumer's channel (Java's is unbounded), never more than
+    /// the run pool's threads (`[runs] threads`).
     pub prefetch: u16,
     /// Declare `mq.events_exchange` (direct, durable) and the queues, each bound under its own
     /// name. Only for scratch setups: the real queues already exist.
@@ -183,20 +190,7 @@ pub struct EntityProcessorConfig {
 
 impl Default for EntityProcessorConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:ENTITY-PROCESSOR".into()) }
-    }
-}
-
-/// Where the message service is (`IFeignMessageService`, Feign name `message`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MessageConfig {
-    pub upstream: UpstreamConfig,
-}
-
-impl Default for MessageConfig {
-    fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:MESSAGE".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:ENTITY-PROCESSOR".into()) }
     }
 }
 
@@ -209,7 +203,7 @@ pub struct FilesConfig {
 
 impl Default for FilesConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:FILES".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:FILES".into()) }
     }
 }
 
@@ -222,7 +216,7 @@ pub struct UiConfig {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        Self { upstream: UpstreamConfig::One("eureka:UI".into()) }
+        Self { upstream: UpstreamConfig::One("lighthouse:UI".into()) }
     }
 }
 
@@ -250,7 +244,7 @@ impl Default for CoreSection {
             function_timeout_seconds: 300,
             java_zone_offset: "+00:00".into(),
             scheduler: crate::scheduler::EventSchedulerSettings::default(),
-            upstream: UpstreamConfig::One("eureka:CORE".into()),
+            upstream: UpstreamConfig::One("lighthouse:CORE".into()),
             event_runs: crate::event_runs::EventRunsSettings::default(),
         }
     }
@@ -273,6 +267,8 @@ pub struct AppDataSection {
     /// as `VersionRetentionDefaults` reads them.
     pub version_retention_days: i32,
     pub version_retention_count: i32,
+    /// `[appdata.migration_recovery]`: core-editor's sweep of interrupted MySQL migrations.
+    pub migration_recovery: crate::editor::recovery::RecoverySettings,
 }
 
 impl AppDataSection {
@@ -290,6 +286,7 @@ impl Default for AppDataSection {
             text_search_stemming: true,
             version_retention_days: appdata::retention::DEFAULT_DAYS,
             version_retention_count: appdata::retention::DEFAULT_COUNT,
+            migration_recovery: crate::editor::recovery::RecoverySettings::default(),
         }
     }
 }
@@ -375,12 +372,12 @@ mod tests {
         assert_eq!(c.redis.cache_prefix, "cmn");
         assert_eq!(c.mongo.database, "core");
         assert_eq!(c.database.database, "core");
-        assert_eq!(c.entity_processor.upstream.entries(), ["eureka:ENTITY-PROCESSOR"]);
-        assert_eq!(c.message.upstream.entries(), ["eureka:MESSAGE"]);
-        assert_eq!(c.files.upstream.entries(), ["eureka:FILES"]);
-        assert_eq!(c.ui.upstream.entries(), ["eureka:UI"]);
-        assert_eq!(c.core.upstream.entries(), ["eureka:CORE"]);
+        assert_eq!(c.entity_processor.upstream.entries(), ["lighthouse:ENTITY-PROCESSOR"]);
+        assert_eq!(c.files.upstream.entries(), ["lighthouse:FILES"]);
+        assert_eq!(c.ui.upstream.entries(), ["lighthouse:UI"]);
+        assert_eq!(c.core.upstream.entries(), ["lighthouse:CORE"]);
         assert_eq!(c.core.function_timeout_seconds, 300);
+        assert_eq!((c.kirun.seconds(), c.kirun.max_steps), (120, 0));
         assert_eq!(c.appdata.builder_app_codes, ["appbuilder", "sitezump"]);
         assert!(c.appdata.text_search_stemming);
         assert!(c.connections.block_private_targets);
@@ -400,9 +397,9 @@ mod tests {
         assert_eq!(c.core.upstream.entries(), ["http://core-a:8005", "http://core-b:8005"]);
         assert_eq!(c.ui.upstream.entries(), ["http://ui:8002"]);
         assert_eq!(c.core.function_timeout_seconds, 300);
-        assert_eq!(c.files.upstream.entries(), ["eureka:FILES"]);
+        assert_eq!(c.files.upstream.entries(), ["lighthouse:FILES"]);
         let d: CoreConfig = serde_json::from_value(serde_json::json!({"core": {"function_timeout_seconds": 5}})).unwrap();
-        assert_eq!((d.core.upstream.entries(), d.ui.upstream.entries()), (vec!["eureka:CORE".to_string()], vec!["eureka:UI".to_string()]));
+        assert_eq!((d.core.upstream.entries(), d.ui.upstream.entries()), (vec!["lighthouse:CORE".to_string()], vec!["lighthouse:UI".to_string()]));
     }
 
     #[test]

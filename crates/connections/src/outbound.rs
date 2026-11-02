@@ -95,6 +95,15 @@ fn is_host_key(key: &str) -> bool {
 
 /// Validates every URL and every host-bearing key in a `connectionDetails` map, at any depth.
 pub async fn validate_connection_details(details: Option<&Map<String, Value>>) -> ConnResult<()> {
+    validate_connection_details_with(details, true).await
+}
+
+/// [`validate_connection_details`] with the private-target rule as `[connections]
+/// block_private_targets` sets it (Rust only, see DIFFERENCES.md). On, it is exactly
+/// [`validate_connection_details`]. Off (local development only), a host may be a private,
+/// loopback or internal address (`localhost`, `10.x`, `.local`, ...) so a connection to a
+/// local service can be saved; the scheme rules and the need for a readable host still apply.
+pub async fn validate_connection_details_with(details: Option<&Map<String, Value>>, block_private_targets: bool) -> ConnResult<()> {
     let Some(details) = details else { return Ok(()) };
     if details.is_empty() {
         return Ok(());
@@ -117,7 +126,7 @@ pub async fn validate_connection_details(details: Option<&Map<String, Value>>) -
                     stack.push((format!("{path}[{i}]"), v));
                 }
             }
-            Value::String(s) => validate_value(&path, s).await?,
+            Value::String(s) => validate_value(&path, s, block_private_targets).await?,
             _ => {}
         }
     }
@@ -129,13 +138,13 @@ pub async fn is_usable(details: Option<&Map<String, Value>>) -> bool {
     validate_connection_details(details).await.is_ok()
 }
 
-async fn validate_value(key: &str, value: &str) -> ConnResult<()> {
+async fn validate_value(key: &str, value: &str, block_private_targets: bool) -> ConnResult<()> {
     if java::is_blank(value) {
         return Ok(());
     }
     let trimmed = java::trim(value);
     if with_authority(trimmed) {
-        return validate_url(Some(key), trimmed).await;
+        return validate_url_with(Some(key), trimmed, block_private_targets).await;
     }
     if let Some(scheme) = scheme_only(trimmed) {
         let lower = scheme.to_lowercase();
@@ -148,13 +157,17 @@ async fn validate_value(key: &str, value: &str) -> ConnResult<()> {
         }
     }
     if is_host_key(key) {
-        check_host(Some(key), trimmed, trimmed).await?;
+        check_host(Some(key), trimmed, trimmed, block_private_targets).await?;
     }
     Ok(())
 }
 
 /// Validates one absolute URL with the save-time rules.
 pub async fn validate_url(key: Option<&str>, url: &str) -> ConnResult<()> {
+    validate_url_with(key, url, true).await
+}
+
+async fn validate_url_with(key: Option<&str>, url: &str, block_private_targets: bool) -> ConnResult<()> {
     let parsed = match uri::parse(java::trim(url)) {
         Ok(u) => u,
         Err(_) => return Err(refuse(key, url, "it is not a valid web address")),
@@ -162,7 +175,7 @@ pub async fn validate_url(key: Option<&str>, url: &str) -> ConnResult<()> {
     let scheme = parsed.scheme.as_deref().unwrap_or("").to_lowercase();
 
     if DATABASE_SCHEMES.contains(&scheme.as_str()) {
-        return check_database_authority(key, url).await;
+        return check_database_authority(key, url, block_private_targets).await;
     }
 
     if !ALLOWED_SCHEMES.contains(&scheme.as_str()) {
@@ -174,7 +187,7 @@ pub async fn validate_url(key: Option<&str>, url: &str) -> ConnResult<()> {
         Some(h) if !java::is_blank(&h) => h,
         _ => return Err(refuse(key, url, "the address has no readable host name")),
     };
-    check_host(key, url, &host).await
+    check_host(key, url, &host, block_private_targets).await
 }
 
 /// The call-time check, exactly as Java: the save-time rules (re-worded for a call), then what
@@ -269,6 +282,40 @@ async fn check_client_host(url: &str, name: &str, ip: Option<IpAddr>) -> ConnRes
     Ok(())
 }
 
+/// The same rules for a server no URL names (an SMTP host): the blocked names and suffixes,
+/// then every address the host resolves to (`target` only names it in the refusal). The
+/// addresses are returned so the connection goes to exactly the ones judged, with no second
+/// lookup to rebind.
+pub async fn guard_host(target: &str, host: &str) -> ConnResult<Vec<IpAddr>> {
+    let name = normalize_host(Some(host));
+    if name.is_empty() {
+        return Err(refuse_call(target, "the address has no readable host name"));
+    }
+    if let Ok(ip) = name.parse::<IpAddr>() {
+        if is_private_address(&canonical(JavaInet::from_ip(ip))) {
+            return Err(refuse_call(target, &format!("'{name}' is a private or internal address")));
+        }
+        return Ok(vec![ip]);
+    }
+    if BLOCKED_NAMES.contains(&name.as_str()) {
+        return Err(refuse_call(target, &format!("'{name}' is this server, not an outside address")));
+    }
+    if BLOCKED_SUFFIXES.iter().any(|s| name.ends_with(s)) {
+        return Err(refuse_call(target, &format!("'{name}' is an internal address")));
+    }
+    let addresses = resolve(&name).await.map_err(|_| refuse_call(target, &format!("'{name}' does not resolve to any address")))?;
+    for a in &addresses {
+        let a = canonical(*a);
+        if is_private_address(&a) {
+            return Err(refuse_call(
+                target,
+                &format!("'{name}' resolves to {}, which is a private or internal address", a.host_address()),
+            ));
+        }
+    }
+    Ok(addresses.iter().map(JavaInet::ip).collect())
+}
+
 /// An IPv4-mapped IPv6 address judged as the IPv4 address it carries.
 pub fn canonical(a: JavaInet) -> JavaInet {
     match a {
@@ -291,7 +338,7 @@ fn normalize_host(raw: Option<&str>) -> String {
     host
 }
 
-async fn check_database_authority(key: Option<&str>, url: &str) -> ConnResult<()> {
+async fn check_database_authority(key: Option<&str>, url: &str, block_private_targets: bool) -> ConnResult<()> {
     let trimmed = java::trim(url);
     // `rest.indexOf("://") + 3`: a missing "://" starts at index 2, as Java does.
     let start = match trimmed.find("://") {
@@ -323,7 +370,7 @@ async fn check_database_authority(key: Option<&str>, url: &str) -> ConnResult<()
         if java::is_blank(host) {
             return Err(refuse(key, url, "the address has no readable host name"));
         }
-        check_host(key, url, host).await?;
+        check_host(key, url, host, block_private_targets).await?;
     }
     Ok(())
 }
@@ -337,10 +384,14 @@ fn java_split_comma(s: &str) -> Vec<&str> {
     parts
 }
 
-async fn check_host(key: Option<&str>, original: &str, raw_host: &str) -> ConnResult<()> {
+/// The save-time host rules. With `block_private_targets` off only a readable host is needed.
+async fn check_host(key: Option<&str>, original: &str, raw_host: &str, block_private_targets: bool) -> ConnResult<()> {
     let host = normalize_host(Some(raw_host));
     if host.is_empty() {
         return Err(refuse(key, original, "the address has no readable host name"));
+    }
+    if !block_private_targets {
+        return Ok(());
     }
     if BLOCKED_NAMES.contains(&host.as_str()) {
         return Err(refuse(key, original, &format!("'{host}' is this server, not an outside address")));

@@ -2,7 +2,7 @@
 //!
 //! - Nothing is registered until the first readiness check passes, so the gateway never sees an
 //!   instance that would fail its first request.
-//! - The lease is 10 seconds of renewal in a 30 second lease (Eureka's default is 30/90): a
+//! - The lease is 10 seconds of renewal in a 30 second lease (the registry protocol's default is 30/90): a
 //!   crashed instance leaves the registry within half a minute.
 //! - A heartbeat answered 404 (the server restarted, or evicted us) registers again at once.
 //! - Readiness keeps being checked with every heartbeat. Three failures in a row report DOWN, so
@@ -87,13 +87,13 @@ pub fn registration(app: &str, port: u16, health_path: &str) -> Registration {
 }
 
 impl Registration {
-    /// Lighthouse servers, in any of the forms [`crate::eureka_base`] accepts.
+    /// Lighthouse servers, in any of the forms [`crate::registry_base`] accepts.
     pub fn servers<I, S>(mut self, servers: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let list: Vec<String> = servers.into_iter().map(|s| crate::eureka_base(s.as_ref())).collect();
+        let list: Vec<String> = servers.into_iter().map(|s| crate::registry_base(s.as_ref())).collect();
         if !list.is_empty() {
             self.servers = list;
         }
@@ -258,7 +258,7 @@ impl Registration {
     }
 
     /// Reports `status` (UP or DOWN) by registering again with a newer `lastDirtyTimestamp`, as
-    /// a Eureka client does. Nothing is sent when the status is unchanged and registered.
+    /// a Lighthouse client does. Nothing is sent when the status is unchanged and registered.
     pub async fn set_status(&self, status: Status) -> Result<()> {
         let changed = {
             let mut s = self.lock();

@@ -215,6 +215,16 @@ impl Store {
     }
 }
 
+/// Whether `e` says the object is not in the bucket (S3 `NoSuchKey`): a file row whose bytes are
+/// gone, such as one that came over with a database copy. The download answers 404 for it rather
+/// than 500, and the file browser shows an icon instead of breaking (local, 2026-10-22).
+pub fn is_missing_object(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        let text = c.to_string();
+        text.contains("NoSuchKey") || text.contains("The specified key does not exist")
+    })
+}
+
 pub fn collapse_slashes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev = '\0';
@@ -234,6 +244,14 @@ mod tests {
     #[test]
     fn collapses() {
         assert_eq!(collapse_slashes("a//b///c/"), "a/b/c/");
+    }
+
+    #[test]
+    fn a_missing_object_is_told_apart_from_other_failures() {
+        let missing = anyhow::anyhow!("service error: NoSuchKey: The specified key does not exist.")
+            .context("get local-secured/FIN/shriram.jpg");
+        assert!(is_missing_object(&missing));
+        assert!(!is_missing_object(&anyhow::anyhow!("connection refused").context("get local-secured/x")));
     }
 
     #[tokio::test]

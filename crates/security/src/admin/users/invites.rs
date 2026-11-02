@@ -15,6 +15,7 @@ use crate::data::crud::own_or_managed;
 use crate::data::users_admin::{access_request, access_request_values, invite, invite_values, user_values, AccessRequest, Invite, INVITE, REQUEST, USER};
 use crate::errors::{AuthError, AuthResult};
 use crate::events::EventMessage;
+use crate::internal::urls::platform_app_url;
 use crate::jackson::{epoch, json, opt, Obj};
 use crate::model::{ContextAuth, User, PLACEHOLDER};
 use crate::signin::AuthRequest;
@@ -31,6 +32,17 @@ fn conflict(key: &str, params: &[&str]) -> AuthError {
 
 fn blank(s: Option<&str>) -> bool {
     s.is_none_or(|v| v.trim().is_empty())
+}
+
+/// The invite link's prefix: the first non blank of the invited client's app URL and the app
+/// owner's (each as `checkUrl` wrote it), else the app's platform address. `checkUrl` puts
+/// `https://` before a stored `http://` URL; the link keeps the stored scheme instead.
+fn invite_link_prefix(client_url: &str, owner_url: &str, platform: &str) -> String {
+    let u = if client_url.trim().is_empty() { owner_url.trim() } else { client_url.trim() };
+    if u.is_empty() {
+        return platform.to_string();
+    }
+    u.strip_prefix("https://").filter(|r| r.starts_with("http://") || r.starts_with("https://")).unwrap_or(u).to_string()
 }
 
 /// `matchesIfGiven`.
@@ -296,6 +308,27 @@ impl Admin {
         Ok(deleted)
     }
 
+    /// The invite mail's `urlPrefix` (DIFFERENCES.md, RS3 and RS4): the app's URL for the invited
+    /// client as `getAppUrl` answers it, read for the server's own mail (the client's `URL`
+    /// property, else its own newest LIVE URL); else the same for the app's OWNER (its `URL`
+    /// property, else its own newest LIVE URL); else the app's platform address. Never a sibling
+    /// tenant's URL: one tenant's invite must not link to another tenant's site. `""` only for an
+    /// unknown app or with no platform ending configured. A failure reading a URL falls through to
+    /// the next step rather than dropping the mail.
+    async fn invite_url_prefix(&self, app_code: &str, client_id: u64) -> AuthResult<String> {
+        let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(String::new()) };
+        let app = &app;
+        let url_of = |id: u64| async move {
+            self.app_url_internal(app, id).await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, app = app_code, client = id, "no client URL for the invite mail");
+                String::new()
+            })
+        };
+        let client_url = url_of(client_id).await;
+        let owner_url = if client_url.trim().is_empty() && app.client_id != client_id { url_of(app.client_id).await } else { String::new() };
+        Ok(invite_link_prefix(&client_url, &owner_url, &platform_app_url(&app.app_code, &self.dir().subdomain_endings)))
+    }
+
     /// `raiseInvitedEvent`: `USER_INVITED` for the app's mail (false without an app).
     async fn raise_invited(&self, ca: &ContextAuth, i: &Invite, existing: Option<&User>) -> bool {
         let Some(app_code) = ca.url_app_code.clone().filter(|a| !a.trim().is_empty()) else { return false };
@@ -304,14 +337,10 @@ impl Admin {
                 None => String::new(),
                 Some(p) => self.db.profile(p).await?.and_then(|p| p.name).unwrap_or_default(),
             };
-            let url_prefix = match self.dir().app_by_code(&app_code).await? {
-                Some(_) => self.db.latest_client_url(&app_code, i.client_id).await?.filter(|u| !u.trim().is_empty()),
-                None => None,
-            };
-            let url_prefix = match url_prefix {
-                Some(u) => u,
-                None => self.db.latest_client_url(&app_code, None).await?.filter(|u| !u.trim().is_empty()).unwrap_or_default(),
-            };
+            let invited_client = i.client_id.unwrap_or_else(|| ca.user.client_id());
+            let url_prefix = self.invite_url_prefix(&app_code, invited_client).await?;
+            // The link's host only (never the code), so a dead link can be traced to its prefix.
+            tracing::info!(invite = i.id, app = %app_code, url_prefix = %url_prefix, "USER_INVITED link prefix");
             let email = first_non_blank(&[i.email_id.as_deref(), existing.and_then(|u| u.email_id.as_deref())]);
             let (first, last, phone) = match existing {
                 None => (
@@ -545,7 +574,9 @@ impl Admin {
             Some(p) => self.has_access_to_profiles(u.client_id, &[p]).await?,
             None => false,
         };
-        self.caches().service.evict_everywhere(crate::caches::USER_SUB_ORG, &format!("orgStructure:{}", created.client_id)).await;
+        // The owner's cached sub-org (`<client>:owner`) lists every user of the client, so it has to
+        // drop too, or an Owner cannot hand work to the new user until the cache expires (LZT-1716).
+        self.evict_owner_cache(created.client_id, created.reporting_to).await;
         if addable {
             self.db.add_profile_to_user(created.id, i.profile_id.unwrap_or_default()).await?;
         }
@@ -873,6 +904,31 @@ mod tests {
         let a = AccessRequest { id: 1, status: Some("PENDING".into()), ..Default::default() };
         assert_eq!(request_json(&a, &RequestNames::default()), json!({"id": 1, "status": "PENDING"}));
     }
+
+    /// RS3 and RS4: the invited client's URL when it has one, else the app owner's, else the
+    /// app's platform address.
+    #[test]
+    fn invite_link_prefix_is_the_clients_or_the_platforms() {
+        let endings = vec![" .local.modlix.com".to_string(), ".local.sitezump.ai".to_string()];
+        let platform = platform_app_url("CxZump", &endings);
+        assert_eq!(platform, "https://cxzump.local.modlix.com");
+        assert_eq!(platform_app_url("cxzump", &[]), "");
+        assert_eq!(platform_app_url(" ", &endings), "");
+        assert_eq!(platform_app_url("cxzump", &[" ".into(), ".modlix.com".into()]), "https://cxzump.modlix.com");
+
+        let owner = "https://owner.example.test";
+        assert_eq!(invite_link_prefix("https://anter.example.test", owner, &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("https://anter.example.test", "", &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("", owner, &platform), owner);
+        assert_eq!(invite_link_prefix("  ", " https://http://owner.example.test ", &platform), "http://owner.example.test");
+        assert_eq!(invite_link_prefix("", "", &platform), platform);
+        assert_eq!(invite_link_prefix("  ", " ", &platform), platform);
+        assert_eq!(invite_link_prefix("", "", ""), "");
+        // `checkUrl` over a stored `http://` URL.
+        assert_eq!(invite_link_prefix("https://http://anter.example.test:8080", "", &platform), "http://anter.example.test:8080");
+        assert_eq!(invite_link_prefix("https://https://anter.example.test", "", &platform), "https://anter.example.test");
+        assert_eq!(invite_link_prefix("https://httpbin.example.test", "", &platform), "https://httpbin.example.test");
+    }
 }
 
 #[cfg(test)]
@@ -880,6 +936,7 @@ mod live {
     use super::*;
     use crate::admin::users::testkit::{fx, sys, NONE, PASSWORD};
     use crate::spring::Params;
+    use std::sync::Arc;
     use super::super::passwords::SecretType;
     use serde_json::json;
 
@@ -990,12 +1047,18 @@ mod live {
             .unwrap()
             .to_string();
         assert_eq!(err(s.invite_accept(&on_c, &reg(&otp, json!({"passType": "OTP", "otp": "1"})), &info()).await).0, StatusCode::FORBIDDEN, "OTP sets no secret");
+        // An Owner's cached sub-org (every user of the client) must drop when the invite makes a
+        // user, or a transfer to the new user is refused until it expires (LZT-1716).
+        let owner_key = format!("{c}:owner");
+        s.caches().id_lists.insert(crate::caches::USER_SUB_ORG, owner_key.clone(), std::sync::Arc::new(vec![])).await;
+        assert!(s.caches().id_lists.get(crate::caches::USER_SUB_ORG, &owner_key).await.is_some());
         let (body, _) = s.invite_accept(&on_c, &reg(&full, json!({"passType": "PIN", "pin": "1234"})), &info()).await.map_err(|e| e.to_string()).unwrap_or_else(|e| (json!({"error": e}), None));
         // The user is made, with the invite's identifiers and profile; signing in with a PIN is
         // then refused, as appbuilder has no PIN sign-in for the client.
         assert!(body["error"].as_str().unwrap().contains("403"), "{body}");
         let made = fx.ids(&format!("SELECT ID FROM security_user WHERE CLIENT_ID = {c} AND USER_NAME = 'zzrl{run}k1' AND PHONE_NUMBER IS NOT NULL")).await;
         assert_eq!(made.len(), 1);
+        assert!(s.caches().id_lists.get(crate::caches::USER_SUB_ORG, &owner_key).await.is_none(), "the owner sub-org cache is dropped");
         assert_eq!(s.db.assigned_profile_ids(made[0], Some(2)).await.unwrap(), vec![p1]);
         let twin = s.invite_create(&sys, Invite { client_id: Some(c), email_id: Some(mail("k3")), ..Default::default() }).await.unwrap()["userRequest"]["inviteCode"]
             .as_str()
@@ -1051,5 +1114,89 @@ mod live {
         s.request_page(&sys, &page, Some(cond), Some(&format!("zzrl{run}b"))).await.unwrap();
         assert_eq!(s.request_user(&sys, &rid1).await.unwrap().id, b.id);
         fx.finish().await;
+    }
+
+    /// Keeps the `urlPrefix` of every `USER_INVITED` it is handed.
+    #[derive(Default)]
+    struct Recorded(std::sync::Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl crate::events::EventSink for Recorded {
+        async fn publish(&self, e: &EventMessage) -> AuthResult<bool> {
+            let prefix = e.data.iter().find(|(k, _)| k == "urlPrefix").and_then(|(_, v)| v.as_str()).unwrap_or("<none>");
+            self.0.lock().unwrap().push(prefix.to_string());
+            Ok(true)
+        }
+    }
+
+    /// RS3 and RS4: the invite mail's `urlPrefix` on a scratch app of SYSTEM, for an invite into
+    /// ZZRUM: the platform address while neither ZZRUM nor the owner has a URL, whatever another
+    /// client's LIVE row says; then the owner's LIVE row; then the owner's `URL` property over it;
+    /// then ZZRUM's own LIVE row over the owner's; then ZZRUM's `URL` property over that. Then
+    /// `POST users/invite` carries the same prefix.
+    #[tokio::test]
+    async fn invite_url_prefix_is_the_invited_clients_or_the_platforms() {
+        let Some(mut fx) = fx().await else { return };
+        let prefix = "zzrsinv";
+        crate::admin::clients::testlive::remove_leftovers(&fx.s, prefix).await;
+        let sys = sys();
+        let (c, m) = (fx.c, fx.m);
+        let code = crate::admin::clients::testlive::scratch_code(prefix);
+        let made = crate::admin::clients::testlive::scratch_app(&fx.s, &sys, json!({"appName": "ZZ RS3 invite", "appCode": code})).await;
+        let app_id = crate::admin::clients::testlive::id_of(&made);
+        let app = fx.s.dir().app_by_code(&code).await.unwrap().unwrap();
+        let owner = app.client_id;
+        assert_eq!(owner, 1);
+        let pool = fx.s.db.pool.clone();
+        let exec = |sql: String| {
+            let pool = pool.clone();
+            async move { sqlx::query(&sql).execute(&pool).await.unwrap() }
+        };
+        let s = fx.s.clone();
+        let url_of = |s: Arc<Admin>, code: String| async move { s.invite_url_prefix(&code, m).await.unwrap() };
+        let platform = platform_app_url(&code, &s.dir().subdomain_endings);
+        assert_eq!(platform, format!("https://{code}.local.modlix.com"));
+
+        // Nothing of ZZRUM's or the owner's: the platform address.
+        assert_eq!(url_of(s.clone(), code.clone()).await, platform);
+        // Another client's (a sibling's) LIVE row never reaches it.
+        exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({c}, 'zzrs3-c.example.test', '{code}', 'LIVE')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, platform);
+        // RS4: no URL of ZZRUM's, the owner's LIVE row, then the owner's `URL` property over it.
+        exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({owner}, 'zzrs3-owner-live.example.test', '{code}', 'LIVE')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-owner-live.example.test");
+        exec(format!("INSERT INTO security_app_property (APP_ID, CLIENT_ID, NAME, VALUE) VALUES ({app_id}, {owner}, 'URL', 'zzrs3-owner.example.test/')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-owner.example.test");
+        // ZZRUM's own LIVE row wins over the owner's, as `checkUrl` writes it.
+        exec(format!("INSERT INTO security_client_url (CLIENT_ID, URL_PATTERN, APP_CODE, URL_TYPE) VALUES ({m}, 'zzrs3-live.example.test', '{code}', 'LIVE')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-live.example.test");
+        // ZZRUM's `URL` property comes first.
+        exec(format!("INSERT INTO security_app_property (APP_ID, CLIENT_ID, NAME, VALUE) VALUES ({app_id}, {m}, 'URL', 'https://zzrs3-m.example.test/')")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-m.example.test");
+        // Another client's newer LIVE row still does not reach it.
+        exec(format!("DELETE FROM security_app_property WHERE APP_ID = {app_id} AND CLIENT_ID = {m}")).await;
+        exec(format!("UPDATE security_client_url SET UPDATED_AT = NOW() + INTERVAL 1 MINUTE WHERE APP_CODE = '{code}' AND CLIENT_ID = {c}")).await;
+        assert_eq!(url_of(s.clone(), code.clone()).await, "https://zzrs3-live.example.test");
+
+        exec(format!("DELETE FROM security_client_url WHERE APP_CODE = '{code}' AND URL_TYPE = 'LIVE'")).await;
+        exec(format!("DELETE FROM security_app_property WHERE APP_ID = {app_id}")).await;
+        crate::admin::clients::testlive::remove_app(&s, &sys, app_id).await;
+
+        // Through the route, as SYSTEM: the mail carries what the lookup answers for ZZRUM.
+        let rec = Arc::new(Recorded::default());
+        let recording = Arc::new(Admin { internal: s.internal.clone(), events: rec.clone(), files: s.files.clone(), hosting: s.hosting.clone() });
+        fx.router = crate::admin::router(recording);
+        let h = [("authorization", basic_142()), ("clientcode", "SYSTEM".to_string()), ("appcode", "leadzump".to_string())];
+        let expected = s.invite_url_prefix("leadzump", m).await.unwrap();
+        assert!(expected.starts_with("https://"), "{expected}");
+        let (st, v) = fx.http_with("POST", "/users/invite", &h, Some(json!({"clientId": m, "emailId": format!("zzrl{}u1@example.invalid", fx.run)}))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(rec.0.lock().unwrap().pop(), Some(expected));
+        fx.finish().await;
+    }
+
+    fn basic_142() -> String {
+        use base64::Engine;
+        format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("142:{PASSWORD}")))
     }
 }

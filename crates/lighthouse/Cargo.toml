@@ -1,6 +1,6 @@
 [package]
 name = "lighthouse"
-description = "Lighthouse: the registry (Eureka's API, peer replication, eviction with self-preservation) that replaces the Java Eureka server, and the config server (oci-config snapshots, Spring Cloud Config's endpoint, the Rust units' documents and the ai and ssr env files) that replaces the Java config server and tools/render_config.py."
+description = "Lighthouse: the registry (the registry protocol's API, peer replication, eviction with self-preservation) that replaces the Java registry server, and the config server (oci-config snapshots, Spring Cloud Config's endpoint, the Rust units' documents and the ai and ssr env files) that replaces the Java config server and tools/render_config.py."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

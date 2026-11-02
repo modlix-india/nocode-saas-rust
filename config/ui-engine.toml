@@ -30,7 +30,7 @@ resource_cache_age = 604800
 # The Java ui's JVM runs in the developer machine's zone (IST) locally; +00:00 in containers.
 java_zone_offset = "+05:30"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "UI-ENGINE"

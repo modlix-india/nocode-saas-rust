@@ -99,6 +99,7 @@ fn notification_messages_match_java() {
         x_debug: None,
         draft: false,
         payload: Some(data()),
+        ..Default::default()
     };
     assert_eq!(n1.to_json(), java[2]);
     let n2 = NotificationMessage {

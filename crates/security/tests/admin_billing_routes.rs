@@ -31,7 +31,7 @@ fn world() -> World {
     let db = Db::new(pool);
     let events = Arc::new(RecordingEvents::default());
     let internal = Arc::new(Internal { auth: h.auth.clone(), db: db.clone(), billing: Arc::new(db), wallet_events: events.clone() });
-    let state = Arc::new(Admin { internal, events, files: None });
+    let state = Arc::new(Admin { internal, events, files: None, hosting: Default::default() });
     World { h, state }
 }
 

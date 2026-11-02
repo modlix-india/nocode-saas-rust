@@ -75,15 +75,49 @@ pub struct NewVersion {
     pub object: Document,
 }
 
+/// Rust only: how one object type's history is held back in replies, as its kind's
+/// [`crate::write::kind::Kind::redact`] holds back the object (core's connections).
+#[derive(Clone, Copy)]
+pub struct VersionRedaction {
+    /// The rows' `objectType` (`CONNECTION`).
+    pub object_type: &'static str,
+    /// The row's `object` as a reply carries it.
+    pub redact: fn(JMap) -> JMap,
+    /// Whether a history query may filter or sort on a field of the row (`object.<path>`).
+    pub filterable: fn(&str) -> bool,
+}
+
 #[derive(Clone)]
 pub struct VersionStore {
     store: Store,
     auth_names: &'static [(&'static str, &'static str)],
+    redactions: &'static [VersionRedaction],
 }
 
 impl VersionStore {
     pub fn new(store: Store, auth_names: &'static [(&'static str, &'static str)]) -> Self {
-        Self { store, auth_names }
+        Self { store, auth_names, redactions: &[] }
+    }
+
+    /// The store whose replies hold back what `redactions` say.
+    pub fn with_redactions(mut self, redactions: &'static [VersionRedaction]) -> Self {
+        self.redactions = redactions;
+        self
+    }
+
+    fn redaction(&self, object_type: Option<&str>) -> Option<&'static VersionRedaction> {
+        let t = object_type?;
+        self.redactions.iter().find(|r| r.object_type == t)
+    }
+
+    /// The row as a reply carries it.
+    fn redacted(&self, mut v: JMap) -> JMap {
+        if let Some(r) = self.redaction(str_field(&v, "objectType")) {
+            if let Some(JValue::Object(o)) = v.get_mut("object") {
+                *o = (r.redact)(std::mem::take(o));
+            }
+        }
+        v
     }
 
     fn auth_name(&self, object_type: &str) -> &'static str {
@@ -119,7 +153,7 @@ impl VersionStore {
             return Ok(None);
         };
         let v = decode_bson(&VERSION, &d);
-        Ok(self.access_check(ca, &v).await?.then_some(v))
+        Ok(self.access_check(ca, &v).await?.then(|| self.redacted(v)))
     }
 
     /// `accessCheck`: the type's `_READ` authority, then the caller's own client or a client in
@@ -164,11 +198,20 @@ impl VersionStore {
         }
         let pageable = Pageable::of(query.page, query.size, sort);
         let any = self.store.backend().find_one(COLLECTION, doc! {"object.id": id}, None).await?;
-        let allowed = match any {
-            Some(d) => self.access_check(ca, &decode_bson(&VERSION, &d)).await?,
+        let any = any.map(|d| decode_bson(&VERSION, &d));
+        let allowed = match &any {
+            Some(v) => self.access_check(ca, v).await?,
             None => true,
         };
-        if !allowed {
+        // A type whose objects are held back cannot be filtered or sorted on what is held back
+        // (a projection is harmless: the rows are held back after it).
+        let refused = |r: &VersionRedaction| {
+            let condition_fields = query.condition.as_ref().map(Condition::fields).unwrap_or_default();
+            let sorted = pageable.sort.0.iter().map(|o| o.property.as_str());
+            !condition_fields.into_iter().chain(sorted).all(r.filterable)
+        };
+        let held_back = any.as_ref().and_then(|v| self.redaction(str_field(v, "objectType")));
+        if !allowed || held_back.is_some_and(refused) {
             return Ok(page_json(Vec::new(), &pageable, 0));
         }
         let filter = Condition::to_mongo(Some(&condition))?;
@@ -182,7 +225,7 @@ impl VersionStore {
             find = find.projection(p);
         }
         let docs = self.store.backend().find(COLLECTION, find).await?;
-        let content: Vec<JValue> = docs.iter().map(|d| JValue::Object(to_jackson(&VERSION, &decode_bson(&VERSION, d)))).collect();
+        let content: Vec<JValue> = docs.iter().map(|d| JValue::Object(to_jackson(&VERSION, &self.redacted(decode_bson(&VERSION, d))))).collect();
         let total = match known_total(content.len(), &pageable) {
             Some(t) => t,
             None => self.store.backend().count(COLLECTION, filter).await? as i64,

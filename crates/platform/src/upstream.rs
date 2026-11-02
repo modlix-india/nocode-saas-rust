@@ -1,8 +1,8 @@
 //! Where another service is.
 //!
 //! An [`Upstream`] is either a fixed list of base URLs, used round robin (compose service
-//! addresses today, Kubernetes Service names later), or `eureka:<APP>`, which follows the Java
-//! registry while Java services are still the ones answering.
+//! addresses today, Kubernetes Service names later), or `lighthouse:<APP>`, which follows the
+//! instances registered in Lighthouse under that name.
 //!
 //! A fixed list with more than one address is probed every few seconds (a TCP connect: a stopped
 //! container refuses it), and addresses that fail are skipped until they answer again. Blue/green
@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 
 use crate::config::UpstreamConfig;
-use crate::eureka::Eureka;
+use crate::registry::Registry;
 
 /// Accepts the paths a route sends elsewhere.
 pub type PathTest = fn(&str) -> bool;
@@ -40,7 +40,7 @@ struct Member {
 
 enum Kind {
     Static(Vec<Member>),
-    Eureka { eureka: Eureka, app: String },
+    Registry { registry: Registry, app: String },
 }
 
 struct Inner {
@@ -50,18 +50,24 @@ struct Inner {
     probed: AtomicBool,
 }
 
+/// The registry app a `lighthouse:<APP>` upstream entry names.
+pub fn registry_app(entry: &str) -> Option<&str> {
+    entry.strip_prefix("lighthouse:")
+}
+
 impl Upstream {
-    /// `eureka` is needed only when the configuration names an `eureka:` source.
-    pub fn from_config(cfg: &UpstreamConfig, eureka: Option<&Eureka>) -> Result<Self> {
+    /// `registry` (the Lighthouse registry client) is needed only when the configuration names a
+    /// `lighthouse:` source.
+    pub fn from_config(cfg: &UpstreamConfig, registry: Option<&Registry>) -> Result<Self> {
         let entries = cfg.entries();
         if entries.len() == 1 {
-            if let Some(app) = entries[0].strip_prefix("eureka:") {
-                let Some(eureka) = eureka else {
-                    bail!("upstream {} needs [eureka] zones configured", entries[0]);
+            if let Some(app) = registry_app(&entries[0]) {
+                let Some(registry) = registry else {
+                    bail!("upstream {} needs [registry] zones configured", entries[0]);
                 };
-                eureka.watch(app);
-                return Ok(Self::new(Kind::Eureka {
-                    eureka: eureka.clone(),
+                registry.watch(app);
+                return Ok(Self::new(Kind::Registry {
+                    registry: registry.clone(),
                     app: app.to_ascii_uppercase(),
                 }));
             }
@@ -115,7 +121,7 @@ impl Upstream {
     /// Another member to try after a connection to `failed` (a base URL this upstream gave out)
     /// could not be opened: the next one in the list that is up, else the next one at all.
     /// `failed` is skipped from now on until its probe sees it answer again. `None` when there
-    /// is no other member: a single address, an `eureka:` source, or a base that is not ours.
+    /// is no other member: a single address, a `lighthouse:` source, or a base that is not ours.
     pub fn next_base_after(&self, failed: &str) -> Option<String> {
         let Kind::Static(members) = &self.inner.kind else { return None };
         let at = members.iter().position(|m| m.base == failed)?;
@@ -160,7 +166,7 @@ impl Upstream {
     pub fn has_addresses(&self) -> bool {
         match &self.inner.kind {
             Kind::Static(members) => !members.is_empty(),
-            Kind::Eureka { .. } => true,
+            Kind::Registry { .. } => true,
         }
     }
 
@@ -176,7 +182,7 @@ impl Upstream {
                 let i = self.inner.next.fetch_add(1, Ordering::Relaxed);
                 Ok(pool[i % pool.len()].base.clone())
             }
-            Kind::Eureka { eureka, app } => eureka.resolve(app).await,
+            Kind::Registry { registry, app } => registry.resolve(app).await,
         }
     }
 
@@ -380,18 +386,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_forms_and_eureka_source() {
+    async fn config_forms_and_registry_source() {
         assert!(Upstream::from_config(&UpstreamConfig::Many(vec![]), None).is_err());
-        assert!(Upstream::from_config(&UpstreamConfig::One("eureka:SECURITY".into()), None).is_err());
+        assert!(Upstream::from_config(&UpstreamConfig::One("lighthouse:SECURITY".into()), None).is_err());
         let one = Upstream::from_config(&UpstreamConfig::One("http://a:1/".into()), None).unwrap();
         assert_eq!(one.base().await.unwrap(), "http://a:1");
 
-        let eureka = crate::eureka::Eureka::new(
-            &crate::config::EurekaConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
+        let registry = crate::registry::Registry::new(
+            &crate::config::RegistryConfig { zones: vec!["http://127.0.0.1:1/eureka/".into()], ..Default::default() },
             0,
         )
         .unwrap();
-        let e = Upstream::from_config(&UpstreamConfig::One("eureka:security".into()), Some(&eureka)).unwrap();
-        assert!(e.base().await.is_err(), "eureka unreachable");
+        assert!(Upstream::from_config(&UpstreamConfig::One("lighthouse:SECURITY".into()), None).is_err(), "needs the registry client too");
+        let l = Upstream::from_config(&UpstreamConfig::One("lighthouse:security".into()), Some(&registry)).unwrap();
+        assert!(l.base().await.is_err(), "a registry name, not an address");
+        assert_eq!(registry_app("lighthouse:CORE-EDITOR"), Some("CORE-EDITOR"));
+        assert_eq!(registry_app("http://core-editor:8111"), None);
+        let e = Upstream::from_config(&UpstreamConfig::One("lighthouse:security".into()), Some(&registry)).unwrap();
+        assert!(e.base().await.is_err(), "lighthouse unreachable");
     }
 }

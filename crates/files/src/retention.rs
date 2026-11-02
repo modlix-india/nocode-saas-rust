@@ -348,7 +348,7 @@ async fn hierarchy(st: &AppState, cc: &str) -> AppResult<Vec<String>> {
     list.ok_or_else(|| crate::errors::literal("FILES.CLIENT_UNKNOWN", StatusCode::NOT_FOUND, format!("Unknown client {cc}")).param("client", cc).into())
 }
 
-async fn evict_caches(st: &AppState) {
+pub(crate) async fn evict_caches(st: &AppState) {
     st.cache().evict_all_everywhere(CACHE_POLICIES).await;
     st.cache().evict_all_everywhere(CACHE_HIERARCHY).await;
 }

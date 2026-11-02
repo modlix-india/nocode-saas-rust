@@ -18,6 +18,7 @@ use kirun::{Map, Value};
 use crate::authorities::{has_authority, AuthoritiesTokenExtractor};
 use crate::context;
 use crate::error::{messages, CoreError};
+use crate::exec_limit;
 use crate::gson::to_gson;
 use crate::repos::app::{app_function_repository, app_schema_repository};
 use crate::repos::definition::DefinitionFunction;
@@ -68,30 +69,52 @@ pub async fn execute(
     client_code: &str,
     arguments: Arguments,
 ) -> Result<String, CoreError> {
-    let Some(mut output) = run(st, namespace, name, app_code, client_code, arguments).await? else {
-        return Err(CoreError::msg_as(
-            StatusCode::NOT_FOUND,
-            messages::OBJECT_NOT_FOUND,
-            "CORE.FUNCTION_NOT_FOUND",
-            &["Function", &format!("{}.{name}", namespace.unwrap_or("null"))],
-        ));
-    };
+    // The budget covers the events read after the run too: a loop function called directly
+    // hands back its iterations one by one.
+    let full_name = full_name(namespace, name);
+    exec_limit::guard(&st.inner().config.kirun, &full_name, app_code, client_code, async {
+        let Some(output) = run(st, namespace, name, app_code, client_code, arguments).await? else {
+            return Err(CoreError::msg_as(
+                StatusCode::NOT_FOUND,
+                messages::OBJECT_NOT_FOUND,
+                "CORE.FUNCTION_NOT_FOUND",
+                &["Function", &format!("{}.{name}", namespace.unwrap_or("null"))],
+            ));
+        };
+        Ok(events_text(output).await)
+    })
+    .await?
+}
 
+/// The Gson text of the events up to and including `output`. Each event read is a step of the
+/// run's budget; a stopped run ends the list (and is answered by its `guard`).
+pub async fn events_text(mut output: FunctionOutput) -> String {
     let mut events = Vec::new();
     while let Some(er) = output.next() {
+        if exec_limit::step().await.is_err() {
+            break;
+        }
         let is_output = er.get_name() == Event::OUTPUT;
-        let result: serde_json::Map<String, Value> =
-            er.get_result().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let result: serde_json::Map<String, Value> = er.get_result().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         events.push(serde_json::json!({ "name": er.get_name(), "result": result }));
         if is_output {
             break;
         }
     }
-    Ok(to_gson(&Value::Array(events)))
+    to_gson(&Value::Array(events))
+}
+
+/// `namespace.name`, or the name alone without a namespace.
+fn full_name(namespace: Option<&str>, name: &str) -> String {
+    match namespace {
+        Some(ns) if !ns.is_empty() => format!("{ns}.{name}"),
+        _ => name.to_string(),
+    }
 }
 
 /// `CoreFunctionService.execute`: the function's output, or `None` when no repository has the
-/// function (Java's chain completes empty).
+/// function (Java's chain completes empty). The run is held to `[kirun]`'s limits
+/// ([`exec_limit`]); a run inside another (a trigger, a token function) shares its budget.
 pub async fn run(
     st: &AppState,
     namespace: Option<&str>,
@@ -100,7 +123,16 @@ pub async fn run(
     client_code: &str,
     arguments: Arguments,
 ) -> Result<Option<FunctionOutput>, CoreError> {
-    let repos = repositories(st, app_code, client_code).await?;
+    let full_name = full_name(namespace, name);
+    exec_limit::guard(&st.inner().config.kirun, &full_name, app_code, client_code, async {
+        let repos = repositories(st, app_code, client_code).await?;
+        run_in(&repos, namespace, name, arguments).await
+    })
+    .await?
+}
+
+/// [`run`] on the given repositories, inside the run's budget.
+pub async fn run_in(repos: &Repositories, namespace: Option<&str>, name: &str, arguments: Arguments) -> Result<Option<FunctionOutput>, CoreError> {
     let Some(fun) = repos.functions.find(namespace, name).await? else {
         return Ok(None);
     };
@@ -120,7 +152,10 @@ pub async fn run(
         }
     }
 
-    let mut fep = FunctionExecutionParameters::new(Arc::new(FunctionRepo(repos.functions.clone())), schema_repo)
+    // Every step of the run (of nested definitions too, which run on this repository) is
+    // checked against the run's budget.
+    let function_repo = exec_limit::limited(Arc::new(FunctionRepo(repos.functions.clone())));
+    let mut fep = FunctionExecutionParameters::new(function_repo, schema_repo)
         .set_arguments(args)
         .set_values_map(AuthoritiesTokenExtractor::new(auth.authorities().to_vec()).values_map());
 
@@ -136,13 +171,7 @@ pub async fn run(
     };
     match result {
         Ok(output) => Ok(Some(output)),
-        Err(e) => {
-            let full_name = match namespace {
-                Some(ns) if !ns.is_empty() => format!("{ns}.{name}"),
-                _ => name.to_string(),
-            };
-            Err(step_failure(context::raised_or_unknown(&e), &full_name, &traces))
-        }
+        Err(e) => Err(step_failure(context::raised_or_unknown(&e), &full_name(namespace, name), &traces)),
     }
 }
 

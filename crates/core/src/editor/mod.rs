@@ -15,12 +15,17 @@ pub mod docs;
 pub mod index;
 pub mod kinds;
 pub mod preview;
+pub mod purge;
+pub mod recovery;
 pub mod routes;
 pub mod schedules;
+pub mod secrets;
 pub mod storage;
 
 #[cfg(test)]
 mod local_stack;
+#[cfg(test)]
+mod purge_local_stack;
 #[cfg(test)]
 mod tests;
 
@@ -65,13 +70,23 @@ pub struct Parts {
     pub billing: Arc<dyn BillingSecurity>,
     pub redis: Option<redis::Client>,
     pub eviction_channel: String,
+    /// `[connections] block_private_targets`: whether a saved connection may point at a
+    /// private, loopback or internal address (refused while on, the default).
+    pub block_private_targets: bool,
+    /// The admin purge's view of the `core` Mongo database and the core MySQL schema.
+    pub purge_docs: Option<Arc<dyn purge::DocStore>>,
+    pub purge_rows: Option<Arc<dyn purge::RowStore>>,
+    pub purge_guard: Option<Arc<dyn purge::ManagedClients>>,
 }
 
 /// The editor's state on a store.
 pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, parts: Parts) -> Arc<CoreEditor> {
-    let cx = Commons::new(store, cache.clone(), core_messages(), EDITOR_AUTH_NAMES);
+    let cx = Commons::new(store, cache.clone(), core_messages(), EDITOR_AUTH_NAMES).with_version_redactions(&secrets::HISTORY);
     let ops = Arc::new(StorageOps::new(parts.catalog, parts.kirun_schemas, parts.core_schemas, parts.data.clone(), parts.triggers));
-    let svc = |o: CoreObject| OverridableService::new(CoreKind::new(o, ops.clone()), cx.clone());
+    let block_private_targets = parts.block_private_targets;
+    let svc = |o: CoreObject| {
+        OverridableService::new(CoreKind::new(o, ops.clone()).with_block_private_targets(block_private_targets), cx.clone())
+    };
     let functions = svc(CoreObject::Function);
     let schemas = svc(CoreObject::Schema);
     let storages = svc(CoreObject::Storage);
@@ -108,6 +123,9 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
         schedules,
         redis: parts.redis,
         eviction_channel: parts.eviction_channel,
+        purge_docs: parts.purge_docs,
+        purge_rows: parts.purge_rows,
+        purge_guard: parts.purge_guard,
     })
 }
 
@@ -141,6 +159,25 @@ impl LiveData {
         self.catalog.connection("appData", app, client, "APP_DATA").await.map_err(|e| e.text())
     }
 
+    /// A connection's server, so two connections to one server are listed once: `default` for
+    /// one using the default connection or naming no URL (the engines' default server then).
+    fn server_key(c: &appdata::model::Connection) -> String {
+        if appdata::mysql::db::truthy(c.detail("useDefaultConnection")) {
+            return "default".into();
+        }
+        match c.detail("url").map(appdata::Value::java_string).filter(|u| !u.trim().is_empty() && u != "null") {
+            Some(url) => url,
+            None => "default".into(),
+        }
+    }
+
+    fn backend_engine(&self, backend: purge::TenantBackend) -> Arc<dyn appdata::engine::AppDataEngine> {
+        match backend {
+            purge::TenantBackend::Mongo => self.mongo.clone(),
+            purge::TenantBackend::MySql => self.mysql.clone(),
+        }
+    }
+
     /// `services.get(subType)`: an app on another backend has no engine.
     fn engine(&self, conn: Option<&appdata::model::Connection>) -> Result<Arc<dyn appdata::engine::AppDataEngine>, String> {
         use appdata::model::ConnectionSubType as Sub;
@@ -164,8 +201,14 @@ impl DataStores for LiveData {
             }
         };
         for conn in conns {
-            if let Err(e) = self.mysql.reconcile(Some(&conn), app, &s, Some(applied_by)).await {
-                tracing::error!(storage = s.name, app, error = %e, "Could not reconcile on a connection");
+            match self.mysql.reconcile(Some(&conn), app, &s, Some(applied_by)).await {
+                // Each blocked tenant's reason is in its own storage_migration or
+                // storage_migration_issue table; this line says which tenants to look in.
+                Ok(report) if !report.all_clean() => {
+                    tracing::warn!(storage = s.name, app, summary = report.summary(), "Tables reconciled with blocked tenants");
+                }
+                Ok(_) => {}
+                Err(e) => tracing::error!(storage = s.name, app, error = %e, "Could not reconcile on a connection"),
             }
         }
     }
@@ -187,6 +230,44 @@ impl DataStores for LiveData {
     async fn estimated_row_count(&self, app: &str, client: &str) -> i64 {
         let conn = self.conn(app, client).await.ok().flatten();
         self.mongo.estimated_row_count(conn.as_ref(), app, client).await
+    }
+
+    async fn tenant_databases(&self) -> (Vec<purge::TenantDb>, Vec<String>) {
+        use purge::TenantBackend as B;
+        // One entry per server: the engines' defaults, then each connection with other details.
+        let mut servers: Vec<(B, String, String, Option<appdata::model::Connection>)> =
+            vec![(B::Mongo, "default".into(), "default".into(), None), (B::MySql, "default".into(), "default".into(), None)];
+        let mut errors = Vec::new();
+        for (backend, sub) in [(B::Mongo, "MONGO"), (B::MySql, "MYSQL")] {
+            match self.catalog.all_app_data_everywhere(sub).await {
+                Ok(conns) => {
+                    for c in conns {
+                        let key = Self::server_key(&c);
+                        if !servers.iter().any(|(b, k, _, _)| *b == backend && *k == key) {
+                            let label = format!("connection {}", c.id);
+                            servers.push((backend, key, label, Some(c)));
+                        }
+                    }
+                }
+                Err(e) => errors.push(format!("{sub} app-data connections: {}", e.text())),
+            }
+        }
+        let mut out = Vec::new();
+        for (backend, _, server, conn) in servers {
+            match self.backend_engine(backend).database_names(conn.as_ref()).await {
+                Ok(names) => out.extend(names.into_iter().map(|name| purge::TenantDb { backend, server: server.clone(), conn: conn.clone(), name })),
+                Err(e) => errors.push(format!("{backend} ({server}): list databases: {e}")),
+            }
+        }
+        (out, errors)
+    }
+
+    async fn tenant_rows(&self, db: &purge::TenantDb) -> Result<i64, String> {
+        self.backend_engine(db.backend).database_rows(db.conn.as_ref(), &db.name).await.map_err(|e| e.to_string())
+    }
+
+    async fn drop_tenant_database(&self, db: &purge::TenantDb) -> Result<bool, String> {
+        self.backend_engine(db.backend).drop_database(db.conn.as_ref(), &db.name).await.map_err(|e| e.to_string())
     }
 }
 
@@ -306,12 +387,13 @@ fn engines(cfg: &CoreConfig, cache: &CacheService, defs: Arc<crate::storage::def
     (mongo, mysql)
 }
 
-/// The editor on a connected core: its state, and the whole router (with the run log and the
-/// event raise of step 4, so every internal route the platform jobs call is on this unit).
-pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>, axum::Router)> {
+/// The editor on a connected core: its state, the whole router (with the run log and the
+/// event raise of step 4, so every internal route the platform jobs call is on this unit), and
+/// the storage migration recovery, for `run` to start.
+pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>, axum::Router, recovery::Recovery)> {
     let s = exec.state.inner();
     let store = s.definitions.store().clone();
-    let security = SecurityClient::from_config(&cfg.security, exec.eureka.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, exec.registry.as_ref())?;
     let defs = crate::storage_defs(&exec.cache, s.definitions.clone(), s.core_schemas.clone());
     let (mongo, mysql) = engines(cfg, &exec.cache, defs, s.kirun_schemas.clone());
     let catalog = s.appdata.catalog().clone();
@@ -321,6 +403,7 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         "" => None,
         url => redis::Client::open(platform::cache::normalize_redis_url(url).as_str()).ok(),
     };
+    let recovery = recovery::Recovery { catalog: catalog.clone(), mysql: mysql.clone(), settings: cfg.appdata.migration_recovery.clone() };
     let parts = Parts {
         catalog: catalog.clone(),
         kirun_schemas: s.kirun_schemas.clone(),
@@ -331,13 +414,17 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
         billing: Arc::new(security.clone()),
         redis,
         eviction_channel: cfg.redis.eviction_channel.clone(),
+        block_private_targets: cfg.connections.block_private_targets,
+        purge_docs: Some(Arc::new(exec.mongo.clone())),
+        purge_rows: Some(Arc::new(exec.pool.clone())),
+        purge_guard: Some(Arc::new(security.clone())),
     };
     let security_callers = SecurityCallers { security: security.clone(), server_port: cfg.server.port };
     let callers: Arc<dyn CallerSource> = Arc::new(caller::EditorCallers { inner: Arc::new(SecurityCallers { security, server_port: cfg.server.port }) });
     let st = state(store, exec.cache.clone(), callers, parts);
     let resolver: Arc<dyn caller::Resolver> = Arc::new(StateResolver { callers: security_callers, state: exec.state.clone() });
     let router = routes::with_layers(routes::router(st.clone()).merge(crate::event_routes::router().with_state(exec.state.clone())), resolver);
-    Ok((st, router))
+    Ok((st, router, recovery))
 }
 
 /// Starts core-editor and serves until a shutdown signal.
@@ -348,7 +435,8 @@ pub async fn run() -> Result<()> {
     let cfg = loaded.config;
     let exec = crate::connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
-    let (_, router) = assemble(&cfg, &exec)?;
+    let (_, router, recovery) = assemble(&cfg, &exec)?;
+    recovery.spawn();
     let health = Health::new(telemetry.metrics.clone());
     let db = exec.mongo.clone();
     health.check("mongo", move || {
@@ -358,5 +446,5 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
     });
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: exec.eureka, cors: true }.run(router).await
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: true }.run(router).await
 }

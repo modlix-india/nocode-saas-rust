@@ -99,6 +99,12 @@ pub async fn with_scope<F: std::future::Future>(scope: RequestScope, fut: F) -> 
     SCOPE.scope(Arc::new(scope), fut).await
 }
 
+/// Runs `fut` inside a scope that already exists, such as [`current`]'s: work a request hands to
+/// another task or runtime keeps its language and what the handler learnt about the caller.
+pub async fn within<F: std::future::Future>(scope: Arc<RequestScope>, fut: F) -> F::Output {
+    SCOPE.scope(scope, fut).await
+}
+
 /// Who asks the client and app override source for a text.
 #[derive(Debug, Clone, Copy)]
 pub struct OverrideKey<'a> {

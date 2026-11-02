@@ -60,6 +60,17 @@ pub fn check_url(url: &str) -> AuthResult<String> {
     Ok(if n.starts_with(HTTPS) { n } else { format!("{HTTPS}{n}") })
 }
 
+/// The app's platform address, `https://<appCode><first subdomain ending>`: the host
+/// `subdomainAppCode` resolves to the app (and so to its owning client). `""` when no ending is
+/// configured or the code is blank.
+pub fn platform_app_url(app_code: &str, endings: &[String]) -> String {
+    let code = app_code.trim().to_lowercase();
+    match endings.iter().map(|e| e.trim()).find(|e| !e.is_empty()) {
+        Some(e) if !code.is_empty() => format!("{HTTPS}{code}{e}"),
+        _ => String::new(),
+    }
+}
+
 impl Internal {
     /// `AppService.getProperties(clientId, appId, appCode, URL)` narrowed to what `getAppUrl`
     /// reads: the client's own URL property when the caller may read it.
@@ -78,7 +89,22 @@ impl Internal {
     /// `getAppUrlInternal(appCode, appId, clientId)`: the URL property, else the newest LIVE URL,
     /// as `checkUrl` writes it; `""` when there is none.
     pub async fn app_url_for(&self, ca: &ContextAuth, app: &crate::model::App, client_id: u64) -> AuthResult<String> {
-        let url = match self.url_property(ca, app, client_id).await? {
+        let property = self.url_property(ca, app, client_id).await?;
+        self.app_url_from(app, client_id, property).await
+    }
+
+    /// The same answer for the server's own use (the link of an invite mail), so the client's URL
+    /// property is read whoever is asking: an app owner's property is not the caller's to read.
+    pub async fn app_url_internal(&self, app: &crate::model::App, client_id: u64) -> AuthResult<String> {
+        let props = self.db.app_properties(app, APP_PROP_URL, &[client_id], true).await?;
+        let property = props.into_iter().find(|p| p.client_id == client_id).map(|p| p.value);
+        self.app_url_from(app, client_id, property).await
+    }
+
+    /// The URL property as read (`None`: none to read), else the newest LIVE URL, as `checkUrl`
+    /// writes it.
+    async fn app_url_from(&self, app: &crate::model::App, client_id: u64, property: Option<Option<String>>) -> AuthResult<String> {
+        let url = match property {
             Some(Some(v)) => Some(v),
             Some(None) => return Err(AuthError::internal("The mapper returned a null value.")),
             None => self.db.latest_client_url(&app.app_code, Some(client_id)).await?,

@@ -4,7 +4,7 @@ Measured against `nocode-saas/notification` (the jar built 2026-10-13, current w
 `3cf6ebc54`; the notification module last changed 2026-09-01) on the local stack with
 `tools/parity_notification.py`: 80 cases, 73 SAME, 7 EXPECTED (N4), 0 DIFF. Java notification
 does not run locally; it was started for the comparison with a self-contained configuration
-(no config server, no Eureka, a scratch queue) and stopped afterwards.
+(no config server, no Lighthouse, a scratch queue) and stopped afterwards.
 
 ## What Java notification is
 
@@ -67,8 +67,8 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   connection and there is an `email` template, in-app when the connection allows it and there is an
   `inapp` template; recipients from security's `users/internal/notification` with Java's
   `UsersListRequest` per target type (`User Id`, `Client Id`, `Client Code`; anything else asks
-  for the whole app); email to every recipient first, then in-app; a failure anywhere stops the
-  rest (an email error means no in-app).
+  for the whole app); email to every recipient first, then in-app. Java's first failed send
+  stopped the rest (an email error meant no further mail and no in-app); see N18.
 - **Preferences are never read when sending.** `getInternalNotificationPreferecene` exists in Java
   but nothing calls it; the Rust port has no such read either.
 - **Templates** (`AbstractTemplateService`): the notification's own language rule (the default
@@ -100,16 +100,18 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
 
 ## Different on purpose
 
-- **N1. In-app streams with several instances (same as Java, documented).** The open streams live
-  in the process, in both implementations. A notification is consumed by one instance (one of the
-  three queues, one consumer each), and that instance pushes it only to streams open on itself;
-  a user whose stream is on another instance sees it only on the next list or count read. Two
-  Java instances behave the same way today. Proposed fix (not built): after storing the rows, the
-  consuming instance publishes `{key, frame}` on a Redis channel (e.g. `notificationInApp`), every
-  instance subscribes and delivers to its own streams, and the local delivery is dropped in favour
-  of the published one. The Redis connection already exists for cache evictions; message loss
-  while an instance is disconnected only delays the event to the next read, which is no worse
-  than today.
+- **N1. In-app streams with several instances: resolved (2026-10-22).** The open streams live
+  in each process, in both implementations, and a notification is consumed by one instance.
+  Java pushed it only to the streams open on that instance; a user whose stream was on another
+  saw it only on the next list or count read. Now, with `[redis] url` set, the consuming
+  instance publishes `{"keys": ["<userId>-<appCode>", ...], "frame": "<the SSE frame>"}` on the
+  Redis channel `[sse] push_channel` (`notificationPush`, no cache prefix, like
+  `evictionChannel`), and every instance, the publisher included, hands the frame to its own
+  streams when it hears it (`push.rs`, over `CacheService::spawn_listener`). The publisher never
+  also delivers locally, so each stream gets a frame once. Without Redis, or when the publish
+  fails, the frame goes to this instance's streams only, as before. A message published while
+  an instance is not subscribed is lost for its streams (the in-app row is still in the list
+  and the count). Counted in `notification_push_total{via="redis"|"local"}`.
 - **N2. Error bodies**: `stackTrace` is empty, the body is coded (N14), and the JSON is
   compact (all Rust units). Java sends its server stack and the exception's own text to any
   caller.
@@ -165,6 +167,134 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   looks like our fault). `tools/parity_notification.py` compares the bodies by code
   (`tools/error_parity.py`) and lists these cases as EXPECTED. Not yet run against Java with
   these changes: Java notification was not running on the local stack when they were made.
+- **N15. `filterAuthorization` narrows a normal notification too** (Kiran, 2026-10-22). Java
+  carried `filterAuthorization` on the queue message but never applied it: a notification to a
+  client reached every user of it. Now the recipients request to security's
+  `users/internal/notification` carries it for every notification, so a notification sent to a
+  client (or a user) with a filter reaches only the users whose authorities in the app meet
+  that expression, on both channels: the emails go only to them and only they get a
+  `notification_inapp` row and the bell entry. A blank or absent filter changes nothing. A
+  filter nobody meets ends the run as "no recipients" (logged, nothing sent).
+- **N16. People's choices are applied when sending** (Kiran, 2026-10-27, for LoopZump: no email
+  unless a person opts in, while other apps keep email on unless a person opts out). Java stored
+  the preference map and the definition's `channelEnabled` and read neither. Now, per recipient
+  and channel (`email`, `inapp`), the sender takes the person's preference map for the message's
+  app: `categories.<notificationCategory>.<channel>`, else `channels.<channel>`, else the
+  definition's `channelEnabled.<channel>` (absent or `true`: on until the person turns it off;
+  `false`: off until they turn it on). Values that are not `true`/`false` count as no choice, and
+  other keys in the map are left to the app. With no map and no `channelEnabled` (every
+  definition before this), everyone gets every channel, as before. Code: `src/choices.rs`.
+- **N17. An app may mark rows read itself** (Kiran, 2026-10-27: the app's bell decides whether
+  opening it reads everything, or each row has a Read button and See all opens a list).
+  `GET /notifications?markRead=false` lists without marking (any other value, or none, marks as
+  Java did). `POST /read?appCode=` (appCode also from the header) with `{"ids": [..]}` (numbers or
+  digit strings) or `{"all": true}` marks the caller's own unread rows in that app and answers
+  `{"read": <rows changed>}`; other users' rows and other apps are left alone; a body naming
+  neither is a 400 `COMMON.PARAM_MISSING`, ids that are not whole numbers a 400.
+- **N18. One failed send never stops the others** (Kiran, 2026-11-02: "We cannot drop others
+  emails just one fails"). Java ended the run at the first mail the email service refused, so the
+  later recipients, the in-app rows and (now) the push were lost, and the message was acked. Each
+  send is now on its own: a refused mail is logged with the user id and the run goes on to the next
+  recipient, an in-app failure is logged and push still runs, a push failure is logged. Each failure
+  counts once in `Outcome::Sent.failed` and in `notification_failed_total{reason="send"}`. Failures
+  before the sends (connection, definition, recipients, choices) still end the run with an error.
+
+## Data notifications (Rust only, 2026-10-22)
+
+`CoreServices.Notification.SendDataNotification` (crates/core/DIFFERENCES.md D42) publishes a
+`NotificationQueObject` with `kind: DATA`, `eventName`, `data` (any JSON) and `expiresAt` (epoch
+milliseconds) on the same exchange. The listener reads those properties too (a message without
+`kind` is a normal notification; any other `kind` fails the run, acked):
+
+- No connection, definition, template or database: nothing is read from core and no
+  `notification_inapp` row is written, so there is no bell entry and no count.
+- A message past its `expiresAt` is dropped (logged at debug, counted as
+  `notification_failed_total{reason="expired"}`).
+- The recipients come from the same `users/internal/notification` call as a normal
+  notification's, with the same request per target type, plus `filterAuthorization` when the
+  message has one: security (Rust only) then keeps the users whose authorities in the app meet
+  that expression. A normal notification applies it the same way (N15).
+- One frame goes to each recipient's streams for the app (each user once, on every instance:
+  N1): `event:<eventName>`, `data:{"event":..,"data":..,"id":"<uuid>","sentAt":<millis>}`
+  (compact JSON, one line), `id:<the same uuid>`, `retry:5000`.
+- The message is acked at once and never retried: a user who is not online misses it.
+  Counted as `notification_sent_total{channel="data"}`.
+
+## Push notifications (Rust only, 2026-10-31)
+
+A third channel, `push`, reaches the recipients' registered browsers (Web Push), Android phones
+(FCM HTTP v1) and iPhones (APNs, token auth over HTTP/2). Code: `src/push_send/`.
+
+- **When.** The NOTIFICATION connection has `push` (core answers `"push": {}` for `push: true`,
+  or the client's PUSH connection inlined for a name), and the definition has a `push` template
+  or, without one, an `inapp` template. The `push` parts are `title`, `body`, `image`, `url`; the
+  `inapp` fallback uses `title`, `description`, `image`, `url` (and `body` when there is no
+  `description`, as the template editor names it). Preferences apply as for any
+  channel (`channels.push`, `categories.<c>.push`, `channelEnabled.push`).
+- **Order and failure.** Push runs after email and in-app, and runs even when they failed (N18).
+  Its failures are logged and counted (`notification_push_total{platform,outcome}`), and never fail the message
+  (`Outcome::Sent.pushed` counts the devices that took it).
+- **Devices.** The `notification_push_device` table (`sql/notification/V5__Push devices.sql` at the
+  repository root, applied by CI before the deploy; rollback in `sql/rollback/notification/`)
+  holds one row per browser subscription or phone token, keyed by `SHA-256(PLATFORM:token)`. A
+  token registered again moves to the new user and app, so a shared device reaches whoever signed
+  in last. A device the push service
+  calls gone (Web 404/410, FCM `UNREGISTERED`, APNs 410/`BadDeviceToken`) is deleted.
+- **Only apps that have notifications.** `GET /push/config` answers `enabled: false`, and
+  `POST /push/devices` keeps nothing, unless core's
+  `GET /api/core/notifications/internal/app/{appCode}` counts at least one definition with an
+  `inapp` or `push` channel (kept `[push] app_check_seconds`, 10 min). A site without
+  notifications never registers a service worker.
+- **Web push keys per app** (Kiran, 2026-11-02). An app may have its own VAPID pair
+  (`notification_push_app_key`, `sql/notification/V7__Push app keys.sql`), made by
+  `POST /push/app-key?appCode=` (`{"clientCode"?, "replace"?: true}`; `GET` answers
+  `{publicKey}`, never the private half). Making or replacing it needs `Application_UPDATE` and
+  write access to the app (security's `hasWriteAccess`) for the caller's client, or for a client
+  the caller's client manages (`doesClientManageClientCode`); otherwise 403
+  `COMMON.PERMISSION_REQUIRED` or `COMMON.FORBIDDEN`. Using the app never makes one.
+  `GET /push/config` hands out the app's public key, else the platform's (`[push] vapid_*`), and
+  a browser's registration keeps the key it was handed as its `PROVIDER_ACCOUNT`; each
+  subscription is sent with its own key, so one made before the app had its own still gets the
+  platform's (a row without an account is the platform's). After a replace, the old
+  subscriptions get nothing until the browser subscribes again, which the page does quietly at
+  the next sign-in (it compares the key it is handed with its subscription's). In the browser
+  the service worker is scoped to the app's path on a shared host (`/<app>/<client>/`), so apps
+  there keep separate subscriptions; the one an app registered for `/` before is dropped then.
+- **Credentials.** Web Push signs with the key its subscription was made with (above). FCM and APNs use the
+  first whose Firebase project or Apple team matches the one the device was built against
+  (`providerAccount`): the client's PUSH connection (`fcm.credentials`, the service account
+  JSON; `apns.{teamId, keyId, privateKey}`), then the platform's (`[push]`), then the key the
+  client uploaded for the app and that account; else nothing. The project and team follow the
+  mobile app's developer accounts (ui's `publishMode`): an app on the platform's accounts is
+  built against the platform's Firebase project and Apple team, one on the client's own
+  accounts against the client's, so the platform's keys never serve a client's own app.
+- **Uploaded keys.** The mobile app screens upload a client's own keys to
+  `POST /push/keys?appCode=`: `{platform: "ANDROID", serviceAccount}` (the JSON; its
+  `project_id` is the account) or `{platform: "IOS", teamId, keyId, privateKey}` (the `.p8`),
+  as text or as base64 of the file. The caller needs `Authorities.ROLE_MobileApp_CREATE` (ui's
+  mobile app permission). A key is checked by making the signer from it
+  (`NOTIF.PUSH_KEY_NOT_FIREBASE`, `NOTIF.PUSH_KEY_NOT_APPLE`), and kept in
+  `notification_push_key` (`sql/notification/V6__Push keys.sql`), one per app, platform and
+  account. The first client to give an account's key owns it; another client is refused
+  (`NOTIF.PUSH_KEY_TAKEN`). Ownership is not checked with Google or Apple (a Firebase project id
+  and an Apple Team ID are both public), so a disputed account is settled by hand (Kiran,
+  2026-11-02): support confirms who owns it, deletes the other client's row
+  (`DELETE FROM notification_push_key WHERE APP_CODE = ? AND PLATFORM = ? AND ACCOUNT = ?`), and
+  the owner uploads again. `GET /push/keys?appCode=` lists the caller's client's keys without
+  the secrets. Keys never leave this service: no internal route hands them out, because
+  internal routes are reachable through the gateway (nginx refuses `/internal` paths from
+  outside; this keeps them off the inside too). The sender keeps a key it read for
+  `app_check_seconds`; an upload forgets it on the instance that took it.
+- **Web Push endpoints** are URLs the browser hands in, so only `https` on the known push
+  services (`fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com`,
+  `push.apple.com` and their subdomains) are taken or posted to.
+- **APNs and HTTP/2.** reqwest's `http2` feature would switch HTTP/2 on for every unit's clients
+  (features unify across the workspace), so the APNs client is hyper with `hyper-rustls`, in this
+  crate only.
+- **Routes.** `GET /push/config`, `POST` and `DELETE /push/devices`, `GET` and `POST /push/keys`
+  need a signed-in caller as every route does; `GET /push/sw.js` is the service worker, served to anyone with
+  `Service-Worker-Allowed: /`. It shows a push only when no tab of the site is focused (a
+  visible tab already shows the in-app toast) and opens the push's `url` on a click.
 
 ## Found along the way (Java, worth knowing)
 

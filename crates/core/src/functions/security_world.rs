@@ -219,7 +219,8 @@ pub async fn run(
         forwarded_port: if with_request { "443".into() } else { String::new() },
         draft: false,
         debug: None,
-        raised: Default::default(),
+        client_ip: if with_request { "203.0.113.7".into() } else { String::new() },
+        ..Default::default()
     });
     let c2 = ctx.clone();
     let fut = async move {

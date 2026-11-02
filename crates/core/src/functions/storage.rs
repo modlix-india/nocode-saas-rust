@@ -18,7 +18,7 @@ use kirun::{Map, Value};
 
 use super::{arg, arg_string, output, CoreFunction};
 use crate::error::CoreError;
-use crate::storage::service::AppDataService;
+use crate::storage::service::{AppDataService, BatchOp, BatchOutcome, NamedOp, OnConflict};
 use crate::storage::values::{gson_object, gson_tree, storage_document, storage_value};
 
 pub const NAMESPACE: &str = "CoreServices.Storage";
@@ -268,6 +268,10 @@ storage_function!(Aggregate);
 storage_function!(GetVersionDetails);
 storage_function!(ClearDraft);
 storage_function!(CopyToDraft);
+storage_function!(GetFields);
+storage_function!(Batch);
+storage_function!(UpdateIf);
+storage_function!(NextSequence);
 
 fn sort_order(with_case: bool) -> Schema {
     let mut props = vec![
@@ -956,6 +960,282 @@ impl CoreFunction for CopyToDraft {
     }
 }
 
+impl GetFields {
+    fn make_signature() -> FunctionSignature {
+        signature(
+            "GetFields",
+            vec![p("storageName", Schema::of_string("storageName")), code("appCode"), code("clientCode")],
+            Schema::of_object("result"),
+        )
+    }
+}
+
+/// Rust only: the storage's fields, each name to its schema as defined (the Gson form a schema
+/// is served in, `details` included), for the storage as the client resolves it on the current
+/// surface, its `ref` followed. Read's storage gate applies; no rows are read.
+#[async_trait]
+impl CoreFunction for GetFields {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let fields = self.service.storage_fields(app.as_deref(), client.as_deref(), &storage).await?;
+        Ok(output("result", Value::Object(fields)))
+    }
+}
+
+/// The `result` and `updated` events of `UpdateIf`, and the `value` one of `NextSequence`.
+fn events_of(outputs: Vec<(&str, Schema)>) -> Map<Event> {
+    Map::from([
+        Event::output_event_map_entry(outputs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+        Event::event_map_entry(Event::ERROR, Map::from([("result".to_string(), Schema::of_any("result"))])),
+    ])
+}
+
+/// An operation's text field: a string, or a number written as text; absent is empty.
+fn op_text(o: &serde_json::Map<String, Value>, key: &str) -> String {
+    match o.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => crate::gson::number_to_java_string(n),
+        Some(Value::Bool(b)) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn op_doc(o: &serde_json::Map<String, Value>, key: &str) -> Document {
+    match o.get(key).map(storage_value) {
+        Some(DataValue::Object(d)) => d,
+        _ => Document::new(),
+    }
+}
+
+fn op_flag(o: &serde_json::Map<String, Value>, key: &str, default: bool) -> bool {
+    match o.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => default,
+    }
+}
+
+/// `operations[i]` as a batch operation; a missing storage, id or unknown `op` is a 400 that
+/// names the index.
+pub fn batch_ops(v: &Value) -> Result<Vec<NamedOp>, CoreError> {
+    let Value::Array(items) = v else { return Ok(Vec::new()) };
+    let bad = |i: usize, why: &str| {
+        CoreError::new(axum::http::StatusCode::BAD_REQUEST, format!("operations[{i}]: {why}"))
+            .with_code("CORE.STORAGE_BATCH_INVALID")
+            .param("index", i)
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let Value::Object(o) = item else { return Err(bad(i, "an operation is an object")) };
+        let storage = op_text(o, "storageName");
+        if storage.trim().is_empty() {
+            return Err(bad(i, "storageName is required"));
+        }
+        let id = op_text(o, "dataObjectId");
+        let need_id = |i: usize| if id.trim().is_empty() { Err(bad(i, "dataObjectId is required")) } else { Ok(id.clone()) };
+        let op = match op_text(o, "op").to_ascii_lowercase().as_str() {
+            "create" => BatchOp::Create { storage, data: op_doc(o, "dataObject") },
+            "update" => BatchOp::Update { storage, id: need_id(i)?, data: op_doc(o, "dataObject"), partial: op_flag(o, "isPartial", true) },
+            "updateif" => BatchOp::UpdateIf {
+                storage,
+                id: need_id(i)?,
+                expected: op_doc(o, "expected"),
+                data: op_doc(o, "dataObject"),
+                partial: op_flag(o, "isPartial", true),
+            },
+            "delete" => BatchOp::Delete { storage, id: need_id(i)? },
+            "nextsequence" => BatchOp::NextSequence {
+                storage,
+                key: op_text(o, "key"),
+                start: o.get("start").and_then(Value::as_i64).unwrap_or(1),
+            },
+            other => return Err(bad(i, &format!("unknown op '{other}' (create, update, updateIf, delete, nextSequence)"))),
+        };
+        let name = Some(op_text(o, "as")).filter(|n| !n.trim().is_empty());
+        out.push(NamedOp { op, name });
+    }
+    Ok(out)
+}
+
+/// `onConflict`: `throw` (the default; also absent, null or blank) or `report`, any case;
+/// anything else is a 400 naming the parameter.
+pub fn on_conflict(v: &Value) -> Result<OnConflict, CoreError> {
+    let parsed = match v {
+        Value::Null => Some(OnConflict::Throw),
+        Value::String(t) => OnConflict::parse(Some(t)),
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        CoreError::new(axum::http::StatusCode::BAD_REQUEST, "onConflict: throw or report")
+            .with_code("CORE.STORAGE_BATCH_INVALID")
+            .param("parameter", "onConflict")
+    })
+}
+
+/// A batch's `result`: `{committed, atomic, results}`, and `conflict` when a reported conflict
+/// rolled it back.
+pub fn batch_result(outcome: &BatchOutcome) -> Result<Value, CoreError> {
+    let results = outcome.results.iter().map(gson).collect::<Result<Vec<_>, _>>()?;
+    let mut m = serde_json::Map::new();
+    m.insert("committed".into(), Value::Bool(outcome.committed));
+    m.insert("results".into(), Value::Array(results));
+    m.insert("atomic".into(), Value::Bool(outcome.atomic));
+    if let Some(c) = &outcome.conflict {
+        let mut o = serde_json::Map::new();
+        o.insert("index".into(), Value::from(c.index));
+        o.insert("as".into(), c.name.clone().map(Value::String).unwrap_or(Value::Null));
+        o.insert("op".into(), s(c.op));
+        o.insert("storageName".into(), s(&c.storage));
+        o.insert("kind".into(), s(c.kind.name()));
+        o.insert("key".into(), c.key.clone().map(Value::String).unwrap_or(Value::Null));
+        o.insert("message".into(), s(&c.message));
+        m.insert("conflict".into(), Value::Object(o));
+    }
+    Ok(Value::Object(m))
+}
+
+impl Batch {
+    fn make_signature() -> FunctionSignature {
+        signature(
+            "Batch",
+            vec![
+                list_of("operations", Schema::of_object("operation")),
+                code("appCode"),
+                code("clientCode"),
+                p("onConflict", Schema::of_string("onConflict").set_enums(enums(&["throw", "report"])).set_default_value(s("throw"))),
+            ],
+            Schema::of_object("result"),
+        )
+    }
+}
+
+/// Rust only. Several writes as one unit: `operations` is a list of
+/// `{op: create|update|updateIf|delete|nextSequence, storageName, dataObject, dataObjectId,
+/// isPartial (default true), expected, key, start, as}`. A later operation uses an earlier
+/// result through `{"$ref": "<as>.<path>"}` in its data, or `"$ref:<as>.<path>"` as its id or key.
+/// On MySQL the batch is one transaction; `result` is `{committed: true, results, atomic}`. A
+/// failure names the operation in `failedIndex` and leaves nothing written.
+///
+/// `onConflict: "report"`: a duplicate key (a unique index already holds the value) or an
+/// `updateIf` whose `expected` no longer matches rolls the batch back the same way, but the step
+/// completes normally with `{committed: false, atomic, results: [], conflict: {index, as, op,
+/// storageName, kind: DUPLICATE|STALE, key, message}}`. Every other failure still fails the step.
+#[async_trait]
+impl CoreFunction for Batch {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let ops = batch_ops(arg(args, "operations"))?;
+        let mode = on_conflict(arg(args, "onConflict"))?;
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let outcome = self.service.batch(app.as_deref(), client.as_deref(), ops, mode).await?;
+        Ok(output("result", batch_result(&outcome)?))
+    }
+}
+
+impl UpdateIf {
+    fn make_signature() -> FunctionSignature {
+        FunctionSignature::new("UpdateIf")
+            .set_namespace(NAMESPACE)
+            .set_parameters(
+                vec![
+                    p("storageName", Schema::of_string("storageName")),
+                    p("dataObjectId", Schema::of_string("dataObjectId")),
+                    object("expected"),
+                    p("dataObject", Schema::of_object("dataObject")),
+                    flag("isPartial", true),
+                    code("appCode"),
+                    code("clientCode"),
+                ]
+                .into_iter()
+                .collect(),
+            )
+            .set_events(events_of(vec![("updated", Schema::of_boolean("updated")), ("result", Schema::of_any("result"))]))
+    }
+}
+
+/// Rust only. Compare-and-set: updates the row only when every field in `expected` still has
+/// that value (`{"version": 3}`, `{"status": "AVAILABLE"}`). `updated` says whether it did;
+/// `result` is the updated row, or the row as it stands when it did not. On MySQL the row is
+/// locked from the comparison to the write.
+#[async_trait]
+impl CoreFunction for UpdateIf {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let id = arg_string(args, "dataObjectId")?;
+        let expected = match storage_value(arg(args, "expected")) {
+            DataValue::Object(o) => o,
+            _ => Document::new(),
+        };
+        let data = match storage_value(arg(args, "dataObject")) {
+            DataValue::Object(o) => o,
+            _ => Document::new(),
+        };
+        let partial = bool_arg(args, "isPartial");
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let out = self
+            .service
+            .update_if(app.as_deref(), client.as_deref(), &storage, &id, &expected, data, partial)
+            .await?;
+        let mut m = Map::new();
+        m.insert("updated".into(), Value::Bool(out.updated));
+        m.insert("result".into(), Value::Object(gson_object(&out.row)?.into_iter().collect()));
+        Ok(FunctionOutput::new(vec![EventResult::output_of(m)]))
+    }
+}
+
+impl NextSequence {
+    fn make_signature() -> FunctionSignature {
+        FunctionSignature::new("NextSequence")
+            .set_namespace(NAMESPACE)
+            .set_parameters(
+                vec![
+                    p("storageName", Schema::of_string("storageName")),
+                    p("key", Schema::of_string("key").set_default_value(s(""))),
+                    int("start", 1),
+                    code("appCode"),
+                    code("clientCode"),
+                ]
+                .into_iter()
+                .collect(),
+            )
+            .set_events(events_of(vec![("value", Schema::of_long("value"))]))
+    }
+}
+
+/// Rust only. The next number of the counter `key`, kept beside the storage's rows in the same
+/// tenant: `start` the first time, then one more each call, atomically (receipt and case
+/// numbers). Inside a `Batch` the number is handed out only if the batch commits.
+#[async_trait]
+impl CoreFunction for NextSequence {
+    fn signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let storage = arg_string(args, "storageName")?;
+        let key = match args.get("key") {
+            Some(Value::Null) | None => String::new(),
+            Some(_) => arg_string(args, "key")?,
+        };
+        let start = args.get("start").and_then(Value::as_i64).unwrap_or(1);
+        let (app, client) = (opt_code(args, "appCode")?, opt_code(args, "clientCode")?);
+        let value = self.service.next_sequence(app.as_deref(), client.as_deref(), &storage, &key, start).await?;
+        Ok(output("value", Value::from(value)))
+    }
+}
+
 /// Every storage function, in the order `makeStorageFunctions` registers them.
 pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Function>> {
     use super::Core;
@@ -972,6 +1252,11 @@ pub fn all(service: &Arc<AppDataService>) -> Vec<Arc<dyn kirun::function::Functi
         Arc::new(Core(Aggregate::new(service.clone()))),
         Arc::new(Core(UpdateMany::new(service.clone()))),
         Arc::new(Core(GetVersionDetails::new(service.clone()))),
+        // Rust only, after every function Java has.
+        Arc::new(Core(GetFields::new(service.clone()))),
+        Arc::new(Core(Batch::new(service.clone()))),
+        Arc::new(Core(UpdateIf::new(service.clone()))),
+        Arc::new(Core(NextSequence::new(service.clone()))),
     ]
 }
 
@@ -1180,6 +1465,223 @@ mod tests {
         .await;
     }
 
+    /// `onConflict`: throw by default, report on request, anything else refused as a 400.
+    #[test]
+    fn on_conflict_is_throw_unless_report() {
+        assert_eq!(on_conflict(&Value::Null).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!("")).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!("throw")).unwrap(), OnConflict::Throw);
+        assert_eq!(on_conflict(&json!(" Report ")).unwrap(), OnConflict::Report);
+        for bad in [json!("ignore"), json!(true), json!(1), json!({"x": 1})] {
+            let e = on_conflict(&bad).unwrap_err();
+            assert_eq!(e.status(), axum::http::StatusCode::BAD_REQUEST, "{bad}");
+            assert_eq!(e.code().unwrap().code, "CORE.STORAGE_BATCH_INVALID");
+        }
+    }
+
+    /// Two storages for the claim key pattern: `seat` holds `claimKey` under a unique index,
+    /// `log` has none.
+    async fn claim_functions() -> (Arc<AppDataService>, Arc<MemoryEngine>) {
+        let base = security_stub(&[], &["app"]).await;
+        let catalog = MemoryCatalog::with(vec![
+            st(json!({"name": "seat", "appCode": "app", "clientCode": "SYSTEM",
+                      "indexes": {"claimKey_unique": {"fields": [{"fieldName": "claimKey"}], "unique": true}}})),
+            st(json!({"name": "log", "appCode": "app", "clientCode": "SYSTEM"})),
+        ]);
+        let engine = Arc::new(MemoryEngine::default());
+        let svc = Arc::new(policy(catalog, engine.clone(), &base, Arc::new(RecordingEvents::default())));
+        (svc, engine)
+    }
+
+    /// A duplicate key or a stale `updateIf` inside a batch: `throw` fails the step as before,
+    /// `report` answers `committed: false` with the conflict; either way nothing stays written.
+    /// A claim released to null is free again (many nulls are allowed).
+    #[tokio::test]
+    async fn batch_conflicts_throw_or_report() {
+        let (svc, engine) = claim_functions().await;
+        let ctx = request(
+            auth(json!({"user": {"id": 1, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true,
+                        "clientCode": "SYSTEM"}), Some("SYSTEM"), Some("app")),
+            false,
+            None,
+        );
+        context::with_request(ctx, async {
+            let all = all(&svc);
+            let f = |n: &str| all.iter().find(|f| f.get_signature().get_name() == n).unwrap().clone();
+            let batch = f("Batch");
+            let take = |seat: i64| json!([
+                {"op": "create", "storageName": "log", "dataObject": {"what": "booking"}, "as": "entry"},
+                {"op": "create", "storageName": "seat", "dataObject": {"claimKey": format!("P1|10:00|{seat}"), "status": "BOOKED"}, "as": "seat"},
+            ]);
+
+            // The first claim of seat 1 commits.
+            let (_, ok) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(ok["committed"], json!(true));
+            assert!(ok.get("conflict").is_none());
+            assert_eq!(ok["results"].as_array().unwrap().len(), 2);
+            let held = ok["results"][1]["_id"].as_str().unwrap().to_string();
+            assert_eq!((engine.count("log"), engine.count("seat")), (1, 1));
+
+            // A second claim of seat 1, reported: rolled back (the log row undone), told why.
+            let (name, r) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(name, "output");
+            assert_eq!(r["committed"], json!(false));
+            assert_eq!(r["results"], json!([]));
+            assert_eq!(r["atomic"], json!(false));
+            assert_eq!(
+                r["conflict"],
+                json!({"index": 1, "as": "seat", "op": "create", "storageName": "seat", "kind": "DUPLICATE",
+                       "key": "claimKey_unique", "message": "That is already taken (claimKey_unique)."})
+            );
+            assert_eq!((engine.count("log"), engine.count("seat")), (1, 1));
+
+            // The next seat is free.
+            let (_, r) = run(batch.as_ref(), json!({"operations": take(2), "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+
+            // Thrown (the default): the step fails and nothing of the batch stays.
+            let thrown = run(batch.as_ref(), json!({"operations": take(1)})).await.unwrap_err();
+            assert!(thrown.contains("claimKey_unique"), "{thrown}");
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+            let ops = batch_ops(&take(1)).unwrap();
+            let e = svc.batch(Some("app"), None, ops, OnConflict::Throw).await.unwrap_err();
+            assert_eq!(e.status(), axum::http::StatusCode::CONFLICT);
+            let c = e.code().unwrap();
+            assert_eq!(c.code, "CORE.DUPLICATE_KEY");
+            let param = |n: &str| c.params.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+            assert_eq!((param("index"), param("storage"), param("failedIndex")), (Some("claimKey_unique".into()), Some("seat".into()), Some("1".into())));
+            assert_eq!((engine.count("log"), engine.count("seat")), (2, 2));
+
+            // A stale updateIf, reported: STALE, no key, nothing written.
+            let stale = json!([
+                {"op": "create", "storageName": "log", "dataObject": {"what": "cancel"}},
+                {"op": "updateIf", "storageName": "seat", "dataObjectId": held, "expected": {"status": "CANCELLED"},
+                 "dataObject": {"status": "CANCELLED", "claimKey": null}},
+            ]);
+            let (_, r) = run(batch.as_ref(), json!({"operations": stale, "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(false));
+            assert_eq!(r["conflict"]["kind"], json!("STALE"));
+            assert_eq!(r["conflict"]["key"], json!(null));
+            assert_eq!(r["conflict"]["as"], json!(null));
+            assert_eq!((r["conflict"]["index"].clone(), r["conflict"]["op"].clone()), (json!(1), json!("updateIf")));
+            assert!(r["conflict"]["message"].as_str().unwrap().contains("no longer matches"));
+            assert_eq!(engine.count("log"), 2);
+            // Thrown, the stale row fails the step with today's 409.
+            let e = svc.batch(Some("app"), None, batch_ops(&stale).unwrap(), OnConflict::Throw).await.unwrap_err();
+            assert_eq!(e.code().unwrap().code, "CORE.STORAGE_CONDITION_FAILED");
+
+            // Releasing the claim (null) frees seat 1 for the next booking; nulls never collide.
+            let release = json!([{"op": "updateIf", "storageName": "seat", "dataObjectId": held, "expected": {"status": "BOOKED"},
+                                  "dataObject": {"status": "CANCELLED", "claimKey": null}}]);
+            let (_, r) = run(batch.as_ref(), json!({"operations": release, "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+            let (_, r) = run(batch.as_ref(), json!({"operations": take(1), "onConflict": "report"})).await.unwrap();
+            assert_eq!(r["committed"], json!(true));
+
+            // Any other failure is not a conflict: it still fails the step.
+            let missing = json!([{"op": "update", "storageName": "seat", "dataObjectId": "nope", "dataObject": {"x": 1}}]);
+            assert!(run(batch.as_ref(), json!({"operations": missing, "onConflict": "report"})).await.is_err());
+            assert!(run(batch.as_ref(), json!({"operations": [], "onConflict": "sometimes"})).await.is_err());
+
+            // A plain Create meets the same 409 (no longer an unknown error).
+            let e = svc
+                .create(Some("app"), None, "seat", appdata::model::DataObject::of(storage_document(json!({"claimKey": "P1|10:00|2"}).as_object().unwrap())), Some(false), None)
+                .await
+                .unwrap_err();
+            assert_eq!((e.status(), e.code().unwrap().code.to_string()), (axum::http::StatusCode::CONFLICT, "CORE.DUPLICATE_KEY".to_string()));
+        })
+        .await;
+    }
+
+    /// `GetFields`: inline properties, a ref followed to the app schema (`details` kept), a
+    /// client's own schema copy for that client, inline properties over the ref, no relation
+    /// fields, and Read's gate (readAuth, onlyThruKIRun) and missing storage refusal.
+    #[tokio::test]
+    async fn get_fields() {
+        let base = security_stub(&[("SYSTEM", "FIN2")], &["app"]).await;
+        let deal = json!({"ref": "LeadZumpV2.Deal"});
+        let catalog = MemoryCatalog::with(vec![
+            st(json!({"name": "inline", "appCode": "app", "clientCode": "SYSTEM",
+                      "schema": {"type": "OBJECT", "properties": {"title": {"type": "STRING", "maxLength": 50, "pattern": "^[A-Z]"}}}})),
+            st(json!({"name": "deal", "appCode": "app", "clientCode": "SYSTEM", "schema": deal,
+                      "relations": {"ownerId": {"storageName": "users", "relationType": "TO_ONE"}}})),
+            st(json!({"name": "deal", "appCode": "app", "clientCode": "FIN2", "schema": deal})),
+            st(json!({"name": "mixed", "appCode": "app", "clientCode": "SYSTEM",
+                      "schema": {"ref": "LeadZumpV2.Deal", "properties": {"stage": {"type": "STRING"}, "extra": {"type": "INTEGER", "minimum": 1}}}})),
+            st(json!({"name": "noSchema", "appCode": "app", "clientCode": "SYSTEM"})),
+            st(json!({"name": "broken", "appCode": "app", "clientCode": "SYSTEM", "schema": {"ref": "LeadZumpV2.Missing"}})),
+            st(json!({"name": "guarded", "appCode": "app", "clientCode": "SYSTEM", "readAuth": "Authorities.Nope",
+                      "schema": {"type": "OBJECT", "properties": {"a": {"type": "STRING"}}}})),
+            st(json!({"name": "kirunOnly", "appCode": "app", "clientCode": "SYSTEM", "onlyThruKIRun": true,
+                      "schema": {"type": "OBJECT", "properties": {"a": {"type": "STRING"}}}})),
+        ]);
+        let system_deal = json!({"namespace": "LeadZumpV2", "name": "Deal", "type": "OBJECT", "properties": {
+            "name": {"type": "STRING", "maxLength": 120,
+                     "details": {"label": "Deal name", "order": 1, "preferredComponent": "TextBox"}},
+            "stage": {"type": "STRING", "enums": ["OPEN", "WON"], "defaultValue": "OPEN"}}});
+        let mut fin2_deal = system_deal.clone();
+        fin2_deal["properties"]["region"] = json!({"type": "STRING", "format": "EMAIL",
+            "details": {"label": "Region", "order": 10, "properties": {"customField": true, "mandatory": false}}});
+        *catalog.schemas.lock() = vec![("SYSTEM".into(), system_deal), ("FIN2".into(), fin2_deal)];
+        let svc = Arc::new(policy(catalog, Arc::new(MemoryEngine::default()), &base, Arc::new(RecordingEvents::default())));
+        let ctx = request(
+            auth(json!({"user": {"id": 1, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true,
+                        "clientCode": "SYSTEM"}), Some("SYSTEM"), Some("app")),
+            false,
+            None,
+        );
+        context::with_request(ctx, async {
+            let all = all(&svc);
+            let f = all.iter().find(|f| f.get_signature().get_name() == "GetFields").unwrap().clone();
+            let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+
+            let (name, inline) = run(f.as_ref(), json!({"storageName": "inline"})).await.unwrap();
+            assert_eq!(name, "output");
+            assert_eq!(keys(&inline), ["title"]);
+            assert_eq!(inline["title"]["type"], json!("STRING"));
+            assert_eq!(inline["title"]["maxLength"], json!(50));
+            assert_eq!(inline["title"]["pattern"], json!("^[A-Z]"));
+
+            let (_, sys) = run(f.as_ref(), json!({"storageName": "deal"})).await.unwrap();
+            assert_eq!(keys(&sys), ["name", "stage"], "the app schema's fields, no relation field");
+            assert_eq!(sys["name"]["maxLength"], json!(120));
+            assert_eq!(sys["name"]["details"], json!({"preferredComponent": "TextBox", "order": 1, "label": "Deal name"}));
+            assert_eq!(sys["stage"]["enums"], json!(["OPEN", "WON"]));
+            assert_eq!(sys["stage"]["defaultValue"], json!("OPEN"));
+
+            let (_, fin2) = run(f.as_ref(), json!({"storageName": "deal", "clientCode": "FIN2"})).await.unwrap();
+            assert_eq!(keys(&fin2), ["name", "stage", "region"], "FIN2's own copy of the schema");
+            assert_eq!(fin2["region"]["format"], json!("EMAIL"));
+            assert_eq!(fin2["region"]["details"]["properties"], json!({"customField": true, "mandatory": false}));
+            assert_eq!(fin2["region"]["details"]["order"], json!(10));
+
+            let (_, mixed) = run(f.as_ref(), json!({"storageName": "mixed"})).await.unwrap();
+            assert_eq!(keys(&mixed), ["name", "stage", "extra"]);
+            assert!(mixed["stage"].get("enums").is_none(), "written beside the ref, it wins");
+            assert_eq!(mixed["extra"]["minimum"], json!(1));
+
+            let (_, none) = run(f.as_ref(), json!({"storageName": "noSchema"})).await.unwrap();
+            assert_eq!(none, json!({}));
+
+            let broken = run(f.as_ref(), json!({"storageName": "broken"})).await.unwrap_err();
+            assert!(broken.contains("LeadZumpV2.Missing"), "{broken}");
+            let guarded = run(f.as_ref(), json!({"storageName": "guarded"})).await.unwrap_err();
+            let read_guarded = run(read_fn(&all).as_ref(), json!({"storageName": "guarded", "dataObjectId": "1"})).await.unwrap_err();
+            assert_eq!(guarded, read_guarded, "Read's readAuth refusal");
+            let only = run(f.as_ref(), json!({"storageName": "kirunOnly"})).await.unwrap_err();
+            let read_only = run(read_fn(&all).as_ref(), json!({"storageName": "kirunOnly", "dataObjectId": "1"})).await.unwrap_err();
+            assert_eq!(only, read_only, "Read's onlyThruKIRun refusal");
+            assert!(run(f.as_ref(), json!({"storageName": "missing"})).await.is_err());
+            assert!(run(f.as_ref(), json!({})).await.is_err(), "storageName is required");
+        })
+        .await;
+    }
+
+    fn read_fn(all: &[Arc<dyn Function>]) -> Arc<dyn Function> {
+        all.iter().find(|f| f.get_signature().get_name() == "Read").unwrap().clone()
+    }
+
     #[test]
     fn filters_and_arguments() {
         let f = draft_copy_filters(&json!({"a": null, "b": {"follow": null}, "c": {"follow": [{"field": "x", "storage": "y", "refField": "z"}]}})).unwrap();
@@ -1233,6 +1735,10 @@ mod tests {
             GetVersionDetails::make_signature(),
             ClearDraft::make_signature(),
             CopyToDraft::make_signature(),
+            GetFields::make_signature(),
+            Batch::make_signature(),
+            UpdateIf::make_signature(),
+            NextSequence::make_signature(),
         ]
         .iter()
         .map(|s| (s.get_full_name(), s.get_parameters().len()))
@@ -1252,6 +1758,10 @@ mod tests {
                 ("CoreServices.Storage.GetVersionDetails".into(), 9),
                 ("CoreServices.Storage.ClearDraft".into(), 2),
                 ("CoreServices.Storage.CopyToDraft".into(), 3),
+                ("CoreServices.Storage.GetFields".into(), 3),
+                ("CoreServices.Storage.Batch".into(), 4),
+                ("CoreServices.Storage.UpdateIf".into(), 7),
+                ("CoreServices.Storage.NextSequence".into(), 5),
             ]
         );
     }

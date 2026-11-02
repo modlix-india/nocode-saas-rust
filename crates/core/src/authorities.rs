@@ -56,6 +56,13 @@ impl appdata::engine::AuthorityCheck for KirunAuthorityCheck {
     }
 }
 
+/// The same check for a connection's `consentAuth` (the OAuth consent gate).
+impl connections::context::AuthorityCheck for KirunAuthorityCheck {
+    fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool {
+        has_authority(expression, authorities).unwrap_or(false)
+    }
+}
+
 pub fn has_authority(expression: Option<&str>, authorities: &[String]) -> Result<bool, KIRunError> {
     let Some(expression) = expression.filter(|e| !e.trim().is_empty()) else {
         return Ok(true);
@@ -77,6 +84,20 @@ mod tests {
 
     fn auths(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The consent gate adzumptwo's connections carry (modlix-apps adzumptwo_SYSTEM
+    /// rust/CONSENT_AUTH.md): the app's Account MANAGE role, or an Owner who also holds one of
+    /// the app's roles (every AdZump profile grants Report READ), never `ROLE_Owner` alone.
+    #[test]
+    fn the_adzumptwo_consent_gate() {
+        let gate = "Authorities.ADZUMPTWO.ROLE_Account_MANAGE or (Authorities.ROLE_Owner and Authorities.ADZUMPTWO.ROLE_Report_READ)";
+        let check = |a: &[&str]| connections::context::AuthorityCheck::has_authority(&KirunAuthorityCheck, Some(gate), &auths(a));
+        assert!(check(&["Authorities.Logged_IN", "Authorities.ADZUMPTWO.ROLE_Account_MANAGE"]));
+        assert!(check(&["Authorities.ROLE_Owner", "Authorities.ADZUMPTWO.ROLE_Report_READ"]));
+        assert!(!check(&["Authorities.ROLE_Owner", "Authorities.Logged_IN"]), "an Owner without the app");
+        assert!(!check(&["Authorities.ADZUMPTWO.ROLE_Report_READ", "Authorities.ADZUMPTWO.ROLE_Account_READ"]), "a viewer");
+        assert!(!check(&[]));
     }
 
     #[test]

@@ -10,8 +10,9 @@ use serde_json::{Map, Value};
 
 use crate::dao::{Dao, InAppFilter, InAppRow, NewInApp};
 use crate::model::{CoreNotification, NotificationUser};
+use crate::push::Push;
 use crate::spring::{page_json, Pageable};
-use crate::sse::{event_frame, key, Hub};
+use crate::sse::{event_frame, key};
 use crate::template::{language, processed_template};
 
 pub const INAPP_TEMPLATE_NAME: &str = "inapp";
@@ -80,7 +81,8 @@ fn not_blank(s: Option<&str>) -> Option<&str> {
 
 pub struct InAppService {
     pub dao: Dao,
-    pub hub: Arc<Hub>,
+    /// To the recipients' open streams, on every instance ([`Push`]).
+    pub push: Arc<Push>,
 }
 
 impl InAppService {
@@ -92,7 +94,8 @@ impl InAppService {
     }
 
     /// `readNotifications`: one page, newest first; the rows returned are then marked read
-    /// (the page still shows them as they were before).
+    /// (the page still shows them as they were before), unless `mark_read` is false (Rust only:
+    /// an app that marks each row read itself, through [`Self::mark_read`]).
     pub async fn read(
         &self,
         app_code: Option<&str>,
@@ -100,24 +103,34 @@ impl InAppService {
         category: Option<&str>,
         pageable: &Pageable,
         user_id: u64,
+        mark_read: bool,
     ) -> Result<Value> {
         let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else {
             return Ok(page_json(Vec::new(), pageable));
         };
         let filter = InAppFilter { app_code, user_id, notification_type: not_blank(notification_type), category: not_blank(category) };
         let rows = self.dao.page(&filter, pageable.size, pageable.offset()).await?;
-        if !rows.is_empty() {
+        if mark_read && !rows.is_empty() {
             let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
             self.dao.mark_read(&ids).await?;
         }
         Ok(page_json(rows.iter().map(list_item_json).collect(), pageable))
+    }
+
+    /// The caller's own unread rows in the app marked read: these `ids`, or all of them when
+    /// `ids` is `None`. Rows of other users or apps are left alone. Answers how many changed;
+    /// 0 for a blank app code.
+    pub async fn mark_read(&self, app_code: Option<&str>, ids: Option<&[u64]>, user_id: u64) -> Result<u64> {
+        let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else { return Ok(0) };
+        self.dao.mark_read_of(app_code, user_id, ids).await
     }
 }
 
 #[async_trait]
 impl InAppSink for InAppService {
     /// `sendInApp`: renders the `inapp` template once, stores a row per recipient, then sends
-    /// each stored row to that recipient's open streams for the app.
+    /// each stored row to that recipient's open streams for the app, on whichever instance they
+    /// are open (Java reached only the consuming instance's).
     async fn send_in_app(
         &self,
         users: &[NotificationUser],
@@ -162,7 +175,7 @@ impl InAppSink for InAppService {
         for row in &stored {
             let k = key(row.user_id, app);
             let frame = event_frame("notification", &event_json(row), &uuid::Uuid::new_v4().to_string(), 5000);
-            self.hub.send(&k, &frame);
+            self.push.deliver(&[k], &frame).await;
         }
         Ok(())
     }

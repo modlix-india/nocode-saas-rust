@@ -104,6 +104,13 @@ impl SecurityCalls {
         parse(text(rb).await?)
     }
 
+    /// Rust only: security-internal's contact codes, `POST /api/security/internal/contactCodes`
+    /// (issue) or `.../contactCodes/verify`. The answer is `{ok, reason, message, ...}`.
+    pub async fn contact_code(&self, verify: bool, body: &Value) -> Result<Option<Value>, CoreError> {
+        let path = if verify { "/api/security/internal/contactCodes/verify" } else { "/api/security/internal/contactCodes" };
+        self.post_value(path, &[], body).await
+    }
+
     /// `getClientById`: security's `Client`.
     pub async fn client_by_id(&self, client_id: Id) -> Result<Option<Value>, CoreError> {
         self.client_by_id_text(&client_id.to_string()).await

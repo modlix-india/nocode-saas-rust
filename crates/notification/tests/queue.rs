@@ -19,7 +19,9 @@ use notification::email::EmailSink;
 use notification::inapp::InAppSink;
 use notification::model::{CoreNotification, MailConnection, NotificationUser};
 use notification::queue::{consume_forever, handle, ConsumerState, Settle};
+use notification::push::Push;
 use notification::send::{Outcome, SendService};
+use notification::sse::Hub;
 use parking_lot::Mutex;
 use platform::upstream::Upstream;
 use serde_json::{json, Map, Value};
@@ -54,6 +56,9 @@ async fn service() -> (Arc<SendService>, Arc<Fake>, Arc<Seen>) {
         directory: DirectoryClient::new(Upstream::fixed(&[&base]), t).unwrap(),
         email: seen.clone(),
         in_app: seen.clone(),
+        push: Push::local(Hub::new(8)),
+        prefs: None,
+        devices: None,
     };
     (Arc::new(s), fake, seen)
 }
@@ -63,7 +68,7 @@ const BODY: &[u8] = br#"{"appCode":"app","clientCode":"SYSTEM","urlClientCode":"
 #[tokio::test]
 async fn deliveries_are_settled_as_spring_settles_them() {
     let (s, fake, seen) = service().await;
-    assert_eq!(handle(&s, Some("application/json"), BODY).await, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true })));
+    assert_eq!(handle(&s, Some("application/json"), BODY).await, Settle::Ack(Some(Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 0 })));
     assert_eq!(*seen.0.lock(), ["n:1"]);
     // Unreadable, or not declared as JSON: rejected for good.
     assert_eq!(handle(&s, Some("application/json"), b"not json").await, Settle::Drop);

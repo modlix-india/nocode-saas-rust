@@ -159,6 +159,8 @@ impl Catalog for FakeCatalog {
 #[derive(Default)]
 struct FakeData {
     calls: Mutex<Vec<String>>,
+    /// The databases the app-data servers hold, with their rows.
+    tenants: Mutex<Vec<(String, i64)>>,
 }
 
 impl FakeData {
@@ -186,7 +188,71 @@ impl DataStores for FakeData {
     async fn estimated_row_count(&self, _: &str, _: &str) -> i64 {
         3
     }
+    async fn tenant_databases(&self) -> (Vec<super::purge::TenantDb>, Vec<String>) {
+        let dbs = self
+            .tenants
+            .lock()
+            .iter()
+            .map(|(name, _)| super::purge::TenantDb { backend: super::purge::TenantBackend::Mongo, server: "default".into(), conn: None, name: name.clone() })
+            .collect();
+        (dbs, Vec::new())
+    }
+    async fn tenant_rows(&self, db: &super::purge::TenantDb) -> Result<i64, String> {
+        Ok(self.tenants.lock().iter().find(|(n, _)| *n == db.name).map(|(_, r)| *r).unwrap_or(0))
+    }
+    async fn drop_tenant_database(&self, db: &super::purge::TenantDb) -> Result<bool, String> {
+        self.calls.lock().push(format!("drop database {}", db.name));
+        self.tenants.lock().retain(|(n, _)| *n != db.name);
+        Ok(true)
+    }
 }
+
+/// The core MySQL schema: `core_tokens` has a CLIENT_CODE, `core_things` a CLIENT_CODE and an
+/// APP_CODE; rows are (table, client, app).
+#[derive(Default)]
+struct FakeRows {
+    rows: Mutex<Vec<(&'static str, String, String)>>,
+}
+
+impl FakeRows {
+    fn matching(&self, table: &str, column: &str, value: &str) -> usize {
+        self.rows.lock().iter().filter(|r| Self::hit(r, table, column, value)).count()
+    }
+    fn hit(r: &(&'static str, String, String), table: &str, column: &str, value: &str) -> bool {
+        r.0 == table && if column == "CLIENT_CODE" { r.1 == value } else { r.2 == value }
+    }
+}
+
+#[async_trait]
+impl super::purge::RowStore for FakeRows {
+    async fn schema(&self) -> anyhow::Result<String> {
+        Ok("core".into())
+    }
+    async fn tables_with(&self, column: &str) -> anyhow::Result<Vec<String>> {
+        Ok(if column == "CLIENT_CODE" { vec!["core_things".into(), "core_tokens".into()] } else { vec!["core_things".into()] })
+    }
+    async fn count(&self, table: &str, column: &str, value: &str) -> anyhow::Result<u64> {
+        Ok(self.matching(table, column, value) as u64)
+    }
+    async fn delete(&self, table: &str, column: &str, value: &str) -> anyhow::Result<u64> {
+        let n = self.matching(table, column, value);
+        self.rows.lock().retain(|r| !Self::hit(r, table, column, value));
+        Ok(n as u64)
+    }
+}
+
+/// Who manages whom for the purge: SYSTEM every other client, LZCLA (MID) only ZZ10.
+struct FakeManaged;
+
+#[async_trait]
+impl super::purge::ManagedClients for FakeManaged {
+    async fn manages(&self, managing: &str, client: &str) -> anyhow::Result<bool> {
+        Ok((managing == "SYSTEM" && client != "SYSTEM") || (managing == "LZCLA" && client == "ZZ10"))
+    }
+}
+
+/// The collections the purge's document store lists (the in-memory store has no listing).
+const PURGE_COLLECTIONS: [&str; 5] = ["function", "storage", "version", "connection", "system.views"];
 
 #[derive(Default)]
 struct FakeTriggers {
@@ -277,6 +343,7 @@ struct Env {
     triggers: Arc<FakeTriggers>,
     catalog: Arc<FakeCatalog>,
     billing: Arc<FakeBilling>,
+    rows: Arc<FakeRows>,
     probe: Arc<LocalCaches<String, u32>>,
 }
 
@@ -341,6 +408,11 @@ fn path<'a>(m: &'a JMap, keys: &[&str]) -> Option<&'a JValue> {
 }
 
 fn env() -> Env {
+    env_with(true)
+}
+
+/// The editor with `[connections] block_private_targets` as given.
+fn env_with(block_private_targets: bool) -> Env {
     let mem = Arc::new(MemBackend::new());
     let dir = Arc::new(FakeDirectory::new());
     dir.chain(&[SYSTEM]);
@@ -350,6 +422,7 @@ fn env() -> Env {
     let triggers = Arc::new(FakeTriggers::default());
     let catalog = Arc::new(FakeCatalog::default());
     let billing = Arc::new(FakeBilling::default());
+    let rows = Arc::new(FakeRows::default());
     let parts = Parts {
         catalog: catalog.clone(),
         kirun_schemas: crate::state::Builtins::kirun_schemas(),
@@ -360,12 +433,20 @@ fn env() -> Env {
         billing: billing.clone(),
         redis: None,
         eviction_channel: "evictionChannel".into(),
+        block_private_targets,
+        purge_docs: Some(Arc::new(super::purge::BackendDocs {
+            name: "core".into(),
+            backend: mem.clone(),
+            collections: PURGE_COLLECTIONS.iter().map(|c| c.to_string()).collect(),
+        })),
+        purge_rows: Some(rows.clone()),
+        purge_guard: Some(Arc::new(FakeManaged)),
     };
     let callers: Arc<dyn CallerSource> = Arc::new(EditorCallers { inner: Arc::new(HeaderCallers) });
     let st = state(store, cache.clone(), callers, parts);
     let router = with_layers(router(st.clone()), Arc::new(HeaderResolver));
     let probe = cache.family();
-    Env { mem, dir, cache, st, router, data, triggers, catalog, billing, probe }
+    Env { mem, dir, cache, st, router, data, triggers, catalog, billing, rows, probe }
 }
 
 impl Env {
@@ -681,6 +762,16 @@ async fn the_base_client_is_the_manager_or_the_app_owner_and_none_for_the_owner(
 
 // ── StorageOverrideChainIntegrationTest: saving a derived storage ───
 
+/// `GET /api/core/notifications/internal/app/{app}`'s count.
+async fn notifications_of(e: &Env, app: &str) -> i64 {
+    let r = e.send("GET", &format!("/api/core/notifications/internal/app/{app}"), None, &[], "").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    match r.obj().get("count") {
+        Some(JValue::Int(n)) => *n,
+        other => panic!("count: {other:?}"),
+    }
+}
+
 async fn read_as(e: &Env, client: &str, id: &str) -> JMap {
     let r = e.as_client(client, "GET", &format!("/api/core/storages/{id}"), "").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
@@ -863,7 +954,8 @@ async fn connection_reads_hide_what_the_caller_may_not_see() {
     assert_eq!(c.status, StatusCode::OK, "{}", c.text());
     let id = c.id();
     let full = e.call("GET", &format!("/api/core/connections/{id}"), "").await.obj();
-    assert_eq!(path(&full, &["connectionDetails", "password"]), Some(&s("p")));
+    assert_eq!(path(&full, &["connectionDetails", "password"]), Some(&s(SECRET_MASK)), "masked even for a caller who may update it");
+    assert_eq!(path(&full, &["connectionDetails", "user"]), Some(&s("u")));
     let reader = all_for("Connection").into_iter().filter(|a| a.ends_with("_READ")).collect::<Vec<_>>().join(",");
     let r = e.send("GET", &format!("/api/core/connections/{id}"), Some(SYSTEM), &[("x-test-auth", &reader)], "").await.obj();
     assert!(path(&r, &["connectionDetails", "password"]).is_none());
@@ -884,6 +976,179 @@ async fn connection_reads_hide_what_the_caller_may_not_see() {
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "an update is checked too: {}", r.text());
 }
 
+const LOCAL_SMTP: &str = r#"{"name":"mail","appCode":"testapp","clientCode":"SYSTEM","connectionType":"MAIL","connectionSubType":"SMTP","connectionDetails":{"mailProps":{"mail.smtp.host":"localhost","mail.smtp.port":"16040"}}}"#;
+
+#[tokio::test]
+async fn a_private_smtp_host_is_refused_while_the_guard_is_on() {
+    let e = env();
+    let r = e.call("POST", "/api/core/connections", LOCAL_SMTP).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    assert!(r.text().contains("CORE.CONNECTION_TARGET_REFUSED"), "{}", r.text());
+    let on = env_with(true).call("POST", "/api/core/connections", LOCAL_SMTP).await;
+    assert_eq!(on.status, StatusCode::BAD_REQUEST, "the default is the guard on");
+}
+
+#[tokio::test]
+async fn a_private_smtp_host_can_be_saved_with_the_guard_off() {
+    let e = env_with(false);
+    let c = e.call("POST", "/api/core/connections", LOCAL_SMTP).await;
+    assert_eq!(c.status, StatusCode::OK, "{}", c.text());
+    let mut body = c.obj();
+    body.insert("connectionDetails".into(), JValue::Object(obj(r#"{"mailProps":{"mail.smtp.host":"127.0.0.1","mail.smtp.port":"16040"}}"#)));
+    let u = e.call("PUT", &format!("/api/core/connections/{}", c.id()), &to_body(&body)).await;
+    assert_eq!(u.status, StatusCode::OK, "{}", u.text());
+    assert_eq!(path(&u.obj(), &["connectionDetails", "mailProps", "mail.smtp.host"]), Some(&s("127.0.0.1")));
+    // The other save rules stay.
+    let file = e
+        .call("POST", "/api/core/connections", r#"{"name":"f","appCode":"testapp","clientCode":"SYSTEM","connectionType":"REST_API","connectionDetails":{"baseUrl":"file:///etc/passwd"}}"#)
+        .await;
+    assert_eq!(file.status, StatusCode::BAD_REQUEST, "{}", file.text());
+}
+
+#[tokio::test]
+async fn a_connection_keeps_its_consent_auth() {
+    let e = env();
+    let plain = e.call("POST", "/api/core/connections", r#"{"name":"plain","appCode":"testapp","clientCode":"SYSTEM","connectionType":"REST_API","connectionDetails":{"baseUrl":"https://api.example.com"}}"#).await;
+    assert_eq!(plain.status, StatusCode::OK, "{}", plain.text());
+    assert!(plain.obj().get("consentAuth").is_none(), "absent stays absent: {}", plain.text());
+
+    let gate = "Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner";
+    let c = e
+        .call(
+            "POST",
+            "/api/core/connections",
+            &format!(r#"{{"name":"oa","appCode":"testapp","clientCode":"SYSTEM","connectionType":"REST_API","connectionSubType":"REST_API_OAUTH2","consentAuth":"{gate}","connectionDetails":{{"grantType":"AUTHORIZATION_CODE"}}}}"#),
+        )
+        .await;
+    assert_eq!(c.status, StatusCode::OK, "{}", c.text());
+    assert_eq!(c.obj().get("consentAuth"), Some(&s(gate)));
+    let read = e.call("GET", &format!("/api/core/connections/{}", c.id()), "").await.obj();
+    assert_eq!(read.get("consentAuth"), Some(&s(gate)));
+
+    let mut body = read.clone();
+    body.insert("consentAuth".into(), s("Authorities.ROLE_Owner"));
+    let u = e.call("PUT", &format!("/api/core/connections/{}", c.id()), &to_body(&body)).await;
+    assert_eq!(u.status, StatusCode::OK, "{}", u.text());
+    assert_eq!(u.obj().get("consentAuth"), Some(&s("Authorities.ROLE_Owner")), "an update changes it");
+    let mut body = u.obj();
+    body.shift_remove("consentAuth");
+    let cleared = e.call("PUT", &format!("/api/core/connections/{}", c.id()), &to_body(&body)).await;
+    assert!(cleared.obj().get("consentAuth").is_none(), "an update without it clears it: {}", cleared.text());
+}
+
+const SECRET_MASK: &str = connections::connection::SECRET_MASK;
+
+/// The stored connection's detail at `keys`, as text.
+fn stored_detail(e: &Env, id: &str, keys: &[&str]) -> Option<String> {
+    let raw = overridable::bson_conv::doc_to_j(&e.raw("connection", id));
+    let mut all = vec!["connectionDetails"];
+    all.extend_from_slice(keys);
+    path(&raw, &all).and_then(JValue::as_str).map(str::to_string)
+}
+
+#[tokio::test]
+async fn connection_secrets_never_leave_and_a_masked_save_keeps_them() {
+    let e = env_with(false);
+    let c = e
+        .call(
+            "POST",
+            "/api/core/connections",
+            r#"{"name":"mail","appCode":"testapp","clientCode":"SYSTEM","connectionType":"MAIL","connectionSubType":"SMTP",
+               "connectionDetails":{"userName":"u","password":"fake-pw","mailProps":{"mail.smtp.host":"smtp.example.com","mail.password":"fake-mail-pw"}}}"#,
+        )
+        .await;
+    assert_eq!(c.status, StatusCode::OK, "{}", c.text());
+    assert!(!c.text().contains("fake-"), "the create's answer: {}", c.text());
+    let id = c.id();
+
+    // Every read: by id, the eager list, the draft view.
+    let read = e.call("GET", &format!("/api/core/connections/{id}"), "").await;
+    assert!(!read.text().contains("fake-"), "{}", read.text());
+    let read = read.obj();
+    assert_eq!(path(&read, &["connectionDetails", "password"]), Some(&s(SECRET_MASK)));
+    assert_eq!(path(&read, &["connectionDetails", "mailProps", "mail.password"]), Some(&s(SECRET_MASK)));
+    assert_eq!(path(&read, &["connectionDetails", "mailProps", "mail.smtp.host"]), Some(&s("smtp.example.com")));
+    let list = e.call("GET", "/api/core/connections?appCode=testapp&eager=true", "").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.text());
+    assert!(list.text().contains(SECRET_MASK) && !list.text().contains("fake-"), "{}", list.text());
+
+    // Saved back as read, with another field edited: the stored secrets stay.
+    let mut body = read.clone();
+    body.insert("connectionDetails".into(), JValue::Object(obj(
+        r#"{"userName":"v","password":"********","mailProps":{"mail.smtp.host":"smtp2.example.com","mail.password":""}}"#,
+    )));
+    let u = e.call("PUT", &format!("/api/core/connections/{id}"), &to_body(&body)).await;
+    assert_eq!(u.status, StatusCode::OK, "{}", u.text());
+    assert!(!u.text().contains("fake-"), "{}", u.text());
+    assert_eq!(stored_detail(&e, &id, &["password"]).as_deref(), Some("fake-pw"));
+    assert_eq!(stored_detail(&e, &id, &["mailProps", "mail.password"]).as_deref(), Some("fake-mail-pw"));
+    assert_eq!(stored_detail(&e, &id, &["userName"]).as_deref(), Some("v"));
+    assert_eq!(stored_detail(&e, &id, &["mailProps", "mail.smtp.host"]).as_deref(), Some("smtp2.example.com"));
+
+    // A new value replaces; a secret the body leaves out stays.
+    let mut body = u.obj();
+    body.insert("connectionDetails".into(), JValue::Object(obj(r#"{"userName":"v","password":"fake-new-pw","mailProps":{"mail.smtp.host":"smtp2.example.com"}}"#)));
+    let u = e.call("PUT", &format!("/api/core/connections/{id}"), &to_body(&body)).await;
+    assert_eq!(u.status, StatusCode::OK, "{}", u.text());
+    assert_eq!(stored_detail(&e, &id, &["password"]).as_deref(), Some("fake-new-pw"));
+    assert_eq!(stored_detail(&e, &id, &["mailProps", "mail.password"]).as_deref(), Some("fake-mail-pw"));
+
+    // A draft of the masked read keeps the real secrets in the draft row, answers them masked,
+    // and publishes without losing them.
+    let mut draft = u.obj();
+    draft.insert("connectionDetails".into(), JValue::Object(obj(r#"{"userName":"drafted","password":"********","mailProps":{"mail.smtp.host":"smtp2.example.com","mail.password":"********"}}"#)));
+    let d = e.call("PUT", &format!("/api/core/connections/{id}?draft=true"), &to_body(&draft)).await;
+    assert_eq!(d.status, StatusCode::OK, "{}", d.text());
+    assert!(!d.text().contains("fake-"), "{}", d.text());
+    let row = e.mem.all("draft").into_iter().find(|r| r.get_str("objectId") == Ok(id.as_str())).expect("draft row");
+    let content = overridable::bson_conv::doc_to_j(row.get_document("content").unwrap());
+    assert_eq!(path(&content, &["connectionDetails", "password"]), Some(&s("fake-new-pw")), "the draft runs with the real secret");
+    assert_eq!(path(&content, &["connectionDetails", "mailProps", "mail.password"]), Some(&s("fake-mail-pw")));
+    let drafted = e.call("GET", &format!("/api/core/connections/{id}?draft=true"), "").await;
+    assert!(!drafted.text().contains("fake-") && drafted.text().contains("drafted"), "{}", drafted.text());
+    let p = e.call("POST", &format!("/api/core/connections/{id}/publish"), "").await;
+    assert_eq!(p.status, StatusCode::OK, "{}", p.text());
+    assert!(!p.text().contains("fake-"), "{}", p.text());
+    assert_eq!(stored_detail(&e, &id, &["password"]).as_deref(), Some("fake-new-pw"));
+    assert_eq!(stored_detail(&e, &id, &["userName"]).as_deref(), Some("drafted"));
+
+    // The history keeps the real values for the draft merge, and answers them masked.
+    assert!(e.mem.all("version").iter().any(|v| format!("{v}").contains("fake-new-pw")));
+    let history = e.call("POST", &format!("/api/core/versions/{id}/query"), "{}").await;
+    assert_eq!(history.status, StatusCode::OK, "{}", history.text());
+    assert!(history.text().contains(SECRET_MASK) && !history.text().contains("fake-"), "{}", history.text());
+    let one = path(&history.obj(), &["content"]).and_then(|c| match c {
+        JValue::Array(a) => a.first().and_then(JValue::as_object).and_then(|v| str_field(v, "id")).map(str::to_string),
+        _ => None,
+    });
+    let v = e.call("GET", &format!("/api/core/versions/{}", one.expect("a version row")), "").await;
+    assert!(v.text().contains(SECRET_MASK) && !v.text().contains("fake-"), "{}", v.text());
+    let guess = r#"{"condition":{"field":"object.connectionDetails.password","operator":"EQUALS","value":"fake-new-pw"}}"#;
+    let guessed = e.call("POST", &format!("/api/core/versions/{id}/query"), guess).await;
+    assert_eq!(path(&guessed.obj(), &["totalElements"]), Some(&JValue::Int(0)), "{}", guessed.text());
+
+    // No list filter or sort on the details.
+    let guessed = e.call("GET", "/api/core/connections?appCode=testapp&connectionDetails.password=fake-new-pw", "").await;
+    assert_eq!(path(&guessed.obj(), &["totalElements"]), Some(&JValue::Int(0)), "{}", guessed.text());
+    let sorted = e.call("GET", "/api/core/connections?appCode=testapp&sort=connectionDetails.password", "").await;
+    assert_eq!(path(&sorted.obj(), &["totalElements"]), Some(&JValue::Int(0)), "{}", sorted.text());
+    let named = e.call("GET", "/api/core/connections?appCode=testapp&name=mail", "").await;
+    assert_eq!(path(&named.obj(), &["totalElements"]), Some(&JValue::Int(1)), "{}", named.text());
+
+    // A new connection never stores the mask as a secret.
+    let copy = e
+        .call(
+            "POST",
+            "/api/core/connections",
+            r#"{"name":"copy","appCode":"testapp","clientCode":"SYSTEM","connectionType":"MAIL","connectionSubType":"SMTP",
+               "connectionDetails":{"userName":"u","password":"********","mailProps":{"mail.smtp.host":"smtp.example.com"}}}"#,
+        )
+        .await;
+    assert_eq!(copy.status, StatusCode::OK, "{}", copy.text());
+    assert_eq!(stored_detail(&e, &copy.id(), &["password"]), None);
+    assert_eq!(stored_detail(&e, &copy.id(), &["userName"]).as_deref(), Some("u"));
+}
+
 // ── the other kinds ─────────────────────────────────────────────────
 
 #[tokio::test]
@@ -898,6 +1163,12 @@ async fn the_other_kinds_read_their_classes_as_java_does() {
     let none = e.send("GET", "/api/core/notifications/internal/zz?appCode=testapp&clientCode=SYSTEM&urlClientCode=SYSTEM", None, &[], "").await;
     assert_eq!((none.status, none.body.len()), (StatusCode::OK, 0));
     assert_eq!(e.send("GET", "/api/core/notifications/internal/n?appCode=testapp", None, &[], "").await.status, StatusCode::BAD_REQUEST);
+    // Only `inapp` or `push` channels count: `n` has email only.
+    assert_eq!(notifications_of(&e, "testapp").await, 0);
+    let p = e.call("POST", "/api/core/notifications", r#"{"name":"p","appCode":"testapp","clientCode":"SYSTEM","channelTemplates":{"inapp":{"templateParts":{"en":{"title":"x"}}}}}"#).await;
+    assert_eq!(p.status, StatusCode::OK, "{}", p.text());
+    assert_eq!(notifications_of(&e, "testapp").await, 1);
+    assert_eq!(notifications_of(&e, "otherapp").await, 0);
     let mut nb = n.obj();
     nb.insert("channelEnabled".into(), JValue::Object(obj(r#"{"email":false}"#)));
     let r = e.call("PUT", &format!("/api/core/notifications/{}", n.id()), &to_body(&nb)).await;
@@ -1382,5 +1653,193 @@ mod schedule_view {
         let p = from_cron_preview(Some("61 * * * *"), None, Some("UTC"), now).unwrap();
         assert!(!p.valid);
         assert!(p.error.as_deref().unwrap_or_default().starts_with("The scheduler cannot read this cron"), "{:?}", p.error);
+    }
+}
+
+// ── the admin purge ─────────────────────────────────────────────────
+
+mod purge_routes {
+    use super::*;
+    use mongodb::bson::doc;
+
+    const PURGERS: &str = "Authorities.Client_DELETE,Authorities.Application_DELETE";
+
+    impl Env {
+        async fn purge(&self, client: Option<&str>, auth: &str, uri: &str) -> Answer {
+            self.send("DELETE", uri, client, &[("x-test-auth", auth)], "").await
+        }
+    }
+
+    /// Two clients' documents of two apps, their tenant databases, a few service databases,
+    /// and core rows.
+    fn seeded() -> Env {
+        let e = env();
+        for (coll, d) in [
+            ("function", doc! {"name": "f1", "appCode": "zapp", "clientCode": "ZZ1"}),
+            ("function", doc! {"name": "f2", "appCode": "zapp2", "clientCode": "ZZ1"}),
+            ("function", doc! {"name": "f3", "appCode": "zapp", "clientCode": "ZZ10"}),
+            ("function", doc! {"name": "f4", "appCode": "other", "clientCode": "ZZ10"}),
+            ("storage", doc! {"name": "s1", "uniqueName": "u_s1", "appCode": "zapp", "clientCode": "SYSTEM"}),
+            ("version", doc! {"objectName": "f1", "objectAppCode": "zapp", "clientCode": "ZZ1"}),
+            ("version", doc! {"objectName": "f4", "objectAppCode": "other", "clientCode": "ZZ10"}),
+            ("connection", doc! {"name": "c", "appCode": "zapp2", "clientCode": "ZZ1"}),
+        ] {
+            e.mem.put_raw(coll, d);
+        }
+        *e.data.tenants.lock() = [
+            ("ZZ1_zapp", 4),
+            ("ZZ1_zapp_draft", 1),
+            ("ZZ1_zapp2", 2),
+            ("ZZ10_zapp", 7),
+            ("ZZ10_other_draft", 3),
+            ("core", 100),
+            ("entity_processor", 50),
+            ("ZZ1", 1),
+        ]
+        .iter()
+        .map(|(n, r)| (n.to_string(), *r))
+        .collect();
+        *e.rows.rows.lock() = vec![
+            ("core_tokens", "ZZ1".into(), String::new()),
+            ("core_tokens", "ZZ10".into(), String::new()),
+            ("core_things", "ZZ1".into(), "zapp".into()),
+            ("core_things", "ZZ10".into(), "zapp".into()),
+            ("core_things", "ZZ10".into(), "other".into()),
+        ];
+        e
+    }
+
+    fn names(e: &Env, coll: &str) -> Vec<String> {
+        let mut v: Vec<String> = e
+            .mem
+            .all(coll)
+            .iter()
+            .filter_map(|d| d.get_str("name").or_else(|_| d.get_str("objectName")).ok().map(str::to_string))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// The report as compact JSON (the editor writes it pretty, as Jackson).
+    fn compact(a: &Answer) -> String {
+        to_compact(&JValue::Object(a.obj()))
+    }
+
+    fn tenants(e: &Env) -> Vec<String> {
+        e.data.tenants.lock().iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn only_a_managing_client_with_the_authority_may_purge_a_client() {
+        let e = seeded();
+        let a = e.purge(None, PURGERS, "/api/core/purge/client/ZZ1").await;
+        assert_eq!(a.status, StatusCode::UNAUTHORIZED, "{}", a.text());
+        let a = e.purge(Some(SYSTEM), "Authorities.Application_DELETE", "/api/core/purge/client/ZZ1").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        let a = e.purge(Some(SYSTEM), "Authorities.Client_DELETE", "/api/core/purge/app/zapp").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        // MID does not manage ZZ1; ZZ1 never purges itself.
+        for (caller, uri) in [(MID, "/api/core/purge/client/ZZ1?dryRun=false"), ("ZZ1", "/api/core/purge/client/ZZ1?dryRun=false")] {
+            let a = e.purge(Some(caller), PURGERS, uri).await;
+            assert_eq!(a.status, StatusCode::FORBIDDEN, "{caller}: {}", a.text());
+            assert!(a.text().contains("only a client that manages ZZ1"), "{}", a.text());
+        }
+        // An app purge stays SYSTEM's.
+        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/app/zapp?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text());
+        assert!(a.text().contains("SYSTEM client only"), "{}", a.text());
+        assert_eq!(names(&e, "function").len(), 4, "a refused purge deleted documents");
+        assert_eq!(tenants(&e).len(), 8, "a refused purge dropped databases");
+        // MID manages ZZ10: its dry run answers.
+        let a = e.purge(Some(MID), PURGERS, "/api/core/purge/client/ZZ10").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+    }
+
+    #[tokio::test]
+    async fn bad_codes_and_system_are_refused() {
+        let e = seeded();
+        for uri in [
+            "/api/core/purge/client/SYSTEM",
+            "/api/core/purge/client/system",
+            "/api/core/purge/client/ZZ_1",
+            "/api/core/purge/client/ZZ-1",
+            "/api/core/purge/app/z-app",
+            "/api/core/purge/app/_",
+        ] {
+            let a = e.purge(Some(SYSTEM), PURGERS, &format!("{uri}?dryRun=false")).await;
+            assert_eq!(a.status, StatusCode::BAD_REQUEST, "{uri}: {}", a.text());
+        }
+        assert_eq!(names(&e, "function").len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_client_purge_is_a_dry_run_unless_asked() {
+        let e = seeded();
+        for uri in ["/api/core/purge/client/ZZ1", "/api/core/purge/client/ZZ1?dryRun=true", "/api/core/purge/client/ZZ1?dryRun=yes"] {
+            let a = e.purge(Some(SYSTEM), PURGERS, uri).await;
+            assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+            assert_eq!(
+                compact(&a),
+                r#"{"dryRun":true,"mongo":{"ZZ1_zapp.*":4,"ZZ1_zapp2.*":2,"ZZ1_zapp_draft.*":1,"core.connection":1,"core.function":2,"core.version":1},"mysql":{"core.core_things":1,"core.core_tokens":1},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ1_zapp2"],"errors":[]}"#
+            );
+        }
+        assert_eq!(names(&e, "function").len(), 4, "a dry run deleted documents");
+        assert_eq!(tenants(&e).len(), 8, "a dry run dropped databases");
+        assert_eq!(e.rows.rows.lock().len(), 5, "a dry run deleted rows");
+        assert!(e.data.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_client_purge_deletes_the_clients_traces_only() {
+        let e = seeded();
+        let cached = e.st.functions.cache_name("zapp", "f1", false);
+        let other = e.st.functions.cache_name("zapp2", "f2", true);
+        let table = appdata::engine::storage_cache_names("u_s1")[0].clone();
+        for c in [&cached, &other, &table] {
+            e.warm(c).await;
+        }
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        assert_eq!(
+            compact(&a),
+            r#"{"dryRun":false,"mongo":{"ZZ1_zapp.*":4,"ZZ1_zapp2.*":2,"ZZ1_zapp_draft.*":1,"core.connection":1,"core.function":2,"core.version":1},"mysql":{"core.core_things":1,"core.core_tokens":1},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ1_zapp2"],"errors":[]}"#
+        );
+        assert_eq!(names(&e, "function"), ["f3", "f4"]);
+        assert_eq!(names(&e, "version"), ["f4"]);
+        assert_eq!(names(&e, "storage"), ["s1"], "another client's storage of the app stays");
+        assert!(names(&e, "connection").is_empty());
+        assert_eq!(tenants(&e), ["ZZ10_zapp", "ZZ10_other_draft", "core", "entity_processor", "ZZ1"]);
+        assert_eq!(e.data.calls(), ["drop database ZZ1_zapp", "drop database ZZ1_zapp_draft", "drop database ZZ1_zapp2"]);
+        assert!(e.rows.rows.lock().iter().all(|r| r.1 == "ZZ10"));
+        for c in [&cached, &other, &table] {
+            assert!(!e.is_warm(c).await, "{c} outlived the purge");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_app_purge_reaches_every_client() {
+        let e = seeded();
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/app/zapp?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        assert_eq!(
+            compact(&a),
+            r#"{"dryRun":false,"mongo":{"ZZ10_zapp.*":7,"ZZ1_zapp.*":4,"ZZ1_zapp_draft.*":1,"core.function":2,"core.storage":1,"core.version":1},"mysql":{"core.core_things":2},"dropped":["ZZ1_zapp","ZZ1_zapp_draft","ZZ10_zapp"],"errors":[]}"#
+        );
+        assert_eq!(names(&e, "function"), ["f2", "f4"]);
+        assert_eq!(names(&e, "version"), ["f4"]);
+        assert!(names(&e, "storage").is_empty());
+        assert_eq!(tenants(&e), ["ZZ1_zapp2", "ZZ10_other_draft", "core", "entity_processor", "ZZ1"]);
+        assert_eq!(e.rows.rows.lock().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn failures_are_reported_and_the_rest_goes_on() {
+        let e = seeded();
+        e.mem.fail("version", true);
+        let a = e.purge(Some(SYSTEM), PURGERS, "/api/core/purge/client/ZZ1?dryRun=false").await;
+        assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+        let errors = a.obj().get("errors").cloned().unwrap();
+        assert!(to_compact(&errors).contains("core.version"), "{}", a.text());
+        assert_eq!(names(&e, "function"), ["f3", "f4"]);
     }
 }

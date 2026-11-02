@@ -588,10 +588,17 @@ impl Db {
         Ok(r.rows_affected() > 0)
     }
 
+    /// `removeProfileForUser`. `add_profile_to_user` stores the profile's ROOT, but a client
+    /// that overrides a profile reads it (assignedProfiles, app profiles) under the override's
+    /// id, so the id a caller sends back can be the override: the row is deleted under the root
+    /// as well as the given id (QA-0599: Java deleted only the given id, nothing matched).
     pub async fn remove_profile_for_user(&self, user_id: u64, profile_id: u64) -> AuthResult<u64> {
-        Ok(sqlx::query("DELETE FROM security_profile_user WHERE USER_ID = ? AND PROFILE_ID = ?")
+        let root: Option<u64> =
+            sqlx::query_scalar("SELECT COALESCE(ROOT_PROFILE_ID, ID) FROM security_profile WHERE ID = ? LIMIT 1").bind(profile_id).fetch_optional(&self.pool).await?;
+        Ok(sqlx::query("DELETE FROM security_profile_user WHERE USER_ID = ? AND PROFILE_ID IN (?, ?)")
             .bind(user_id)
             .bind(profile_id)
+            .bind(root.unwrap_or(profile_id))
             .execute(&self.pool)
             .await?
             .rows_affected())

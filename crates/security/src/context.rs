@@ -121,8 +121,12 @@ impl Auth {
 
     /// `getAuthenticationIfNotInCache` for a bearer token.
     async fn bearer_context(&self, token: &str, claims: &Claims, app_code: Option<&str>, req: &RequestInfo) -> AuthResult<ContextAuth> {
-        // `.take(1).single()`: no row is "Source was empty", an error, not an empty answer.
-        let row = self.token_row(token).await?.ok_or_else(|| AuthError::internal("Source was empty"))?;
+        // `.take(1).single()`: no row is "Source was empty" in Java, an error, and the request goes
+        // on anonymous. A signed token without its row was signed out, revoked or cleaned up: the
+        // caller's state, not the server's, so it is reported as such (logged at debug, not error).
+        let row = self.token_row(token).await?.ok_or_else(|| {
+            AuthError::msg(StatusCode::UNAUTHORIZED, UNKNOWN_TOKEN, &[]).with_debug("Source was empty: the token has no row (signed out, revoked or cleaned up)")
+        })?;
         let store = self.dir.store.clone();
         let (ca, touched) = tokio::join!(
             self.spring_authentication(app_code, req, claims, &row),

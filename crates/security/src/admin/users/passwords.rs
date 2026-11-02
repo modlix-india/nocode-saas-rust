@@ -116,6 +116,46 @@ fn compare_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
     x.len().cmp(&y.len())
 }
 
+/// What `secret_change_rule` asks of the caller before a secret is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecretGate {
+    /// Nothing more (one's own secret, whose old value `isPasswordUpdatable` checks).
+    Allowed,
+    /// Refused: another user's secret needs `User_UPDATE`.
+    NoAuthority,
+    /// The caller's client must manage the target's client.
+    ManagedClient,
+    /// The target must be the caller or below them in the reporting tree.
+    SubOrg,
+}
+
+/// `checkHierarchy`, tightened (2026-10-30): Java let anyone signed in set the secret of any
+/// user of their own client (no authority, no old secret), so a Sales Member could reset the
+/// Owner's password. Now another user's secret needs `User_UPDATE` always; for a user of the
+/// caller's own client also the reporting line, unless the caller sees the whole client (an
+/// Owner, or `ROLE_Client_MANAGE` as in `readPageFilter`). SYSTEM's callers keep the reach every
+/// other user route gives them; a user of another client still needs it to be managed.
+fn secret_change_rule(ca: &ContextAuth, target: u64, target_client: u64) -> SecretGate {
+    use super::accounts::{CLIENT_MANAGE_ROLE, OWNER_ROLE};
+    use super::common::has_any;
+    if target == ca.user.id() {
+        return SecretGate::Allowed;
+    }
+    if !has_any(ca, &["Authorities.User_UPDATE"]) {
+        return SecretGate::NoAuthority;
+    }
+    if ca.is_system_client() {
+        return SecretGate::Allowed;
+    }
+    if target_client != ca.user.client_id() {
+        return SecretGate::ManagedClient;
+    }
+    if has_any(ca, &[OWNER_ROLE, CLIENT_MANAGE_ROLE]) {
+        return SecretGate::Allowed;
+    }
+    SecretGate::SubOrg
+}
+
 /// The special characters `ClientPasswordPolicyService` accepts.
 const SPECIAL: &str = "~`!@#$%^&*()_-+={}[]|\\/:;\"'<>,.?";
 
@@ -287,20 +327,24 @@ impl Admin {
     }
 
     /// `updatePassword(userId, request)` (and, with the caller's id, `updatePassword(request)`).
+    /// Who may set whose secret is `secret_change_rule`; the gate runs before the policy checks,
+    /// so a refused caller learns nothing about the target's policy or history.
     pub async fn update_password(&self, ca: &ContextAuth, user_id: Option<u64>, b: &PasswordBody) -> AuthResult<bool> {
         if !ca.authenticated {
             return Err(forbidden("login_required", &[]));
         }
         let id = user_id.unwrap_or(ca.user.id());
         let Some(u) = self.db.user_row(id).await? else { return Ok(false) };
-        self.password_updatable(ca, &u, b, true).await?;
-        // `checkHierarchy`.
-        if !ca.is_system_client() && u.client_id != ca.user.client_id() {
-            let allowed = super::common::has_any(ca, &["Authorities.User_UPDATE"]) && self.caller_manages_client(ca, u.client_id).await?;
-            if !allowed {
-                return Err(forbidden("hierarchy_error", &[]));
-            }
+        let allowed = match secret_change_rule(ca, u.id, u.client_id) {
+            SecretGate::Allowed => true,
+            SecretGate::NoAuthority => return Err(forbidden(crate::errors::FORBIDDEN_PERMISSION, &["User UPDATE"])),
+            SecretGate::ManagedClient => self.caller_manages_client(ca, u.client_id).await?,
+            SecretGate::SubOrg => self.sub_org_allows(ca, u.client_id, u.id).await?,
+        };
+        if !allowed {
+            return Err(forbidden("hierarchy_error", &[]));
         }
+        self.password_updatable(ca, &u, b, true).await?;
         let t = b.pass_type.ok_or_else(|| npe("java.util.Map.get(Object)"))?;
         self.set_user_secret(ca, &u, ca.user.id(), t, b.new_password.as_deref().unwrap_or(""), false).await
     }
@@ -548,6 +592,30 @@ mod policy_tests {
         s.validate_secret_policy(1, None, None, None, "x").await.unwrap();
     }
 
+    /// 2026-10-30: who may set another user's secret.
+    #[test]
+    fn secret_change_rule_matrix() {
+        use crate::admin::users::testkit::caller;
+        const UPDATE: &str = "Authorities.User_UPDATE";
+        let on = |user: u64, client: u64, auths: &[&str]| caller(user, client, "ZZ", "BUS", auths);
+        // Oneself: always, with or without User_UPDATE (the old secret is checked after).
+        assert_eq!(secret_change_rule(&on(5, 7, &[]), 5, 7), SecretGate::Allowed);
+        // A Sales-Member-style caller (no User_UPDATE): refused for anyone else, even of their own client.
+        assert_eq!(secret_change_rule(&on(5, 7, &["Authorities.User_READ"]), 6, 7), SecretGate::NoAuthority);
+        assert_eq!(secret_change_rule(&on(5, 7, &[]), 6, 9), SecretGate::NoAuthority);
+        // An Owner without User_UPDATE is refused too: the authority is always needed.
+        assert_eq!(secret_change_rule(&on(5, 7, &["Authorities.ROLE_Owner"]), 6, 7), SecretGate::NoAuthority);
+        // User_UPDATE in the same client: the reporting line, unless the whole client is theirs.
+        assert_eq!(secret_change_rule(&on(5, 7, &[UPDATE]), 6, 7), SecretGate::SubOrg);
+        assert_eq!(secret_change_rule(&on(5, 7, &[UPDATE, "Authorities.ROLE_Owner"]), 6, 7), SecretGate::Allowed);
+        assert_eq!(secret_change_rule(&on(5, 7, &[UPDATE, "Authorities.ROLE_Client_MANAGE"]), 6, 7), SecretGate::Allowed);
+        // Another client: it must be managed, Owner or not.
+        assert_eq!(secret_change_rule(&on(5, 7, &[UPDATE, "Authorities.ROLE_Owner"]), 6, 9), SecretGate::ManagedClient);
+        // SYSTEM with User_UPDATE reaches everyone; without it, no one but itself.
+        assert_eq!(secret_change_rule(&caller(5, 1, "SYSTEM", "SYS", &[UPDATE]), 6, 9), SecretGate::Allowed);
+        assert_eq!(secret_change_rule(&caller(5, 1, "SYSTEM", "SYS", &[]), 6, 1), SecretGate::NoAuthority);
+    }
+
     #[test]
     fn secret_types() {
         assert_eq!((SecretType::Otp.constant(), SecretType::Pin.display(), SecretType::Otp.display()), ("OTP", "PIN", "OTP"));
@@ -629,6 +697,59 @@ mod live {
         assert_eq!(st, StatusCode::OK);
         let picker = s.find_user_clients(&AuthRequest::default(), None, Some("ZZRUL".into())).await.unwrap();
         assert!(!picker.iter().any(|v| v["userId"] == e.id));
+        fx.finish().await;
+    }
+
+    /// 2026-10-30: another user of one's own client. A Sales-Member-style caller (no User_UPDATE)
+    /// is refused, even for the Owner; User_UPDATE reaches the caller's reporting line only; an
+    /// Owner or a Client_MANAGE holder reaches the whole client; one's own change is as before.
+    #[tokio::test]
+    async fn same_client_secret_changes_need_user_update_and_the_line() {
+        let Some(fx) = fx().await else { return };
+        let (s, c) = (&fx.s, fx.c);
+        let sys = sys();
+        let owner = fx.user(c, "po").await;
+        let a = fx.user(c, "pa").await;
+        let b = fx.user(c, "pb").await;
+        let d = fx.user(c, "pd").await;
+        s.user_set_manager(&sys, b.id, Some(a.id)).await.unwrap();
+        let new = |p: &str| body(json!({"newPassword": p}));
+        let code = |r: AuthResult<bool>| r.map_err(|e| (e.status(), e.message()));
+
+        // Oneself, without any authority: the old secret must match, the new one must differ.
+        let me = fx.as_user(&b, "ZZRUL", &[]);
+        let same = body(json!({"oldPassword": PASSWORD, "newPassword": PASSWORD}));
+        assert_eq!(code(s.update_password(&me, None, &same).await).unwrap_err().1, crate::errors::message("new_password_match", &[]));
+        s.update_password(&me, None, &body(json!({"oldPassword": PASSWORD, "newPassword": "Zz@24680a"}))).await.unwrap();
+        s.update_password(&me, Some(b.id), &body(json!({"oldPassword": "Zz@24680a", "newPassword": "Zz@24680b"}))).await.unwrap();
+
+        // A member without User_UPDATE: not their reportee, not the Owner.
+        let sales = fx.as_user(&a, "ZZRUL", &["Authorities.User_READ"]);
+        for target in [b.id, owner.id, d.id] {
+            let (st, msg) = code(s.update_password(&sales, Some(target), &new("Zz@13579a")).await).unwrap_err();
+            assert_eq!((st, msg), (StatusCode::FORBIDDEN, crate::errors::message("forbidden_permission", &["User UPDATE"])), "{target}");
+        }
+
+        // User_UPDATE: the reportee yes; someone outside the line or the Owner, no.
+        let manager = fx.as_user(&a, "ZZRUL", &["Authorities.User_READ", "Authorities.User_UPDATE"]);
+        s.update_password(&manager, Some(b.id), &new("Zz@13579b")).await.unwrap();
+        for target in [d.id, owner.id] {
+            let (st, msg) = code(s.update_password(&manager, Some(target), &new("Zz@13579c")).await).unwrap_err();
+            assert_eq!((st, msg), (StatusCode::FORBIDDEN, crate::errors::message("hierarchy_error", &[])), "{target}");
+        }
+
+        // The whole client: an Owner, or a Client_MANAGE holder; each still needs User_UPDATE.
+        let owner_ca = fx.as_user(&owner, "ZZRUL", &["Authorities.User_UPDATE", "Authorities.ROLE_Owner"]);
+        s.update_password(&owner_ca, Some(d.id), &new("Zz@13579d")).await.unwrap();
+        let manage = fx.as_user(&d, "ZZRUL", &["Authorities.User_UPDATE", "Authorities.ROLE_Client_MANAGE"]);
+        s.update_password(&manage, Some(a.id), &new("Zz@13579e")).await.unwrap();
+        let owner_only = fx.as_user(&owner, "ZZRUL", &["Authorities.ROLE_Owner"]);
+        assert_eq!(code(s.update_password(&owner_only, Some(a.id), &new("Zz@13579f")).await).unwrap_err().0, StatusCode::FORBIDDEN);
+
+        // The anonymous reset by OTP never asks for an authority: a wrong OTP is its refusal.
+        let on_c = anonymous(c, "ZZRUL");
+        let reset = body(json!({"authRequest": {"userName": d.email_id, "otp": "000000"}, "newPassword": "Zz@13579g"}));
+        assert_eq!(code(s.reset_password(&on_c, &reset).await).unwrap_err().1, crate::errors::message("user_password_invalid", &["OTP", "OTP"]));
         fx.finish().await;
     }
 }

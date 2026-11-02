@@ -1,7 +1,7 @@
 //! files-serve / files-manage configuration. Local: `config/files-*.toml`; the deployed templates are
 //! `rust/files-*.toml` in the private oci-config repo.
 
-use platform::config::{EurekaConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
+use platform::config::{RegistryConfig, MySqlConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct FilesConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     pub redis: RedisConfig,
     pub security: SecurityConfig,
     pub database: MySqlConfig,
@@ -23,7 +23,7 @@ impl Default for FilesConfig {
         Self {
             server: ServerConfig { port: 8103, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             redis: RedisConfig::default(),
             security: SecurityConfig::default(),
             database: MySqlConfig { database: "files".into(), ..Default::default() },

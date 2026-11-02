@@ -5,7 +5,8 @@
 //! The template is read and rendered as the email path does it (`AbstractTemplateService`: the
 //! language, then every part of that language's set through FreeMarker, both from the
 //! `connections` crate); the HTML `body` part becomes the PDF in [`crate::pdf`], which stands in
-//! for openhtmltopdf (see there for what it draws).
+//! for openhtmltopdf (see there for what it draws). Rust only: `fileData.sha256` is the SHA-256
+//! of the PDF bytes written.
 
 use std::sync::Arc;
 
@@ -18,8 +19,7 @@ use kirun::model::FunctionOutput;
 use kirun::{Map, Value};
 use overridable::{JMap, JValue};
 
-use super::message::gson_tree;
-use super::support::{empty_result, event_output, require_context_key, Java, JavaFunction};
+use super::support::{empty_result, event_output, gson_tree, require_context_key, Java, JavaFunction};
 use super::{arg_string, output};
 use crate::context;
 use crate::error::CoreError;
@@ -180,9 +180,7 @@ impl TemplateToPdf {
             // PdfConversionService sends the message key itself.
             _ => return Err(CoreError::coded(StatusCode::INTERNAL_SERVER_ERROR, "CORE.TEMPLATE_BODY_MISSING", "template_details_missing")),
         };
-        let pdf = tokio::task::spawn_blocking(move || crate::pdf::html_to_pdf(&html))
-            .await
-            .map_err(|e| CoreError::unknown(e.to_string()))?;
+        let pdf = crate::pdf_render::render(html).await.map_err(CoreError::unknown)?;
         Ok(Some(pdf))
     }
 
@@ -208,6 +206,12 @@ impl TemplateToPdf {
         }
         self.files.create(file_type, client_code, overwrite, file_location, &name, bytes).await
     }
+}
+
+/// The SHA-256 of `bytes`, 64 lower-case hex digits.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// `getAsJsonObject()` read by `JsonUtil.toMap` (`HashMap`s all the way down).
@@ -244,11 +248,15 @@ impl JavaFunction for TemplateToPdf {
         let Some(bytes) = self.convert(&template_name, &app, &client, "pdf", &data).await? else {
             return Err(empty_result(TEMPLATE_TO_PDF));
         };
-        let Some(details) =
+        let sha256 = sha256_hex(&bytes);
+        let Some(mut details) =
             self.make_file_in_files(&client, &template_name, &file_name, &file_location, &file_type, overwrite, bytes).await?
         else {
             return Err(empty_result(TEMPLATE_TO_PDF));
         };
+        // Rust only: the fingerprint of the exact bytes stored, so a signed form can name the
+        // unsigned one it was made from (whichever renderer drew it).
+        details.insert("sha256".into(), Value::String(sha256));
         Ok(output("fileData", gson_tree(Value::Object(details))))
     }
 }
@@ -401,6 +409,9 @@ mod tests {
         assert_eq!(up.query, "clientCode=SYSTEM&override=true&filePath=%2Fdocs&fileName=inv.pdf");
         assert_eq!(up.content_type, None);
         assert_eq!(detail["size"], json!(up.bytes.len()));
+        // The fingerprint is of the very bytes the files service got.
+        assert_eq!(detail["sha256"], json!(sha256_hex(&up.bytes)));
+        assert_eq!(detail["sha256"].as_str().unwrap().len(), 64);
         assert_eq!(assert_valid(&up.bytes), 1);
         assert_eq!(pdf_text(&up.bytes), ["Invoice 42\nDear Ann, & thanks."]);
 
@@ -494,6 +505,12 @@ mod tests {
         let e = t.convert("invoice", "a", "c", "docx", &serde_json::Map::new()).await.unwrap_err();
         assert_eq!((e.status(), e.text()), (StatusCode::NOT_FOUND, "The given file format docx is invalid.".to_string()));
         assert_eq!(t.convert("invoice", "", "", "pdf", &serde_json::Map::new()).await.unwrap(), None);
+    }
+
+    #[test]
+    fn sha256_is_lower_case_hex() {
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     #[test]

@@ -62,7 +62,9 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   `CoreServices.*` functions of `CoreFunctionRepository`, in its order. The signatures of the 53
   added in step 3 are Java's own `repositoryFind` JSON, kept in
   `functions/java_signatures.json` and read back into kirun's model (a test checks each reads
-  back to the JSON); a signature change in Java needs that file re-captured. Seven Rust-only
+  back to the JSON); a signature change in Java needs that file re-captured. Three parameters
+  in it are Rust only: `CoreServices.Email.SendEmail`'s `attachments`, `cc` and `bcc` (see the
+  connections crate's DIFFERENCES.md, items 25 and 36). Seven Rust-only
   `CoreServices.Platform.*` follow them (79 in all; see "Platform functions").
 - **D4 KIRun built-ins follow kirun-js** (`D4_kirun_builtins`). The `System.*` functions and
   schemas are kirun-rust's: the set listed with `includeKIRunRepos=true` differs, signatures
@@ -182,12 +184,19 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   `debugMessage` is Feign's exception text (method, URL, the downstream body), core-exec's is
   the message, or, for a coded refusal from a Rust security unit (passed on with its code), that
   unit's own detail, which starts with Java's text (`Access Denied: needs Authorities.User_READ`).
-- **D31 `TemplateToPdf`'s renderer.** openhtmltopdf (CSS layout, images, SVG, colours, fonts,
-  bidi) is replaced by `crate::pdf`: the HTML's text and structure (headings, emphasis, lists,
-  tables side by side, `pre`, breaks, alignment, page breaks) in Helvetica / Courier on A4.
-  Characters outside WinAnsi print as `?`; images are not drawn, so nothing is fetched from
-  files. Everything around it (template, language, parts, file name, the files upload, the
-  output) is Java's.
+- **D31 `TemplateToPdf`'s renderer.** openhtmltopdf is replaced by the pdf-render sidecar
+  (`deploy/pdf-render`, WeasyPrint: CSS with `<style>` and `@page`, tables, borders, colours,
+  fonts, running headers, images) when `[pdf] upstream` is set (`crate::pdf_render`). The sidecar
+  reads images only from the files service (any host's `/api/files/{static,secured}/file/...`)
+  and `data:` URLs, Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`: any family a
+  template links, kept in memory after the first fetch) and `https` hosts listed in its
+  `ALLOWED_HOSTS`; Java fetched any URL, so other external images are left out. WeasyPrint is not openhtmltopdf: a few CSS details lay out differently, and CSS 3 layout
+  (flex) it supports where openhtmltopdf did not. Without `[pdf] upstream`, or when the sidecar
+  fails and `[pdf] fallback_on_error` is on (off by default since 2026-10-22: a sidecar failure fails
+  the call), `crate::pdf` makes the PDF: the HTML's text and
+  structure (headings, emphasis, lists, tables side by side, `pre`, breaks, alignment, page
+  breaks) in Helvetica / Courier on A4, characters outside WinAnsi as `?`, no images. Everything
+  around it (template, language, parts, file name, the files upload, the output) is Java's.
 - **D32 the definition marker's value.** Java's message, file, e-mail, AI, notification and event
   functions compare `DefinitionFunction.CONTEXT_KEY` with `"true"`; core-exec only knows whether
   a definition is running, so "present but not true" (which core never sets) is unreachable.
@@ -206,6 +215,76 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
 - **Not run by the live parity:** anything that would send (REST to a real target, e-mail,
   WhatsApp, calls, AI) or publish (events, notifications) on the Java side. Those are covered by
   the unit tests against in-process fakes.
+
+### Data notifications and the retired message functions (2026-10-22, Rust only)
+
+- **D42 `CoreServices.Notification.SendDataNotification`.** A push to the open browser tabs of
+  one user (`User Id`) or of a client's users (`Client Id`, `Client Code`), optionally only
+  those holding `filterAuthorization`, that is never stored (no `notification_inapp` row, no
+  bell entry). Arguments: `appCode`, `clientCode`, `targetType`, `targetId`, `targetCode`,
+  `filterAuthorization` (as `SendNotification`), `eventName`, `data` (any JSON) and
+  `ttlSeconds` (1 to 3600, default 60); output `{sent}`. The caller and hierarchy checks are
+  `SendNotification`'s (`connections::notification::prepare`), and only inside a server
+  function. The event name is 1 to 64 letters, digits, `_ . -`, not `init` or `notification`;
+  the data at most 64 KB as JSON (400s `CORE.DATA_NOTIFICATION_EVENT_INVALID`,
+  `CORE.DATA_NOTIFICATION_EVENT_RESERVED`, `CORE.DATA_NOTIFICATION_TOO_LARGE`). The message goes
+  on the notifications exchange with `kind: DATA`, `eventName`, `data` and `expiresAt`; the
+  notification service delivers it (crates/notification/DIFFERENCES.md). Its signature is
+  built in Rust (`data_notification_signature`), not captured from Java, and `repositoryFind` /
+  `repositoryFilter` list it after the 72 functions Java has.
+- **D43 `CoreServices.Message.*` fail at once.** The message service is retired. The seven
+  functions (`SendWhatsapp`, `MakeCall`, `LinkWhatsappNumber`, `ListWhatsappNumbers`,
+  `GetWhatsappPairingCode`, `RemoveWhatsappNumber`, `SetDefaultWhatsappNumber`) stay registered
+  under Java's signatures, because stored definitions still name them (on the local stack,
+  2026-10-22: eight leadzumptwo server functions), but each answers 410
+  `CORE.MESSAGE_SERVICE_RETIRED` before its arguments are even validated, and calls nothing.
+  The message client (`message_calls.rs`) and `[message] upstream` are removed;
+  `CORE.WHATSAPP_*` and `CORE.MESSAGE_*_FORBIDDEN` are no longer raised.
+- **D44 `CoreServices.REST.*` downloads in webhook and event runs.** With `downloadAsAFile`,
+  a run holding `Authorities._Webhook` (the internal webhook route) or
+  `Authorities._Event_Runner` (an event without its own authentication) stores the response
+  through files' internal create route as a **secured** file of the run's client (or of a
+  `fileClientCode` the run's client manages), where Java stored nothing for an anonymous
+  caller. The file's `url` is files' answer: `api/files/secured/file/<CLIENT>/<fileLocation>/<name>`.
+  Rules in crates/connections/DIFFERENCES.md (30).
+- **D45 a connection's `consentAuth`** (2026-10-23, added; no Java equivalent). The Connection
+  document has an optional `consentAuth` (an authority expression, as a storage's `createAuth`),
+  read by core-exec and written by core-editor (E14). `POST /api/core/connections/oauth/evoke`
+  checks it against the caller with KIRun's evaluator (`authorities::KirunAuthorityCheck`, the
+  one storage gates use) before a state row or consent URL is made, and answers 403
+  `CORE.CONNECTION_CONSENT_FORBIDDEN` when the caller does not satisfy it. `GET
+  /api/core/connections/oauth/revoke` checks it too, before anything is revoked (403
+  `CORE.CONNECTION_REVOKE_FORBIDDEN`). Absent or blank: as before. The callback is not gated.
+  Rules in crates/connections/DIFFERENCES.md (32).
+- **D46 `CoreServices.Event.GetScheduleState`** (2026-10-23, Rust only). `eventName`,
+  `appCode` and `clientCode` in; `exists`, `enabled`, `cron`, `clientCode`, `ownCopy` out: the
+  schedule the caller's client runs on, from its effective definition (its own copy merged over
+  the base, else the base) on the live surface, also when called on the draft surface. Access
+  as `SetScheduleEnabled`: only inside a server function (else `exists` false), the app it runs
+  in and the caller's own client; another `appCode` or `clientCode` is 403
+  `CORE.SCHEDULE_STATE_FORBIDDEN`. `exists` is false for an event the app does not have or one
+  without a schedule.
+- **D47 `TemplateToPdf`'s `fileData.sha256`** (2026-11-01, Rust only). The output's `fileData`
+  (the files service's details) also carries `sha256`: the SHA-256 of the PDF bytes core uploaded,
+  64 lower-case hex digits, whichever renderer drew them (pdf-render or the text fallback). A
+  signed form records the fingerprint of the unsigned one it was made from (CXZ-1318).
+- **D48 `GetAuthentication`'s `clientIp` and `userAgent`** (2026-11-01, Rust only). The `auth`
+  object has two more strings, signed in or not: `clientIp`, the address our own proxies wrote
+  (`X-Real-IP`, which the load balancer's nginx sets from `$remote_addr` after its Cloudflare
+  real-ip rule; else the last `X-Forwarded-For` hop, the one the gateway appended; never the
+  first, which the browser can write; only a value that parses as an IP address), and
+  `userAgent`, the `User-Agent` header trimmed to 300 characters. Both are empty for event and
+  webhook runs. The `Security.Context.ContextAuthentication` schema lists them.
+- **D49 contact codes for a caller who is not signed in** (2026-11-01, Rust only).
+  `SendContactCode` and `VerifyContactCode` take `subjectKey`. A server function that has already
+  checked something the caller holds (a sign link it found by its token, still live) passes its
+  key; the codes then belong to that subject of the URL's client, not to a user, and only the same
+  key checks them. Without a user and without a key the answer stays `SIGN_IN`; both still run
+  only inside a server function. Limits for a subject: one code per target every 30 s, five an
+  hour per subject, five an hour to one target over all subjects, five wrong tries, once, the app's
+  OTP expiry. security-internal keeps a subject's rows in `security_otp` with no `USER_ID` and
+  `PURPOSE` `CONTACT_SUBJECT:<sha256 of client code and key>`. The send also records the caller's
+  address (D48) in `IP_ADDRESS`.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
@@ -436,7 +515,7 @@ the evictions each write publishes included. Tags are the parity script's case n
   service order; Java reads the services concurrently and writes them as they finish.
 - **E10 template previews** render with the FreeMarker subset `crates/connections` implements
   (`process_lenient`: an element that fails is skipped, as `IGNORE_HANDLER` does), and the PDF
-  with core's text renderer (as `CoreServices.File.TemplateToPdf`).
+  with the same renderer as `CoreServices.File.TemplateToPdf` (D31).
 - **E11 the schedule zones** are chrono-tz's IANA regions; Java lists its JDK's tz database. The
   two lists match locally; a tz release can add or rename a region on one side first.
 - **E12 a refused anonymous caller.** Anything outside core's permitted paths answers an
@@ -451,6 +530,62 @@ the evictions each write publishes included. Tags are the parity script's case n
   next (measured: the core restarted at 21:01 on 2026-10-15 flipped all three). Rust writes one
   fixed order, the one Java core showed when this was ported; the parity script reports these
   as expected.
+- **E14 connection saves** (2026-10-23, added; no Java equivalent). The editor keeps a
+  connection's `consentAuth` (D45) on create and update (an update without it clears it, as
+  every copied field), and its save-time address check follows `[connections]
+  block_private_targets` (default true: unchanged). Set to false, which only the local
+  `config/core-editor.toml` does, a connection may be saved pointing at a private, loopback or
+  internal host (a local SMTP sink); the scheme rules still refuse. Rules in
+  crates/connections/DIFFERENCES.md (33).
+- **E15 a connection's credentials never leave core-editor** (2026-10-23, Rust only). Java
+  answered a connection whole to a caller with `Connection_UPDATE` (the list's eager `data`,
+  its drafts and its version history to anyone who could read them). Here every reply that
+  carries a connection (`GET /{id}`, `?draft=true`, the eager list, create, update, draft
+  save, publish, fork, `createForClient`, `PATCH /{id}/blueprint`, `/api/core/versions/{id}`
+  and `/{id}/query`) has each secret in `connectionDetails` as `********`
+  (`editor::secrets`; the key rule is crates/connections/DIFFERENCES.md, 34). A secret
+  sent back absent from an object the save sends, null, empty or as `********` keeps the stored
+  one on update, on a draft save (from the draft it replaces, else the document) and so on
+  publish; a new value replaces it; on a create there is nothing to keep and such a secret is
+  left out. A save without `connectionDetails` replaces the details, as in Java. The version
+  rows keep the full object (publish's three-way merge reads them) and are masked when
+  answered; a list filter or sort, or a version query condition or sort, naming
+  `connectionDetails` answers an empty page. The code that opens connections reads the stored
+  document and is unchanged, and the `/api/core/connections/internal/*` routes (other units
+  sending mail and opening REST and app-data connections; nginx refuses every `/internal` path
+  from outside) still answer the full connection. Core's transports never carried connections.
+- **E16 the admin purge** (2026-10-26, Rust only, no Java counterpart). `DELETE
+  /api/core/purge/client/{clientCode}?dryRun=` and `DELETE /api/core/purge/app/{appCode}?dryRun=`
+  remove every core trace of a dead client, or of an app for every client (multi's clean-up
+  calls them, then ui's and security's). Only a signed-in SYSTEM caller (`is_system_client`)
+  holding `Authorities.Client_DELETE` (client) or `Authorities.Application_DELETE` (app) may
+  call them (401 anonymous, 403 otherwise); `SYSTEM` and codes that are not letters and digits
+  (an app code may also hold `_`) are a 400. `dryRun` is **true unless it is `false`**: a dry
+  run counts and deletes nothing. A client's purge deletes every document in every `core`
+  collection (listed at run time) whose `clientCode` is the client, every row of the core
+  MySQL schema's tables having a `CLIENT_CODE` column with that value, and drops every tenant
+  database and schema `<client>_<anything>` (the name split at its first `_`, the left part
+  the client exactly) on the engines' default servers and every APP_DATA connection's server.
+  An app's purge does the same keyed by app: documents whose `appCode` or `objectAppCode`
+  (versions, drafts) is the app, rows with an `APP_CODE` column, and every
+  `<client>_<app>` / `<client>_<app>_draft`. Names that cannot be tenant databases (no `_`,
+  anything but letters, digits and `_`, the servers' and the platform's own: `admin`,
+  `config`, `local`, `ui`, `core`, `security`, `information_schema`, `mysql`,
+  `performance_schema`, `sys`, `entity_processor`, ...) are never dropped
+  (`appdata::engine::PROTECTED_DATABASES`). The answer is a report, the same shape for both
+  runs: `{"dryRun", "mongo": {"<db>.<collection>": n}, "mysql": {"<schema>.<table>": n},
+  "dropped": [names], "errors": [...]}`; a dropped database is counted as `"<name>.*"` (Mongo
+  `dbStats.objects`, MySQL the `table_rows` estimate). A failure is a line in `errors` and the
+  rest goes on. A real run then evicts what `DELETE /api/core/internal/cache` does and, by
+  name on every instance, the deleted definitions' caches, the affected apps' page caches, the
+  engines' table and index caches of the affected apps' storages, and the inheritance,
+  dependency and storage reference caches.
+  Two later rules (2026-10-26): a collection of 64 MB or more is read only through its index on
+  `objectAppCode` or `appCode` (as the ui purge does: a full scan of a big `version` collection
+  took minutes a call on dev), and caches are evicted only when the purge dropped a database or
+  deleted a document or row.
+  Who may purge (2026-10-26): a client only by a client that manages it (security's
+  `doesClientManageClientCode`), never by itself and never SYSTEM; an app only by SYSTEM.
 
 Java's own behaviour kept (not differences, listed so nobody "fixes" them by accident):
 `TransportService` exports and imports schemas, storages, functions, templates, event

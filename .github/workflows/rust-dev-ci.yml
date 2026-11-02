@@ -1,9 +1,6 @@
-# The Rust units for dev: on a push to oci-development (or by hand), build all 15 images, push
+# The Rust units for dev: on a push to oci-development (or by hand), build the images of the units it changed (of 15 units, Lighthouse and pdf-render), push
 # ocir.../idfmutpuhiky/dev-<unit>:<sha> and :latest, then deploy them to the dev host with
 # keepup-rust.sh. The work is in rust-build-deploy.yml.
-#
-# The deploy job runs only when the repository variable RUST_DEPLOY_DEV is 'true': until the
-# switch the images are built and pushed, and nothing touches the host (the runbook: oci-config rust/RUNBOOK.md).
 
 name: rust-dev-ci
 
@@ -16,12 +13,15 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'deploy/Dockerfile.prebuilt'
+      - 'deploy/pdf-render/**'
+      - 'sql/**'
+      - 'tools/ci_sql.sh'
       - '.github/workflows/rust-build-deploy.yml'
       - '.github/workflows/rust-dev-ci.yml'
   workflow_dispatch:
     inputs:
       units:
-        description: Units to deploy, space separated (empty deploys all 15; gateway-rust always goes last)
+        description: Units to deploy, space separated (empty builds and deploys what the push changed; Lighthouse first, gateway-rust last)
         required: false
         type: string
         default: ''
@@ -39,10 +39,15 @@ jobs:
     uses: ./.github/workflows/rust-build-deploy.yml
     with:
       environment: dev
+      profile: ci
       ssh_key: /home/ubuntu/keys/dev-internal.key
-      deploy: ${{ vars.RUST_DEPLOY_DEV == 'true' }}
+      deploy: true
       units: ${{ inputs.units || '' }}
     secrets:
       ocir_user: ${{ secrets.OCI_NON_PROD_DOCKER_USER_NAME }}
       ocir_token: ${{ secrets.OCI_NON_PROD_CLI_AUTH_TOKEN }}
       server_ip: ${{ secrets.DEV_SERVER_IP }}
+      lighthouse_github_token: ${{ secrets.LIGHTHOUSE_GITHUB_TOKEN }}
+      lighthouse_admin_token_sha256: ${{ secrets.LIGHTHOUSE_ADMIN_TOKEN_SHA256 }}
+      db_user: ${{ secrets.DEV_DB_USER }}
+      db_password: ${{ secrets.DEV_DB_PASSWORD }}

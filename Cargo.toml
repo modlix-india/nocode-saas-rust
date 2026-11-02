@@ -52,6 +52,7 @@ local-ip-address = "0.6"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 metrics-process = "2.4"
+mimalloc = { version = "0.1.52", default-features = false }
 mime_guess = "2"
 moka = { version = "0.12", features = ["future"] }
 percent-encoding = "2"
@@ -61,7 +62,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql", "chrono", "macros"] }
+# MySQL over OpenSSL (native-tls), not rustls: OCI HeatWave serves an X.509 v1 certificate, which
+# rustls refuses outright ("UnsupportedCertVersion") even in the default "preferred" mode, where
+# the certificate is not verified. OpenSSL takes it, as Java's drivers did (sslMode PREFERRED:
+# encrypted, not verified). The runtime image (distroless cc-debian12) carries libssl3.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "mysql", "chrono", "macros"] }
 thiserror = "2"
 toml = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -82,7 +87,7 @@ chrono-tz = "0.10"
 hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 
-kirun = "2.0.1"
+kirun = "2.2.0"
 hmac = "0.12"
 md-5 = "0.10"
 sha1 = "0.10"
@@ -92,3 +97,11 @@ quick-xml = "0.39"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# dev and stage images (rust-build-deploy.yml, profile `ci`): about twice as fast to compile as
+# release (each crate split over the runner's cores, no link-time optimisation), at the cost of
+# somewhat bigger and slightly slower binaries. prod builds with release.
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16

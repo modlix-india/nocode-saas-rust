@@ -39,6 +39,8 @@ const MESSAGE: &str = "message";
 const OPERATION: &str = "operation";
 const TEXT_INDEX_NAME: &str = "_textIndex";
 const DUPLICATE_ID_INDEX: &str = "index: _id_";
+/// The per-database collection that holds named counters (`Storage.NextSequence`).
+const SEQUENCE_COLLECTION: &str = "_mlx_sequence";
 const AGGREGATE_MAX_SECONDS: u64 = 30;
 const VERSION_PURGE_BATCH: usize = 1000;
 const COPY_BATCH_SIZE: usize = 500;
@@ -568,7 +570,8 @@ impl AppDataEngine for MongoAppDataService {
                         return Err(AppDataError::storage_object_id_exists(&id.to_hex(), &storage.name));
                     }
                 }
-                return Err(e.into());
+                // Another unique index: a 409 naming the storage (`CORE.DUPLICATE_KEY`).
+                return Err(AppDataError::from(e).in_storage(&storage.name));
             }
         };
         let inserted = match result.inserted_id {
@@ -634,7 +637,7 @@ impl AppDataEngine for MongoAppDataService {
         let validated = self.hooks.validator.validate(&to_write, storage, schema.as_ref()).await?;
         let mut document = bson_util::from_validated(&relation_keys(storage), &validated)?;
         codec::encode(&mut document, storage.column_definitions.as_ref());
-        coll.replace_one(doc! { ID: object_id }, document).await?;
+        coll.replace_one(doc! { ID: object_id }, document).await.map_err(|e| AppDataError::from(e).in_storage(&storage.name))?;
 
         let mut doc = coll
             .find_one(doc! { ID: object_id })
@@ -659,6 +662,48 @@ impl AppDataEngine for MongoAppDataService {
             Some(d) => Ok(convert_ids(storage, d, false)),
             None => Err(AppDataError::object_not_found(&storage.name, id)),
         }
+    }
+
+    /// `$inc` on the counter's document is atomic on any deployment, standalone included. The
+    /// first call inserts `start`; two first calls racing meet on the `_id` and the loser
+    /// increments instead.
+    async fn next_sequence(
+        &self,
+        cx: &Ctx,
+        client_code: &str,
+        conn: Option<&Connection>,
+        storage: &Storage,
+        key: &str,
+        start: i64,
+    ) -> AppDataResult<i64> {
+        use mongodb::options::ReturnDocument;
+        let tenant = cx.tenant(client_code, storage);
+        let coll = self
+            .client(conn)
+            .await?
+            .database(&database_name(&tenant, &storage.app_code, cx.draft))
+            .collection::<BsonDocument>(SEQUENCE_COLLECTION);
+        let name = format!("{}:{key}", storage.unique_name);
+        for _ in 0..3 {
+            let bumped = coll
+                .find_one_and_update(doc! { ID: &name }, doc! { "$inc": { "value": 1_i64 } })
+                .return_document(ReturnDocument::After)
+                .await?;
+            if let Some(d) = bumped {
+                return match d.get("value") {
+                    Some(Bson::Int64(v)) => Ok(*v),
+                    Some(Bson::Int32(v)) => Ok(i64::from(*v)),
+                    Some(Bson::Double(v)) => Ok(*v as i64),
+                    _ => Err(AppDataError::internal(format!("sequence {name} holds no number"))),
+                };
+            }
+            match coll.insert_one(doc! { ID: &name, "value": start }).await {
+                Ok(_) => return Ok(start),
+                Err(e) if is_duplicate_key(&e).is_some() => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(AppDataError::internal(format!("sequence {name}: could not be read or created")))
     }
 
     async fn read_page(&self, cx: &Ctx, client_code: &str, conn: Option<&Connection>, storage: &Storage, query: &Query)
@@ -964,6 +1009,28 @@ impl AppDataEngine for MongoAppDataService {
         }
         let Ok(client) = self.client(conn).await else { return Ok(false) };
         Ok(client.database(&database_name(client_code, app_code, true)).drop().await.is_ok())
+    }
+
+    async fn database_names(&self, conn: Option<&Connection>) -> AppDataResult<Vec<String>> {
+        Ok(self.client(conn).await?.list_database_names().await?)
+    }
+
+    async fn database_rows(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<i64> {
+        let stats = self.client(conn).await?.database(name).run_command(doc! {"dbStats": 1}).await?;
+        Ok(match stats.get("objects") {
+            Some(Bson::Int32(n)) => i64::from(*n),
+            Some(Bson::Int64(n)) => *n,
+            Some(Bson::Double(n)) => *n as i64,
+            _ => 0,
+        })
+    }
+
+    async fn drop_database(&self, conn: Option<&Connection>, name: &str) -> AppDataResult<bool> {
+        if !crate::engine::is_tenant_database_name(name) {
+            return Err(AppDataError::internal(format!("IllegalArgumentException: not a tenant database: {name}")));
+        }
+        self.client(conn).await?.database(name).drop().await?;
+        Ok(true)
     }
 
     async fn copy_live_to_draft(

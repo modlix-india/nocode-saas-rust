@@ -99,6 +99,14 @@ pub trait TokenStore: Send + Sync {
     /// `revokeToken`: every unrevoked token of the connection (of the type, when given) marked
     /// revoked; true when any row changed.
     async fn revoke(&self, client_code: &str, app_code: &str, connection_name: &str, token_type: Option<TokenType>) -> ConnResult<bool>;
+    /// Rust only: the first row of a consent (the row its evoke made, which carries the state
+    /// every later token of that consent copies) for the client, app and connection. Its
+    /// `CREATED_AT` is when the business's sign-in was made and `USER_ID` who made it. The
+    /// default reads any row of the state, for stores that keep one row per state.
+    async fn consent_row(&self, client_code: &str, app_code: &str, connection_name: &str, state: &str) -> ConnResult<Option<CoreToken>> {
+        let _ = (client_code, app_code, connection_name);
+        self.by_state(Some(state)).await
+    }
     /// `create`: inserts and reads the row back.
     async fn create(&self, token: &CoreToken) -> ConnResult<CoreToken>;
     /// `update`: every column but `CREATED_BY` / `CREATED_AT` from the entity, then the row.
@@ -155,6 +163,16 @@ pub fn active_token_sql(client_code: &str, app_code: &str, connection_name: &str
 
 pub fn by_state_sql(state: &str) -> Statement {
     Statement { sql: format!("SELECT {COLUMNS} FROM core_tokens WHERE STATE = ? LIMIT 1"), params: vec![s(state)] }
+}
+
+pub fn consent_row_sql(client_code: &str, app_code: &str, connection_name: &str, state: &str) -> Statement {
+    Statement {
+        sql: format!(
+            "SELECT {COLUMNS} FROM core_tokens WHERE CLIENT_CODE = ? AND APP_CODE = ? AND CONNECTION_NAME = ? AND STATE = ? \
+             ORDER BY ID ASC LIMIT 1"
+        ),
+        params: vec![s(client_code), s(app_code), s(connection_name), s(state)],
+    }
 }
 
 pub fn by_id_sql(id: u64) -> Statement {
@@ -325,6 +343,10 @@ impl TokenStore for TokenDao {
         Ok(self.execute(revoke_sql(client_code, app_code, connection_name, token_type)).await?.rows_affected() > 0)
     }
 
+    async fn consent_row(&self, client_code: &str, app_code: &str, connection_name: &str, state: &str) -> ConnResult<Option<CoreToken>> {
+        self.one(consent_row_sql(client_code, app_code, connection_name, state)).await
+    }
+
     async fn create(&self, t: &CoreToken) -> ConnResult<CoreToken> {
         let id = self.execute(insert_sql(t)).await?.last_insert_id();
         self.one(by_id_sql(id)).await?.ok_or_else(|| ConnError::other("The token just created could not be read"))
@@ -393,6 +415,9 @@ mod tests {
         assert!(r.sql.starts_with("UPDATE core_tokens SET IS_REVOKED = 1 WHERE TOKEN_TYPE = ? AND CLIENT_CODE = ?"));
         assert_eq!(by_state_sql("x").params, vec![Param::Str(Some("x".into()))]);
         assert_eq!(by_id_sql(3).params, vec![Param::U64(Some(3))]);
+        let c = consent_row_sql("S", "a", "c", "st");
+        assert!(c.sql.ends_with("WHERE CLIENT_CODE = ? AND APP_CODE = ? AND CONNECTION_NAME = ? AND STATE = ? ORDER BY ID ASC LIMIT 1"), "{}", c.sql);
+        assert_eq!(c.params, vec![s("S"), s("a"), s("c"), s("st")]);
         assert_eq!(TokenType::parse("REFRESH"), Some(TokenType::Refresh));
         assert_eq!(TokenType::parse("X"), None);
         let c = JavaClock { zone_offset_seconds: 19_800 };

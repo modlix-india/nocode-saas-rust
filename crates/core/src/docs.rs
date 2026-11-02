@@ -69,6 +69,8 @@ pub const CONNECTION: Pojo = Pojo {
             Field::new("connectionDetails", K::MapObject, C::MapObject),
             Field::new("isAppLevel", K::BoxBool, C::Copy),
             Field::new("onlyThruKIRun", K::BoxBool, C::Copy),
+            // Rust only: the OAuth consent gate (connections' `Connection::consent_auth`).
+            Field::new("consentAuth", K::Str, C::Copy),
         ],
     ],
 };

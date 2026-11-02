@@ -12,6 +12,7 @@
 
 mod generic;
 mod internal;
+mod purge;
 mod resources;
 
 use axum::extract::Request;
@@ -69,6 +70,8 @@ enum Route {
     RetentionDelete(String),
     RetentionEffective,
     RetentionPreview,
+    /// The admin purge: (`client` or `app`, code).
+    Purge(String, String),
     MethodNotAllowed(&'static str),
 }
 
@@ -123,6 +126,7 @@ impl Route {
             RetentionUpdate(_) | RetentionDelete(_) => "/api/files/retention/{id}",
             RetentionEffective => "/api/files/retention/effective",
             RetentionPreview => "/api/files/retention/preview",
+            Purge(k, _) => if k == "client" { "/api/files/purge/client/{clientCode}" } else { "/api/files/purge/app/{appCode}" },
             MethodNotAllowed(t) => t,
         }
     }
@@ -241,6 +245,13 @@ fn route(method: &Method, rest: &str) -> Option<Route> {
             Method::DELETE => AccessDelete(id),
             _ => MethodNotAllowed("/api/files/accesspath/{id}"),
         });
+    }
+
+    if let Some(p) = rest.strip_prefix("purge/") {
+        return match (p.split_once('/'), method == Method::DELETE) {
+            (Some((k @ ("client" | "app"), code)), true) if !code.is_empty() && !code.contains('/') => Some(Purge(k.to_string(), code.to_string())),
+            _ => None,
+        };
     }
 
     if rest == "retention" {
@@ -425,6 +436,7 @@ async fn handle(st: AppState, r: Route, uri: String, req: Request) -> AppResult<
                 .await?,
             ))
         }
+        Purge(kind, code) => purge::handle(&cx, &kind, &code).await,
         MethodNotAllowed(_) => Err(AppError::Empty(StatusCode::METHOD_NOT_ALLOWED)),
     }
 }

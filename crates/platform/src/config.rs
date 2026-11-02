@@ -61,6 +61,8 @@ fn layered<T>(service: &str, document: Option<&serde_json::Value>) -> Result<T>
 where
     T: DeserializeOwned + Serialize + Default,
 {
+    // Configuration is the first thing every unit loads, before any TLS client exists.
+    crate::crypto::install();
     let mut fig = Figment::from(Serialized::defaults(T::default()));
     if let Some(file) = config_file(service) {
         fig = fig.merge(Toml::file(&file));
@@ -121,6 +123,7 @@ pub async fn load_async<T>(service: &str) -> Result<Loaded<T>>
 where
     T: DeserializeOwned + Serialize + Default,
 {
+    crate::crypto::install();
     if !lighthouse_urls_set() {
         return Ok(Loaded { config: load(service)?, lighthouse: None, warning: None });
     }
@@ -258,11 +261,19 @@ pub struct ServerConfig {
     pub port: u16,
     /// How long to keep serving after leaving discovery, so requests already on their way land.
     pub shutdown_grace_seconds: u64,
+    /// The largest request body a handler reads into memory (`Bytes`, `String`, `Json`, forms);
+    /// a larger one is answered 413. Java's codecs held 50 MB (`AbstractBaseConfiguration
+    /// .getInMemorySize`); axum's own default is 2 MiB, too small for big page and function
+    /// definitions. A route can still set its own `DefaultBodyLimit` (files disables it).
+    pub max_body_bytes: usize,
 }
+
+/// [`ServerConfig::max_body_bytes`]'s default: Java's 50 MB.
+pub const DEFAULT_MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self { port: 8080, shutdown_grace_seconds: 5 }
+        Self { port: 8080, shutdown_grace_seconds: 5, max_body_bytes: DEFAULT_MAX_BODY_BYTES }
     }
 }
 
@@ -297,7 +308,7 @@ impl Default for TelemetryConfig {
     }
 }
 
-/// How to reach another service: a fixed list of base URLs (round robin), or `eureka:<APP>`
+/// How to reach another service: a fixed list of base URLs (round robin), or `lighthouse:<APP>`
 /// to follow the Java registry while it still exists.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
@@ -323,14 +334,14 @@ impl UpstreamConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub struct EurekaConfig {
-    /// Register this instance in Eureka so Java Feign clients can call it by name. Off unless a
+pub struct RegistryConfig {
+    /// Register this instance in Lighthouse so Java Feign clients can call it by name. Off unless a
     /// Java service calls this unit.
     pub register: bool,
     /// The name to register under, e.g. `FILES`.
     pub register_as: String,
-    /// Eureka base URLs, e.g. `http://eureka:9999/eureka/`. Needed by `register` and by any
-    /// `eureka:<APP>` upstream.
+    /// Lighthouse base URLs, e.g. `http://eureka:9999/eureka/`. Needed by `register` and by any
+    /// `lighthouse:<APP>` upstream.
     pub zones: Vec<String>,
     /// The address to advertise. Defaults to this machine's primary IP.
     pub instance_ip: String,
@@ -346,6 +357,15 @@ pub struct RedisConfig {
     /// (`fil`, `ui`, `cor`...). Must match while Java instances still write the same data.
     pub cache_prefix: String,
     pub eviction_channel: String,
+    /// The most each family of local caches (one value type: resolved pages, app properties,
+    /// tokens...) may hold, in MB of estimated size. Java caps every cache NAME at 10,000 entries
+    /// instead, which leaves the total unbounded: names carry the app and page.
+    pub cache_budget_mb: u64,
+    /// The most entries each family of small values (tokens, flags, ids) may hold: their size
+    /// cannot be estimated behind an `Arc`, so they are counted instead.
+    pub cache_max_entries: u64,
+    /// How long a cached value lives after it was loaded (Caffeine's expire-after-write).
+    pub cache_ttl_secs: u64,
 }
 
 impl Default for RedisConfig {
@@ -354,6 +374,9 @@ impl Default for RedisConfig {
             url: String::new(),
             cache_prefix: "cmn".into(),
             eviction_channel: "evictionChannel".into(),
+            cache_budget_mb: 128,
+            cache_max_entries: 20_000,
+            cache_ttl_secs: 60 * 60,
         }
     }
 }
@@ -361,7 +384,7 @@ impl Default for RedisConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SecurityConfig {
-    /// Where the security service is: base URL(s) or `eureka:SECURITY`.
+    /// Where the security service is: base URL(s) or `lighthouse:SECURITY`.
     pub upstream: UpstreamConfig,
     /// Where `AuthenticationController` runs when it runs apart from the rest of security
     /// (security-auth): the caller's context (`internal/securityContextAuthentication`, 73% of

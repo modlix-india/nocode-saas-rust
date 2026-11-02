@@ -50,3 +50,29 @@ action = "Try again in a moment."
 java = "unknown_error_with_id"
 when = "Not raised by the Rust units (kept for the Java bundle's mapping). An unexpected failure answers COMMON.INTERNAL_ERROR, which says the same."
 audience = "anyone"
+
+# ---- Push keys (Rust only) ----
+
+[NOTIF.PUSH_KEY_NOT_FIREBASE]
+status = 400
+text = "This file is not a Firebase service account key."
+action = "In the Firebase console open Project settings, Service accounts, choose Generate new private key, and upload that JSON file."
+java_text = "Not a Firebase service account JSON"
+when = "Uploading the Firebase key of an Android app on the client's own developer accounts, when the file is not a service account JSON with project_id, client_email and an RSA private_key."
+audience = "signed-in"
+
+[NOTIF.PUSH_KEY_NOT_APPLE]
+status = 400
+text = "This is not an Apple push key, or the team id or key id is missing."
+action = "Upload the .p8 file from Certificates, Identifiers & Profiles, Keys (with Apple Push Notifications service on), and give its Key ID and your Team ID."
+java_text = "Not an APNs .p8 key with teamId and keyId"
+when = "Uploading the Apple push key of an iOS app on the client's own developer accounts, when the file is not a P-256 .p8 key or the team id or key id is empty."
+audience = "signed-in"
+
+[NOTIF.PUSH_KEY_TAKEN]
+status = 403
+text = "Another organisation has already given the push key for this Firebase project or Apple team in this app."
+action = "Check the Firebase project or Apple team id. If the project or team is yours, contact support: they confirm who owns it and remove the other organisation's key, then upload yours again."
+java_text = "Push key owned by another client"
+when = "Uploading a push key for an app, Firebase project or Apple team whose key another client uploaded first."
+audience = "signed-in"

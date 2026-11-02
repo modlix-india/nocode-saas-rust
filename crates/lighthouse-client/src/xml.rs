@@ -1,11 +1,11 @@
-//! Eureka's XML, as the Java server writes it (XStream, pretty printed with two spaces, no
+//! The registry protocol's XML, as the Java server writes it (XStream, pretty printed with two spaces, no
 //! declaration).
 //!
 //! py_eureka_client 0.11.10 reads only XML, with ElementTree, and throws when `<port>` has no
 //! `enabled` attribute, when `<dataCenterInfo>` has no `class`, or when a numeric element is
 //! present but empty. So every one of those is always written, from typed fields that cannot be
 //! empty. Element names and order follow the Java output exactly (see the goldens in
-//! `tests/goldens`, captured from the Java Eureka server).
+//! `tests/goldens`, captured from the Java registry server).
 
 use std::fmt::Write;
 

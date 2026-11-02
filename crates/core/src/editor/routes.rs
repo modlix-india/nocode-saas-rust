@@ -1,7 +1,8 @@
 //! core-editor's routes: the commons routers of every core document kind (CRUD, drafts, fork,
 //! publish, versions, publish-all, transport) under the Java base paths, and the core
 //! controllers' own routes on top (event definition schedules, template previews, a
-//! notification for the services, the index, the caches, an app's wipe, billing).
+//! notification for the services, the index, the caches, an app's wipe, billing, and the
+//! Rust-only admin purge of a client or an app).
 
 use std::sync::Arc;
 
@@ -29,6 +30,7 @@ use platform::security::ContextAuthentication;
 use crate::editor::billing::Billing;
 use crate::editor::caller;
 use crate::editor::index::build_index;
+use crate::editor::purge::{self, Target};
 use crate::editor::kinds::CoreKind;
 use crate::editor::schedules::{self, ScheduleModel, ScheduleSources};
 use crate::editor::storage::{DataStores, StorageOps};
@@ -55,6 +57,10 @@ pub struct CoreEditor {
     pub schedules: Arc<dyn ScheduleSources>,
     pub redis: Option<redis::Client>,
     pub eviction_channel: String,
+    pub purge_docs: Option<Arc<dyn purge::DocStore>>,
+    pub purge_rows: Option<Arc<dyn purge::RowStore>>,
+    /// Who manages whom, for the purge; `None` refuses every client purge.
+    pub purge_guard: Option<Arc<dyn purge::ManagedClients>>,
 }
 
 type St = Arc<CoreEditor>;
@@ -164,6 +170,8 @@ pub fn router(st: St) -> Router {
 fn own_routes(st: St) -> Router {
     Router::new()
         .route("/api/core", delete(delete_app))
+        .route("/api/core/purge/client/{code}", delete(purge_client))
+        .route("/api/core/purge/app/{code}", delete(purge_app))
         .route("/api/core/eventDefinitions/schedules", get(client_schedules))
         .route("/api/core/eventDefinitions/schedule/toCron", post(to_cron))
         .route("/api/core/eventDefinitions/schedule/fromCron", post(from_cron))
@@ -171,6 +179,7 @@ fn own_routes(st: St) -> Router {
         .route("/api/core/templates/preview", post(template_preview))
         .route("/api/core/templates/preview/pdf", post(template_preview_pdf))
         .route("/api/core/notifications/internal/{name}", get(internal_notification))
+        .route("/api/core/notifications/internal/app/{app_code}", get(internal_app_notifications))
         .route("/api/core/index", get(index))
         .route("/api/core/index/internal/{app_code}", get(internal_index))
         .route("/api/core/internal/cache", get(cache_names).delete(cache_reset_all))
@@ -243,6 +252,63 @@ async fn delete_app(State(st): State<St>, RawQuery(q): RawQuery, h: HeaderMap) -
     }
     .await;
     respond(R, r)
+}
+
+// ── Admin purge (Rust only) ──────────────────────────────────────────
+
+/// `DELETE /api/core/purge/client/{clientCode}?dryRun=`: see [`purge`].
+async fn purge_client(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/core/purge/client/{clientCode}", purge::CLIENT_DELETE, Target::client(&code), q, h).await
+}
+
+/// `DELETE /api/core/purge/app/{appCode}?dryRun=`: see [`purge`].
+async fn purge_app(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/core/purge/app/{appCode}", purge::APPLICATION_DELETE, Target::app(&code), q, h).await
+}
+
+/// A signed-in caller holding `authority`; a client only by a client that manages it, an app
+/// only by SYSTEM; a bad code is a 400; a dry run unless `dryRun=false`.
+async fn purge_route(st: St, route: &'static str, authority: &'static str, target: Result<Target, String>, q: Option<String>, h: HeaderMap) -> Response {
+    let ca = match caller(&st, &h, route).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    if let Err(r) = pre_authorize(&ca, authority) {
+        return with_route(r, route);
+    }
+    let target = match target {
+        Ok(t) => t,
+        Err(m) => return respond(route, Err(bad_request(&m))),
+    };
+    // A client: only a client that manages it (never itself, never SYSTEM). An app: SYSTEM only.
+    let allowed = match &target {
+        Target::Client(c) => {
+            let guard = st.purge_guard.as_deref();
+            match purge::may_purge_client(guard, ca.client_code(), c).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::error!(error = %e, "purge: could not ask security who manages the client");
+                    false
+                }
+            }
+        }
+        Target::App(_) => ca.is_system_client(),
+    };
+    if !allowed {
+        let why = match &target {
+            Target::Client(c) => format!("Access Denied: only a client that manages {c} may purge it"),
+            Target::App(_) => "Access Denied: an app purge is for the SYSTEM client only".to_string(),
+        };
+        let c = platform::error::Coded::permission_required(&[authority]).debug(why);
+        return with_route(platform::error::coded_response(&c), route);
+    }
+    let dry_run = purge::dry_run(Params::from_query(q.as_deref()).first("dryRun"));
+    tracing::warn!(target = ?target, dry_run, user = ca.user.id, "admin purge");
+    let report = purge::run(&st, &target, dry_run).await;
+    if !report.errors.is_empty() {
+        tracing::warn!(target = ?target, dry_run, errors = ?report.errors, "admin purge finished with errors");
+    }
+    respond(route, Ok(json(report.to_json())))
 }
 
 // ── EventDefinitionController ────────────────────────────────────────
@@ -383,11 +449,13 @@ async fn template_preview_pdf(State(st): State<St>, h: HeaderMap, body: Bytes) -
     if let Err(r) = caller(&st, &h, R).await {
         return r;
     }
-    let r = preview_request(&body).and_then(|(t, _, d)| {
-        crate::editor::preview::render_pdf(t.as_ref(), d.as_ref())
+    let r = match preview_request(&body) {
+        Ok((t, _, d)) => crate::editor::preview::render_pdf(t.as_ref(), d.as_ref())
+            .await
             .map(|bytes| Reply { status: StatusCode::OK, headers: Vec::new(), body: c::ReplyBody::File { content_type: "application/pdf", bytes } })
-            .map_err(unknown)
-    });
+            .map_err(unknown),
+        Err(e) => Err(e),
+    };
     respond(R, r)
 }
 
@@ -414,6 +482,36 @@ async fn internal_notification(State(st): State<St>, Path(name): Path<String>, R
     }
     .await;
     respond(R, r)
+}
+
+/// `GET /internal/app/{appCode}`: `{"count": n}`, how many notifications of the app (any client)
+/// have an `inapp` or `push` channel (Rust only). The notification service turns push on for an
+/// app only when it has one, so a site without notifications never registers a service worker.
+async fn internal_app_notifications(State(st): State<St>, Path(app_code): Path<String>, h: HeaderMap) -> Response {
+    const R: &str = "/api/core/notifications/internal/app/{app_code}";
+    if let Err(r) = caller(&st, &h, R).await {
+        return r;
+    }
+    let r = async {
+        let svc = &st.notifications;
+        let docs = svc
+            .commons()
+            .store
+            .find_docs(svc.kind().object.doc().collection(), mongodb::bson::doc! {"appCode": &app_code})
+            .await
+            .map_err(AppError::Internal)?;
+        let count = docs.iter().filter(|d| notifies_on_screen(d)).count();
+        let mut out = JMap::new();
+        out.insert("count".into(), JValue::Int(count as i64));
+        Ok(json(JValue::Object(out)))
+    }
+    .await;
+    respond(R, r)
+}
+
+/// A notification with an `inapp` or a `push` channel template.
+fn notifies_on_screen(d: &mongodb::bson::Document) -> bool {
+    d.get_document("channelTemplates").is_ok_and(|ch| ch.contains_key("inapp") || ch.contains_key("push"))
 }
 
 // ── CoreIndexController ──────────────────────────────────────────────

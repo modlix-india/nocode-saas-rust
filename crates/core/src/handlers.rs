@@ -1,7 +1,8 @@
 //! core-exec's routes: `FunctionExecutionController` and the `repositoryFind` /
 //! `repositoryFilter` routes of `FunctionController` and `SchemaController`. All of them are
 //! open (`CoreConfiguration` lists them as unauthenticated), but the caller is still asked of
-//! security, as `JWTTokenFilter` does for every request.
+//! security, as `JWTTokenFilter` does for every request. The internal webhook route (Rust only)
+//! is in [`webhook`].
 
 use std::sync::Arc;
 
@@ -23,16 +24,31 @@ use crate::gson::{to_gson, to_jackson_pretty};
 use crate::java_model::jackson_schema;
 use crate::repos::app::{app_function_repository, app_schema_repository};
 use crate::repos::{signature_json, FunctionSource, Hybrid, SchemaSource};
+use crate::run_pool::RunPool;
 use crate::state::AppState;
 
+mod webhook;
+
 pub fn router(state: AppState) -> Router {
-    crate::unmapped::without_allow_header(routes(state))
+    router_on(state, None)
 }
 
-fn routes(state: AppState) -> Router {
-    Router::new()
+/// [`router`], with the function executions (the execute routes and the webhook) run on `pool`
+/// when there is one ([`crate::run_pool`]); the other routes stay on the server's runtime.
+pub fn router_on(state: AppState, pool: Option<RunPool>) -> Router {
+    crate::unmapped::without_allow_header(routes(state, pool))
+}
+
+fn routes(state: AppState, pool: Option<RunPool>) -> Router {
+    let mut executions = Router::new()
         .route("/api/core/function/execute/{namespace}/{name}", get(execute_get).post(execute_post))
         .route("/api/core/function/execute/{full_name}", get(execute_full_get).post(execute_full_post))
+        .merge(webhook::router());
+    if let Some(pool) = pool {
+        executions = executions.route_layer(middleware::from_fn_with_state(pool, crate::run_pool::offload));
+    }
+    Router::new()
+        .merge(executions)
         .route("/api/core/functions/repositoryFind", get(functions_find))
         .route("/api/core/functions/repositoryFilter", get(functions_filter))
         .route("/api/core/schemas/repositoryFind", get(schemas_find))
@@ -66,6 +82,8 @@ pub(crate) async fn request_context(st: &AppState, h: &HeaderMap) -> Result<Arc<
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("true")),
         debug: caller.debug.clone(),
+        client_ip: context::client_ip(h),
+        user_agent: context::user_agent(h),
         raised: Default::default(),
     }))
 }

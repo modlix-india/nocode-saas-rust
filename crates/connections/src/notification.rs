@@ -1,13 +1,18 @@
 //! `NotificationService.processAndSendNotification`: checks that the caller may notify the
 //! target, then publishes a `NotificationQueObject` on the `notifications` exchange for the
 //! notification service to render and deliver.
+//!
+//! A data notification (Rust only, [`prepare_data`]) goes the same way after the same checks:
+//! the message carries `kind: DATA`, an event name, any JSON and an expiry, and the
+//! notification service pushes it to the recipients' open streams without storing it.
 
 use async_trait::async_trait;
+use http::StatusCode;
 use serde_json::{Map, Value};
 
 use crate::context::Caller;
-use crate::error::ConnResult;
-use crate::mq::{NotificationMessage, Publisher, Route, NOTIFICATION_TYPE_ID};
+use crate::error::{ConnError, ConnResult};
+use crate::mq::{NotificationMessage, Publisher, Route, KIND_DATA, NOTIFICATION_TYPE_ID};
 
 pub const USER_ID: &str = "User Id";
 pub const CLIENT_ID: &str = "Client Id";
@@ -120,5 +125,92 @@ pub async fn prepare(
         payload: req.payload.clone(),
         ..Default::default()
     };
+    Ok(Some((key, message)))
+}
+
+/// The longest event name a data notification may carry.
+pub const EVENT_NAME_MAX: usize = 64;
+/// The most a data notification's data may weigh, serialised.
+pub const DATA_MAX_BYTES: usize = 64 * 1024;
+/// The event names the stream itself uses.
+pub const RESERVED_EVENT_NAMES: [&str; 2] = ["init", "notification"];
+
+/// The arguments of `SendDataNotification`.
+#[derive(Debug, Clone, Default)]
+pub struct DataNotificationRequest {
+    pub app_code: Option<String>,
+    pub client_code: Option<String>,
+    pub target_id: Option<i128>,
+    pub target_code: Option<String>,
+    pub target_type: String,
+    pub filter_authorization: Option<String>,
+    pub event_name: String,
+    pub data: Value,
+    /// How long the push is worth delivering.
+    pub ttl_seconds: i64,
+}
+
+/// An event name is 1 to 64 letters, digits, `_`, `.` or `-`, and not one the stream uses
+/// itself (`init`, `notification`, in any case).
+pub fn check_event_name(name: &str) -> ConnResult<()> {
+    let shape = !name.is_empty()
+        && name.len() <= EVENT_NAME_MAX
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+    if !shape {
+        return Err(ConnError::coded(
+            StatusCode::BAD_REQUEST,
+            "CORE.DATA_NOTIFICATION_EVENT_INVALID",
+            format!("Event name '{name}' must be 1 to {EVENT_NAME_MAX} letters, digits, '_', '.' or '-'"),
+        )
+        .param("event", name.to_string()));
+    }
+    if RESERVED_EVENT_NAMES.iter().any(|r| r.eq_ignore_ascii_case(name)) {
+        return Err(ConnError::coded(StatusCode::BAD_REQUEST, "CORE.DATA_NOTIFICATION_EVENT_RESERVED", format!("Event name '{name}' is reserved"))
+            .param("event", name.to_string()));
+    }
+    Ok(())
+}
+
+/// The data, serialised, must fit in [`DATA_MAX_BYTES`].
+pub fn check_data_size(data: &Value) -> ConnResult<()> {
+    let size = serde_json::to_vec(data).map(|v| v.len()).unwrap_or(usize::MAX);
+    if size > DATA_MAX_BYTES {
+        return Err(ConnError::coded(
+            StatusCode::BAD_REQUEST,
+            "CORE.DATA_NOTIFICATION_TOO_LARGE",
+            format!("Data notification data is {size} bytes, more than the {DATA_MAX_BYTES} allowed"),
+        )
+        .param("size", size.to_string())
+        .param("limit", DATA_MAX_BYTES.to_string()));
+    }
+    Ok(())
+}
+
+/// The event name and data are checked first; then the caller and target exactly as
+/// [`prepare`] checks them (`None` where a notification would not be sent); then the message,
+/// marked `DATA`, expiring `ttl_seconds` after `now_millis`.
+pub async fn prepare_data(
+    route: &Route,
+    checks: &dyn HierarchyChecks,
+    caller: &Caller,
+    req: DataNotificationRequest,
+    now_millis: i64,
+) -> ConnResult<Option<(String, NotificationMessage)>> {
+    check_event_name(&req.event_name)?;
+    check_data_size(&req.data)?;
+    let base = NotificationRequest {
+        app_code: req.app_code,
+        client_code: req.client_code,
+        target_id: req.target_id,
+        target_code: req.target_code,
+        target_type: req.target_type,
+        filter_authorization: req.filter_authorization,
+        ..Default::default()
+    };
+    let Some((key, mut message)) = prepare(route, checks, caller, base).await? else { return Ok(None) };
+    message.kind = Some(KIND_DATA.to_string());
+    message.event_name = Some(req.event_name);
+    message.data = Some(req.data);
+    message.expires_at = Some(now_millis.saturating_add(req.ttl_seconds.saturating_mul(1000)));
     Ok(Some((key, message)))
 }

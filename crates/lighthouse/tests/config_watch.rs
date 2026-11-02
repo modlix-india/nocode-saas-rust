@@ -29,7 +29,7 @@ async fn register_with(base: &str, id: &str, version: Option<&str>) {
 }
 
 async fn states(base: &str) -> Vec<(String, String)> {
-    let view: Value = get(format!("{base}/v1/config"), None).await.json().await.unwrap();
+    let view: Value = get(format!("{base}/v1/config"), Some(ADMIN_TOKEN)).await.json().await.unwrap();
     let multi = view["units"].as_array().unwrap().iter().find(|u| u["unit"] == "multi").unwrap().clone();
     let mut out: Vec<(String, String)> = multi["instances"]
         .as_array()

@@ -1,6 +1,6 @@
-//! multi's configuration: where security, core and ui are.
+//! multi's configuration: where security, core, ui and files are.
 
-use platform::config::{EurekaConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
+use platform::config::{RegistryConfig, SecurityConfig, ServerConfig, TelemetryConfig, UpstreamConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 pub struct MultiConfig {
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
-    pub eureka: EurekaConfig,
+    pub registry: RegistryConfig,
     /// Caller identity and the security calls (apps, transports).
     pub security: SecurityConfig,
     pub core: ServiceConfig,
     pub ui: ServiceConfig,
+    /// files-manage, for the purge only.
+    pub files: ServiceConfig,
 }
 
 impl Default for MultiConfig {
@@ -20,10 +22,11 @@ impl Default for MultiConfig {
         Self {
             server: ServerConfig { port: 8110, ..Default::default() },
             telemetry: TelemetryConfig::default(),
-            eureka: EurekaConfig::default(),
+            registry: RegistryConfig::default(),
             security: SecurityConfig::default(),
             core: ServiceConfig::default(),
             ui: ServiceConfig::default(),
+            files: ServiceConfig::default(),
         }
     }
 }
@@ -31,6 +34,6 @@ impl Default for MultiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ServiceConfig {
-    /// Base URL(s) or `eureka:<APP>`.
+    /// Base URL(s) or `lighthouse:<APP>`.
     pub upstream: UpstreamConfig,
 }

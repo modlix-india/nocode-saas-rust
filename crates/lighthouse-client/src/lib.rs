@@ -1,6 +1,6 @@
-//! Talking to Lighthouse, the registry that replaces Eureka.
+//! Talking to Lighthouse, the registry that replaces Lighthouse.
 //!
-//! - [`wire`]: Eureka's `InstanceInfo` and `Applications` in the JSON shape the Java server
+//! - [`wire`]: the registry protocol's `InstanceInfo` and `Applications` in the JSON shape the Java server
 //!   (Jackson) writes, read leniently (ports and timestamps as numbers or strings,
 //!   `overriddenstatus` in either spelling), and [`xml`] for the clients that only read XML
 //!   (py_eureka_client).
@@ -25,8 +25,8 @@ pub use wire::{ActionType, Application, Applications, InstanceInfo, Status};
 pub const DEFAULT_SERVER: &str = "http://localhost:8761/eureka";
 
 /// `http://host:8761`, `http://host:8761/` and `http://host:8761/eureka/` all name the same
-/// server. Returns its Eureka API base without a trailing slash (`http://host:8761/eureka`).
-pub fn eureka_base(url: &str) -> String {
+/// server. Returns its Lighthouse API base without a trailing slash (`http://host:8761/eureka`).
+pub fn registry_base(url: &str) -> String {
     let u = url.trim().trim_end_matches('/');
     if u.ends_with("/eureka") {
         u.to_string()
@@ -37,7 +37,7 @@ pub fn eureka_base(url: &str) -> String {
 
 /// The server's origin (`http://host:8761`), for its routes outside `/eureka`.
 pub fn origin(url: &str) -> String {
-    eureka_base(url).trim_end_matches("/eureka").to_string()
+    registry_base(url).trim_end_matches("/eureka").to_string()
 }
 
 /// The servers named by `LIGHTHOUSE_URLS` (comma separated), else the local one.
@@ -51,7 +51,7 @@ fn servers_from(value: Option<&str>) -> Vec<String> {
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(eureka_base)
+        .map(registry_base)
         .collect();
     if list.is_empty() {
         vec![DEFAULT_SERVER.to_string()]
@@ -65,7 +65,7 @@ pub fn token_from_env() -> Option<String> {
     std::env::var("LIGHTHOUSE_TOKEN").ok().filter(|t| !t.is_empty())
 }
 
-/// Wall-clock milliseconds, the unit of every Eureka timestamp.
+/// Wall-clock milliseconds, the unit of every Lighthouse timestamp.
 pub fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -79,9 +79,9 @@ mod tests {
 
     #[test]
     fn server_urls() {
-        assert_eq!(eureka_base("http://h:8761"), "http://h:8761/eureka");
-        assert_eq!(eureka_base(" http://h:8761/ "), "http://h:8761/eureka");
-        assert_eq!(eureka_base("http://h:8761/eureka/"), "http://h:8761/eureka");
+        assert_eq!(registry_base("http://h:8761"), "http://h:8761/eureka");
+        assert_eq!(registry_base(" http://h:8761/ "), "http://h:8761/eureka");
+        assert_eq!(registry_base("http://h:8761/eureka/"), "http://h:8761/eureka");
         assert_eq!(origin("http://h:8761/eureka/"), "http://h:8761");
         assert_eq!(origin("http://h:8761"), "http://h:8761");
         assert_eq!(servers_from(None), vec![DEFAULT_SERVER]);

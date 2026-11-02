@@ -1,7 +1,7 @@
 //! The editor's routes: the commons routers of every ui document kind (CRUD, drafts, fork,
 //! publish, versions, publish-all, transport, an app's wipe) under the Java base paths, and the
 //! ui controllers' own routes on top: the application index and mobile apps, the page component
-//! and event routes, the function step routes.
+//! and event routes, the function step routes; and the Rust-only admin purge.
 
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use overridable::json::parse;
 use overridable::pojo::{convert_json, map_field, str_field, to_jackson};
-use overridable::write::controller::{bool_param, error_response, int_param, spring_refusal, Reply};
+use overridable::write::controller::{bool_param, error_response, int_param, spring_refusal, Reply, DRAFT_VERSION_HEADER};
 use overridable::write::deletion::DeletionService;
 use overridable::write::kind::Method;
 use overridable::write::messages as msg;
@@ -32,6 +32,7 @@ use crate::docs::{COMPONENT_DEFINITION, FUNCTION, PAGE};
 use crate::editor::index::{build_index, IndexServices};
 use crate::editor::kinds::{copy_then_put, java_put_order, UiEvictions, UiFiller, UiKind};
 use crate::editor::mobile::{self, MobileApps, MOBILE_APP_CREATE};
+use crate::editor::purge::{self, Target};
 use crate::respond::with_ui_layers;
 
 /// Everything the editor's routes share.
@@ -49,6 +50,10 @@ pub struct EditorState {
     pub fillers: OverridableService<UiFiller>,
     pub transports: Arc<TransportService>,
     pub mobile: MobileApps,
+    /// The admin purge's view of the `ui` Mongo database (`None`: the purge reports it cannot run).
+    pub purge: Option<Arc<dyn purge::DocStore>>,
+    /// Who manages whom, for the purge; `None` refuses every client purge.
+    pub purge_guard: Option<Arc<dyn purge::ManagedClients>>,
 }
 
 type St = Arc<EditorState>;
@@ -146,7 +151,10 @@ fn own_routes(st: St) -> Router {
         .route("/api/ui/pages/{id}/components", get(read_components).post(add_component))
         .route("/api/ui/pages/{id}/components/{component_key}", patch(patch_component).delete(remove_component))
         .route("/api/ui/pages/{id}/events/{function_name}", get(read_event).put(put_event))
+        .route("/api/ui/pages/{id}/changes", patch(patch_changes))
         .route("/api/ui/functions/{id}/steps", get(read_steps).patch(patch_steps))
+        .route("/api/ui/purge/client/{code}", delete(purge_client))
+        .route("/api/ui/purge/app/{code}", delete(purge_app))
         .with_state(st)
 }
 
@@ -179,6 +187,63 @@ fn pre_authorize(ca: &ContextAuthentication, authority: &str) -> Result<(), Resp
 /// The caller, or the refusal as the router answers it.
 async fn caller(st: &St, h: &HeaderMap, route: &'static str) -> Result<ContextAuthentication, Response> {
     st.callers.caller(h).await.map_err(|e| with_route(error_response(e), route))
+}
+
+// ── Admin purge (Rust only) ─────────────────────────────────────────
+
+/// `DELETE /api/ui/purge/client/{clientCode}?dryRun=`: see [`purge`].
+async fn purge_client(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/ui/purge/client/{clientCode}", purge::CLIENT_DELETE, Target::client(&code), q, h).await
+}
+
+/// `DELETE /api/ui/purge/app/{appCode}?dryRun=`: see [`purge`].
+async fn purge_app(State(st): State<St>, Path(code): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    purge_route(st, "/api/ui/purge/app/{appCode}", purge::APPLICATION_DELETE, Target::app(&code), q, h).await
+}
+
+/// A signed-in caller holding `authority`; a client only by a client that manages it, an app
+/// only by SYSTEM; a bad code is a 400; a dry run unless `dryRun=false`.
+async fn purge_route(st: St, route: &'static str, authority: &'static str, target: Result<Target, String>, q: Option<String>, h: HeaderMap) -> Response {
+    let ca = match caller(&st, &h, route).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    if let Err(r) = pre_authorize(&ca, authority) {
+        return with_route(r, route);
+    }
+    let target = match target {
+        Ok(t) => t,
+        Err(m) => return respond(route, Err(bad_request(&m))),
+    };
+    // A client: only a client that manages it (never itself, never SYSTEM). An app: SYSTEM only.
+    let allowed = match &target {
+        Target::Client(c) => {
+            let guard = st.purge_guard.as_deref();
+            match purge::may_purge_client(guard, ca.client_code(), c).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::error!(error = %e, "purge: could not ask security who manages the client");
+                    false
+                }
+            }
+        }
+        Target::App(_) => ca.is_system_client(),
+    };
+    if !allowed {
+        let why = match &target {
+            Target::Client(c) => format!("Access Denied: only a client that manages {c} may purge it"),
+            Target::App(_) => "Access Denied: an app purge is for the SYSTEM client only".to_string(),
+        };
+        let c = platform::error::Coded::permission_required(&[authority]).debug(why);
+        return with_route(platform::error::coded_response(&c), route);
+    }
+    let dry_run = purge::dry_run(Params::from_query(q.as_deref()).first("dryRun"));
+    tracing::warn!(target = ?target, dry_run, user = ca.user.id, "admin purge");
+    let report = purge::run(&st, &target, dry_run).await;
+    if !report.errors.is_empty() {
+        tracing::warn!(target = ?target, dry_run, errors = ?report.errors, "admin purge finished with errors");
+    }
+    respond(route, Ok(json(report.to_json())))
 }
 
 // ── ApplicationController ───────────────────────────────────────────
@@ -435,6 +500,9 @@ struct ForClient {
     standalone: bool,
     draft: bool,
     surface_draft: bool,
+    /// `draftVersion`: the draft version the caller last saw (`X-Draft-Version` of its draft
+    /// read), checked by the draft save as `PUT ?draft=true&draftVersion=` checks it.
+    draft_version: Option<i64>,
 }
 
 impl ForClient {
@@ -445,6 +513,7 @@ impl ForClient {
             standalone: bool_param(&p, "standalone", false)?,
             draft: bool_param(&p, "draft", false)?,
             surface_draft: h.get("x-draft").and_then(|v| v.to_str().ok()).is_some_and(|v| v.eq_ignore_ascii_case("true")),
+            draft_version: int_param(&p, "draftVersion")?,
         })
     }
 }
@@ -461,8 +530,20 @@ async fn patch_for_client(
     fc: &ForClient,
     patch: impl FnOnce(&mut JMap) -> AppResult<()>,
 ) -> AppResult<JMap> {
+    Ok(patch_for_client_versioned(st, ca, id, fc, patch).await?.0)
+}
+
+/// `patch_for_client`, and the draft's version after the save when the change went to an
+/// existing copy's draft (the `X-Draft-Version` the next save of that draft has to send).
+async fn patch_for_client_versioned(
+    st: &EditorState,
+    ca: &ContextAuthentication,
+    id: &str,
+    fc: &ForClient,
+    patch: impl FnOnce(&mut JMap) -> AppResult<()>,
+) -> AppResult<(JMap, Option<i64>)> {
     if fc.target.is_none() && !fc.draft {
-        return patch_overridable(st, ca, id, patch).await;
+        return Ok((patch_overridable(st, ca, id, patch).await?, None));
     }
     let forbidden = || st.cx.error(StatusCode::FORBIDDEN, msg::FORBIDDEN_PERMISSION, &["Page"]);
     if id.trim().is_empty() {
@@ -483,13 +564,14 @@ async fn patch_for_client(
         st.pages.find_one(str_field(&stored, "name").unwrap_or_default(), str_field(&stored, "appCode").unwrap_or_default(), &target).await?
     };
     match own {
-        None => create_for_target(st, ca, &stored, &target, fc, patch).await,
+        None => Ok((create_for_target(st, ca, &stored, &target, fc, patch).await?, None)),
         Some(own) => {
             let own_id = str_field(&own, "id").unwrap_or_default().to_string();
             if fc.draft {
-                patch_draft(st, ca, &own, patch).await
+                let (view, version) = patch_draft(st, ca, &own, fc.draft_version, patch).await?;
+                Ok((view, Some(version)))
             } else {
-                patch_overridable(st, ca, &own_id, patch).await
+                Ok((patch_overridable(st, ca, &own_id, patch).await?, None))
             }
         }
     }
@@ -499,15 +581,21 @@ async fn patch_for_client(
 /// answers the draft view after. UPDATE on the copy itself is checked here: `save_draft` alone
 /// would not refuse a caller without it, its draft target forks the page into the caller's
 /// client instead, a write nobody asked for.
-async fn patch_draft(st: &EditorState, ca: &ContextAuthentication, own: &JMap, patch: impl FnOnce(&mut JMap) -> AppResult<()>) -> AppResult<JMap> {
+async fn patch_draft(
+    st: &EditorState,
+    ca: &ContextAuthentication,
+    own: &JMap,
+    expected_version: Option<i64>,
+    patch: impl FnOnce(&mut JMap) -> AppResult<()>,
+) -> AppResult<(JMap, i64)> {
     if !st.pages.access_check(ca, Method::Update, str_field(own, "appCode"), str_field(own, "clientCode"), true).await? {
         return Err(st.cx.error(StatusCode::FORBIDDEN, msg::FORBIDDEN_PERMISSION, &["Page"]));
     }
     let own_id = str_field(own, "id").unwrap_or_default();
     let (mut view, _) = st.pages.read_draft_with_version(ca, own_id).await?;
     patch(&mut view)?;
-    st.pages.save_draft(ca, view, None).await?;
-    Ok(st.pages.read_draft_with_version(ca, own_id).await?.0)
+    st.pages.save_draft(ca, view, expected_version).await?;
+    st.pages.read_draft_with_version(ca, own_id).await
 }
 
 /// `createForTarget`: the target's first copy, made by whoever may create one for it.
@@ -851,6 +939,163 @@ async fn put_event(State(st): State<St>, Path((id, name)): Path<(String, String)
         })
         .await?;
         Ok(page_reply(&saved))
+    }
+    .await;
+    respond(R, r)
+}
+
+/// The top-level page fields a change set may set or clear. The rest are the document's
+/// identity and bookkeeping, or the two maps it changes entry by entry.
+const CHANGEABLE_FIELDS: [&str; 7] = ["device", "translations", "properties", "rootComponent", "permission", "description", "title"];
+
+/// What `PATCH /api/ui/pages/{id}/changes` asks for: whole components and event functions by
+/// key (null removes one), top-level fields (null clears one), and the versions of the entries
+/// the caller read.
+#[derive(Default)]
+pub struct PageChanges {
+    pub components: JMap,
+    pub events: JMap,
+    pub fields: JMap,
+    pub expected_components: JMap,
+    pub expected_events: JMap,
+    pub message: JValue,
+}
+
+impl PageChanges {
+    fn from_body(req: &JMap) -> AppResult<Self> {
+        let changes = Self {
+            components: map_body_field(req, "components")?.unwrap_or_default(),
+            events: map_body_field(req, "eventFunctions")?.unwrap_or_default(),
+            fields: map_body_field(req, "fields")?.unwrap_or_default(),
+            expected_components: map_body_field(req, "expectedComponentVersions")?.unwrap_or_default(),
+            expected_events: map_body_field(req, "expectedEventVersions")?.unwrap_or_default(),
+            message: string_field(req, "message")?,
+        };
+        if let Some(f) = changes.fields.keys().find(|f| !CHANGEABLE_FIELDS.contains(&f.as_str())) {
+            return Err(bad_request(&format!("Field '{f}' cannot be changed here.")));
+        }
+        let entries = changes.components.values().chain(changes.events.values());
+        if entries.into_iter().any(|v| !matches!(v, JValue::Object(_) | JValue::Null)) {
+            return Err(bad_request("Failed to read HTTP message"));
+        }
+        Ok(changes)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.components.is_empty() && self.events.is_empty() && self.fields.is_empty()
+    }
+}
+
+fn expected_of(m: &JMap, key: &str) -> i64 {
+    m.get(key).and_then(JValue::as_i64).unwrap_or(0)
+}
+
+/// Applies a change set to a page: only the named entries move, every other component, event
+/// function and field stays as the page has it. A version the caller read that is no longer the
+/// entry's answers 412, before anything changes.
+pub fn apply_page_changes(page: &mut JMap, ch: &PageChanges) -> Result<(), &'static str> {
+    for (k, _) in ch.components.iter() {
+        let expected = expected_of(&ch.expected_components, k);
+        if map_field(page, "componentVersions").is_some() && expected > 0 && version_in(page, "componentVersions", k) != expected {
+            return Err("component");
+        }
+    }
+    for (k, _) in ch.events.iter() {
+        let expected = expected_of(&ch.expected_events, k);
+        if map_field(page, "eventFunctionVersions").is_some() && expected > 0 && version_in(page, "eventFunctionVersions", k) != expected {
+            return Err("event");
+        }
+    }
+    if !ch.components.is_empty() {
+        let existing = map_field(page, "componentDefinition").cloned();
+        let fresh = existing.is_none();
+        let mut defs = existing.unwrap_or_default();
+        for (k, v) in ch.components.iter() {
+            match v {
+                JValue::Object(c) => {
+                    let mut comp = convert_json(&COMPONENT_DEFINITION, c);
+                    comp.insert("key".into(), JValue::Str(k.clone()));
+                    defs.insert(k.clone(), JValue::Object(comp));
+                }
+                _ => {
+                    defs.shift_remove(k);
+                }
+            }
+        }
+        page.insert("componentDefinition".into(), JValue::Object(java_put_order(defs, fresh)));
+        for (k, v) in ch.components.iter() {
+            if v.is_null() {
+                if let Some(JValue::Object(cv)) = page.get_mut("componentVersions") {
+                    cv.shift_remove(k);
+                }
+            } else {
+                bump(page, "componentVersions", k);
+            }
+        }
+    }
+    if !ch.events.is_empty() {
+        let existing = map_field(page, "eventFunctions").cloned();
+        let fresh = existing.is_none();
+        let mut events = existing.unwrap_or_default();
+        for (k, v) in ch.events.iter() {
+            if v.is_null() {
+                events.shift_remove(k);
+            } else {
+                events.insert(k.clone(), v.clone());
+            }
+        }
+        page.insert("eventFunctions".into(), JValue::Object(java_put_order(events, fresh)));
+        for (k, v) in ch.events.iter() {
+            if v.is_null() {
+                if let Some(JValue::Object(ev)) = page.get_mut("eventFunctionVersions") {
+                    ev.shift_remove(k);
+                }
+            } else {
+                bump(page, "eventFunctionVersions", k);
+            }
+        }
+    }
+    for (f, v) in ch.fields.iter() {
+        if v.is_null() {
+            page.shift_remove(f);
+        } else {
+            page.insert(f.clone(), v.clone());
+        }
+    }
+    let v = page.get("version").and_then(JValue::as_i64).unwrap_or(1);
+    page.insert("version".into(), JValue::Int(v + 1));
+    page.insert("message".into(), ch.message.clone());
+    Ok(())
+}
+
+/// `PATCH /api/ui/pages/{id}/changes`: several components, event functions and top-level
+/// fields of a page in one write, through the same for-a-client path as the component and
+/// event routes (`clientCode`, `standalone`, `draft`, and `draftVersion` for the draft's
+/// version), so a client's copy stores only what changed instead of a whole page. A draft
+/// write answers the draft's new version in `X-Draft-Version`.
+async fn patch_changes(State(st): State<St>, Path(id): Path<String>, RawQuery(q): RawQuery, h: HeaderMap, body: Bytes) -> Response {
+    const R: &str = "/api/ui/pages/{id}/changes";
+    let ca = match caller(&st, &h, R).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    let r = async {
+        let req = read_json(&body)?;
+        let changes = PageChanges::from_body(&req)?;
+        if changes.is_empty() {
+            return Err(bad_request("No changes."));
+        }
+        let fc = ForClient::from(q.as_deref(), &h)?;
+        let cx = st.cx.clone();
+        let (saved, draft_version) = patch_for_client_versioned(&st, &ca, &id, &fc, |page| {
+            apply_page_changes(page, &changes).map_err(|_| cx.error(StatusCode::PRECONDITION_FAILED, msg::VERSION_MISMATCH, &[]))
+        })
+        .await?;
+        let reply = page_reply(&saved);
+        Ok(match draft_version {
+            Some(v) => reply.header(DRAFT_VERSION_HEADER, v.to_string()),
+            None => reply,
+        })
     }
     .await;
     respond(R, r)

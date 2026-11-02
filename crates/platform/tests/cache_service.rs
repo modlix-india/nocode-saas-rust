@@ -36,9 +36,10 @@ async fn lists_and_clears_local_caches() {
 async fn counts_size_evictions() {
     let svc = CacheService::new("cmn", "evictionChannel", None).unwrap();
     let fam = svc.family::<String, u32>();
-    // A cache holds 10,000 entries (Caffeine's maximumSize in AbstractBaseConfiguration); the
-    // ones beyond are dropped for size, which is what the eviction counter counts.
-    for i in 0..10_500u32 {
+    // A family of small values holds 20,000 entries across all its names (`[redis]
+    // cache_max_entries`; Java's Caffeine allows 10,000 per name); the ones beyond are dropped
+    // for size, which is what the eviction counter counts.
+    for i in 0..20_500u32 {
         fam.insert("big", i.to_string(), i).await;
     }
     let mut stats = svc.local_cache_stats();
@@ -54,7 +55,10 @@ async fn counts_size_evictions() {
     assert_eq!(stats.len(), 1);
     assert_eq!(stats[0].0, "big");
     assert!(stats[0].1.evictions > 0, "{stats:?}");
-    assert!(stats[0].1.entries <= 10_000, "{stats:?}");
+    // Entries are counted off as Moka's maintenance reports them gone, so finish it first.
+    fam.run_pending_tasks().await;
+    let stats = svc.local_cache_stats();
+    assert!(stats[0].1.entries <= 20_000, "{stats:?}");
 }
 
 /// A Redis that speaks just enough RESP2 for `CacheService`. It records every command. For

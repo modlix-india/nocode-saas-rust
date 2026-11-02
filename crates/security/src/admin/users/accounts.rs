@@ -32,8 +32,8 @@ use crate::model::{ClientHierarchy, ContextAuth, User, PLACEHOLDER};
 use crate::spring::Pageable;
 use crate::web::{opt_u64, query_body, to_u64, unreadable};
 
-const OWNER_ROLE: &str = "Authorities.ROLE_Owner";
-const CLIENT_MANAGE_ROLE: &str = "Authorities.ROLE_Client_MANAGE";
+pub(super) const OWNER_ROLE: &str = "Authorities.ROLE_Owner";
+pub(super) const CLIENT_MANAGE_ROLE: &str = "Authorities.ROLE_Client_MANAGE";
 const USER_CREATED_PREFIX: &str = "User created: ";
 const ASSIGNED_ROLE: &str = " Role is assigned to the user ";
 const UNASSIGNED_ROLE: &str = " Role is removed from the selected user";
@@ -167,19 +167,30 @@ fn patch_user(u: &mut User, fields: &Map<String, Value>) -> AuthResult<()> {
     Ok(())
 }
 
-/// `UserService.applyUpdatableFields`: what an edit may change; a caller editing themselves
-/// without `User_UPDATE` keeps their status, designation and manager.
+/// `UserService.applyUpdatableFields`: what an edit may change. A caller without `User_UPDATE`
+/// keeps the user's status, designation and manager, whoever the user is, and another user's
+/// user name, e-mail and phone too (2026-10-30: Java guarded only one's own status and line, so
+/// a manager without `User_UPDATE` could deactivate a reportee, move them out of the line, or
+/// point their e-mail at an inbox of the manager's and take the account over with a password
+/// reset, through `PUT`/`PATCH users/{id}`). One's own identity stays editable.
 pub fn apply_updatable_fields(e: &mut User, entity: &User, ca: &ContextAuth) {
-    let self_without_update = e.id == ca.user.id() && !has_any(ca, &["Authorities.User_UPDATE"]);
-    e.user_name = entity.user_name();
-    e.email_id = entity.email_id();
-    e.phone_number = entity.phone_number();
+    apply_fields(e, entity, has_any(ca, &["Authorities.User_UPDATE"]), e.id == ca.user.id());
+}
+
+/// `apply_updatable_fields`, the rule decided by its caller: `privileged` (`User_UPDATE`, or a
+/// delete gated on `User_DELETE`) writes everything; `own` (one's own record) the identity too.
+fn apply_fields(e: &mut User, entity: &User, privileged: bool, own: bool) {
+    if privileged || own {
+        e.user_name = entity.user_name();
+        e.email_id = entity.email_id();
+        e.phone_number = entity.phone_number();
+    }
     e.first_name = entity.first_name.clone();
     e.last_name = entity.last_name.clone();
     e.middle_name = entity.middle_name.clone();
     e.locale_code = entity.locale_code.clone();
     e.time_zone = crate::timezone::sanitize(entity.time_zone.as_deref());
-    if self_without_update {
+    if !privileged {
         return;
     }
     e.status_code = entity.status_code.clone();
@@ -196,6 +207,18 @@ fn taken_identity(other: &User, email: Option<&str>, phone: Option<&str>) -> &'s
         return "phone number";
     }
     "user name"
+}
+
+/// U7 (2026-10-21): may a caller of `caller.client_id` read a user of `target.client_id` by id.
+/// Yes for the same client, for a target client the caller's client manages at any level (its
+/// partners and customers, without being their client manager), and for the caller's client's
+/// direct managing client (a partner reading the business's user its deals are assigned to,
+/// what core's `GetUser` allows) unless that is the root (SYSTEM, the one client nobody manages).
+/// An unrelated client, a sibling, or a manager further up is not.
+fn may_read_user_of(caller: &ClientHierarchy, target: &ClientHierarchy) -> bool {
+    caller.client_id == target.client_id
+        || target.is_managed_by(caller.client_id)
+        || (caller.level0 == Some(target.client_id) && target.level0.is_some())
 }
 
 /// `validateUserCheckProperty`'s choice: the user's level under the app's client (`OWNER`, then
@@ -268,7 +291,7 @@ impl Admin {
     }
 
     /// `checkSubOrgAndRun`'s test: may the caller act on the target user?
-    async fn sub_org_allows(&self, ca: &ContextAuth, client_id: u64, target: u64) -> AuthResult<bool> {
+    pub(super) async fn sub_org_allows(&self, ca: &ContextAuth, client_id: u64, target: u64) -> AuthResult<bool> {
         if !Self::same_client_non_owner(ca, client_id) || ca.user.id() == target {
             return Ok(true);
         }
@@ -325,20 +348,35 @@ impl Admin {
     }
 
     /// `GET /users/{id}`: `UserService.read` plus a client check Java does not make. A user of
-    /// another client is read only by SYSTEM or by a caller who manages that client
-    /// (`isUserClientManageClient`); to anyone else the user is not found (DIFFERENCES.md).
+    /// another client is read by SYSTEM, by a caller whose client manages the user's client at
+    /// any level, and by a caller of a client the user's client directly manages; to anyone
+    /// else the user is not found (DIFFERENCES.md U7, 2026-10-21).
     pub async fn user_read_managed(&self, ca: &ContextAuth, id: u64) -> AuthResult<User> {
         let u = self.user_read(ca, id).await?;
-        if id != ca.user.id() && !ca.is_system_client() && !self.caller_manages_client(ca, u.client_id).await? {
-            return Err(super::common::not_found("User", id));
+        if id == ca.user.id() || ca.is_system_client() {
+            return Ok(u);
+        }
+        let own = ca.user.client_id();
+        if own != u.client_id {
+            let (caller, target) = (self.dir().hierarchy(own).await?, self.dir().hierarchy(u.client_id).await?);
+            if !may_read_user_of(&caller, &target) {
+                return Err(super::common::not_found("User", id));
+            }
         }
         Ok(u)
     }
 
     /// `AbstractSecurityUpdatableDataService.update(entity)` with `UserService.updatableEntity`.
     pub async fn user_store_update(&self, ca: &ContextAuth, entity: &User) -> AuthResult<User> {
+        self.user_store_write(ca, entity, has_any(ca, &["Authorities.User_UPDATE"])).await
+    }
+
+    /// `user_store_update`; `privileged` (`User_UPDATE`, or a delete already gated on
+    /// `User_DELETE`) writes the status, designation, manager and another user's identity too.
+    async fn user_store_write(&self, ca: &ContextAuth, entity: &User, privileged: bool) -> AuthResult<User> {
         let mut e = self.user_read(ca, entity.id).await?;
-        apply_updatable_fields(&mut e, entity, ca);
+        let own = e.id == ca.user.id();
+        apply_fields(&mut e, entity, privileged, own);
         e.updated_by = Some(ca.user.id());
         e.updated_at = None;
         self.db.entity_update(&USER, e.id, &user_values(&e)).await?;
@@ -444,8 +482,22 @@ impl Admin {
 
     /// `UserService.update(User)`.
     pub async fn user_update(&self, ca: &ContextAuth, e: &User) -> AuthResult<User> {
+        self.user_update_with(ca, e, has_any(ca, &["Authorities.User_UPDATE"])).await
+    }
+
+    /// `user_update`; see `user_store_write` for `privileged`.
+    async fn user_update_with(&self, ca: &ContextAuth, e: &User, privileged: bool) -> AuthResult<User> {
         let refused = || forbidden("forbidden_update", &["user"]);
         let existing = self.user_dao_read(e.id).await?;
+        // Another user's identity the caller may not change is checked as it is stored, so an
+        // identity that is never written cannot refuse (or probe) the edit.
+        let kept;
+        let e = if privileged || e.id == ca.user.id() {
+            e
+        } else {
+            kept = User { user_name: existing.user_name.clone(), email_id: existing.email_id.clone(), phone_number: existing.phone_number.clone(), ..e.clone() };
+            &kept
+        };
         if e.client_id == 0 {
             // `getClientTypeNCodeNClientLevel(null)`: the cache key cannot be made.
             return Err(AuthError::internal("Cannot invoke \"Object.toString()\" because \"args[0]\" is null"));
@@ -488,7 +540,7 @@ impl Admin {
         if !self.caller_manages_client(ca, e.client_id).await? || !self.sub_org_allows(ca, e.client_id, e.id).await? {
             return Err(refused());
         }
-        let updated = self.user_store_update(ca, e).await?;
+        let updated = self.user_store_write(ca, e, privileged).await?;
         self.evict_user(updated.id, updated.client_id).await?;
         if existing.reporting_to != updated.reporting_to {
             self.evict_manager_caches(updated.client_id, existing.reporting_to, updated.reporting_to).await;
@@ -509,7 +561,11 @@ impl Admin {
                 Some(v) => Ok(Some(v.to_string())),
             }
         };
-        let (un, em, ph) = (text_of("userName")?, text_of("emailId")?, text_of("phoneNumber")?);
+        let (mut un, mut em, mut ph) = (text_of("userName")?, text_of("emailId")?, text_of("phoneNumber")?);
+        if key != ca.user.id() && !has_any(ca, &["Authorities.User_UPDATE"]) {
+            // Not written (`apply_updatable_fields`), so not checked either.
+            (un, em, ph) = (None, None, None);
+        }
         let Some(client_id) = self.db.user_client_id(key).await? else { return Err(refused()) };
         let Some(client_type) = self.dir().type_code_level(client_id).await? else { return Err(refused()) };
         let any = un.is_some() || em.is_some() || ph.is_some();
@@ -554,7 +610,8 @@ impl Admin {
             return Err(refused());
         }
         u.status_code = "DELETED".into();
-        let updated = self.user_update(ca, &u).await?;
+        // `User_DELETE` is what marks a user deleted; `User_UPDATE` is not needed too.
+        let updated = self.user_update_with(ca, &u, true).await?;
         self.evict_user(updated.id, updated.client_id).await
     }
 
@@ -1098,6 +1155,57 @@ mod tests {
         assert_eq!((spring_bool(" ON "), spring_bool(""), spring_bool("x")), (Some(true), Some(false), None));
     }
 
+    /// 2026-10-30: a caller without User_UPDATE keeps ANY user's status, designation and manager
+    /// (Java guarded only one's own record) and ANOTHER user's user name, e-mail and phone; the
+    /// other fields still change.
+    #[test]
+    fn status_designation_and_line_need_user_update_for_anyone() {
+        let stored = || User {
+            id: 8,
+            user_name: Some("u8".into()),
+            email_id: Some("u8@x".into()),
+            phone_number: Some("+18".into()),
+            status_code: "ACTIVE".into(),
+            designation_id: Some(1),
+            reporting_to: Some(3),
+            ..Default::default()
+        };
+        let ids = |u: &User| (u.user_name.clone(), u.email_id.clone(), u.phone_number.clone());
+        let edit = User {
+            user_name: Some("taken".into()),
+            email_id: Some("manager@x".into()),
+            phone_number: Some("+19".into()),
+            first_name: Some("N".into()),
+            status_code: "INACTIVE".into(),
+            designation_id: Some(2),
+            reporting_to: Some(9),
+            ..Default::default()
+        };
+        // A manager (user 3) editing their reportee 8 without User_UPDATE.
+        let mut ca = ContextAuth { user: crate::model::ContextUser { id: Some(3), ..Default::default() }, ..Default::default() };
+        ca.user.string_authorities = Some(vec!["Authorities.User_READ".into()]);
+        let mut e = stored();
+        apply_updatable_fields(&mut e, &edit, &ca);
+        assert_eq!((e.first_name.as_deref(), e.status_code.as_str(), e.designation_id, e.reporting_to), (Some("N"), "ACTIVE", Some(1), Some(3)));
+        assert_eq!(ids(&e), ids(&stored()), "another user's user name, e-mail and phone are kept");
+        // The user themselves, without User_UPDATE: their identity changes, the status and line do not.
+        let me = ContextAuth { user: crate::model::ContextUser { id: Some(8), ..Default::default() }, ..Default::default() };
+        let mut e = stored();
+        apply_updatable_fields(&mut e, &edit, &me);
+        assert_eq!(ids(&e), ids(&edit));
+        assert_eq!((e.status_code.as_str(), e.reporting_to), ("ACTIVE", Some(3)));
+        // With User_UPDATE all of them change.
+        ca.user.string_authorities.as_mut().unwrap().push("Authorities.User_UPDATE".into());
+        let mut e = stored();
+        apply_updatable_fields(&mut e, &edit, &ca);
+        assert_eq!((e.first_name.as_deref(), e.status_code.as_str(), e.designation_id, e.reporting_to), (Some("N"), "INACTIVE", Some(2), Some(9)));
+        assert_eq!(ids(&e), ids(&edit));
+        // The delete path writes the status it set, whatever the caller holds.
+        let mut e = stored();
+        apply_fields(&mut e, &User { status_code: "DELETED".into(), ..stored() }, true, false);
+        assert_eq!(e.status_code, "DELETED");
+    }
+
     #[test]
     fn user_check_levels_and_scopes() {
         let h = |l: [Option<u64>; 4]| ClientHierarchy { client_id: 50, level0: l[0], level1: l[1], level2: l[2], level3: l[3] };
@@ -1122,6 +1230,36 @@ mod tests {
         assert_eq!(user_check_scope("NO_DUPLICATE_USER_CUSTOMER", 1, 50, &elsewhere), None);
         assert_eq!(user_check_scope("NO_DUPLICATE_USER_CONSUMER", 1, 50, &elsewhere), None);
         assert_eq!(user_check_scope("SOMETHING_ELSE", 1, 50, &consumer), None);
+    }
+
+    #[test]
+    fn reading_another_clients_user_follows_the_hierarchy() {
+        let h = |client_id: u64, l: [Option<u64>; 4]| ClientHierarchy { client_id, level0: l[0], level1: l[1], level2: l[2], level3: l[3] };
+        // SYSTEM 1, business 28 under it, partner 3570 under the business, its customer 4286,
+        // and 3919, another business under SYSTEM.
+        let business = h(28, [Some(1), None, None, None]);
+        let partner = h(3570, [Some(28), Some(1), None, None]);
+        let customer = h(4286, [Some(3570), Some(28), Some(1), None]);
+        let other = h(3919, [Some(1), None, None, None]);
+        let sibling = h(3571, [Some(28), Some(1), None, None]);
+        // Same client.
+        assert!(may_read_user_of(&partner, &partner));
+        // A managed child client, and one further down: the caller need not be its client manager.
+        assert!(may_read_user_of(&business, &partner));
+        assert!(may_read_user_of(&business, &customer));
+        assert!(may_read_user_of(&partner, &customer));
+        // The caller's client's direct managing client.
+        assert!(may_read_user_of(&partner, &business));
+        assert!(may_read_user_of(&customer, &partner));
+        // Not: an unrelated client, a sibling, a manager above the direct one.
+        assert!(!may_read_user_of(&business, &other));
+        assert!(!may_read_user_of(&other, &customer));
+        assert!(!may_read_user_of(&partner, &sibling));
+        assert!(!may_read_user_of(&customer, &business));
+        // SYSTEM's users are not read upward by the businesses directly under it.
+        let system = h(1, [None; 4]);
+        assert!(!may_read_user_of(&business, &system));
+        assert!(may_read_user_of(&system, &customer));
     }
 }
 
@@ -1322,6 +1460,137 @@ mod live {
         assert_eq!(st, StatusCode::OK);
         let (st, _) = fx.http("PATCH", "/users/makeUserActive?userId=x", None).await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+        fx.finish().await;
+    }
+
+    /// 2026-10-30: `PUT`/`PATCH users/{id}` by a manager of the user's line. Without User_UPDATE
+    /// the status, designation, manager, user name, e-mail and phone stay as stored (the name
+    /// still changes); with it they change. One's own profile edit is unchanged, and a delete needs only User_DELETE.
+    #[tokio::test]
+    async fn status_designation_and_line_need_user_update() {
+        let Some(fx) = fx().await else { return };
+        let (s, c) = (&fx.s, fx.c);
+        let sys = sys();
+        let owner = fx.user(c, "uo").await;
+        let a = fx.user(c, "ua").await;
+        let b = fx.user(c, "ub").await;
+        let x = fx.user(c, "ux").await;
+        s.user_set_manager(&sys, b.id, Some(a.id)).await.unwrap();
+        s.user_set_manager(&sys, x.id, Some(a.id)).await.unwrap();
+        let (st, des) = fx.http("POST", "/designations", Some(json!({"clientId": c, "name": format!("zz des u {}", fx.run)}))).await;
+        assert_eq!(st, StatusCode::OK, "{des}");
+        let des = des["id"].as_u64().unwrap();
+        let line = |u: &User| (u.status_code.clone(), u.designation_id, u.reporting_to);
+        let ids = |u: &User| (u.user_name.clone(), u.email_id.clone(), u.phone_number.clone());
+        let o = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let steal = format!("zzrl{}steal@example.invalid", fx.run);
+
+        // PUT by the manager without User_UPDATE: the name changes, nothing else (not the line,
+        // not the identity, even one another user holds: it is never checked, so no 409 either).
+        let no_update = fx.as_user(&a, "ZZRUL", &["Authorities.User_READ"]);
+        let stored = s.user_dao_read(b.id).await.unwrap();
+        let mut edit = stored.clone();
+        edit.last_name = Some("Put".into());
+        edit.status_code = "INACTIVE".into();
+        edit.designation_id = Some(des);
+        edit.reporting_to = Some(owner.id);
+        edit.email_id = Some(steal.clone());
+        edit.phone_number = Some("9100000077".into());
+        edit.user_name = owner.user_name.clone();
+        let after = s.user_update(&no_update, &edit).await.unwrap();
+        assert_eq!(after.last_name.as_deref(), Some("Put"));
+        assert_eq!(line(&after), line(&stored));
+        assert_eq!(ids(&after), ids(&stored));
+        // PATCH, the same.
+        let patch = o(json!({"lastName": "Patch", "statusCode": "INACTIVE", "designationId": des, "reportingTo": owner.id,
+            "emailId": steal, "phoneNumber": "9100000077", "userName": owner.user_name}));
+        let after = s.user_patch(&no_update, b.id, &patch).await.unwrap();
+        assert_eq!(after.last_name.as_deref(), Some("Patch"));
+        assert_eq!(line(&after), line(&stored));
+        assert_eq!(ids(&after), ids(&stored));
+        let row = s.user_dao_read(b.id).await.unwrap();
+        assert_eq!((line(&row), ids(&row)), (line(&stored), ids(&stored)), "nothing changed in the row");
+
+        // One's own profile without User_UPDATE: as before, the name and identity, not the status.
+        let me = fx.as_user(&b, "ZZRUL", &[]);
+        let own_mail = format!("zzrl{}ubself@example.invalid", fx.run);
+        let after = s.user_patch(&me, b.id, &o(json!({"firstName": "Self", "emailId": own_mail, "statusCode": "INACTIVE"}))).await.unwrap();
+        assert_eq!((after.first_name.as_deref(), after.email_id.as_deref(), after.status_code.as_str()), (Some("Self"), Some(own_mail.as_str()), "ACTIVE"));
+        let mut own = after.clone();
+        own.phone_number = Some("9100000078".into());
+        assert_eq!(s.user_update(&me, &own).await.unwrap().phone_number.as_deref(), Some("9100000078"));
+
+        // With User_UPDATE the manager changes all three.
+        let with_update = fx.as_user(&a, "ZZRUL", &["Authorities.User_READ", "Authorities.User_UPDATE"]);
+        let after = s.user_patch(&with_update, b.id, &o(json!({"statusCode": "INACTIVE", "designationId": des, "emailId": steal}))).await.unwrap();
+        assert_eq!((after.status_code.as_str(), after.designation_id, after.email_id.as_deref()), ("INACTIVE", Some(des), Some(steal.as_str())));
+        // ...and an identity another user holds is still refused for them (409).
+        let mut clash = after.clone();
+        clash.user_name = owner.user_name.clone();
+        assert_eq!(status(s.user_update(&with_update, &clash).await).0, StatusCode::CONFLICT);
+        let mut edit = after.clone();
+        edit.reporting_to = Some(owner.id);
+        edit.status_code = "ACTIVE".into();
+        let after = s.user_update(&with_update, &edit).await.unwrap();
+        assert_eq!((after.status_code.as_str(), after.reporting_to), ("ACTIVE", Some(owner.id)));
+
+        // A delete by a User_DELETE holder without User_UPDATE still marks the user deleted.
+        let deleter = fx.as_user(&a, "ZZRUL", &["Authorities.User_READ", "Authorities.User_DELETE"]);
+        s.user_delete(&deleter, x.id).await.unwrap();
+        assert_eq!(s.user_dao_read(x.id).await.unwrap().status_code, "DELETED");
+        fx.finish().await;
+    }
+
+    /// QA-0599 (2026-10-26): a client that overrides a profile reads the user's assignment
+    /// under the OVERRIDE's id, while the row holds the root; removing by that id removes it.
+    #[tokio::test]
+    async fn removing_a_profile_by_its_override_id_removes_the_root_assignment() {
+        let Some(fx) = fx().await else { return };
+        let (s, c, m) = (&fx.s, fx.c, fx.m);
+        let sys = sys();
+        let body = |v: serde_json::Value| super::super::profiles::profile_from_body(v.as_object().unwrap()).unwrap();
+        let root = s.profile_create(&sys, body(json!({"appId": 2, "clientId": c, "name": format!("zz rp {}", fx.run), "arrangement": {"k": {"roleId": 70}}}))).await.unwrap().id.unwrap();
+        let over = s.profile_create(&sys, body(json!({"rootProfileId": root, "appId": 2, "clientId": m, "name": "", "title": "Below"}))).await.unwrap().id.unwrap();
+        let u = fx.user(m, "po").await;
+        let owner = fx.as_user(&u, "ZZRUM", MEMBER);
+
+        assert!(s.user_assign_profile(&owner, u.id, over).await.unwrap());
+        assert_eq!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap(), vec![root], "the root is stored");
+        let seen: Vec<_> = s.assigned_profiles(&owner, u.id, Some(2), true).await.unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(seen, vec![Some(over)], "the client below reads it as its override");
+
+        assert!(s.user_remove_profile(&owner, u.id, over).await.unwrap(), "removed by the override's id");
+        assert!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap().is_empty());
+        assert!(!s.user_remove_profile(&owner, u.id, over).await.unwrap(), "nothing left to remove");
+
+        // By the root's id, as before.
+        assert!(s.user_assign_profile(&owner, u.id, root).await.unwrap());
+        assert!(s.user_remove_profile(&owner, u.id, root).await.unwrap());
+        assert!(s.db.assigned_profile_ids(u.id, Some(2)).await.unwrap().is_empty());
+        fx.finish().await;
+    }
+
+    /// U7 (2026-10-21, QA-0482): `GET users/{id}` by a plain `User_READ` holder, no client
+    /// manager role or assignment: own client, a client its client manages, and its client's
+    /// direct manager are read; a sibling client is not found.
+    #[tokio::test]
+    async fn reading_users_by_id_follows_the_client_hierarchy() {
+        let Some(fx) = fx().await else { return };
+        let (s, c, m, i) = (&fx.s, fx.c, fx.m, fx.i);
+        let reader = &["Authorities.User_READ"];
+        let lu = fx.user(c, "ra").await;
+        let lu2 = fx.user(c, "rb").await;
+        let mu = fx.user(m, "rc").await;
+        let iu = fx.user(i, "rd").await;
+        let on_c = fx.as_user(&lu, "ZZRUL", reader);
+        let on_m = fx.as_user(&mu, "ZZRUM", reader);
+
+        assert_eq!(s.user_read_managed(&on_c, lu2.id).await.unwrap().id, lu2.id, "same client");
+        assert_eq!(s.user_read_managed(&on_c, mu.id).await.unwrap().id, mu.id, "a managed client, not as its manager");
+        assert_eq!(s.user_read_managed(&on_c, iu.id).await.unwrap().id, iu.id, "an individual's client it manages");
+        assert_eq!(s.user_read_managed(&on_m, lu.id).await.unwrap().id, lu.id, "the direct managing client");
+        let (st, msg) = status(s.user_read_managed(&on_m, iu.id).await);
+        assert_eq!(st, StatusCode::NOT_FOUND, "a sibling client stays not found: {msg}");
         fx.finish().await;
     }
 }

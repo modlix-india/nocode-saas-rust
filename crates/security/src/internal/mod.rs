@@ -7,6 +7,7 @@
 pub mod apps;
 pub mod billing;
 pub mod clients;
+pub mod contact;
 pub mod routes;
 pub mod scope;
 pub mod ssl;
@@ -70,11 +71,11 @@ pub async fn run() -> Result<()> {
     crate::check_jwt_key(&cfg)?;
     crate::configure_messages(&cfg)?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     let state = build(&cfg, pool.clone(), cache.clone());
     cache.spawn_eviction_listener();
 
-    let eureka = crate::eureka_for(&cfg)?;
+    let registry = crate::registry_for(&cfg)?;
     let health = Health::new(telemetry.metrics.clone());
     health.check("mysql", move || {
         let pool = pool.clone();
@@ -84,7 +85,7 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: true }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: true }
         .run(routes::router(state))
         .await
 }

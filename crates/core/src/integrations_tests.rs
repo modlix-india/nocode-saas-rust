@@ -120,6 +120,12 @@ impl TokenStore for MemoryTokens {
     async fn by_state(&self, state: Option<&str>) -> ConnResult<Option<CoreToken>> {
         Ok(self.rows.lock().iter().find(|t| state.is_some() && t.state.as_deref() == state).cloned())
     }
+    async fn consent_row(&self, c: &str, a: &str, n: &str, state: &str) -> ConnResult<Option<CoreToken>> {
+        Ok(self.rows.lock().iter().filter(|t| {
+            t.client_code.as_deref() == Some(c) && t.app_code.as_deref() == Some(a) && t.connection_name.as_deref() == Some(n)
+                && t.state.as_deref() == Some(state)
+        }).min_by_key(|t| t.id).cloned())
+    }
     async fn revoke(&self, c: &str, a: &str, n: &str, _: Option<TokenType>) -> ConnResult<bool> {
         let mut any = false;
         for t in self.rows.lock().iter_mut() {
@@ -369,7 +375,9 @@ async fn publishers() {
 fn all(i: &Arc<Integrations>, catalog: Arc<dyn crate::storage::defs::Catalog>) -> Vec<Arc<dyn Function>> {
     use crate::functions::integration_fns as f;
     let mut v = f::rest(i);
-    v.extend(f::email(i));
+    // A files service nobody answers on: only the attachment test reads files.
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&["http://127.0.0.1:1"])).unwrap());
+    v.extend(f::email(i, &files));
     v.extend(f::create_event(i, &catalog));
     v.extend(f::notification(i));
     v.extend(f::ai(i));
@@ -425,6 +433,20 @@ async fn rest_requests() {
     // An anonymous caller downloads nothing: Java's chain completes empty.
     let r = run(get_request.as_ref(), json!({"connectionName": "rest", "url": "/rest/file.pdf", "downloadAsAFile": true}), crate::functions::security_world::anonymous(7, "FIN"), true, true).await;
     assert_eq!(r.unwrap_err().status(), StatusCode::NOT_FOUND);
+    // A webhook or event run stores it, always as a secured file of the run's own client.
+    let client = json!({"id": 7, "code": "FIN"});
+    for auth in [
+        crate::events::webhook_authentication(Some("leadzumptwo"), Some("FIN"), &client).unwrap(),
+        crate::events::anonymous_authentication(Some("leadzumptwo"), Some("FIN"), &client).unwrap(),
+    ] {
+        let args = json!({"connectionName": "rest", "url": "/rest/file.pdf", "downloadAsAFile": true, "fileName": "rec", "fileLocation": "/calls", "fileType": "static"});
+        let r = run(get_request.as_ref(), args, auth, true, true).await.unwrap();
+        assert_eq!(r["data"]["name"], "rec.pdf");
+        assert_eq!(s.files.created.lock().last().unwrap().clone(), ("secured".into(), "FIN".into(), false, "/calls".into(), "rec.pdf".into(), 3));
+    }
+    // The connections crate names the same authorities core's run contexts carry.
+    assert_eq!(connections::rest::call::WEBHOOK_AUTHORITY, crate::events::WEBHOOK_AUTHORITY);
+    assert_eq!(connections::rest::call::EVENT_RUNNER_AUTHORITY, crate::events::EVENT_RUNNER_AUTHORITY);
     for name in ["PutRequest", "PatchRequest", "DeleteRequest"] {
         assert_eq!(find(&fns, name).get_signature().get_namespace(), "CoreServices.REST");
     }
@@ -441,7 +463,7 @@ async fn send_email_and_chat() {
         jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
                     "fromExpression": "from@x.com", "toExpression": "${email}"})),
     );
-    // A default language without an expression fails, as Java renders the null expression.
+    // A default language without an expression is the language (Java failed on it).
     s.docs.templates.lock().insert(
         "nolang".into(),
         jmap(json!({"name": "nolang", "templateParts": {"en": {"subject": "S"}}, "defaultLanguage": "en", "toExpression": "${email}"})),
@@ -455,7 +477,7 @@ async fn send_email_and_chat() {
     let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
     assert!(sent.contains("a@x.com") && sent.contains("Hi Asha"), "{sent}");
     let r = run(send.as_ref(), json!({"connectionName": "mail", "templateName": "nolang", "templateData": {"email": "a@x.com"}}), fin(), true, true).await;
-    assert_eq!(r.unwrap_err().text(), "Cannot invoke \"String.length()\" because \"s\" is null");
+    assert_eq!(r.unwrap()["sent"], json!(true));
     // An unknown template is the template's 404.
     let r = run(send.as_ref(), json!({"connectionName": "mail", "templateName": "none"}), fin(), true, true).await;
     assert_eq!(r.unwrap_err().status(), StatusCode::NOT_FOUND);
@@ -470,6 +492,103 @@ async fn send_email_and_chat() {
     let r = run(chat.as_ref(), json!({"connectionName": "none", "prompt": "hi"}), fin(), true, true).await.unwrap();
     assert_eq!(r["error"], "Connection details missing none");
     assert_eq!(run(chat.as_ref(), json!({"connectionName": "ai", "prompt": "hi"}), fin(), false, true).await.unwrap_err().status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// A files service holding one secured PDF for FIN, recording who read what.
+async fn attachment_files() -> (String, Arc<Mutex<Vec<String>>>) {
+    let reads: Arc<Mutex<Vec<String>>> = Default::default();
+    let r = reads.clone();
+    let router = Router::new().route(
+        "/api/files/internal/{resourceType}/convertToBase64",
+        get(move |Path(kind): Path<String>, axum::extract::RawQuery(q): axum::extract::RawQuery| {
+            let r = r.clone();
+            async move {
+                let q = q.unwrap_or_default();
+                r.lock().push(format!("{kind} {q}"));
+                if kind == "secured" && q.contains("url=%2Fapi%2Ffiles%2Fsecured%2Ffile%2FFIN%2Finvoices%2FMay.pdf") {
+                    "data:application/pdf;name:May.pdf;base64,JVBERi0x".into_response()
+                } else {
+                    StatusCode::OK.into_response()
+                }
+            }
+        }),
+    );
+    (serve(router).await, reads)
+}
+
+#[tokio::test]
+async fn send_email_with_attachments() {
+    let s = setup().await;
+    let (files_base, reads) = attachment_files().await;
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&[&files_base])).unwrap());
+    let fns = crate::functions::integration_fns::email(&s.integrations, &files);
+    s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL",
+                                 "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "k"}}));
+    s.docs.templates.lock().insert(
+        "welcome".into(),
+        jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
+                    "fromExpression": "from@x.com", "toExpression": "${email}"})),
+    );
+    let send = find(&fns, "SendEmail");
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "Asha", "email": "a@x.com"},
+                      "attachments": ["/api/files/secured/file/FIN/invoices/May.pdf", {"content": "aGk=", "name": "notes.txt"}]});
+    let r = run(send.as_ref(), args, fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    // Read as the caller's client, with the metadata.
+    let read = reads.lock().clone();
+    assert_eq!(read.len(), 1);
+    assert!(read[0].starts_with("secured clientCode=FIN&") && read[0].ends_with("&metadataRequired=true"), "{read:?}");
+    let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
+    assert!(
+        sent.ends_with(r#""attachments":[{"content":"JVBERi0x","type":"application/pdf","filename":"May.pdf","disposition":"attachment"},{"content":"aGk=","type":"text/plain","filename":"notes.txt","disposition":"attachment"}]}"#),
+        "{sent}"
+    );
+    // A file the files service does not give is the send's error; nothing more is posted.
+    let before = s.seen.lock().len();
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"},
+                      "attachments": ["/api/files/secured/file/OTHER/x.pdf"]});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.text(), "Unable to send the email: Attachment not found: /api/files/secured/file/OTHER/x.pdf");
+    assert_eq!(s.seen.lock().len(), before);
+    // Not a stored file.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"email": "a@x.com"},
+                      "attachments": ["https://example.com/x.pdf"]});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.text(), "Unable to send the email: Attachment is not a stored file: https://example.com/x.pdf");
+}
+
+#[tokio::test]
+async fn send_email_with_cc_and_bcc() {
+    let s = setup().await;
+    let (files_base, _) = attachment_files().await;
+    let files = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&[&files_base])).unwrap());
+    let fns = crate::functions::integration_fns::email(&s.integrations, &files);
+    s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL",
+                                 "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "k"}}));
+    s.docs.templates.lock().insert(
+        "welcome".into(),
+        jmap(json!({"name": "welcome", "templateParts": {"en": {"subject": "Hi ${name}", "body": "<p>${name}</p>"}},
+                    "fromExpression": "from@x.com", "toExpression": "${email}"})),
+    );
+    let send = find(&fns, "SendEmail");
+    // A string (as a step passes one) and an array; a copy already in `to` and a BCC already in CC are dropped.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "Asha", "email": "a@x.com"},
+                      "cc": "ops@x.com, A@x.com", "bcc": ["audit@x.com; ops@x.com", null]});
+    let r = run(send.as_ref(), args, fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    let sent = s.seen.lock().iter().find(|l| l.starts_with("sendgrid")).cloned().unwrap();
+    assert!(sent.contains(r#""to":[{"email":"a@x.com"}],"cc":[{"email":"ops@x.com"}],"bcc":[{"email":"audit@x.com"}]"#), "{sent}");
+    // Empty and null are no copies.
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"}, "cc": "", "bcc": null});
+    assert_eq!(run(send.as_ref(), args, fin(), true, true).await.unwrap()["sent"], json!(true));
+    // One bad address: 400, nothing posted.
+    let before = s.seen.lock().len();
+    let args = json!({"connectionName": "mail", "templateName": "welcome", "templateData": {"name": "A", "email": "a@x.com"},
+                      "cc": "ops@x.com", "bcc": "audit@x.com, nope"});
+    let e = run(send.as_ref(), args, fin(), true, true).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(e.text(), "Unable to send the email: Not an email address: nope");
+    assert_eq!(s.seen.lock().len(), before);
 }
 
 #[tokio::test]
@@ -493,6 +612,63 @@ async fn send_notification() {
     let r = run(f.as_ref(), json!({"connectionName": "n", "notificationName": "w", "targetId": 1.5}), fin(), true, true).await;
     assert_eq!(r.unwrap_err().status(), StatusCode::INTERNAL_SERVER_ERROR);
     let _ = NotificationRequest::default();
+}
+
+#[tokio::test]
+async fn send_data_notification() {
+    let s = setup().await;
+    let fns = all(&s.integrations, crate::testing::MemoryCatalog::with(Vec::new()));
+    let f = find(&fns, "SendDataNotification");
+    assert_eq!(f.get_signature().get_full_name(), "CoreServices.Notification.SendDataNotification");
+    s.world.answer("GET", "/api/security/clients/internal/isUserPartOfHierarchy", 200, "true");
+    let args = json!({"targetId": 500, "eventName": "incomingCall", "data": {"from": "+9180", "lead": {"id": 9}},
+                      "filterAuthorization": "Authorities.Calls"});
+    // Only inside a server function, as SendNotification.
+    assert_eq!(run(f.as_ref(), args.clone(), fin(), false, true).await.unwrap_err().status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let before = chrono::Utc::now().timestamp_millis();
+    let r = run(f.as_ref(), args.clone(), fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    let (exchange, key, body, type_id) = s.published.sent.lock()[0].clone();
+    assert_eq!((exchange.as_str(), key.as_str(), type_id.as_str()), ("notifications", "notifications2", connections::mq::NOTIFICATION_TYPE_ID));
+    assert_eq!((body["kind"].clone(), body["eventName"].clone()), (json!("DATA"), json!("incomingCall")));
+    assert_eq!(body["data"], json!({"from": "+9180", "lead": {"id": 9}}));
+    assert_eq!((body["targetId"].clone(), body["targetType"].clone(), body["filterAuthorization"].clone()), (json!(500), json!("User Id"), json!("Authorities.Calls")));
+    let expires = body["expiresAt"].as_i64().unwrap();
+    assert!(expires >= before + 60_000 && expires <= chrono::Utc::now().timestamp_millis() + 60_000, "the default ttl is 60 s");
+    assert!(body.get("notificationName").is_none() && body.get("connectionName").is_none());
+
+    // Any JSON as data, and a ttl of its own.
+    let r = run(f.as_ref(), json!({"targetId": 500, "eventName": "tick", "data": [1, "a"], "ttlSeconds": 5}), fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(true));
+    let body = s.published.sent.lock()[1].2.clone();
+    assert_eq!(body["data"], json!([1, "a"]));
+    assert!(body["expiresAt"].as_i64().unwrap() <= chrono::Utc::now().timestamp_millis() + 5_000);
+    // The ttl stays within 1 to 3600 s: the signature refuses others.
+    assert!(run(f.as_ref(), json!({"targetId": 500, "eventName": "tick", "ttlSeconds": 0}), fin(), true, true).await.is_err());
+    assert!(run(f.as_ref(), json!({"targetId": 500, "eventName": "tick", "ttlSeconds": 3601}), fin(), true, true).await.is_err());
+
+    // Refused names and sizes, coded, before anything is checked or published.
+    let code = |e: CoreError| e.code().map(|c| c.code.to_string()).unwrap_or_default();
+    let e = run(f.as_ref(), json!({"targetId": 500, "eventName": "init"}), fin(), true, true).await.unwrap_err();
+    assert_eq!((e.status(), code(e)), (StatusCode::BAD_REQUEST, "CORE.DATA_NOTIFICATION_EVENT_RESERVED".to_string()));
+    let e = run(f.as_ref(), json!({"targetId": 500, "eventName": "a b"}), fin(), true, true).await.unwrap_err();
+    assert_eq!(code(e), "CORE.DATA_NOTIFICATION_EVENT_INVALID");
+    let e = run(f.as_ref(), json!({"targetId": 500, "eventName": "big", "data": "x".repeat(70_000)}), fin(), true, true).await.unwrap_err();
+    assert_eq!(code(e), "CORE.DATA_NOTIFICATION_TOO_LARGE");
+    // No event name at all: the signature requires one.
+    assert!(run(f.as_ref(), json!({"targetId": 500}), fin(), true, true).await.is_err());
+    assert_eq!(s.published.sent.lock().len(), 2);
+
+    // A target the caller may not reach: not sent.
+    s.world.answer("GET", "/api/security/clients/internal/isUserPartOfHierarchy", 200, "false");
+    let r = run(f.as_ref(), args, fin(), true, true).await.unwrap();
+    assert_eq!(r["sent"], json!(false));
+    assert_eq!(s.published.sent.lock().len(), 2);
+    // A publish that fails is the function's error.
+    s.world.answer("GET", "/api/security/clients/internal/isUserPartOfHierarchy", 200, "true");
+    *s.published.fail.lock() = true;
+    assert!(run(f.as_ref(), json!({"targetId": 500, "eventName": "x"}), fin(), true, true).await.is_err());
+    let _ = connections::notification::DataNotificationRequest::default();
 }
 
 #[tokio::test]
@@ -563,7 +739,15 @@ async fn connection_routes() {
         "user": {"id": 110, "clientId": 7, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true, "clientCode": "FIN"
     }).to_string());
     s.docs.add_connection(json!({"name": "notify", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
-                                 "connectionDetails": {"mail": "mail", "inapp": true}}));
+                                 "connectionDetails": {"mail": "mail", "inapp": true, "push": "pushKeys"}}));
+    s.docs.add_connection(json!({"name": "pushKeys", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "PUSH",
+                                 "connectionDetails": {"apns": {"keyId": "K", "teamId": "T", "privateKey": "p"}}}));
+    s.docs.add_connection(json!({"name": "notifyDefault", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
+                                 "connectionDetails": {"inapp": true, "push": true}}));
+    s.docs.add_connection(json!({"name": "notifyText", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
+                                 "connectionDetails": {"inapp": "true", "push": " True "}}));
+    s.docs.add_connection(json!({"name": "notifyOff", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION",
+                                 "connectionDetails": {"inapp": "true", "push": "false"}}));
     s.docs.add_connection(json!({"name": "mail", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "MAIL", "version": 2,
                                  "connectionSubType": "SMTP", "connectionDetails": {"host": "h"}, "isAppLevel": false}));
     s.docs.add_connection(json!({"name": "bare", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "NOTIFICATION", "connectionDetails": {}}));
@@ -576,6 +760,15 @@ async fn connection_routes() {
     assert_eq!(v["inApp"], json!(true));
     assert_eq!(v["mail"]["name"], "mail");
     assert_eq!(v["mail"]["connectionSubType"], "SMTP");
+    assert_eq!(v["push"]["connectionDetails"]["apns"]["teamId"], "T", "the PUSH connection is inlined, secrets and all");
+    let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyDefault?{q}"), false).await;
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((v["inApp"].clone(), v["push"].clone()), (json!(true), json!({})));
+    // The AppBuilder form saves text.
+    let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyText?{q}"), false).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["push"], json!({}));
+    let (_, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/notifyOff?{q}"), false).await;
+    assert!(serde_json::from_str::<Value>(&body).unwrap().get("push").is_none());
     let (st, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/bare?{q}"), false).await;
     assert_eq!((st, body.as_str()), (200, ""));
     let (st, _, body) = http_get(&base, &format!("/api/core/connections/internal/notification/mail?{q}"), false).await;
@@ -614,6 +807,165 @@ async fn connection_routes() {
     assert!(r.status().as_u16() == 200 || r.status().as_u16() >= 400);
     let r = reqwest::Client::new().post(format!("{base}/api/core/connections/oauth/evoke")).send().await.unwrap();
     assert_eq!(r.status().as_u16(), 400);
+}
+
+/// The consent gate on `POST /oauth/evoke`, through the route and KIRun's evaluator.
+#[tokio::test]
+async fn oauth_evoke_honours_consent_auth() {
+    let s = setup().await;
+    let signed_in = |authorities: &[&str]| {
+        json!({"user": {"id": 110, "clientId": 7, "stringAuthorities": authorities}, "authenticated": true, "clientCode": "FIN"}).to_string()
+    };
+    let oauth = |name: &str, gate: Option<&str>| {
+        let mut c = json!({"name": name, "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                           "connectionSubType": "REST_API_OAUTH2",
+                           "connectionDetails": {"grantType": "AUTHORIZATION_CODE",
+                                                 "consentDetails": {"url": "https://provider.example.com/oauth", "queryParams": {"client_id": "1"}}}});
+        if let Some(g) = gate {
+            c["consentAuth"] = json!(g);
+        }
+        c
+    };
+    s.docs.add_connection(oauth("gated", Some("Authorities.LEADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner")));
+    s.docs.add_connection(oauth("open", None));
+    s.docs.add_connection(oauth("blank", Some("  ")));
+    let base = routes(&s).await;
+    let evoke = |name: &str| {
+        reqwest::Client::new()
+            .post(format!("{base}/api/core/connections/oauth/evoke?connectionName={name}"))
+            .header("appCode", "leadzumptwo")
+            .header("clientCode", "FIN")
+            .header("X-Forwarded-Host", "app.local")
+            .header("Authorization", "Basic dXNlcg==")
+            .send()
+    };
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN"]));
+    let r = evoke("gated").await.unwrap();
+    assert_eq!(r.status().as_u16(), 403);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["code"], json!("CORE.CONNECTION_CONSENT_FORBIDDEN"), "{body}");
+    assert!(s.tokens.rows.lock().is_empty(), "nothing stored for a refused consent");
+    for open in ["open", "blank"] {
+        let r = evoke(open).await.unwrap();
+        assert_eq!(r.status().as_u16(), 200, "{open}");
+        assert!(r.text().await.unwrap().starts_with("https://provider.example.com/oauth?client_id=1&redirect_uri="), "{open}");
+    }
+
+    for holder in ["Authorities.LEADZUMPTWO.ROLE_Account_MANAGE", "Authorities.ROLE_Owner"] {
+        s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN", holder]));
+        let r = evoke("gated").await.unwrap();
+        assert_eq!(r.status().as_u16(), 200, "{holder}");
+        let url = r.text().await.unwrap();
+        assert!(url.starts_with("https://provider.example.com/oauth?client_id=1&redirect_uri=https://app.local/api/core/connections/oauth/callback&state="), "{url}");
+    }
+}
+
+/// `GET /oauth/revoke` honours the same `consentAuth`, before anything is looked up or revoked.
+#[tokio::test]
+async fn oauth_revoke_honours_consent_auth() {
+    let s = setup().await;
+    let signed_in = |authorities: &[&str]| {
+        json!({"user": {"id": 110, "clientId": 7, "stringAuthorities": authorities}, "authenticated": true, "clientCode": "FIN"}).to_string()
+    };
+    for (name, gate) in [("gated", Some("Authorities.LEADZUMPTWO.ROLE_Account_MANAGE")), ("open", None)] {
+        let mut c = json!({"name": name, "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                           "connectionSubType": "REST_API_OAUTH2", "connectionDetails": {"grantType": "AUTHORIZATION_CODE"}});
+        if let Some(g) = gate {
+            c["consentAuth"] = json!(g);
+        }
+        s.docs.add_connection(c);
+    }
+    s.tokens.rows.lock().push(CoreToken {
+        id: Some(1),
+        client_code: Some("FIN".into()),
+        app_code: Some("leadzumptwo".into()),
+        connection_name: Some("gated".into()),
+        token_type: Some(TokenType::Access),
+        token: Some("live".into()),
+        is_revoked: Some(false),
+        ..Default::default()
+    });
+    let base = routes(&s).await;
+    let revoked = || s.tokens.rows.lock()[0].is_revoked;
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &signed_in(&["Authorities.Logged_IN"]));
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!(st, 403, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["code"], json!("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+    assert_eq!(revoked(), Some(false), "a refused revoke revokes nothing");
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=open", true).await;
+    assert_eq!(st, 400, "no consentAuth: the normal path ({body})");
+
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200,
+                   &signed_in(&["Authorities.Logged_IN", "Authorities.LEADZUMPTWO.ROLE_Account_MANAGE"]));
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!((st, body.as_str()), (200, "true"));
+    assert_eq!(revoked(), Some(true));
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=gated", true).await;
+    assert_eq!(st, 400, "nothing left to revoke");
+}
+
+/// `GET /oauth/status` (Rust only): the caller's stored sign-in, its consent's start and user,
+/// for the caller's own client and URL app; and `oauth/revoke` also drops a sign-in whose access
+/// token has expired while its refresh token is active.
+#[tokio::test]
+async fn oauth_status_and_revoke_of_a_refresh_only_sign_in() {
+    let s = setup().await;
+    s.world.answer("GET", "/api/security/internal/securityContextAuthentication", 200, &json!({
+        "user": {"id": 110, "clientId": 7, "stringAuthorities": ["Authorities.Logged_IN"]}, "authenticated": true, "clientCode": "FIN"
+    }).to_string());
+    s.docs.add_connection(json!({"name": "G", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                                 "connectionSubType": "REST_API_OAUTH2", "connectionDetails": {"grantType": "AUTHORIZATION_CODE"}}));
+    let at = |t: &str| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S").unwrap();
+    let row = |id: u64, client: &str, app: &str, ty: TokenType, revoked: bool, created: &str, user: u64| CoreToken {
+        id: Some(id),
+        client_code: Some(client.into()),
+        app_code: Some(app.into()),
+        connection_name: Some("G".into()),
+        token_type: Some(ty),
+        token: Some(format!("t{id}")),
+        state: Some("consent-1".into()),
+        is_revoked: Some(revoked),
+        user_id: Some(user),
+        created_at: Some(at(created)),
+        ..Default::default()
+    };
+    {
+        let mut rows = s.tokens.rows.lock();
+        // The consent's first row (its access token, since refreshed and revoked), its refresh
+        // token, a later access token that expired, and another client's and another app's.
+        rows.push(row(1, "FIN", "leadzumptwo", TokenType::Access, true, "2026-10-20 09:15:00", 110));
+        rows.push(row(2, "FIN", "leadzumptwo", TokenType::Refresh, false, "2026-10-20 09:16:00", 110));
+        rows.push(row(3, "FIN", "leadzumptwo", TokenType::Access, true, "2026-10-28 11:00:00", 0));
+        rows.push(row(4, "OTHER", "leadzumptwo", TokenType::Access, false, "2026-10-21 08:00:00", 9));
+        rows.push(row(5, "FIN", "marketingai", TokenType::Access, false, "2026-10-22 08:00:00", 9));
+    }
+    let base = routes(&s).await;
+
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", false).await;
+    assert_eq!(st, 401);
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/status", true).await;
+    assert_eq!(st, 400);
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", true).await;
+    assert_eq!(st, 200, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v, json!({"hasToken": true, "connectedAt": "2026-10-20T09:15:00Z", "connectedBy": 110}));
+    assert!(!body.contains("t2"), "never the token");
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=none", true).await;
+    assert_eq!(st, 200);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), json!({"hasToken": false, "connectedAt": null, "connectedBy": null}));
+
+    // Only the refresh token is active: revoke drops the caller's rows, no other client's or app's.
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=G", true).await;
+    assert_eq!((st, body.as_str()), (200, "true"));
+    let revoked: Vec<_> = s.tokens.rows.lock().iter().map(|t| (t.id.unwrap(), t.is_revoked == Some(true))).collect();
+    assert_eq!(revoked, vec![(1, true), (2, true), (3, true), (4, false), (5, false)]);
+    let (st, _, body) = http_get(&base, "/api/core/connections/oauth/status?connectionName=G", true).await;
+    assert_eq!(st, 200);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["hasToken"], json!(false));
+    let (st, _, _) = http_get(&base, "/api/core/connections/oauth/revoke?connectionName=G", true).await;
+    assert_eq!(st, 400, "nothing left to revoke");
 }
 
 // --- DraftEventPropagationTest / DraftNotificationPropagationTest ------------------------------
@@ -797,4 +1149,95 @@ async fn downloads_are_uploaded_through_the_files_client() {
     let up = uploads.lock().clone();
     assert_eq!((up.len(), up[0].bytes.as_slice()), (1, b"hello".as_slice()));
     assert!(up[0].query.contains("fileName=a.txt") && up[0].query.contains("override=true"), "{}", up[0].query);
+}
+
+// --- against the local stack ------------------------------------------------------------------
+
+/// security-internal and files-manage as `config/core-exec.toml` names them, and the gateway
+/// the files API is read through as the SYSTEM user 142.
+const LOCAL_SECURITY_INTERNAL: &str = "http://localhost:8112";
+const LOCAL_FILES_MANAGE: &str = "http://localhost:8104";
+const LOCAL_GATEWAY: &str = "http://localhost:8080";
+const LOCAL_BASIC: &str = "Basic MTQyOlBhc3NAMTIzNA==";
+/// A scratch folder of FIN's secured files, emptied again at the end.
+const SCRATCH_FOLDER: &str = "_scratch_r2_webhook_downloads";
+
+async fn files_api(method: reqwest::Method, path: &str) -> (u16, Vec<u8>) {
+    let r = reqwest::Client::new()
+        .request(method, format!("{LOCAL_GATEWAY}{path}"))
+        .header("Authorization", LOCAL_BASIC)
+        .header("clientCode", "SYSTEM")
+        .header("appCode", "appbuilder")
+        .send()
+        .await
+        .expect("files api");
+    (r.status().as_u16(), r.bytes().await.unwrap_or_default().to_vec())
+}
+
+/// A webhook run (the real client lookup of FIN, `Authorities._Webhook`) downloads a recording
+/// from a local stub into FIN's secured files through the real files-manage, refuses a client
+/// FIN does not manage (real security), and the file is then found and deleted through the
+/// files API.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1"]
+async fn local_stack_webhook_download_lands_in_the_clients_secured_files() {
+    if !crate::testing::local_stack() {
+        return;
+    }
+    // What an earlier, failed run left behind.
+    files_api(reqwest::Method::DELETE, &format!("/api/files/secured/{SCRATCH_FOLDER}?clientCode=FIN")).await;
+    let recording = b"ID3-r2-webhook-download".to_vec();
+    let body = recording.clone();
+    let stub = serve(Router::new().route("/media/rec.mp3", get(move || {
+        let body = body.clone();
+        async move { ([("content-type", "audio/mpeg")], body) }
+    })))
+    .await;
+
+    let docs = Arc::new(MemoryDocs::default());
+    docs.add_connection(json!({"name": "media", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                               "connectionSubType": "REST_API_BASIC", "connectionDetails": {"baseUrl": stub}}));
+    let mut cfg = crate::config::CoreConfig::default();
+    cfg.connections.block_private_targets = false;
+    let mq = Arc::new(Mq::with(Arc::new(Recording::default()), &cfg.mq));
+    let cache = platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap();
+    let security = Arc::new(SecurityCalls::new(Upstream::fixed(&[LOCAL_SECURITY_INTERNAL])).unwrap());
+    let files: Arc<dyn FileCreate> = Arc::new(crate::files_calls::FilesCalls::new(Upstream::fixed(&[LOCAL_FILES_MANAGE])).unwrap());
+    let integrations = Arc::new(
+        Integrations::new(&cfg, docs, security.clone(), Arc::new(MemoryTokens::default()), cache, mq, Some(files)).unwrap(),
+    );
+    let get_request = find(&crate::functions::integration_fns::rest(&integrations), "GetRequest");
+
+    // The context core's webhook route builds: FIN as security has it, `Authorities._Webhook`.
+    let client = security.client_by_code("FIN").await.unwrap().expect("FIN on the local stack");
+    let auth = crate::events::webhook_authentication(Some("leadzumptwo"), Some("FIN"), &client).unwrap();
+
+    let name = format!("rec{}", chrono::Utc::now().timestamp_millis());
+    let args = json!({"connectionName": "media", "url": "/media/rec.mp3", "downloadAsAFile": true, "fileName": name,
+                      "fileLocation": format!("/{SCRATCH_FOLDER}"), "fileType": "static"});
+    let r = run(get_request.as_ref(), args.clone(), auth.clone(), true, true).await.unwrap();
+    assert_eq!(r["statusCode"], json!(200), "{r:?}");
+    // The stub (hyper) sends `content-type` in lower case, which the exact `Content-Type`
+    // lookup does not see, so the extension comes from the URL. The URL is files' own, without
+    // a leading slash.
+    assert_eq!(r["data"]["url"], json!(format!("api/files/secured/file/FIN/{SCRATCH_FOLDER}/{name}.mp3")), "{r:?}");
+
+    // A client FIN does not manage is refused, and nothing is written for it.
+    let mut foreign = args.clone();
+    foreign["fileClientCode"] = json!("SYSTEM");
+    let r = run(get_request.as_ref(), foreign, auth, true, true).await.unwrap();
+    assert_eq!(r["data"], json!("Client code is invalid"));
+
+    // Found in FIN's secured files, with the bytes downloaded, then deleted.
+    let (status, listed) = files_api(reqwest::Method::GET, &format!("/api/files/secured/{SCRATCH_FOLDER}?clientCode=FIN&size=100")).await;
+    assert_eq!(status, 200);
+    let listed: Value = serde_json::from_slice(&listed).unwrap();
+    let names: Vec<&str> = listed["content"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
+    assert!(names.contains(&format!("{name}.mp3").as_str()), "{names:?}");
+    let (status, bytes) = files_api(reqwest::Method::GET, &format!("/api/files/secured/file/FIN/{SCRATCH_FOLDER}/{name}.mp3")).await;
+    assert_eq!((status, bytes), (200, recording));
+    let (status, deleted) = files_api(reqwest::Method::DELETE, &format!("/api/files/secured/{SCRATCH_FOLDER}?clientCode=FIN")).await;
+    assert_eq!((status, deleted), (200, b"true".to_vec()));
+    let (_, listed) = files_api(reqwest::Method::GET, &format!("/api/files/secured/{SCRATCH_FOLDER}?clientCode=FIN&size=100")).await;
+    assert!(!String::from_utf8_lossy(&listed).contains(&name), "still listed after the delete");
 }

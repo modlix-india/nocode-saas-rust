@@ -222,6 +222,7 @@ async fn setup() -> (Router, F, String) {
         security_up: up.clone(),
         core_up: up.clone(),
         ui_up: up,
+        files_up: None,
         http: reqwest::Client::new(),
         port: 8110,
     };
@@ -543,6 +544,7 @@ async fn services_that_do_not_answer() {
         security_up: security.clone(),
         core_up: core.clone(),
         ui_up: up.clone(),
+        files_up: None,
         http: timeout.map(|t| reqwest::Client::builder().timeout(t).build().unwrap()).unwrap_or_default(),
         port: 8110,
     };

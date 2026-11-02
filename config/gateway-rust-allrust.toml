@@ -26,7 +26,7 @@ internal_upstream = "http://localhost:8112"
 # sub-table (for example [pools.core-exec.breaker] with open_ms = 10000 under it).
 #
 # [pools.NAME]
-# discovery_refresh_ms = 2000     # how often an eureka: pool reads the registry
+# discovery_refresh_ms = 2000     # how often a lighthouse: pool reads the registry
 #
 # [pools.NAME.outlier]
 # consecutive_5xx = 5             # 502/503/504, broken connections or timeouts in a row; 0 = off
@@ -492,7 +492,7 @@ health_path = "/readyz"
 upstreams = ["http://localhost:8113"]
 health_path = "/readyz"
 
-[eureka]
+[registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true
 register_as = "GATEWAY"

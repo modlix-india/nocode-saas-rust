@@ -1,4 +1,4 @@
-//! The dashboard: Eureka's status page, plus managing instances.
+//! The dashboard: the registry protocol's status page, plus managing instances.
 //!
 //! - `GET /` and `GET /dashboard`: one self-contained page (inline CSS and JS, nothing loaded
 //!   from elsewhere). Hosts bind the port to 127.0.0.1, so it is reached through an SSH tunnel.
@@ -6,9 +6,9 @@
 //! - `GET /v1/peers`: each peer, asked now whether it answers, with how replication to it goes.
 //! - `/v1/admin/apps/{APP}/{ID}[/status]`: take an instance out of service, put it back, or
 //!   remove it. They run the registry's normal client writes, so they replicate to the peers
-//!   like the same Eureka calls. They need `Authorization: Bearer <token>` where the token's
+//!   like the same Lighthouse calls. They need `Authorization: Bearer <token>` where the token's
 //!   SHA-256 is `admin_token_sha256`; without that setting they are refused and the page is
-//!   read-only. The Eureka routes themselves stay open to the clients, as Eureka's are.
+//!   read-only. The Lighthouse routes themselves stay open to the clients, as the registry protocol's are.
 //! - `GET /v1/admin/settings`: the configuration this instance started with, as TOML (tokens
 //!   included), with the file it read and the names of the `MODLIX__` variables that set values.
 //!   The same admin token.
@@ -162,7 +162,7 @@ fn done(found: bool, what: &str, app: &str, id: &str) -> Response {
     }
 }
 
-/// `PUT .../status?value=OUT_OF_SERVICE` (or another status): the override Eureka sets.
+/// `PUT .../status?value=OUT_OF_SERVICE` (or another status): the override Lighthouse sets.
 async fn take_out(
     State(n): State<Arc<Node>>,
     Path((app, id)): Path<(String, String)>,

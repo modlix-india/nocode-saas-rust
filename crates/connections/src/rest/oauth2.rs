@@ -7,12 +7,14 @@ use chrono::{Duration as ChronoDuration, NaiveDateTime};
 use http::StatusCode;
 use serde_json::{Map, Value};
 
-use super::basic;
-use super::http::{retrieve_json, JsonTarget};
+use base64::Engine;
+
+use super::http::{retrieve_json_with, JsonTarget};
+use super::{basic, body};
 use super::spring_uri;
 use super::{RestRequest, RestResponse};
 use crate::connection::{self, Connection, ConnectionType, GRANT_AUTHORIZATION_CODE};
-use crate::context::Caller;
+use crate::context::{AuthorityCheck, Caller};
 use crate::error::{messages, ConnError, ConnResult};
 use crate::java;
 use crate::tokens::{CoreToken, TokenType};
@@ -181,10 +183,83 @@ fn query_params(block: &Map<String, Value>) -> Vec<(String, String)> {
 /// A token endpoint stored in the connection: Java fetches it without the call-time guard;
 /// here it is guarded like every other outbound call (see DIFFERENCES.md).
 async fn fetch_token(svc: &Connections, method: &str, uri: &str, target: JsonTarget) -> ConnResult<Option<Value>> {
+    fetch_token_with(svc, method, uri, TokenRequest::default(), target).await
+}
+
+async fn fetch_token_with(svc: &Connections, method: &str, uri: &str, request: TokenRequest, target: JsonTarget) -> ConnResult<Option<Value>> {
     if svc.config.block_private_targets {
         outbound::guard_target(uri).await?;
     }
-    retrieve_json(&svc.http, method, uri, target).await
+    retrieve_json_with(&svc.http, method, uri, request.headers, request.body, target).await
+}
+
+/// The headers and body of a client-credentials token request (Rust only; Java sends neither).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TokenRequest {
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
+/// `tokenDetails.clientAuthentication: "basic"`: the client's id and secret in
+/// `Authorization: Basic` (RFC 6749 2.3.1, each form-encoded first). They are read from
+/// `tokenDetails` (`clientId`, `clientSecret`), then the connection details, then the
+/// `client_id` / `client_secret` query parameters where the stored connections keep them.
+fn basic_client_authentication(details: &Map<String, Value>, token_details: &Map<String, Value>) -> ConnResult<String> {
+    let query = token_details.get("queryParams").and_then(Value::as_object);
+    let find = |camel: &str, snake: &str| -> Option<String> {
+        [token_details.get(camel), details.get(camel), query.and_then(|q| q.get(snake))]
+            .into_iter()
+            .flatten()
+            .find(|v| !java::safe_is_blank(Some(v)))
+            .map(java::to_java_string)
+    };
+    let (Some(id), Some(secret)) = (find("clientId", "client_id"), find("clientSecret", "client_secret")) else {
+        return Err(ConnError::coded(
+            StatusCode::BAD_REQUEST,
+            "CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING",
+            "Basic client authentication needs clientId and clientSecret in the connection's tokenDetails",
+        ));
+    };
+    let pair = format!("{}:{}", spring_uri::url_encode_form(&id), spring_uri::url_encode_form(&secret));
+    Ok(format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(pair)))
+}
+
+/// What the client-credentials request carries besides its query parameters: an optional
+/// `tokenDetails.body` (an object, form-encoded unless `bodyType` is `json`) and optional Basic
+/// client authentication (`clientAuthentication: "basic"`).
+pub fn token_request(details: &Map<String, Value>, token_details: &Map<String, Value>) -> ConnResult<TokenRequest> {
+    let mut request = TokenRequest::default();
+    match token_details.get("body") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(b)) => {
+            let json_body = token_details.get("bodyType").and_then(Value::as_str).is_some_and(|t| t.eq_ignore_ascii_case("json"));
+            let payload = Value::Object(b.clone());
+            if json_body {
+                request.headers.push(("Content-Type".into(), "application/json".into()));
+                request.body = Some(serde_json::to_vec(&payload).unwrap_or_default());
+            } else {
+                request.headers.push(("Content-Type".into(), "application/x-www-form-urlencoded".into()));
+                request.body = Some(body::form_body(&payload));
+            }
+        }
+        Some(_) => {
+            return Err(ConnError::coded(
+                StatusCode::BAD_REQUEST,
+                "CORE.CONNECTION_TOKEN_BODY_INVALID",
+                "The connection's tokenDetails.body must be an object of the values to send",
+            ))
+        }
+    }
+    match token_details.get("clientAuthentication").and_then(Value::as_str) {
+        Some(a) if a.eq_ignore_ascii_case("basic") => {
+            request.headers.push(("Authorization".into(), basic_client_authentication(details, token_details)?));
+        }
+        _ => {}
+    }
+    if !request.headers.is_empty() {
+        request.headers.push(("Accept".into(), "application/json".into()));
+    }
+    Ok(request)
 }
 
 /// `refreshAccessToken`: revoke the access tokens, take the active refresh token, ask the
@@ -238,6 +313,8 @@ pub async fn refresh_access_token(
 
 /// `createClientCredentialsToken`: POST to `tokenDetails.url` with its query parameters and
 /// store the token the response names. The row carries the connection's client and app.
+/// The request may also carry a body and Basic client authentication ([`token_request`]); a
+/// connection with neither must have `queryParams`, as in Java.
 pub async fn create_client_credentials_token(svc: &Connections, caller: &Caller, conn: &Connection) -> ConnResult<Option<String>> {
     if !caller.present {
         return Ok(None);
@@ -245,11 +322,12 @@ pub async fn create_client_credentials_token(svc: &Connections, caller: &Caller,
     let details = conn.details().cloned().unwrap_or_default();
     let token_details = details.get("tokenDetails").and_then(Value::as_object).ok_or_else(|| npe("java.util.Map.get(Object)"))?;
     let url = token_details.get("url").and_then(Value::as_str).unwrap_or("");
-    if !token_details.get("queryParams").is_some_and(Value::is_object) {
+    let request = token_request(&details, token_details)?;
+    if request.headers.is_empty() && !token_details.get("queryParams").is_some_and(Value::is_object) {
         return Err(npe("java.util.Map.forEach(java.util.function.BiConsumer)"));
     }
     let uri = spring_uri::build_to_uri(url, &query_params(token_details))?;
-    let Some(response) = fetch_token(svc, "POST", &uri, JsonTarget::JsonNode).await? else { return Ok(None) };
+    let Some(response) = fetch_token_with(svc, "POST", &uri, request, JsonTarget::JsonNode).await? else { return Ok(None) };
     let response = response.as_object().cloned().unwrap_or_default();
 
     let as_text = |key_detail: &str| -> ConnResult<String> {
@@ -299,8 +377,35 @@ pub async fn access_token_for(
     access_token(svc, caller, Some(app), Some(client), &conn).await
 }
 
+/// Whether the caller may change the business's token for the connection: its `consentAuth`
+/// is absent or blank (as before the field existed), or the caller's authorities satisfy it.
+fn satisfies_consent_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> bool {
+    match conn.consent_auth.as_deref().filter(|e| !java::is_blank(e)) {
+        None => true,
+        Some(expression) => check.has_authority(Some(expression), &caller.authorities),
+    }
+}
+
+/// Rust only: the connection's `consentAuth` gate on starting a consent, which replaces the
+/// business's token for the connection. Absent or blank lets every caller through, as before
+/// the field existed; otherwise the caller's authorities must satisfy the expression, or the
+/// consent is refused (403) before a state row or a URL is made. The callback is not gated:
+/// it only completes a consent this check already let start.
+pub fn check_consent_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> ConnResult<()> {
+    if satisfies_consent_auth(check, caller, conn) {
+        return Ok(());
+    }
+    Err(ConnError::coded(
+        StatusCode::FORBIDDEN,
+        "CORE.CONNECTION_CONSENT_FORBIDDEN",
+        format!("Consent for the connection {} is not allowed: the caller does not satisfy its consentAuth", conn.name()),
+    )
+    .param("connection", conn.name()))
+}
+
 /// `evokeConsentAuth`: the provider's consent URL for an authorization-code connection, with
-/// a new state row to match the callback against. `None` when the connection is not visible.
+/// a new state row to match the callback against. `None` when the connection is not visible;
+/// refused when the caller does not satisfy its `consentAuth` ([`check_consent_auth`]).
 pub async fn evoke_consent(
     svc: &Connections,
     caller: &Caller,
@@ -317,6 +422,7 @@ pub async fn evoke_consent(
     let Some(conn) = connection::read(svc.store.as_ref(), caller, connection_name, app, url_client, ConnectionType::RestApi).await? else {
         return Ok(None);
     };
+    check_consent_auth(svc.authority_check.as_ref(), caller, &conn)?;
     if conn.detail_str(AUTH_GRANT_TYPE) != Some(GRANT_AUTHORIZATION_CODE) {
         return Err(ConnError::coded(StatusCode::BAD_REQUEST, "CORE.CONNECTION_GRANT_TYPE_INVALID", "Invalid Connection Grant Type."));
     }
@@ -463,8 +569,46 @@ async fn invalid_callback(svc: &Connections, caller: &Caller, state: Option<&str
     Ok(CallbackOutcome::Redirect(location))
 }
 
+/// Rust only: the `consentAuth` gate on revoking, which drops the business's token as a new
+/// consent replaces it. Absent or blank lets every caller through, as before; a refusal is 403
+/// `CORE.CONNECTION_REVOKE_FORBIDDEN`.
+pub fn check_revoke_auth(check: &dyn AuthorityCheck, caller: &Caller, conn: &Connection) -> ConnResult<()> {
+    if satisfies_consent_auth(check, caller, conn) {
+        return Ok(());
+    }
+    Err(ConnError::coded(
+        StatusCode::FORBIDDEN,
+        "CORE.CONNECTION_REVOKE_FORBIDDEN",
+        format!("Revoking the token of the connection {} is not allowed: the caller does not satisfy its consentAuth", conn.name()),
+    )
+    .param("connection", conn.name()))
+}
+
+/// The connection whose tokens a revoke drops, for its gate: read as the tokens' client resolves
+/// it, without the access or `onlyThruKIRun` checks, so hiding a connection from the caller
+/// cannot skip its gate. None found: no gate, as before.
+async fn gate_revoke(svc: &Connections, caller: &Caller, connection_name: &str, app: &str, client: &str) -> ConnResult<()> {
+    let url_client = caller.url_client_code.as_deref().unwrap_or(client);
+    match svc.store.read_internal(connection_name, app, url_client, client).await? {
+        Some(conn) => check_revoke_auth(svc.authority_check.as_ref(), caller, &conn),
+        None => Ok(()),
+    }
+}
+
+/// The caller's active token for the connection: the access token, or, when it has expired
+/// and not been refreshed yet, the refresh token that would renew it.
+async fn active_sign_in_token(svc: &Connections, client: &str, app: &str, connection_name: &str) -> ConnResult<Option<CoreToken>> {
+    if let Some(t) = svc.tokens.active_token(client, app, connection_name, TokenType::Access).await? {
+        return Ok(Some(t));
+    }
+    svc.tokens.active_token(client, app, connection_name, TokenType::Refresh).await
+}
+
 /// `revokeConnectionToken`: revokes the caller's tokens for the connection. Refused when the
-/// caller has no active access token for it.
+/// caller has no active token for it (Java looked for an access token only; here an active
+/// refresh token counts too, so a sign-in whose access token has expired can be removed), and
+/// (Rust only) when the caller does not satisfy the connection's `consentAuth`
+/// ([`check_revoke_auth`]), before anything is looked up or revoked.
 pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<bool> {
     let refuse = || ConnError::msg(StatusCode::BAD_REQUEST, messages::CANNOT_DELETE_TOKEN_WITH_CLIENT_CODE, &[connection_name]);
     if !caller.present {
@@ -473,7 +617,8 @@ pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connect
     let (Some(client), Some(app)) = (caller.client_code.as_deref(), caller.url_app_code.as_deref()) else {
         return Err(refuse());
     };
-    let Some(token) = svc.tokens.active_token(client, app, connection_name, TokenType::Access).await? else {
+    gate_revoke(svc, caller, connection_name, app, client).await?;
+    let Some(token) = active_sign_in_token(svc, client, app, connection_name).await? else {
         return Err(refuse());
     };
     svc.tokens.revoke(client, app, connection_name, None).await?;
@@ -481,6 +626,39 @@ pub async fn revoke_connection_token(svc: &Connections, caller: &Caller, connect
         .evict_everywhere(CACHE_NAME, &cache_key(Some(connection_name), token.client_code.as_deref(), token.app_code.as_deref()))
         .await;
     Ok(true)
+}
+
+/// The business's stored sign-in for a connection (Rust only): when it was made and by which
+/// user. Nothing about the token itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SignIn {
+    /// When the consent that produced the active token started (`CREATED_AT` of its first row,
+    /// the database's UTC clock).
+    pub connected_at: Option<NaiveDateTime>,
+    /// The user who started that consent.
+    pub user_id: Option<u64>,
+}
+
+/// Rust only: the caller's stored sign-in for the connection, read for the caller's own client
+/// and URL app exactly as [`revoke_connection_token`] would revoke it. `None` when there is no
+/// active token (or no signed-in caller). It says that a token is stored, not that the provider
+/// still accepts it.
+pub async fn stored_sign_in(svc: &Connections, caller: &Caller, connection_name: &str) -> ConnResult<Option<SignIn>> {
+    if !caller.present {
+        return Ok(None);
+    }
+    let (Some(client), Some(app)) = (caller.client_code.as_deref(), caller.url_app_code.as_deref()) else {
+        return Ok(None);
+    };
+    let Some(token) = active_sign_in_token(svc, client, app, connection_name).await? else {
+        return Ok(None);
+    };
+    let first = match token.state.as_deref().filter(|s| !s.is_empty()) {
+        Some(state) => svc.tokens.consent_row(client, app, connection_name, state).await?,
+        None => None,
+    };
+    let first = first.unwrap_or_else(|| token.clone());
+    Ok(Some(SignIn { connected_at: first.created_at.or(token.created_at), user_id: first.user_id.or(token.user_id) }))
 }
 
 #[cfg(test)]
@@ -529,5 +707,67 @@ mod tests {
         assert_eq!(calculate_expiry(d, &Map::new(), TokenType::Access, now).unwrap(), None);
         let bad = json!({"expires_in": 1.5});
         assert!(calculate_expiry(d, bad.as_object().unwrap(), TokenType::Access, now).is_err());
+    }
+
+    /// Stands in for KIRun's evaluator: an expression is a list of authorities joined by
+    /// ` or `, and any one held allows.
+    struct AnyOf;
+
+    impl AuthorityCheck for AnyOf {
+        fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool {
+            expression.unwrap_or("").split(" or ").any(|want| authorities.iter().any(|a| a == want.trim()))
+        }
+    }
+
+    fn gated(consent_auth: Option<&str>) -> Connection {
+        let mut c = Connection { name: Some("META_API".into()), ..Default::default() };
+        c.consent_auth = consent_auth.map(str::to_string);
+        c
+    }
+
+    fn holding(authorities: &[&str]) -> Caller {
+        Caller { present: true, authorities: authorities.iter().map(|a| a.to_string()).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn no_consent_auth_lets_every_caller_start_a_consent() {
+        for c in [gated(None), gated(Some("")), gated(Some("   "))] {
+            assert!(check_consent_auth(&AnyOf, &holding(&[]), &c).is_ok());
+            assert!(check_consent_auth(&crate::context::NoEvaluator, &Caller::default(), &c).is_ok());
+        }
+    }
+
+    #[test]
+    fn consent_auth_needs_the_callers_authority() {
+        let c = gated(Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner"));
+        assert!(check_consent_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Account_MANAGE"]), &c).is_ok());
+        assert!(check_consent_auth(&AnyOf, &holding(&["Authorities.Logged_IN", "Authorities.ROLE_Owner"]), &c).is_ok());
+
+        let e = check_consent_auth(&AnyOf, &holding(&["Authorities.Logged_IN", "Authorities.ADZUMPTWO.ROLE_Report_READ"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+        assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_CONSENT_FORBIDDEN"));
+        assert_eq!(e.code().unwrap().params, vec![("connection".to_string(), "META_API".to_string())]);
+        assert!(e.message().contains("META_API"), "{}", e.message());
+        assert!(check_consent_auth(&AnyOf, &Caller::default(), &c).is_err(), "an anonymous caller holds nothing");
+    }
+
+    #[test]
+    fn revoke_uses_the_same_gate_with_its_own_code() {
+        let c = gated(Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner"));
+        assert!(check_revoke_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Account_MANAGE"]), &c).is_ok());
+        assert!(check_revoke_auth(&AnyOf, &holding(&[]), &gated(None)).is_ok());
+        assert!(check_revoke_auth(&AnyOf, &holding(&[]), &gated(Some(" "))).is_ok());
+        let e = check_revoke_auth(&AnyOf, &holding(&["Authorities.ADZUMPTWO.ROLE_Report_READ"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+        assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+        assert_eq!(e.code().unwrap().params, vec![("connection".to_string(), "META_API".to_string())]);
+        assert!(check_revoke_auth(&crate::context::NoEvaluator, &holding(&["Authorities.ROLE_Owner"]), &c).is_err());
+    }
+
+    #[test]
+    fn an_unwired_check_keeps_a_gated_consent_shut() {
+        let c = gated(Some("Authorities.ROLE_Owner"));
+        let e = check_consent_auth(&crate::context::NoEvaluator, &holding(&["Authorities.ROLE_Owner"]), &c).unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
     }
 }

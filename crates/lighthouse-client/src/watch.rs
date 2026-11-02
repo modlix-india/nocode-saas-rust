@@ -18,7 +18,7 @@ use crate::wire::{Applications, ApplicationsEnvelope};
 
 #[derive(Debug, Clone)]
 pub struct WatchConfig {
-    /// Lighthouse servers, in any of the forms [`crate::eureka_base`] accepts.
+    /// Lighthouse servers, in any of the forms [`crate::registry_base`] accepts.
     pub servers: Vec<String>,
     pub interval: Duration,
     /// Polls in a row that must see an empty registry before it is believed.
@@ -108,7 +108,7 @@ struct Poller {
 
 impl Poller {
     fn new(cfg: WatchConfig) -> Result<Self> {
-        let servers: Vec<String> = cfg.servers.iter().map(|s| crate::eureka_base(s)).collect();
+        let servers: Vec<String> = cfg.servers.iter().map(|s| crate::registry_base(s)).collect();
         if servers.is_empty() {
             return Err(anyhow!("no Lighthouse servers to watch"));
         }

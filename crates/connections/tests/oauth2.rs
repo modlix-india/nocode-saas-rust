@@ -353,3 +353,194 @@ async fn consent_callback_and_revoke() {
     assert_eq!(e.message(), "No active token found to revoke for connection META_API");
     let _ = Value::Null;
 }
+
+/// Only an authority named in the expression passes, as KIRun's `or` reads it for these.
+struct Named;
+
+impl connections::context::AuthorityCheck for Named {
+    fn has_authority(&self, expression: Option<&str>, authorities: &[String]) -> bool {
+        expression.unwrap_or("").split(" or ").any(|want| authorities.iter().any(|a| a == want.trim()))
+    }
+}
+
+#[tokio::test]
+async fn consent_auth_gates_the_consent_and_not_the_callback() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let mut conn = connection(port, "AUTHORIZATION_CODE");
+    conn.consent_auth = Some("Authorities.ADZUMPTWO.ROLE_Account_MANAGE or Authorities.ROLE_Owner".into());
+    let (svc, tokens) = setup(conn);
+    let svc = svc.with_authority_check(Arc::new(Named));
+    let mut viewer = caller();
+    viewer.url_app_code = Some("marketingai".into());
+    viewer.authorities = vec!["Authorities.Logged_IN".into(), "Authorities.ADZUMPTWO.ROLE_Report_READ".into()];
+
+    let e = oauth2::evoke_consent(&svc, &viewer, "META_API", Some("app.example.com")).await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 403);
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_CONSENT_FORBIDDEN"));
+    assert!(tokens.rows.lock().is_empty(), "a refused consent writes no state row");
+
+    let mut manager = viewer.clone();
+    manager.authorities.push("Authorities.ADZUMPTWO.ROLE_Account_MANAGE".into());
+    let url = oauth2::evoke_consent(&svc, &manager, "META_API", Some("app.example.com")).await.unwrap().unwrap();
+    assert!(url.starts_with("https://www.facebook.com/v21.0/dialog/oauth?client_id=123"), "{url}");
+    let state = tokens.rows.lock()[0].state.clone().unwrap();
+
+    // The callback completes the consent whoever the browser's caller is.
+    let out = oauth2::oauth2_callback(&svc, &viewer, Some("the-code"), Some(&state), Some("app.example.com"), "/api/core/connections/oauth/callback")
+        .await
+        .unwrap();
+    assert_eq!(out, CallbackOutcome::Redirect("https://app.example.com/settings/integrations?META_API=success".into()));
+
+    // Revoking the token is gated the same way: the viewer is refused and nothing is revoked.
+    let active = |rows: &[CoreToken]| rows.iter().filter(|t| t.is_revoked != Some(true)).count();
+    let before = active(&tokens.rows.lock());
+    assert!(before > 0);
+    let e = oauth2::revoke_connection_token(&svc, &viewer, "META_API").await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 403);
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.CONNECTION_REVOKE_FORBIDDEN"));
+    assert_eq!(active(&tokens.rows.lock()), before, "a refused revoke revokes nothing");
+    assert!(oauth2::revoke_connection_token(&svc, &manager, "META_API").await.unwrap());
+    assert_eq!(active(&tokens.rows.lock()), 0);
+    let again = oauth2::revoke_connection_token(&svc, &manager, "META_API").await.unwrap_err();
+    assert_eq!(again.message(), "No active token found to revoke for connection META_API", "then the normal path");
+
+    // Without a supplied evaluator the gated consent stays shut, even for an owner.
+    let (unwired, _) = setup(connection(port, "AUTHORIZATION_CODE"));
+    let mut gated = connection(port, "AUTHORIZATION_CODE");
+    gated.consent_auth = Some("Authorities.ROLE_Owner".into());
+    let (unwired_gated, _) = setup(gated);
+    let mut owner = manager.clone();
+    owner.authorities = vec!["Authorities.ROLE_Owner".into()];
+    assert_eq!(oauth2::evoke_consent(&unwired_gated, &owner, "META_API", Some("h")).await.unwrap_err().status().as_u16(), 403);
+    assert!(oauth2::evoke_consent(&unwired, &viewer, "META_API", Some("h")).await.unwrap().is_some(), "no consentAuth: as before");
+    assert_eq!(oauth2::revoke_connection_token(&unwired_gated, &owner, "META_API").await.unwrap_err().status().as_u16(), 403);
+    let e = oauth2::revoke_connection_token(&unwired, &viewer, "META_API").await.unwrap_err();
+    assert_eq!(e.status().as_u16(), 400, "no consentAuth: the normal path ({})", e.message());
+}
+
+type Seen = Arc<Mutex<Vec<(String, Vec<(String, String)>, String)>>>;
+
+/// A token endpoint that keeps each request's target, headers and body.
+async fn body_server(seen: Seen) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut data = Vec::new();
+                let mut buf = [0u8; 8192];
+                let head_end = loop {
+                    if let Some(i) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    data.extend_from_slice(&buf[..n]);
+                };
+                let head = String::from_utf8_lossy(&data[..head_end]).to_string();
+                let mut lines = head.split("\r\n");
+                let target = lines.next().unwrap().split(' ').nth(1).unwrap().to_string();
+                let headers: Vec<(String, String)> = lines
+                    .take_while(|l| !l.is_empty())
+                    .filter_map(|l| l.split_once(':').map(|(k, v)| (k.to_string(), v.trim().to_string())))
+                    .collect();
+                let len: usize = header(&headers, "content-length").first().and_then(|v| v.parse().ok()).unwrap_or(0);
+                while data.len() < head_end + len {
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    data.extend_from_slice(&buf[..n]);
+                }
+                let body = String::from_utf8_lossy(&data[head_end..]).to_string();
+                seen.lock().push((target, headers, body));
+                let out = json!({"access_token": "cc-token", "expires_in": 60}).to_string();
+                let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len());
+                let _ = sock.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+fn cc_connection(port: u16, token_details: Value, top: Value) -> Connection {
+    let mut details = json!({
+        "baseUrl": format!("http://127.0.0.1:{port}/api"), "grantType": "CLIENT_CREDENTIALS",
+        "tokenKey": "access_token", "expireAtKey": "expires_in",
+    });
+    let mut td = token_details;
+    td["url"] = json!(format!("http://127.0.0.1:{port}/oauth/token"));
+    details["tokenDetails"] = td;
+    for (k, v) in top.as_object().unwrap() {
+        details[k] = v.clone();
+    }
+    Connection::from_json(json!({"name": "CC", "appCode": "app", "clientCode": "SYSTEM", "connectionType": "REST_API",
+        "connectionSubType": "REST_API_OAUTH2", "connectionDetails": details}))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn client_credentials_token_request_with_a_body_and_basic_authentication() {
+    let seen: Seen = Arc::default();
+    let port = body_server(seen.clone()).await;
+    let fetch = |token_details: Value, top: Value| {
+        let conn = cc_connection(port, token_details, top);
+        async move {
+            let (svc, _) = setup(conn.clone());
+            oauth2::create_client_credentials_token(&svc, &caller(), &conn).await
+        }
+    };
+
+    // A form body (the default) with Basic client authentication from tokenDetails.
+    let t = fetch(json!({"body": {"grant_type": "client_credentials", "scope": "calls read"}, "clientAuthentication": "basic",
+                         "clientId": "id:1", "clientSecret": "s&2"}), json!({}))
+        .await
+        .unwrap();
+    assert_eq!(t.as_deref(), Some("cc-token"));
+    let (target, headers, body) = seen.lock().pop().unwrap();
+    assert_eq!(target, "/oauth/token");
+    assert_eq!(body, "grant_type=client_credentials&scope=calls+read");
+    assert_eq!(header(&headers, "content-type"), vec!["application/x-www-form-urlencoded"]);
+    // base64("id%3A1:s%262")
+    assert_eq!(header(&headers, "authorization"), vec!["Basic aWQlM0ExOnMlMjYy"]);
+    assert_eq!(header(&headers, "accept"), vec!["application/json"]);
+
+    // A JSON body, no client authentication; query parameters still go on the URL.
+    fetch(json!({"body": {"grant_type": "client_credentials", "n": 1}, "bodyType": "JSON", "queryParams": {"a": "b"}}), json!({})).await.unwrap();
+    let (target, headers, body) = seen.lock().pop().unwrap();
+    assert_eq!(target, "/oauth/token?a=b");
+    assert_eq!(body, r#"{"grant_type":"client_credentials","n":1}"#);
+    assert_eq!(header(&headers, "content-type"), vec!["application/json"]);
+    assert!(header(&headers, "authorization").is_empty());
+
+    // Basic only: the id and secret from the connection details, then from the query parameters.
+    fetch(json!({"clientAuthentication": "basic"}), json!({"clientId": "top", "clientSecret": "sec"})).await.unwrap();
+    let (_, headers, body) = seen.lock().pop().unwrap();
+    assert_eq!(header(&headers, "authorization"), vec!["Basic dG9wOnNlYw=="]);
+    assert_eq!(body, "", "no body asked for");
+    fetch(json!({"clientAuthentication": "Basic", "queryParams": {"client_id": "q", "client_secret": "w"}}), json!({})).await.unwrap();
+    let (target, headers, _) = seen.lock().pop().unwrap();
+    assert_eq!(target, "/oauth/token?client_id=q&client_secret=w");
+    assert_eq!(header(&headers, "authorization"), vec!["Basic cTp3"]);
+
+    // The query-parameter form is unchanged: no body, no extra headers.
+    fetch(json!({"queryParams": {"client_id": "q"}}), json!({})).await.unwrap();
+    let (target, headers, body) = seen.lock().pop().unwrap();
+    assert_eq!((target.as_str(), body.as_str()), ("/oauth/token?client_id=q", ""));
+    assert!(header(&headers, "authorization").is_empty() && header(&headers, "content-type").is_empty());
+    assert_eq!(header(&headers, "accept"), vec!["*/*"], "the client's own default");
+
+    // Refusals: Basic without the secret, a body that is not an object, nothing at all.
+    let e = fetch(json!({"clientAuthentication": "basic", "clientId": "x"}), json!({})).await.unwrap_err();
+    assert_eq!(e.code().map(|c| c.code.to_string()).as_deref(), Some("CORE.CONNECTION_CLIENT_CREDENTIALS_MISSING"));
+    let e = fetch(json!({"body": "grant_type=x"}), json!({})).await.unwrap_err();
+    assert_eq!(e.code().map(|c| c.code.to_string()).as_deref(), Some("CORE.CONNECTION_TOKEN_BODY_INVALID"));
+    let e = fetch(json!({"body": null}), json!({})).await.unwrap_err();
+    assert!(e.message().contains("java.util.Map.forEach"), "{}", e.message());
+    assert!(seen.lock().is_empty());
+}

@@ -27,22 +27,34 @@ async-trait.workspace = true
 axum.workspace = true
 base64 = "0.22"
 bcrypt = "0.17"
+bytes = "1"
 chrono.workspace = true
 chrono-tz.workspace = true
 futures.workspace = true
 hmac.workspace = true
+http = "1"
+http-body-util.workspace = true
+idna = "1"
+# The ACME client (Let's Encrypt). Its HTTP goes through reqwest (rustls, webpki roots), so no
+# hyper-rustls or platform verifier; ring signs the account's requests.
+instant-acme = { version = "0.8", default-features = false, features = ["ring"] }
+# The new account key of `acme-rollover` (P-256, as instant-acme signs).
+ring = "0.17"
 kirun.workspace = true
 lapin = "4"
 percent-encoding.workspace = true
 rand.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+# A certificate request's key (2048-bit RSA, stored as PKCS#1 PEM as Java stored it) and its CSR.
+rsa = { version = "0.9", features = ["pem", "sha2"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha2.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+x509-cert = { version = "0.2", features = ["builder", "pem"] }
 
 [dev-dependencies]
 figment = { version = "0.10", features = ["toml", "env", "test"] }

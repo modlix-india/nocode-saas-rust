@@ -25,6 +25,13 @@ pub const EVENT_OUTPUT: &str = "output";
 pub const EVENT_ERROR: &str = "error";
 /// The status of a failure that had no response to take one from.
 pub const NO_RESPONSE_STATUS: i32 = 500;
+/// Held only by core's internal webhook run (`crates/core/src/events.rs`).
+pub const WEBHOOK_AUTHORITY: &str = "Authorities._Webhook";
+/// Held only by core's anonymous event run (`crates/core/src/events.rs`).
+pub const EVENT_RUNNER_AUTHORITY: &str = "Authorities._Event_Runner";
+/// The files a webhook or event run downloads are always secured: nobody signed in asked for
+/// them, and recordings and media must not become public by URL.
+pub const RUN_FILE_TYPE: &str = "secured";
 
 /// One event the function raises.
 #[derive(Debug, Clone, PartialEq)]
@@ -159,7 +166,7 @@ pub fn exception_events(e: &ConnError) -> Vec<Event> {
 }
 
 /// Runs the call for a step. `Err` is an argument problem that fails the step itself;
-/// `Ok(None)` is Java's empty output (a download by an unauthenticated caller).
+/// `Ok(None)` is Java's empty output (a download by a caller [`Downloader::of`] refuses).
 pub async fn call(
     svc: &Connections,
     caller: &Caller,
@@ -194,21 +201,65 @@ pub async fn call(
     }
 }
 
+/// Who stores a downloaded file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Downloader {
+    /// A signed-in caller (Java): the file goes to their client, or to `fileClientCode` when the
+    /// URL's client manages it, as the `fileType` the step asks for.
+    User,
+    /// A webhook or event run (Rust only): anonymous, but acting for the run's own client, so a
+    /// provider's recording or media can be stored. The file goes to that client, or to
+    /// `fileClientCode` when the run's client manages it, always as [`RUN_FILE_TYPE`].
+    Run,
+}
+
+impl Downloader {
+    /// Java stores a download only for a signed-in caller; core's webhook and event runs
+    /// (`Authorities._Webhook`, `Authorities._Event_Runner`) may as well. A browser's anonymous
+    /// caller holds neither, so it still gets nothing.
+    pub fn of(caller: &Caller) -> Option<Self> {
+        if !caller.present {
+            None
+        } else if caller.authenticated {
+            Some(Self::User)
+        } else if caller.has_authority(WEBHOOK_AUTHORITY) || caller.has_authority(EVENT_RUNNER_AUTHORITY) {
+            Some(Self::Run)
+        } else {
+            None
+        }
+    }
+
+    /// The client whose management of `fileClientCode` is checked.
+    fn managing(self, caller: &Caller) -> &str {
+        match self {
+            Self::User => caller.url_client_code.as_deref().unwrap_or(""),
+            Self::Run => caller.client_code(),
+        }
+    }
+
+    fn file_type(self, asked: &str) -> &str {
+        match self {
+            Self::User => asked,
+            Self::Run => RUN_FILE_TYPE,
+        }
+    }
+}
+
 async fn process_download(
     caller: &Caller,
     args: &CallArgs,
     mut response: RestResponse,
     downloads: Option<&dyn DownloadSink>,
 ) -> ConnResult<Option<RestResponse>> {
-    if !caller.present || !caller.authenticated {
+    let Some(who) = Downloader::of(caller) else {
         return Ok(None);
-    }
+    };
     let ca_client = caller.client_code.clone().unwrap_or_default();
     let client = if java::is_blank(&args.file_client_code) || ca_client == args.file_client_code {
         ca_client.clone()
     } else {
         let sink = downloads.ok_or_else(|| ConnError::other("No files service"))?;
-        let managing = caller.url_client_code.as_deref().unwrap_or("");
+        let managing = who.managing(caller);
         if sink.does_client_manage_client_code(managing, &args.file_client_code).await? {
             args.file_client_code.clone()
         } else {
@@ -224,7 +275,7 @@ async fn process_download(
     let name = resolve_file_name(&response, &args.url, &args.file_name, &short_uuid())?;
     let sink = downloads.ok_or_else(|| ConnError::other("No files service"))?;
     let file = sink
-        .create_file(&args.file_type, &client, args.file_override, &args.file_location, &name, bytes.clone())
+        .create_file(who.file_type(&args.file_type), &client, args.file_override, &args.file_location, &name, bytes.clone())
         .await?;
     response.data = RestData::Json(Value::Object(file));
     Ok(Some(response))
@@ -244,7 +295,8 @@ pub fn resolve_file_name(r: &RestResponse, url: &str, file_name: &str, unique: &
         final_name.clone()
     };
 
-    let header = |name: &str| r.headers.as_ref().and_then(|h| h.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()));
+    // Header names ignore case, as Spring's HttpHeaders did: providers send `content-type` too.
+    let header = |name: &str| r.headers.as_ref().and_then(|h| h.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone()));
 
     if let Some(ct) = header("Content-Type").filter(|v| !java::is_blank(v)) {
         let ext = MediaType::parse(&ct)?.subtype;
@@ -370,6 +422,110 @@ mod tests {
         assert!(rest_request(&bad).is_err());
     }
 
+    fn run_caller(authenticated: bool, authorities: &[&str]) -> Caller {
+        Caller {
+            present: true,
+            authenticated,
+            client_code: Some("FIN".into()),
+            url_client_code: Some("URLC".into()),
+            authorities: authorities.iter().map(|a| a.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn who_may_store_a_download() {
+        assert_eq!(Downloader::of(&run_caller(true, &[])), Some(Downloader::User));
+        assert_eq!(Downloader::of(&run_caller(false, &["Authorities._Anonymous", WEBHOOK_AUTHORITY])), Some(Downloader::Run));
+        assert_eq!(Downloader::of(&run_caller(false, &["Authorities._Anonymous", EVENT_RUNNER_AUTHORITY])), Some(Downloader::Run));
+        assert_eq!(Downloader::of(&run_caller(false, &["Authorities._Anonymous"])), None, "a browser's anonymous caller");
+        assert_eq!(Downloader::of(&Caller { authorities: vec![WEBHOOK_AUTHORITY.into()], ..Default::default() }), None, "no context at all");
+        assert_eq!(Downloader::User.file_type("static"), "static");
+        assert_eq!(Downloader::Run.file_type("static"), "secured");
+        let c = run_caller(false, &[]);
+        assert_eq!(Downloader::User.managing(&c), "URLC");
+        assert_eq!(Downloader::Run.managing(&c), "FIN");
+    }
+
+    /// Records each managing question and each stored file; manages only `managed`.
+    #[derive(Default)]
+    struct Sink {
+        managed: Vec<(&'static str, &'static str)>,
+        asked: parking_lot::Mutex<Vec<(String, String)>>,
+        stored: parking_lot::Mutex<Vec<(String, String, String)>>,
+    }
+
+    #[async_trait]
+    impl DownloadSink for Sink {
+        async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> ConnResult<bool> {
+            self.asked.lock().push((managing.into(), client.into()));
+            Ok(self.managed.iter().any(|(m, c)| *m == managing && *c == client))
+        }
+        async fn create_file(&self, ty: &str, cc: &str, _: bool, path: &str, name: &str, _: Vec<u8>) -> ConnResult<Map<String, Value>> {
+            self.stored.lock().push((ty.into(), cc.into(), format!("{path}{name}")));
+            Ok(json!({"name": name}).as_object().unwrap().clone())
+        }
+    }
+
+    fn recording() -> RestResponse {
+        RestResponse {
+            data: RestData::Binary(b"ID3".to_vec()),
+            headers: Some(vec![("Content-Type".into(), "audio/mpeg".into())]),
+            status: 200,
+        }
+    }
+
+    fn download_args(file_client_code: &str) -> CallArgs {
+        CallArgs {
+            download_as_a_file: true,
+            file_name: "rec".into(),
+            file_location: "/calls/".into(),
+            file_type: "static".into(),
+            file_client_code: file_client_code.into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn webhook_and_event_runs_store_secured_files_for_their_client() {
+        for authority in [WEBHOOK_AUTHORITY, EVENT_RUNNER_AUTHORITY] {
+            let sink = Sink::default();
+            let c = run_caller(false, &["Authorities._Anonymous", authority]);
+            let out = process_download(&c, &download_args(""), recording(), Some(&sink)).await.unwrap().unwrap();
+            assert_eq!(out.data, RestData::Json(json!({"name": "rec.mpeg"})));
+            assert_eq!(sink.stored.lock()[0], ("secured".to_string(), "FIN".to_string(), "/calls/rec.mpeg".to_string()));
+            // Its own code named outright is no foreign client.
+            process_download(&c, &download_args("FIN"), recording(), Some(&sink)).await.unwrap().unwrap();
+            assert!(sink.asked.lock().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_stores_for_another_client_only_when_its_client_manages_it() {
+        let c = run_caller(false, &[WEBHOOK_AUTHORITY]);
+        let sink = Sink { managed: vec![("FIN", "CHILD")], ..Default::default() };
+        process_download(&c, &download_args("CHILD"), recording(), Some(&sink)).await.unwrap().unwrap();
+        assert_eq!(sink.stored.lock()[0].1, "CHILD");
+        let err = process_download(&c, &download_args("OTHER"), recording(), Some(&sink)).await.unwrap_err();
+        assert_eq!(err.message(), "Client code is invalid");
+        // The run's client is asked, never the URL client a signed-in caller is checked by.
+        assert_eq!(*sink.asked.lock(), vec![("FIN".to_string(), "CHILD".to_string()), ("FIN".to_string(), "OTHER".to_string())]);
+        assert_eq!(sink.stored.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn signed_in_callers_keep_the_java_rules_and_anonymous_ones_get_nothing() {
+        let sink = Sink { managed: vec![("URLC", "CHILD")], ..Default::default() };
+        let user = run_caller(true, &[]);
+        process_download(&user, &download_args("CHILD"), recording(), Some(&sink)).await.unwrap().unwrap();
+        assert_eq!(sink.stored.lock()[0], ("static".to_string(), "CHILD".to_string(), "/calls/rec.mpeg".to_string()));
+        assert_eq!(sink.asked.lock()[0].0, "URLC");
+
+        let anon = run_caller(false, &["Authorities._Anonymous"]);
+        assert!(process_download(&anon, &download_args(""), recording(), Some(&sink)).await.unwrap().is_none());
+        assert_eq!(sink.stored.lock().len(), 1);
+    }
+
     #[test]
     fn file_names() {
         let with = |h: Vec<(&str, &str)>| RestResponse {
@@ -378,8 +534,9 @@ mod tests {
             status: 200,
         };
         assert_eq!(resolve_file_name(&with(vec![("Content-Type", "application/pdf")]), "u", "report.x", "U").unwrap(), "report.pdf");
-        // Lower-case header names are not "Content-Type" to the exact-key lookup.
-        assert_eq!(resolve_file_name(&with(vec![("content-type", "application/pdf")]), "https://h.com/a", "", "U").unwrap(), "fileU.com/a");
+        // Header names ignore case: a provider's `content-type` names the extension too.
+        assert_eq!(resolve_file_name(&with(vec![("content-type", "application/pdf")]), "https://h.com/a", "", "U").unwrap(), "fileU.pdf");
+        assert_eq!(resolve_file_name(&with(vec![("CONTENT-TYPE", "audio/mpeg")]), "https://h.com/rec", "call1", "U").unwrap(), "call1.mpeg");
         assert_eq!(
             resolve_file_name(&with(vec![("content-disposition", "attachment; filename=\"r.csv\"")]), "nodot", "", "U").unwrap(),
             "r.csv"

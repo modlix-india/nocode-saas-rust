@@ -400,6 +400,12 @@ async fn user_routes() {
     let by_id = l.json("POST", "/users/internal/notification", &[], Some(json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142]}))).await;
     assert_eq!(by_id[0]["id"], 142);
     assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(json!({"clientId": 1}))).await, json!([]));
+    // filterAuthorization (Rust only): only the users holding it.
+    let all = |f: &str| json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142], "filterAuthorization": f});
+    let held = l.json("POST", "/users/internal/notification", &[], Some(all("Authorities.Logged_IN"))).await;
+    assert_eq!(held[0]["id"], 142);
+    assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(all("Authorities.RUSTTEST_None"))).await, json!([]));
+    assert_eq!(l.json("POST", "/users/internal/notification", &[], Some(all(" "))).await[0]["id"], 142, "a blank filter is none");
     let proc = l.json("POST", "/users/internal/processor", &[], Some(json!({"appCode": "appbuilder", "clientId": 1, "userIds": [142]}))).await;
     assert_eq!(proc[0]["id"], 142);
     assert!(proc[0]["profileIds"].as_array().is_some());
@@ -559,11 +565,16 @@ async fn url_billing_cache_and_certificate_routes() {
             .body(Body::empty())
             .unwrap();
         let resp = l.router.clone().oneshot(req).await.unwrap();
-        resp.headers().get("etag").unwrap().to_str().unwrap().trim_matches('"').to_string()
+        resp.headers().get("etag").unwrap().to_str().unwrap().to_string()
     };
+    // nginxconf.js stores the header as it came (quoted) and sends it back unchanged.
+    assert!(etag.starts_with('"'));
     let mut with_etag = sys.to_vec();
-    with_etag.push(("If-None-Match", etag));
+    with_etag.push(("If-None-Match", etag.clone()));
     assert_eq!(l.call("GET", "/ssl/internal/certificates", &with_etag, None).await.0, StatusCode::NOT_MODIFIED);
+    let mut bare = sys.to_vec();
+    bare.push(("If-None-Match", etag.trim_matches('"').to_string()));
+    assert_eq!(l.call("GET", "/ssl/internal/certificates", &bare, None).await.0, StatusCode::NOT_MODIFIED);
     // A wrong method.
     assert_eq!(l.call("POST", "/clients/internal/getClientByCode", &[], Some(json!({}))).await.0, StatusCode::METHOD_NOT_ALLOWED);
 }

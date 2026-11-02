@@ -6,10 +6,14 @@
 //! - Queue: [`queue`] consumes `notifications.queues` and runs [`send::SendService`] per message,
 //!   which reads the definitions from core ([`calls::CoreClient`]) and the recipients from
 //!   security ([`calls::DirectoryClient`]), then hands out email ([`email`]) and in-app
-//!   ([`inapp`]) notifications; in-app ones reach the open streams of this process ([`sse`]).
+//!   ([`inapp`]) notifications. A data notification (`kind: DATA`) skips the definitions and the
+//!   database and only reaches the recipients' open streams.
+//! - Streams: [`sse`] holds this process's; [`push`] reaches every instance's through Redis.
+//! - Push (Rust only): [`push_send`] reaches the recipients' registered browsers and phones.
 
 pub mod calls;
 pub mod catalogue;
+pub mod choices;
 pub mod config;
 pub mod dao;
 pub mod email;
@@ -19,6 +23,8 @@ pub mod inapp;
 pub mod messages;
 pub mod model;
 pub mod preference;
+pub mod push;
+pub mod push_send;
 pub mod queue;
 pub mod send;
 pub mod spring;
@@ -31,7 +37,7 @@ use std::time::Duration;
 use anyhow::Result;
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::security::SecurityClient;
 use platform::upstream::Upstream;
@@ -43,6 +49,8 @@ use crate::email::EmailService;
 use crate::handlers::AppState;
 use crate::inapp::InAppService;
 use crate::preference::PreferenceService;
+use crate::push::Push;
+use crate::push_send::PushService;
 use crate::send::SendService;
 use crate::sse::Hub;
 
@@ -54,49 +62,57 @@ pub struct Built {
     pub state: Arc<AppState>,
     pub send: Arc<SendService>,
     pub hub: Arc<Hub>,
-    pub eureka: Option<Eureka>,
+    /// Delivery to every instance's streams.
+    pub push: Arc<Push>,
+    pub registry: Option<Registry>,
     pub pool: sqlx::MySqlPool,
 }
 
 pub async fn build(cfg: &NotificationConfig) -> Result<Built> {
     let pool = platform::db::mysql_pool(&cfg.database).await?;
     let dao = Dao::new(pool.clone());
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
     let cache = if cfg.redis.url.is_empty() {
         None
     } else {
-        Some(CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?)
+        Some(CacheService::configured(&cfg.redis)?)
     };
     let timeout = Duration::from_secs(cfg.core.timeout_seconds.max(1));
-    let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, eureka.as_ref())?, timeout)?;
-    let core_up = Upstream::from_config(&cfg.core.upstream, eureka.as_ref())?;
+    let directory = DirectoryClient::new(platform::security::security_upstream(&cfg.security, registry.as_ref())?, timeout)?;
+    let core_up = Upstream::from_config(&cfg.core.upstream, registry.as_ref())?;
     let connections_up = if cfg.core.connections_upstream.entries().is_empty() {
         core_up.clone()
     } else {
-        Upstream::from_config(&cfg.core.connections_upstream, eureka.as_ref())?
+        Upstream::from_config(&cfg.core.connections_upstream, registry.as_ref())?
     };
     let core = CoreClient::with_connections(core_up, connections_up, timeout)?;
+    let devices = Arc::new(PushService::new(dao.clone(), core.clone(), &cfg.push)?);
     let hub = Hub::new(cfg.sse.buffer);
+    let push = Push::new(hub.clone(), cache.clone(), &cfg.sse.push_channel);
 
-    let in_app = InAppService { dao: dao.clone(), hub: hub.clone() };
+    let in_app = InAppService { dao: dao.clone(), push: push.clone() };
     let send = Arc::new(SendService {
         core,
         directory: directory.clone(),
-        email: Arc::new(EmailService::new(&cfg.email.sendgrid_url)?),
-        in_app: Arc::new(InAppService { dao: dao.clone(), hub: hub.clone() }),
+        email: Arc::new(EmailService { block_private_targets: cfg.email.block_private_targets, ..EmailService::new(&cfg.email.sendgrid_url)? }),
+        in_app: Arc::new(InAppService { dao: dao.clone(), push: push.clone() }),
+        push: push.clone(),
+        prefs: Some(Arc::new(dao.clone())),
+        devices: Some(devices.clone()),
     });
     let state = Arc::new(AppState {
-        security: SecurityClient::from_config(&cfg.security, eureka.as_ref())?,
+        security: SecurityClient::from_config(&cfg.security, registry.as_ref())?,
         inapp: in_app,
         prefs: PreferenceService { dao, directory, cache },
         hub: hub.clone(),
         server_port: cfg.server.port,
+        devices: Some(devices),
     });
-    Ok(Built { state, send, hub, eureka, pool })
+    Ok(Built { state, send, hub, push, registry, pool })
 }
 
 /// Loads configuration, connects everything, starts the queue consumer and the heartbeat, and
@@ -109,6 +125,9 @@ pub async fn run() -> Result<()> {
     let cfg = loaded.config;
     let built = build(&cfg).await?;
     built.hub.spawn_heartbeat(Duration::from_secs(cfg.sse.heartbeat_seconds.max(1)));
+    if built.push.spawn_listener().is_none() {
+        tracing::info!("no [redis] url: notifications reach the streams open on this instance only");
+    }
 
     let health = Health::new(telemetry.metrics.clone());
     {
@@ -142,7 +161,7 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: built.eureka.clone(), cors: false }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: built.registry.clone(), cors: false }
         .run(handlers::router(built.state.clone()))
         .await
 }

@@ -165,7 +165,7 @@ async fn editor_on_the_local_stack() {
     }
     let exec = connected().await;
     let cfg: CoreConfig = platform::config::load("core-exec").expect("config");
-    let (st, router) = super::assemble(&cfg, &exec).expect("assemble");
+    let (st, router, _) = super::assemble(&cfg, &exec).expect("assemble");
     let editor = serve(router).await;
     let data = serve(crate::handlers::router(exec.state.clone())).await;
     let h = Http { http: reqwest::Client::new() };

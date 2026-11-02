@@ -65,6 +65,8 @@ fn context_authentication() -> Schema {
             ("clientCode", Schema::of_string("clientCode")),
             ("urlClientCode", Schema::of_string("urlClientCode")),
             ("urlAppCode", Schema::of_string("urlAppCode")),
+            ("clientIp", Schema::of_string("clientIp")),
+            ("userAgent", Schema::of_string("userAgent")),
         ]))
 }
 

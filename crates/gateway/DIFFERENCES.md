@@ -6,9 +6,10 @@ stripping).
 
 ## Same on purpose (reproduced, including quirks)
 
-- Path: the codes prefix before `/api/` is dropped and never read as codes; codes come from
-  the URL only for `/page/` and `/manifest/` paths (`/<appCode>/<clientCode>/page/...`).
-  A trailing `/` is removed.
+- Path: the codes prefix before `/api/` is dropped from the forwarded path; codes come from
+  the URL, unchecked, for `/page/` and `/manifest/` paths (`/<appCode>/<clientCode>/page/...`,
+  also `/<appCode>/<clientCode>/page/api/...`). A trailing `/` is removed. Codes in front of
+  `/api/` with no `/page/` before it are the one difference (below).
 - Host resolution: `getClientNAppCodeNType(scheme, host, port)`, with the port `-1` when the
   Host header has none, exactly as `URI.getPort()` reports it to the Java filter.
 - `appCode` / `clientCode` headers filled in only when the caller sent none (caller-overridable,
@@ -26,9 +27,41 @@ stripping).
 
 ## Different on purpose
 
+- **URL codes in front of `/api/`** (Kiran, 2026-10-22; `path.rs` `split`, `resolve.rs`). Java
+  (since 2022) never read the codes in `/<appCode>/<clientCode>/api/...`: the host decided. Now
+  they count when they name a real app and client: the client owns the app or has access to it,
+  as security's `GET /api/security/applications/internal/hasReadAccess?appCode=&clientCode=`
+  answers (an unknown app or client is `false`). Otherwise the host decides exactly as before,
+  so a relative URL's junk prefix (`/x/y/api/ui/application`) still resolves by host. Codes that
+  can not be real (one segment, a blank segment, a character other than letters, digits, `_`
+  and `-`, more than 64) are not asked about. The answer is cached in the gateway under
+  security's own cache name and key (`appReadAccess`, `<appCode>:<clientCode>`, true and false
+  alike, for the `[redis]` TTL), so security's evictions when an app's access changes, or an
+  app is created or deleted, clear it here too; a failed lookup is not cached and resolves by
+  host. Draft token hosts keep Java's rule (only codes after a `/page/`). A caller's own
+  `clientCode` / `appCode` headers still win, and internal calls naming their codes still pass
+  straight through. This is what makes a tenant's webhook address
+  `https://<host>/<appCode>/<CLIENTCODE>/api/webhooks/<provider>` (ui DIFFERENCES.md item 39)
+  run for that tenant.
+
+- **Routes with a rewrite and fixed codes** (2026-10-23, website lead intake; `routes.rs`,
+  `proxy.rs` `upstream_headers`). A route may set `rewrite` (its prefix in the forwarded path is
+  replaced, what follows is kept), `app_code` + `client_code` (both or neither) and `anonymous`.
+  With codes, the request goes out with exactly those `appCode` / `clientCode` headers, over
+  any the caller sent, the host is not resolved (no security call), `x-draft` is dropped, and
+  `X-Forwarded-*` / `Forwarded` are added as on any route, so the service still sees the site's
+  host. `anonymous` drops `Authorization`. Spring had no such route: every live real-estate site
+  posts its form to its own domain at `/api/entity/processor/entry/website` (or
+  `/api/entity/collector/entry/website`), which Spring sent to entity-processor / collector
+  whatever the host. Those services are retired; these routes send the same requests to
+  leadzumptwo's intake URIPath (`/api/open/intake/website`, app leadzumptwo, SYSTEM), which finds
+  the tenant from the host as entity-processor did. A route config that sets one code alone,
+  rewrites outside `/api/` or rewrites `/` is refused at startup. Without these keys a route is
+  exactly as before. Tests: `routes.rs` `rewrites_and_fixed_codes`, `tests/proxy.rs`
+  `a_fixed_codes_route_rewrites_and_serves_every_host_anonymously`.
 - **Load balancing** is the gateway's own: round robin over instances that pass active health
   checks (every 5 s, configurable path), with an instance ejected on a connect failure. Spring
-  used Eureka's list as is. A pool whose instances all fail still routes to them (a wrong
+  used the registry protocol's list as is. A pool whose instances all fail still routes to them (a wrong
   health path must not black-hole a service).
 - **Outlier ejection**: an instance that gives 5 gateway failures in a row (502/503/504, a
   broken connection, a timeout) is ejected for 10 s times the number of times it has been
@@ -68,8 +101,8 @@ stripping).
   `GW.HOST_UNRESOLVED` (502, host resolution failed), `GW.NO_ROUTE` (404). Spring answered
   500/503 with its own error body. A service's own errors pass through untouched. The CORS
   preflight refusal stays an empty 403: browsers never show a preflight's body.
-- **No Eureka needed**: pools are static addresses (compose container names, later Kubernetes
-  Services) or `eureka:<APP>` during the migration. An `eureka:` pool reads the registry every
+- **No Lighthouse needed**: pools are static addresses (compose container names, later Kubernetes
+  Services) or `lighthouse:<APP>` during the migration. A `lighthouse:` pool reads the registry every
   2 s (`discovery_refresh_ms`), not every 30 s, and believes an empty list only after the
   registry has answered empty 3 times in a row.
 - `X-Forwarded-Prefix` is not added (Spring adds it only for its discovery-locator routes,

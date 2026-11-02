@@ -223,6 +223,45 @@ impl Apple {
         self.new_profile(bundle_apple_id, profile_name).await
     }
 
+    /// Turns Push Notifications on for the bundle (Rust only); one already on is fine.
+    pub async fn enable_push(&self, bundle_apple_id: &str) -> Result<()> {
+        let body = json!({"data": {
+            "type": "bundleIdCapabilities",
+            "attributes": {"capabilityType": "PUSH_NOTIFICATIONS"},
+            "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle_apple_id}}}
+        }});
+        match self.call(self.http.post(self.url("/v1/bundleIdCapabilities")).json(&body), |status, _, body| format!("Apple API error {status}: {body}")).await {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("409") => Ok(()),
+            Err(e) => Err(e).context("Failed to turn on Push Notifications for the bundle id"),
+        }
+    }
+
+    /// A new App Store profile for the bundle, its earlier ones deleted first (Rust only): a
+    /// profile made before a capability was turned on does not carry it. `""` without a
+    /// configured certificate.
+    pub async fn replace_profile(&self, bundle_apple_id: &str, profile_name: &str) -> Result<String> {
+        if blank(&self.cfg.apple_certificate_id) {
+            return Ok(String::new());
+        }
+        let req = self.http.get(self.url("/v1/profiles")).query(&[("filter[profileType]", "IOS_APP_STORE"), ("include", "bundleId")]);
+        let v = self.call(req, |_, _, body| format!("Apple API error: {body}")).await?;
+        let old: Vec<String> = v
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|p| p["relationships"]["bundleId"]["data"]["id"].as_str() == Some(bundle_apple_id))
+            .filter_map(|p| p["id"].as_str().map(str::to_string))
+            .collect();
+        for id in old {
+            self.call(self.http.delete(self.url(&format!("/v1/profiles/{id}"))), |_, _, body| format!("Apple API error: {body}"))
+                .await
+                .context("Failed to delete the old provisioning profile")?;
+        }
+        self.new_profile(bundle_apple_id, profile_name).await
+    }
+
     /// `setupIosForPlatformAccount`: (bundle id, team id, profile).
     pub async fn setup_ios(&self, client: &str, app_name: &str) -> Result<(String, String, String)> {
         let (identifier, apple_id) = self.get_or_create_bundle_id(client, app_name).await?;

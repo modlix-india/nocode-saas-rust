@@ -39,8 +39,18 @@ fn smtp(port: u16, extra: Value) -> MailConnection {
     MailConnection { connection_sub_type: Some("SMTP".into()), connection_details: Some(details.as_object().unwrap().clone()) }
 }
 
+/// The stub listens on 127.0.0.1, so the private-target guard is off.
 fn service(sendgrid: &str) -> EmailService {
-    EmailService::new(sendgrid).unwrap()
+    EmailService { block_private_targets: false, ..EmailService::new(sendgrid).unwrap() }
+}
+
+#[tokio::test]
+async fn smtp_to_a_private_host_is_refused() {
+    let s = StubSmtp::start(vec![]).await;
+    let svc = EmailService::new("http://127.0.0.1:1").unwrap();
+    // As Java's SMTPService does with any send failure: logged, still true, nothing delivered.
+    assert!(svc.send_email(&user(Some("ann@x.test")), &smtp(s.port, json!({})), &welcome(), &payload()).await.unwrap());
+    assert!(s.messages.lock().is_empty());
 }
 
 #[tokio::test]

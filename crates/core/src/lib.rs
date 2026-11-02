@@ -8,7 +8,8 @@
 //! - [`repos`]: the repositories, layered as the Java services layer them, and
 //!   `DefinitionFunction`;
 //! - [`functions`]: core's own KIRun functions;
-//! - [`exec`] / [`handlers`]: the execution and the routes;
+//! - [`exec`] / [`handlers`]: the execution and the routes; [`exec_limit`] how long one
+//!   execution may run; [`run_pool`] the threads runs execute on, apart from the health routes;
 //! - [`gson`] / [`java_model`]: the JSON the Java code writes;
 //! - [`storage`]: `AppDataService` (the storage policy layer over `crates/appdata`'s engines),
 //!   the storage definitions it reads, the write validator, rows as files;
@@ -18,6 +19,7 @@
 pub mod auth;
 pub mod authorities;
 pub mod catalogue;
+pub mod catch_policy;
 pub mod clients;
 pub mod config;
 pub mod connection_routes;
@@ -33,16 +35,18 @@ pub mod event_scheduler;
 pub mod events;
 pub mod events_queue;
 pub mod exec;
+pub mod exec_limit;
 pub mod files_calls;
 pub mod functions;
 pub mod gson;
 pub mod handlers;
 pub mod integrations;
 pub mod java_model;
-pub mod message_calls;
 pub mod pdf;
+pub mod pdf_render;
 pub mod platform_calls;
 pub mod repos;
+pub mod run_pool;
 pub mod scheduler;
 #[cfg(test)]
 mod platform_smoke;
@@ -70,7 +74,7 @@ use anyhow::Result;
 use overridable::Store;
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::security::SecurityClient;
 use platform::upstream::Upstream;
@@ -89,46 +93,50 @@ pub struct Exec {
     pub mongo: mongodb::Database,
     pub pool: sqlx::MySqlPool,
     pub cache: CacheService,
-    pub eureka: Option<Eureka>,
+    pub registry: Option<Registry>,
     pub security_calls: Arc<SecurityCalls>,
 }
 
 /// Connects the databases, the caches and the other services, and builds the state.
 pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
+    catch_policy::install();
     overridable::pojo::set_java_zone_offset_seconds(cfg.core.zone_offset_seconds()?);
 
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
 
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let cache = CacheService::configured(&cfg.redis)?;
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
-    let security_upstream = platform::security::security_upstream(&cfg.security, eureka.as_ref())?;
-    let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
+    let security_upstream = platform::security::security_upstream(&cfg.security, registry.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, registry.as_ref())?;
     let store = Store::new(mongo.clone(), security.clone(), &cache);
-    // entity-processor retired and message is stopped (2026-10-18): a unit configured without
-    // them still starts, and only the calls that need them fail ("upstream has no addresses").
+    // entity-processor retired (2026-10-18): a unit configured without it still starts, and
+    // only the calls that need it fail ("upstream has no addresses").
     let retired = |what: &str, c: &platform::config::UpstreamConfig| {
-        Upstream::from_config(c, eureka.as_ref()).unwrap_or_else(|e| {
+        Upstream::from_config(c, registry.as_ref()).unwrap_or_else(|e| {
             tracing::warn!(upstream = what, error = %e, "not configured: the calls that need it will fail");
             Upstream::fixed(&[])
         })
     };
     let ep = Arc::new(EntityProcessor::new(retired("entity-processor", &cfg.entity_processor.upstream))?);
     let security_calls = Arc::new(SecurityCalls::new(security_upstream.clone())?);
-    let message = Arc::new(message_calls::MessageCalls::new(retired("message", &cfg.message.upstream))?);
-    let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, eureka.as_ref())?)?);
-    let platform = Arc::new(make_platform_calls(cfg, eureka.as_ref(), &security_upstream)?);
+    let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, registry.as_ref())?)?);
+    pdf_render::install(&cfg.pdf, registry.as_ref())?;
+    let platform = Arc::new(make_platform_calls(cfg, registry.as_ref(), &security_upstream)?);
 
-    let definitions = Arc::new(Definitions::new(
-        store,
-        security.clone(),
-        cache.family(),
-        Duration::from_secs(cfg.core.function_timeout_seconds),
-    ));
+    let definitions = Arc::new(
+        Definitions::new(
+            store,
+            security.clone(),
+            cache.family_weighed(|v: &Arc<Vec<String>>| platform::cache::strings_bytes(v)),
+            Duration::from_secs(cfg.core.function_timeout_seconds),
+        )
+        .with_parsed_caches(&cache),
+    );
     let remote = RemoteRepositories::new(pool.clone(), cache.family(), ep);
 
     let kirun_schemas = Builtins::kirun_schemas();
@@ -159,7 +167,6 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         mongo: mongo.clone(),
         cache: cache.clone(),
         integrations: integrations.clone(),
-        message,
         files,
         scheduler: cfg.core.scheduler.clone(),
         platform,
@@ -181,15 +188,15 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     });
     appdata.attach(&state);
     integrations.attach(&state);
-    Ok(Exec { state, mongo, pool, cache, eureka, security_calls })
+    Ok(Exec { state, mongo, pool, cache, registry, security_calls })
 }
 
 /// The services `CoreServices.Platform.*` call. An upstream the configuration cannot make
-/// (an `eureka:` one without `[eureka] zones`) is kept as its error and fails only the jobs
+/// (a `lighthouse:` one without `[registry] zones`) is kept as its error and fails only the jobs
 /// that need it, with a warning now, so a unit that never runs them still starts.
-fn make_platform_calls(cfg: &CoreConfig, eureka: Option<&Eureka>, security: &Upstream) -> Result<platform_calls::PlatformCalls> {
+fn make_platform_calls(cfg: &CoreConfig, registry: Option<&Registry>, security: &Upstream) -> Result<platform_calls::PlatformCalls> {
     let make = |what: &str, c: &platform::config::UpstreamConfig| {
-        Upstream::from_config(c, eureka).map_err(|e| {
+        Upstream::from_config(c, registry).map_err(|e| {
             tracing::warn!(upstream = what, error = %e, "no upstream for the platform functions");
             e.to_string()
         })
@@ -273,29 +280,16 @@ pub async fn run_exec() -> Result<()> {
     let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
     loaded.log_source(NAME);
     let cfg = loaded.config;
+    tracing::info!(max_execution_seconds = cfg.kirun.seconds(), max_steps = cfg.kirun.max_steps, "function execution limits");
     let exec = connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
 
-    let health = Health::new(telemetry.metrics.clone());
-    let pool = exec.pool.clone();
-    health.check("mysql", move || {
-        let pool = pool.clone();
-        async move {
-            sqlx::query("SELECT 1").execute(&pool).await?;
-            Ok(())
-        }
-    });
-    let db = exec.mongo.clone();
-    health.check("mongo", move || {
-        let db = db.clone();
-        async move {
-            db.run_command(mongodb::bson::doc! {"ping": 1}).await?;
-            Ok(())
-        }
-    });
+    let runs = run_pool::exec_pool(&cfg)?;
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: exec.eureka, cors: true }
-        .run(handlers::router(exec.state))
+    let health = Health::new(telemetry.metrics.clone());
+    run_pool::readiness_checks(&health, &cfg).await?;
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: true }
+        .run(handlers::router_on(exec.state, runs))
         .await
 }
 
@@ -331,15 +325,15 @@ pub async fn run_scheduler() -> Result<()> {
     overridable::pojo::set_java_zone_offset_seconds(cfg.core.zone_offset_seconds()?);
     let mongo = platform::db::mongo_database(&cfg.mongo).await?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
+    let cache = CacheService::configured(&cfg.redis)?;
     cache.spawn_eviction_listener();
-    let eureka = if cfg.eureka.register || !cfg.eureka.zones.is_empty() {
-        Some(Eureka::new(&cfg.eureka, cfg.server.port)?)
+    let registry = if cfg.registry.register || !cfg.registry.zones.is_empty() {
+        Some(Registry::new(&cfg.registry, cfg.server.port)?)
     } else {
         None
     };
-    let security_upstream = platform::security::security_upstream(&cfg.security, eureka.as_ref())?;
-    let security = SecurityClient::from_config(&cfg.security, eureka.as_ref())?;
+    let security_upstream = platform::security::security_upstream(&cfg.security, registry.as_ref())?;
+    let security = SecurityClient::from_config(&cfg.security, registry.as_ref())?;
     let store = Store::new(mongo.clone(), security, &cache);
     let security_calls = Arc::new(SecurityCalls::new(security_upstream)?);
     let pass = Arc::new(event_scheduler_of(cfg.clone(), store, cache.clone(), security_calls, mongo.clone(), pool.clone()));
@@ -349,7 +343,7 @@ pub async fn run_scheduler() -> Result<()> {
 
     let health = Health::new(telemetry.metrics.clone());
     mongo_and_mysql_checks(&health, &mongo, Some(&pool));
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: false }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: false }
         .run(axum::Router::new())
         .await
 }
@@ -399,7 +393,10 @@ pub async fn run_events() -> Result<()> {
     let loaded = platform::config::load_async::<CoreConfig>(NAME).await?;
     let telemetry = platform::telemetry::init(NAME, &loaded.config.telemetry)?;
     loaded.log_source(NAME);
-    let cfg = loaded.config;
+    let mut cfg = loaded.config;
+    // Event tasks (scheduled jobs among them) keep the longer limit unless `[kirun]` sets one.
+    cfg.kirun = cfg.kirun.for_events();
+    tracing::info!(max_execution_seconds = cfg.kirun.seconds(), max_steps = cfg.kirun.max_steps, "function execution limits");
     let Some(uri) = cfg.mq.amqp_uri().filter(|_| cfg.mq.enabled) else {
         anyhow::bail!("core-events needs a broker: set [mq] (or MODLIX__MQ__URI)");
     };
@@ -407,11 +404,18 @@ pub async fn run_events() -> Result<()> {
     exec.cache.spawn_eviction_listener();
     let listener = events_listener_of(&exec, &cfg);
     events_queue::describe_metrics();
-    tokio::spawn(events_queue::consume_forever(Arc::new(listener), uri, cfg.mq.events_exchange.clone(), cfg.events.clone()));
+    // The consumer and every run it starts live on the run pool (kept until the server stops);
+    // the server's runtime keeps only the health routes.
+    let runs = run_pool::events_pool(&cfg)?;
+    let consume = |settings| events_queue::consume_forever(Arc::new(listener), uri, cfg.mq.events_exchange.clone(), settings);
+    match &runs {
+        Some(pool) => drop(pool.spawn(consume(run_pool::events_settings(&cfg.events, pool.threads())))),
+        None => drop(tokio::spawn(consume(cfg.events.clone()))),
+    }
 
     let health = Health::new(telemetry.metrics.clone());
-    mongo_and_mysql_checks(&health, &exec.mongo, Some(&exec.pool));
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka: exec.eureka, cors: false }
+    run_pool::readiness_checks(&health, &cfg).await?;
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry: exec.registry, cors: false }
         .run(axum::Router::new())
         .await
 }

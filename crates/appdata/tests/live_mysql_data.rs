@@ -885,6 +885,18 @@ mod draft_copy {
                 assert_eq!(f.rows_in(&f.db(), "rtd_copy_customers").await, 2, "clearing the draft leaves live alone");
                 assert!(f.rows_in(&f.db(), "rtd_copy_customers_version").await > 0, "and live history");
 
+                // One storage copied on its own (the workspace's "Copy live rows here"): its
+                // orders reference customers the draft does not hold, so it too runs with key
+                // checks off (QA-0483: Java and the first port failed with MySQL 1452 here).
+                assert_eq!(f.rows_in(&f.draft_db(), "rtd_copy_customers").await, 0);
+                assert_eq!(f.e.copy_live_to_draft(&cx(), CLIENT, Some(&f.c), &orders(), Some(true)).await.unwrap(), 4);
+                assert_eq!(draft_names(&f, "rtd_copy_orders", "code").await, ["A1", "A2", "B1", "N1"]);
+                // And replacing customers while draft orders point at them is not refused by
+                // the RESTRICT key either.
+                assert_eq!(f.e.copy_live_to_draft(&cx(), CLIENT, Some(&f.c), &customers(), Some(true)).await.unwrap(), 2);
+                assert_eq!(f.e.copy_live_to_draft(&cx(), CLIENT, Some(&f.c), &customers(), Some(true)).await.unwrap(), 2);
+                f.e.clear_draft_rows(&cx(), CLIENT, Some(&f.c), &customers()).await.unwrap();
+
                 // No filter: every live row, after the draft is emptied. Orders reference
                 // customers the draft does not hold: the copy runs with key checks off.
                 assert_eq!(copy(&f, &orders(), None, &[]).await.unwrap(), 4);

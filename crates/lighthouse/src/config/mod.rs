@@ -10,11 +10,11 @@
 //! - [`auth`]: tokens and scopes. [`server`]: the routes. [`cli`]: `lighthouse render` and
 //!   `lighthouse parity`.
 //!
-//! Secrets are read from oci-config as they are today. OCI Vault (`{vault:name}` values,
-//! phase 3) plugs in at `server::Served::prepare`, where a snapshot becomes what is served: a
-//! pass there that resolves every `{vault:name}` into a resolved copy of the snapshot feeds the
-//! renderer and the Spring endpoint alike, while the raw snapshot (references only) is what goes
-//! to disk and to peers.
+//! Where secrets come from: on the hosts, oci-config-rust (`[config] layout = "repo"`), a private
+//! repository whose unit files hold them inline; locally, `config/local.toml`. Lighthouse reads
+//! the repository with a read-only GitHub token that reaches it only at deploy time (CI, as
+//! `MODLIX__CONFIG__GITHUB_TOKEN`), and serves units and ai/ssr without a token on the host's
+//! private Docker network (`[auth] open`), as the Java config-server did.
 
 pub mod auth;
 pub mod cli;
@@ -39,7 +39,7 @@ use self::spring::SpringConfig;
 pub struct LighthouseConfig {
     /// SHA-256 (hex) of the token that unlocks managing instances from the dashboard
     /// (`MODLIX__ADMIN_TOKEN_SHA256`). Empty: the dashboard is read-only. Reads stay open, as
-    /// Eureka's are.
+    /// The registry protocol's are.
     pub admin_token_sha256: String,
     pub server: ServerConfig,
     pub telemetry: TelemetryConfig,
@@ -76,6 +76,10 @@ pub struct ConfigServerConfig {
     /// The environment whose units this deployment configures: dev, stage or prod, or `local`
     /// with `[config.local]` (the local stack).
     pub env: String,
+    /// What the source holds: empty for oci-config (the Java settings, rendered through
+    /// `rust/`), `repo` for oci-config-rust (each environment's unit files as they are; see
+    /// [`local::repo_documents`]).
+    pub layout: String,
     pub poll_seconds: u64,
     /// Where the last good snapshot is kept (a volume), readable by Lighthouse only. Empty: not
     /// kept.
@@ -94,6 +98,7 @@ impl Default for ConfigServerConfig {
             source: String::new(),
             label: "master".into(),
             env: String::new(),
+            layout: String::new(),
             poll_seconds: 30,
             snapshot_dir: String::new(),
             github_api: "https://api.github.com".into(),
@@ -119,7 +124,7 @@ pub struct RegistryConfig {
     /// An eviction tick that runs this much later than planned is skipped: the process was
     /// stalled, and heartbeats were probably held up with it.
     pub late_tick_skip_ms: u64,
-    /// Eureka's self-preservation: no eviction while the renewals of the last minute are below
+    /// The registry protocol's self-preservation: no eviction while the renewals of the last minute are below
     /// this fraction of the renewals expected.
     pub renewal_percent_threshold: f64,
     pub self_preservation: bool,
@@ -173,6 +178,10 @@ pub struct AllowedConfig {
     pub networks: Vec<String>,
     /// App names allowed to register (any case). Empty allows any app.
     pub apps: Vec<String>,
+    /// The networks trusted with tokenless configuration reads, registry writes and peer calls
+    /// (on a host: its own Docker network). Callers from the other allowed networks see the
+    /// registry and the dashboard read-only. Empty trusts every allowed caller.
+    pub trusted: Vec<String>,
 }
 
 impl Default for AllowedConfig {
@@ -182,6 +191,7 @@ impl Default for AllowedConfig {
                 .map(String::from)
                 .to_vec(),
             apps: vec![],
+            trusted: vec![],
         }
     }
 }

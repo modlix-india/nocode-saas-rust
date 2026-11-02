@@ -1,4 +1,4 @@
-//! Peer replication, as Eureka's `PeerEurekaNodes` does it, in batches.
+//! Peer replication, as the registry protocol's `PeerEurekaNodes` does it, in batches.
 //!
 //! - Every change made for a client is queued for each peer. A queue holds at most
 //!   `replication_queue_limit` items; when it is full a heartbeat goes first (the next one

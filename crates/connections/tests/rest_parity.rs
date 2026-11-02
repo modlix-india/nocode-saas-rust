@@ -4,8 +4,10 @@
 //! saved. Here the cases run through `basic::call` against an in-process server that answers
 //! the same bytes, and both sides are compared.
 //!
-//! Known and listed in DIFFERENCES.md: request header names go out in lower case (hyper), and
-//! the message of a malformed-JSON response differs (Gson's parser versus serde's).
+//! Known and listed in DIFFERENCES.md: request header names go out in lower case (hyper), the
+//! message of a malformed-JSON response differs (Gson's parser versus serde's), and form values
+//! go out plain where Java sent their JSON text (#20: Java's recorded form bodies are rewritten
+//! to plain values before comparing).
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -16,7 +18,7 @@ use base64::Engine;
 use connections::connection::{Connection, ConnectionStore};
 use connections::error::ConnResult;
 use connections::rest::auth::{AuthTokenFunction, EventResult};
-use connections::rest::{basic, RestRequest};
+use connections::rest::{basic, body, RestRequest};
 use connections::tokens::{CoreToken, TokenStore, TokenType};
 use connections::{java, Connections, ConnectionsConfig};
 use parking_lot::Mutex;
@@ -223,6 +225,55 @@ fn normalize_request(r: &Value, port: &str) -> Value {
     json!({"method": r["method"], "target": r["target"], "headers": headers, "body": String::from_utf8_lossy(&body)})
 }
 
+fn form_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < b.len() => {
+                out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap());
+                i += 2;
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap()
+}
+
+/// A recorded Java form request with its values as Rust sends them now: each value's JSON text
+/// read back and written as [`body::form_value`] writes it, and `content-length` to match.
+fn java_form_as_plain(r: &Value) -> Value {
+    let form = r["headers"].as_array().unwrap().iter().any(|h| {
+        h[0].as_str().unwrap().eq_ignore_ascii_case("content-type") && h[1].as_str().unwrap().contains("x-www-form-urlencoded")
+    });
+    if !form {
+        return r.clone();
+    }
+    let text = String::from_utf8(base64::engine::general_purpose::STANDARD.decode(r["body"].as_str().unwrap()).unwrap()).unwrap();
+    let plain: Vec<String> = text
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(|pair| {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let raw = form_decode(v);
+            let value = serde_json::from_str::<Value>(&raw).map(|j| body::form_value(&j)).unwrap_or(raw);
+            format!("{k}={}", connections::rest::spring_uri::url_encode_form(&value))
+        })
+        .collect();
+    let plain = plain.join("&");
+    let mut out = r.clone();
+    out["body"] = Value::String(base64::engine::general_purpose::STANDARD.encode(plain.as_bytes()));
+    for h in out["headers"].as_array_mut().unwrap() {
+        if h[0].as_str().unwrap().eq_ignore_ascii_case("content-length") {
+            h[1] = Value::String(plain.len().to_string());
+        }
+    }
+    out
+}
+
 #[tokio::test]
 async fn basic_rest_service_matches_java() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -295,6 +346,6 @@ async fn basic_rest_service_matches_java() {
     let rust_requests = log.lock().clone();
     assert_eq!(java_requests.len(), rust_requests.len(), "number of requests made");
     for (j, r) in java_requests.iter().zip(&rust_requests) {
-        assert_eq!(normalize_request(r, &port), normalize_request(j, &port), "request");
+        assert_eq!(normalize_request(r, &port), normalize_request(&java_form_as_plain(j), &port), "request");
     }
 }

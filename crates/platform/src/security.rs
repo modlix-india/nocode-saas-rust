@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use crate::config::SecurityConfig;
 use crate::error::{AppError, Coded};
-use crate::eureka::Eureka;
+use crate::registry::Registry;
 use crate::upstream::Upstream;
 
 pub const CLIENT_TYPE_SYSTEM: &str = "SYS";
@@ -75,15 +75,15 @@ pub fn is_internal_route(path: &str) -> bool {
 /// `[security]` as one upstream: `upstream`, with `AuthenticationController`'s paths sent to
 /// `auth_upstream` and security-internal's to `internal_upstream` when they are set. Callers
 /// pick with [`Upstream::base_for`].
-pub fn security_upstream(cfg: &SecurityConfig, eureka: Option<&Eureka>) -> Result<Upstream> {
+pub fn security_upstream(cfg: &SecurityConfig, registry: Option<&Registry>) -> Result<Upstream> {
     let mut routes: Vec<(crate::upstream::PathTest, Upstream)> = Vec::new();
     if !cfg.auth_upstream.entries().is_empty() {
-        routes.push((is_auth_route, Upstream::from_config(&cfg.auth_upstream, eureka)?));
+        routes.push((is_auth_route, Upstream::from_config(&cfg.auth_upstream, registry)?));
     }
     if !cfg.internal_upstream.entries().is_empty() {
-        routes.push((is_internal_route, Upstream::from_config(&cfg.internal_upstream, eureka)?));
+        routes.push((is_internal_route, Upstream::from_config(&cfg.internal_upstream, registry)?));
     }
-    Ok(Upstream::from_config(&cfg.upstream, eureka)?.with_routes(routes))
+    Ok(Upstream::from_config(&cfg.upstream, registry)?.with_routes(routes))
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -255,8 +255,8 @@ impl SecurityClient {
 
     /// `[security]` as configured: `upstream` for everything, `auth_upstream` (when set) for the
     /// `AuthenticationController` calls, `internal_upstream` (when set) for the internal ones.
-    pub fn from_config(cfg: &SecurityConfig, eureka: Option<&Eureka>) -> Result<Self> {
-        Self::routed(security_upstream(cfg, eureka)?, cfg.auth_cache_seconds)
+    pub fn from_config(cfg: &SecurityConfig, registry: Option<&Registry>) -> Result<Self> {
+        Self::routed(security_upstream(cfg, registry)?, cfg.auth_cache_seconds)
     }
 
     /// The caller's context and one-time token sign-ins go to `auth_upstream` when given.
@@ -555,6 +555,32 @@ impl SecurityClient {
             Value::Array(items) => items.into_iter().filter_map(|i| i.as_str().map(str::to_string)).collect(),
             _ => Vec::new(),
         })
+    }
+
+    /// `clients/internal/filterManagedClientCodes`: of `codes`, the ones `managing` manages, in one
+    /// call (duplicates and unknown codes left out).
+    pub async fn filter_managed_client_codes(&self, managing: &str, codes: &[String]) -> Result<Vec<String>> {
+        if codes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let path = "/api/security/clients/internal/filterManagedClientCodes";
+        let body = serde_json::to_string(codes)?;
+        let query = [("managingClientCode", managing.to_string())];
+        let resp = self
+            .send(path, None, |http, url| {
+                http.post(url).query(&query).header(header::CONTENT_TYPE, "application/json").body(body.clone())
+            })
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(anyhow!("filterManagedClientCodes: {status}"));
+        }
+        let bytes = resp.bytes().await?;
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let v: Value = serde_json::from_slice(&bytes)?;
+        Ok(Self::string_list(&v))
     }
 
     pub async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> Result<bool> {

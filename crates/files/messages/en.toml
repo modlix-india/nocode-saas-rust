@@ -497,3 +497,23 @@ audience = "anyone"
 
 [ENTITY.FilesAccessPath]
 text = "file access rule"
+
+# ---- Admin purge (Rust only) ----
+
+[FILES.PURGE_FORBIDDEN]
+status = 403
+params = []
+text = "Only an organisation that manages this one can purge its files; an app's files only the platform's administrators."
+action = "Sign in from the managing organisation with the delete permission."
+java_text = "purge needs Client_DELETE / Application_DELETE and a managing client (no Java counterpart)"
+when = "A client purge by the client itself or by one that does not manage it, an app purge outside SYSTEM, or no Client_DELETE / Application_DELETE."
+audience = "signed-in"
+
+[FILES.PURGE_BAD_CODE]
+status = 400
+params = ["code"]
+text = "[{code} is not a code that can be purged.|That is not a code that can be purged.]"
+action = "Use the client or app code: letters, digits and _ only."
+java_text = "not a purgeable code (no Java counterpart)"
+when = "A purge asked for an empty code, one with other characters, or the SYSTEM client."
+audience = "signed-in"

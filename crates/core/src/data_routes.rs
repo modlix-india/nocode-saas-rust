@@ -561,10 +561,19 @@ async fn copy_to_draft(State(st): State<AppState>, Path(storage): Path<String>, 
     .await
 }
 
-async fn migration_status(State(st): State<AppState>, Path(storage): Path<String>, h: HeaderMap) -> Response {
+/// `?problems=true` keeps only the tenants that need attention. Either way they come first,
+/// then by client, live before draft.
+async fn migration_status(State(st): State<AppState>, Path(storage): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
     data_route(st, h, "/api/core/data/{storage}/migrationStatus", |st, app, client| async move {
+        let only_problems = Params(query_params(q.as_deref())).bool("problems", Some(false))?.unwrap_or(false);
         Ok(match service(&st).migration_status(opt(&app), opt(&client), &storage).await? {
-            Some(list) => json(&Value::Array(list.iter().map(tenant_progress).collect())),
+            Some(mut list) => {
+                list.retain(|t| !only_problems || t.needs_attention());
+                list.sort_by(|a, b| {
+                    (!a.needs_attention(), &a.client_code, a.surface != "LIVE").cmp(&(!b.needs_attention(), &b.client_code, b.surface != "LIVE"))
+                });
+                json(&Value::Array(list.iter().map(tenant_progress).collect()))
+            }
             None => empty_ok(),
         })
     })
@@ -586,6 +595,39 @@ fn tenant_progress(t: &appdata::mysql::migration::TenantProgress) -> Value {
     d.insert("done".into(), Value::Bool(t.state == Some(S::Applied)));
     d.insert("untouched".into(), Value::Bool(t.state.is_none()));
     d.insert("resumable".into(), Value::Bool(matches!(t.state, Some(S::Failed) | Some(S::Running))));
+    // What the workspace's storage status view shows besides the record.
+    d.insert("clientCode".into(), Value::String(t.client_code.clone()));
+    d.insert("surface".into(), Value::String(t.surface.clone()));
+    let text = |d: &mut Document, k: &str, v: &Option<String>| {
+        if let Some(v) = v {
+            d.insert(k.into(), Value::String(v.clone()));
+        }
+    };
+    if let Some(v) = t.to_version {
+        d.insert("toVersion".into(), Value::Int(v as i64));
+    }
+    text(&mut d, "startedAt", &t.started_at);
+    text(&mut d, "finishedAt", &t.finished_at);
+    text(&mut d, "appliedBy", &t.applied_by);
+    text(&mut d, "error", &t.error);
+    let issues: Vec<Value> = t
+        .issues
+        .iter()
+        .map(|i| {
+            let mut o = Document::new();
+            o.insert("kind".into(), Value::String(i.kind.clone()));
+            text(&mut o, "surface", &i.surface);
+            o.insert("offending".into(), Value::Int(i.offending));
+            o.insert("detail".into(), Value::String(i.detail.clone()));
+            o.insert("createdAt".into(), Value::String(i.created_at.clone()));
+            text(&mut o, "appliedBy", &i.applied_by);
+            o.insert("current".into(), Value::Bool(i.current));
+            Value::Object(o)
+        })
+        .collect();
+    d.insert("currentIssues".into(), Value::Int(t.issues.iter().filter(|i| i.current).count() as i64));
+    d.insert("issues".into(), Value::Array(issues));
+    d.insert("needsAttention".into(), Value::Bool(t.needs_attention()));
     Value::Object(d)
 }
 

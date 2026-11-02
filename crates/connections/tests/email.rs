@@ -15,9 +15,11 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
 /// One connection at a time; RCPT replies come from the map, everything else is accepted.
+/// `rcpts` is every envelope recipient asked for, `accepted` every message taken.
 struct StubSmtp {
     port: u16,
     accepted: Arc<Mutex<Vec<String>>>,
+    rcpts: Arc<Mutex<Vec<String>>>,
 }
 
 impl StubSmtp {
@@ -26,6 +28,8 @@ impl StubSmtp {
         let port = listener.local_addr().unwrap().port();
         let accepted = Arc::new(Mutex::new(Vec::new()));
         let acc = accepted.clone();
+        let rcpts = Arc::new(Mutex::new(Vec::new()));
+        let asked = rcpts.clone();
         tokio::spawn(async move {
             loop {
                 let Ok((sock, _)) = listener.accept().await else { return };
@@ -38,6 +42,7 @@ impl StubSmtp {
                         "250 stub".to_string()
                     } else if cmd.starts_with("RCPT") {
                         let addr = &line[line.find('<').unwrap() + 1..line.find('>').unwrap()];
+                        asked.lock().push(addr.to_string());
                         rcpt_replies.iter().find(|(a, _)| *a == addr).map(|(_, r)| r.to_string()).unwrap_or_else(|| "250 ok".into())
                     } else if cmd.starts_with("DATA") {
                         w.write_all(b"354 go ahead\r\n").await.unwrap();
@@ -61,7 +66,7 @@ impl StubSmtp {
                 }
             }
         });
-        StubSmtp { port, accepted }
+        StubSmtp { port, accepted, rcpts }
     }
 }
 
@@ -86,26 +91,27 @@ fn details(to: &[&str]) -> ProcessedEmail {
         from: "noreply@example.com".into(),
         subject: "Welcome".into(),
         body: "<p>Hi</p>".into(),
+        ..Default::default()
     }
 }
 
 #[tokio::test]
 async fn suppressed_recipient_is_not_sent_instead_of_an_error() {
     let s = StubSmtp::start(vec![("gone@example.com", SUPPRESSED)]).await;
-    assert!(!email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["gone@example.com"])).await.unwrap());
+    assert!(!email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["gone@example.com"]), false).await.unwrap());
 }
 
 #[tokio::test]
 async fn permanently_rejected_recipient_is_not_sent() {
     let s = StubSmtp::start(vec![("gone@example.com", "550 5.1.1 no such user")]).await;
-    assert!(!email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["gone@example.com"])).await.unwrap());
+    assert!(!email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["gone@example.com"]), false).await.unwrap());
 }
 
 #[tokio::test]
 async fn partial_send_counts_as_sent() {
     let s = StubSmtp::start(vec![("gone@example.com", "550 5.1.1 no such user")]).await;
     let conn = smtp_connection(s.port, json!({"mail.smtp.sendpartial": "true"}));
-    assert!(email::smtp_send(&conn, &details(&["ok@example.com", "gone@example.com"])).await.unwrap());
+    assert!(email::smtp_send(&conn, &details(&["ok@example.com", "gone@example.com"]), false).await.unwrap());
     assert_eq!(s.accepted.lock().len(), 1);
 }
 
@@ -113,14 +119,14 @@ async fn partial_send_counts_as_sent() {
 async fn without_sendpartial_one_refusal_sends_nothing() {
     let s = StubSmtp::start(vec![("gone@example.com", "550 5.1.1 no such user")]).await;
     let conn = smtp_connection(s.port, json!({}));
-    assert!(!email::smtp_send(&conn, &details(&["ok@example.com", "gone@example.com"])).await.unwrap());
+    assert!(!email::smtp_send(&conn, &details(&["ok@example.com", "gone@example.com"]), false).await.unwrap());
     assert!(s.accepted.lock().is_empty());
 }
 
 #[tokio::test]
 async fn accepted_recipient_is_sent() {
     let s = StubSmtp::start(vec![]).await;
-    assert!(email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["ok@example.com"])).await.unwrap());
+    assert!(email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["ok@example.com"]), false).await.unwrap());
     let msgs = s.accepted.lock().clone();
     assert_eq!(msgs.len(), 1);
     assert!(msgs[0].contains("Subject: Welcome"));
@@ -132,28 +138,28 @@ async fn accepted_recipient_is_sent() {
 async fn connection_checks_and_failures() {
     let mut c = smtp_connection(1, json!({}));
     c.connection_details.as_mut().unwrap().remove("password");
-    let e = email::smtp_send(&c, &details(&["a@x.com"])).await.unwrap_err();
+    let e = email::smtp_send(&c, &details(&["a@x.com"]), false).await.unwrap_err();
     assert_eq!(e.message(), "Unable to send the email: Connection username/password is missing");
     let mut c = smtp_connection(1, json!({}));
     c.connection_details.as_mut().unwrap()["mailProps"] = json!({});
-    let e = email::smtp_send(&c, &details(&["a@x.com"])).await.unwrap_err();
+    let e = email::smtp_send(&c, &details(&["a@x.com"]), false).await.unwrap_err();
     assert_eq!(e.message(), "Unable to send the email: Connection Properties with 'mail.' are missing");
     let mut c = smtp_connection(1, json!({}));
     c.connection_details = None;
     assert_eq!(
-        email::smtp_send(&c, &details(&["a@x.com"])).await.unwrap_err().message(),
+        email::smtp_send(&c, &details(&["a@x.com"]), false).await.unwrap_err().message(),
         "Unable to send the email: Connection details are missing"
     );
     // Nothing listening: the connection failure is the error.
     let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let e = email::smtp_send(&smtp_connection(closed, json!({})), &details(&["a@x.com"])).await.unwrap_err();
+    let e = email::smtp_send(&smtp_connection(closed, json!({})), &details(&["a@x.com"]), false).await.unwrap_err();
     assert!(e.message().starts_with("Unable to send the email: Couldn't connect to host"), "{}", e.message());
     // No usable recipient: not sent, nothing attempted.
-    assert!(!email::smtp_send(&smtp_connection(closed, json!({})), &details(&["not an address"])).await.unwrap());
+    assert!(!email::smtp_send(&smtp_connection(closed, json!({})), &details(&["not an address"]), false).await.unwrap());
     // A sender that is not an address.
     let mut d = details(&["a@x.com"]);
     d.from = String::new();
-    assert!(email::smtp_send(&smtp_connection(closed, json!({})), &d).await.is_err());
+    assert!(email::smtp_send(&smtp_connection(closed, json!({})), &d, false).await.is_err());
 }
 
 #[tokio::test]
@@ -177,12 +183,12 @@ async fn read_timeout_from_mail_smtp_timeout() {
     });
     let conn = smtp_connection(port, json!({"mail.smtp.timeout": 200, "mail.smtp.connectiontimeout": "1500"}));
     let started = std::time::Instant::now();
-    let e = email::smtp_send(&conn, &details(&["a@x.com"])).await.unwrap_err();
+    let e = email::smtp_send(&conn, &details(&["a@x.com"]), false).await.unwrap_err();
     assert_eq!(e.message(), "Unable to send the email: Read timed out");
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
     // A connection that fails shows the connect timeout it had.
     let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let e = email::smtp_send(&smtp_connection(closed, json!({"mail.smtp.connectiontimeout": 1500})), &details(&["a@x.com"]))
+    let e = email::smtp_send(&smtp_connection(closed, json!({"mail.smtp.connectiontimeout": 1500})), &details(&["a@x.com"]), false)
         .await
         .unwrap_err();
     assert!(e.message().contains("; timeout 1500; "), "{}", e.message());
@@ -242,18 +248,29 @@ async fn send_email_renders_the_template_and_sends_by_smtp() {
     let store = Store(vec![smtp_connection(s.port, json!({}))]);
     let templates = Templates(vec![welcome()]);
     let http = HttpClient { block_private_targets: false };
-    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1" };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
     let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": true, "lang": "fr"}));
-    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", Some(&json!([""])), &d).await.unwrap();
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", Some(&json!([""])), &d, &Default::default(), &Default::default()).await.unwrap();
     assert_eq!(sent, Some(true));
     let msg = s.accepted.lock()[0].clone();
     assert!(msg.contains("Subject: Bonjour Ann"), "{msg}");
     assert!(msg.contains("To: ann@example.com"), "{msg}");
 
+    // The step's address and the template's `toExpression` naming the same person: one `To`, one
+    // envelope recipient (CXZ-1202).
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", Some(&json!(["Ann@Example.com"])), &d, &Default::default(), &Default::default())
+        .await
+        .unwrap();
+    assert_eq!(sent, Some(true));
+    let msg = s.accepted.lock()[1].clone();
+    let to_line = msg.lines().find(|l| l.starts_with("To: ")).unwrap_or_default().to_string();
+    assert_eq!(to_line.trim_end(), "To: Ann@Example.com", "{msg}");
+    assert_eq!(s.rcpts.lock().iter().filter(|r| r.eq_ignore_ascii_case("ann@example.com")).count(), 2, "once per send");
+
     // Outside a KIRun runtime the function reports not sent.
     let mut outside = caller();
     outside.in_kirun = false;
-    assert_eq!(email::send_email_function(&ctx, &outside, "", "", Some("mail"), "welcome", None, &d).await.unwrap(), Some(false));
+    assert_eq!(email::send_email_function(&ctx, &outside, "", "", Some("mail"), "welcome", None, &d, &Default::default(), &Default::default()).await.unwrap(), Some(false));
 
     // The rendered parts.
     let tmpl = welcome();
@@ -273,7 +290,7 @@ async fn send_email_refusals() {
     ]);
     let templates = Templates(vec![welcome()]);
     let http = HttpClient { block_private_targets: false };
-    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1" };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
     let d = data(json!({"email": "a@x.com", "name": "A", "vip": false}));
     let c = caller();
     let e = email::send_email(&ctx, &c, None, None, &[], "welcome", Some("nope"), &d).await.unwrap_err();
@@ -287,7 +304,7 @@ async fn send_email_refusals() {
     assert_eq!(e.message(), "Unable to send the email: SENDGRID api key is not found");
     // No caller to resolve blank codes from: no output.
     let none = Caller { in_kirun: true, ..Default::default() };
-    assert_eq!(email::send_email_function(&ctx, &none, "", "", Some("mail"), "welcome", None, &d).await.unwrap(), None);
+    assert_eq!(email::send_email_function(&ctx, &none, "", "", Some("mail"), "welcome", None, &d, &Default::default(), &Default::default()).await.unwrap(), None);
 }
 
 /// A stand-in SendGrid: records the request, answers 202 with no body, or 400 with one.
@@ -357,16 +374,27 @@ async fn sendgrid_posts_the_java_body() {
 #[test]
 fn language_and_parts() {
     let d = data(json!({}));
-    // Neither expression nor default: "" and the "en" parts.
+    // Neither expression nor default: "en" and the "en" parts.
     let t = EmailTemplate::from_json(json!({"templateParts": {"de": {"subject": "Hallo"}, "en": {"subject": "Hello"}}})).unwrap();
-    assert_eq!(email::language(&t, &d).unwrap(), Some(String::new()));
+    assert_eq!(email::language(&t, &d).unwrap().as_deref(), Some("en"));
     assert_eq!(email::processed_parts(Some(""), &t, &d).unwrap()["subject"], "Hello");
     // A language without parts falls back to the first set in Java's map order.
     let first = email::processed_parts(Some("fr"), &t, &d).unwrap();
     assert!(first["subject"] == "Hello" || first["subject"] == "Hallo");
-    // A default language without an expression fails, as in Java.
-    let t2 = EmailTemplate::from_json(json!({"defaultLanguage": "en", "templateParts": {"en": {}}})).unwrap();
-    assert!(email::language(&t2, &d).is_err());
+    // A default language without an expression is the language; nothing at all is `en`.
+    let t2 = EmailTemplate::from_json(json!({"defaultLanguage": "fr", "templateParts": {"en": {}}})).unwrap();
+    assert_eq!(email::language(&t2, &d).unwrap().as_deref(), Some("fr"));
+    assert_eq!(email::language(&EmailTemplate::default(), &d).unwrap().as_deref(), Some("en"));
+    // An expression that renders blank takes the default, and without one `en` (Java: null).
+    let t4 = EmailTemplate::from_json(json!({"languageExpression": "${lang!\"\"}", "defaultLanguage": "de"})).unwrap();
+    assert_eq!(email::language(&t4, &d).unwrap().as_deref(), Some("de"));
+    assert_eq!(email::language(&t4, &data(json!({"lang": " fr "}))).unwrap().as_deref(), Some("fr"));
+    let t5 = EmailTemplate::from_json(json!({"languageExpression": "${lang!\"\"}"})).unwrap();
+    assert_eq!(email::language(&t5, &d).unwrap().as_deref(), Some("en"));
+    // The set is found whatever its case.
+    let upper = EmailTemplate::from_json(json!({"templateParts": {"de": {"subject": "Hallo"}, "EN": {"subject": "Hello"}}})).unwrap();
+    assert_eq!(email::processed_parts(Some("en"), &upper, &d).unwrap()["subject"], "Hello");
+    assert_eq!(email::processed_parts(Some("DE"), &upper, &d).unwrap()["subject"], "Hallo");
     // No parts at all.
     let t3 = EmailTemplate::default();
     assert_eq!(email::processed_parts(Some("en"), &t3, &d).unwrap_err().message(), "Unable to send the email: No template parts found");
@@ -376,4 +404,242 @@ fn language_and_parts() {
     let conn = Connection::default();
     assert_eq!(email::from_address(&conn, &tf, &data(json!({"f": "x@y.com"}))).unwrap(), "x@y.com");
     assert_eq!(email::from_address(&conn, &EmailTemplate::default(), &d).unwrap(), "");
+}
+
+// --- Attachments
+
+/// A files service that answers `data:` URLs for the paths it holds, recording each read.
+struct Files {
+    held: Vec<(&'static str, &'static str)>,
+    reads: Mutex<Vec<(String, bool)>>,
+}
+
+#[async_trait]
+impl email::AttachmentFiles for Files {
+    async fn read_base64(&self, url: &str, secured: bool) -> ConnResult<Option<String>> {
+        self.reads.lock().push((url.to_string(), secured));
+        Ok(self.held.iter().find(|(u, _)| *u == url).map(|(_, b64)| b64.to_string()))
+    }
+}
+
+const INVOICE: &str = "/api/files/secured/file/SYSTEM/invoices/May.pdf";
+
+fn files() -> Files {
+    Files { held: vec![(INVOICE, "data:application/pdf;name:May.pdf;base64,JVBERi0x")], reads: Mutex::new(Vec::new()) }
+}
+
+#[tokio::test]
+async fn smtp_sends_stored_and_inline_attachments() {
+    let s = StubSmtp::start(vec![]).await;
+    let store = Store(vec![smtp_connection(s.port, json!({}))]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
+    let f = files();
+    let sources = email::attachment_sources(Some(&json!([INVOICE, {"content": "aGVsbG8=", "name": "notes.txt"}]))).unwrap();
+    let attachments = email::Attachments { sources, files: Some(&f) };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", None, &d, &attachments, &Default::default()).await.unwrap();
+    assert_eq!(sent, Some(true));
+    assert_eq!(f.reads.lock().clone(), vec![(INVOICE.to_string(), true)]);
+    let msg = s.accepted.lock()[0].clone();
+    assert!(msg.contains("Content-Type: multipart/mixed"), "{msg}");
+    assert!(msg.contains("<p>Hi Ann,</p>"), "{msg}");
+    assert!(msg.contains("filename=\"May.pdf\""), "{msg}");
+    assert!(msg.contains("Content-Type: application/pdf"), "{msg}");
+    // lettre writes ASCII content as 7bit, anything else in base64.
+    assert!(msg.contains("\n%PDF-1\n"), "{msg}");
+    assert!(msg.contains("filename=\"notes.txt\""), "{msg}");
+    assert!(msg.contains("Content-Type: text/plain"), "{msg}");
+}
+
+#[tokio::test]
+async fn attachment_failures_send_nothing() {
+    let s = StubSmtp::start(vec![]).await;
+    let store = Store(vec![smtp_connection(s.port, json!({}))]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let f = files();
+    let send = |sources: Value, files: Option<&'static Files>| {
+        let ctx = &ctx;
+        let d = &d;
+        async move {
+            let a = email::Attachments { sources: email::attachment_sources(Some(&sources)).unwrap(), files: files.map(|f| f as _) };
+            email::send_email_function(ctx, &caller(), "", "", Some("mail"), "welcome", None, d, &a, &Default::default()).await
+        }
+    };
+    let f: &'static Files = Box::leak(Box::new(f));
+    let e = send(json!(["/api/files/static/file/SYSTEM/gone.pdf"]), Some(f)).await.unwrap_err();
+    assert_eq!(e.message(), "Unable to send the email: Attachment not found: /api/files/static/file/SYSTEM/gone.pdf");
+    let e = send(json!([INVOICE]), None).await.unwrap_err();
+    assert_eq!(e.message(), "Unable to send the email: Stored files cannot be attached here");
+    let big = "A".repeat(email::MAX_ATTACHMENT_BYTES / 3 * 4 + 8);
+    let e = send(json!([{"content": big, "name": "big.bin"}]), Some(f)).await.unwrap_err();
+    assert_eq!(e.message(), "Unable to send the email: Attachments are over 20 MB in all");
+    // A missing template is still the first refusal: nothing is read for it.
+    f.reads.lock().clear();
+    let a = email::Attachments { sources: email::attachment_sources(Some(&json!([INVOICE]))).unwrap(), files: Some(f) };
+    assert!(email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "nope", None, &d, &a, &Default::default()).await.is_err());
+    assert!(f.reads.lock().is_empty());
+    assert!(s.accepted.lock().is_empty());
+}
+
+#[tokio::test]
+async fn sendgrid_sends_attachments_in_base64() {
+    let (port, log) = fake_sendgrid(202).await;
+    let conn = Connection::from_json(json!({"name": "sg", "connectionType": "MAIL", "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "SG.key"}})).unwrap();
+    let http = HttpClient { block_private_targets: false };
+    let url = format!("http://127.0.0.1:{port}/v3/mail/send");
+    let mut d = details(&["a@x.com"]);
+    d.attachments = vec![email::EmailAttachment { name: "May.pdf".into(), content_type: "application/pdf".into(), bytes: b"%PDF-1".to_vec() }];
+    assert!(email::sendgrid_send(&http, &url, &conn, &d).await.unwrap());
+    let req = log.lock()[0].clone();
+    assert!(
+        req.ends_with(r#""content":[{"type":"text/html","value":"<p>Hi</p>"}],"attachments":[{"content":"JVBERi0x","type":"application/pdf","filename":"May.pdf","disposition":"attachment"}]}"#),
+        "{req}"
+    );
+}
+
+// --- The private-target guard
+
+#[tokio::test]
+async fn smtp_to_a_private_host_is_refused() {
+    let s = StubSmtp::start(vec![]).await;
+    let e = email::smtp_send(&smtp_connection(s.port, json!({})), &details(&["a@x.com"]), true).await.unwrap_err();
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.PRIVATE_TARGET_REFUSED"));
+    assert_eq!(
+        e.message(),
+        format!("Refusing to call \"smtp://127.0.0.1:{}\": '127.0.0.1' is a private or internal address. Only addresses reachable from the public internet can be called.", s.port)
+    );
+    assert!(s.accepted.lock().is_empty());
+    // Through EmailService: the guard follows the context's flag.
+    let store = Store(vec![smtp_connection(s.port, json!({}))]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: true };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let e = email::send_email(&ctx, &caller(), None, None, &[], "welcome", Some("mail"), &d).await.unwrap_err();
+    assert_eq!(e.code().map(|c| c.code.as_ref()), Some("CORE.PRIVATE_TARGET_REFUSED"));
+    assert!(s.accepted.lock().is_empty());
+}
+
+#[tokio::test]
+async fn smtp_guard_rules() {
+    use connections::outbound::{guard_host, with_resolver, Resolver};
+    let resolver: Resolver = Arc::new(|name: &str| match name {
+        "smtp.public.example" => Some(vec!["93.184.216.34".parse().unwrap()]),
+        "rebound.example" => Some(vec!["93.184.216.34".parse().unwrap(), "10.0.0.5".parse().unwrap()]),
+        "mapped.example" => Some(vec!["::ffff:127.0.0.1".parse().unwrap()]),
+        _ => None,
+    });
+    with_resolver(resolver, async {
+        assert_eq!(guard_host("smtp://smtp.public.example:587", "SMTP.Public.Example.").await.unwrap(), vec!["93.184.216.34".parse::<std::net::IpAddr>().unwrap()]);
+        assert_eq!(guard_host("t", "8.8.8.8").await.unwrap().len(), 1);
+        for (host, why) in [
+            ("rebound.example", "'rebound.example' resolves to 10.0.0.5, which is a private or internal address"),
+            ("mapped.example", "'mapped.example' resolves to 127.0.0.1, which is a private or internal address"),
+            ("localhost", "'localhost' is this server, not an outside address"),
+            ("metadata.google.internal", "'metadata.google.internal' is this server, not an outside address"),
+            ("mail.corp.internal", "'mail.corp.internal' is an internal address"),
+            ("169.254.169.254", "'169.254.169.254' is a private or internal address"),
+            ("[::1]", "'::1' is a private or internal address"),
+            ("nowhere.example", "'nowhere.example' does not resolve to any address"),
+            (" ", "the address has no readable host name"),
+        ] {
+            let e = guard_host("t", host).await.unwrap_err();
+            assert_eq!(e.message(), format!("Refusing to call \"t\": {why}. Only addresses reachable from the public internet can be called."), "{host}");
+        }
+    })
+    .await;
+}
+
+// --- CC and BCC
+
+#[test]
+fn copy_addresses_from_the_argument() {
+    let a = email::copy_addresses(Some(&json!(" ops@example.com; Sales@example.com,,sales@EXAMPLE.com ,"))).unwrap();
+    assert_eq!(a, vec!["ops@example.com", "Sales@example.com"]);
+    let a = email::copy_addresses(Some(&json!(["a@x.com, b@x.com", null, "", "A@x.com"]))).unwrap();
+    assert_eq!(a, vec!["a@x.com", "b@x.com"]);
+    assert!(email::copy_addresses(None).unwrap().is_empty());
+    assert!(email::copy_addresses(Some(&Value::Null)).unwrap().is_empty());
+    assert!(email::copy_addresses(Some(&json!(" , "))).unwrap().is_empty());
+    // One bad address refuses the whole list, naming it.
+    let e = email::copy_addresses(Some(&json!("ok@x.com, not an address"))).unwrap_err();
+    assert_eq!(e.status(), http::StatusCode::BAD_REQUEST);
+    assert_eq!(e.message(), "Unable to send the email: Not an email address: not an address");
+    let code = e.code().unwrap();
+    assert_eq!(code.code.as_ref(), "CORE.MAIL_ADDRESS_INVALID");
+    assert_eq!(code.params, vec![("address".to_string(), "not an address".to_string())]);
+    assert_eq!(email::copy_addresses(Some(&json!([5]))).unwrap_err().message(), "Unable to send the email: Not an email address: 5");
+    // Copies already in `to` go, and a BCC already in CC.
+    let c = email::Copies::from_args(Some(&json!("ann@example.com, ops@x.com")), Some(&json!("OPS@x.com; audit@x.com; ANN@example.com"))).unwrap();
+    let c = c.without(&["Ann@Example.com".to_string()]);
+    assert_eq!((c.cc, c.bcc), (vec!["ops@x.com".to_string()], vec!["audit@x.com".to_string()]));
+}
+
+#[tokio::test]
+async fn smtp_sends_one_copy_with_cc_in_the_headers_and_bcc_only_in_the_envelope() {
+    let s = StubSmtp::start(vec![]).await;
+    let store = Store(vec![smtp_connection(s.port, json!({}))]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    // Two `to` addresses (given and the template's), a CC also in `to`, a BCC also in CC.
+    let copies = email::Copies::from_args(Some(&json!("ops@example.com, ANN@example.com")), Some(&json!(["audit@example.com", "ops@example.com"]))).unwrap();
+    let to = json!(["bob@example.com"]);
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", Some(&to), &d, &Default::default(), &copies).await.unwrap();
+    assert_eq!(sent, Some(true));
+    let msgs = s.accepted.lock().clone();
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(s.rcpts.lock().clone(), vec!["bob@example.com", "ann@example.com", "ops@example.com", "audit@example.com"]);
+    assert!(msgs[0].contains("To: bob@example.com, ann@example.com"), "{}", msgs[0]);
+    assert!(msgs[0].contains("Cc: ops@example.com"), "{}", msgs[0]);
+    assert!(!msgs[0].to_lowercase().contains("bcc"), "{}", msgs[0]);
+    assert!(!msgs[0].contains("audit@example.com"), "{}", msgs[0]);
+}
+
+#[tokio::test]
+async fn smtp_copy_refused_still_sends_to_the_customer() {
+    let s = StubSmtp::start(vec![("gone@example.com", SUPPRESSED)]).await;
+    let mut d = details(&["ok@example.com"]);
+    d.cc = vec!["gone@example.com".into()];
+    d.bcc = vec!["audit@example.com".into()];
+    assert!(email::smtp_send(&smtp_connection(s.port, json!({})), &d, false).await.unwrap());
+    assert_eq!(s.accepted.lock().len(), 1);
+    assert_eq!(s.rcpts.lock().clone(), vec!["ok@example.com", "gone@example.com", "audit@example.com"]);
+    // The `to` refused: nothing goes to the copies either.
+    let s = StubSmtp::start(vec![("gone@example.com", SUPPRESSED)]).await;
+    let mut d = details(&["gone@example.com"]);
+    d.cc = vec!["ops@example.com".into()];
+    assert!(!email::smtp_send(&smtp_connection(s.port, json!({})), &d, false).await.unwrap());
+    assert!(s.accepted.lock().is_empty());
+}
+
+#[tokio::test]
+async fn sendgrid_posts_cc_and_bcc_in_the_personalization() {
+    let (port, log) = fake_sendgrid(202).await;
+    let sg = Connection::from_json(json!({"name": "sg", "clientCode": "SYSTEM", "connectionType": "MAIL", "connectionSubType": "SENDGRID", "connectionDetails": {"apiKey": "SG.key"}})).unwrap();
+    let store = Store(vec![sg]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let url = format!("http://127.0.0.1:{port}/v3/mail/send");
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: &url, block_private_targets: false };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let copies = email::Copies::from_args(Some(&json!("ops@example.com; ann@example.com")), Some(&json!("audit@example.com, Ops@example.com"))).unwrap();
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("sg"), "welcome", None, &d, &Default::default(), &copies).await.unwrap();
+    assert_eq!(sent, Some(true));
+    let req = log.lock()[0].clone();
+    assert!(
+        req.contains(r#"{"personalizations":[{"to":[{"email":"ann@example.com"}],"cc":[{"email":"ops@example.com"}],"bcc":[{"email":"audit@example.com"}]}],"#),
+        "{req}"
+    );
+    // No copies: no cc or bcc keys at all.
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("sg"), "welcome", None, &d, &Default::default(), &Default::default()).await.unwrap();
+    assert_eq!(sent, Some(true));
+    let req = log.lock()[1].clone();
+    assert!(req.contains(r#"{"personalizations":[{"to":[{"email":"ann@example.com"}]}],"#), "{req}");
 }

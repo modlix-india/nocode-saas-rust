@@ -6,7 +6,7 @@
 //!
 //! Shutdown order on SIGTERM / Ctrl-C:
 //! 1. `/readyz` starts failing, so the gateway's health checks take this instance out;
-//! 2. the Eureka registration (if any) is withdrawn, for Java callers; the Lighthouse one (if
+//! 2. the Lighthouse registration (if any) is withdrawn, for Java callers; the Lighthouse one (if
 //!    any) goes OUT_OF_SERVICE, so the gateway drains the instance;
 //! 3. requests keep being served for `shutdown_grace_seconds`;
 //! 4. the instance is deleted from every Lighthouse;
@@ -23,9 +23,9 @@ use lighthouse_client::Registration;
 use tokio::sync::watch;
 
 use crate::config::ServerConfig;
-use crate::eureka::Eureka;
+use crate::registry::Registry;
 use crate::health::Health;
-use crate::http::{observe, spring_cors};
+use crate::http::{catch_panic, observe, spring_cors};
 use crate::telemetry::Telemetry;
 
 pub struct Service {
@@ -33,8 +33,8 @@ pub struct Service {
     pub server: ServerConfig,
     pub telemetry: Telemetry,
     pub health: Health,
-    /// Registered under `[eureka] register_as` when `[eureka] register` is on.
-    pub eureka: Option<Eureka>,
+    /// Registered under `[registry] register_as` when `[registry] register` is on.
+    pub registry: Option<Registry>,
     /// Answer CORS like the Java services (`*`). Off for the gateway, which passes preflights
     /// through to the service that owns the path.
     pub cors: bool,
@@ -58,16 +58,19 @@ impl Service {
         S: Future<Output = ()> + Send + 'static,
     {
         // The message scope sits inside CORS and observation, around every handler, so a coded
-        // error anywhere is written in the request's language.
-        let mut app = app.merge(self.health.routes()).layer(middleware::from_fn(crate::messages::layer));
+        // error anywhere is written in the request's language. Panic recovery sits inside it, so
+        // a handler's panic is answered as COMMON.INTERNAL_ERROR in that language too.
+        let mut app = with_body_limit(app.merge(self.health.routes()), self.server.max_body_bytes)
+            .layer(middleware::from_fn(catch_panic))
+            .layer(middleware::from_fn(crate::messages::layer));
         if self.cors {
             app = app.layer(middleware::from_fn(spring_cors));
         }
         let app = app.layer(middleware::from_fn(observe));
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let eureka = self
-            .eureka
+        let registry = self
+            .registry
             .as_ref()
             .filter(|e| e.me().is_some())
             .map(|e| e.spawn_lifecycle(shutdown_rx.clone()));
@@ -95,7 +98,7 @@ impl Service {
                 let draining_since = tokio::time::Instant::now();
                 health.start_draining();
                 let _ = shutdown_tx.send(true);
-                if let Some(e) = eureka {
+                if let Some(e) = registry {
                     let _ = e.await;
                 }
                 // Lighthouse: OUT_OF_SERVICE, the grace period, then the DELETE.
@@ -109,6 +112,12 @@ impl Service {
         self.telemetry.shutdown();
         Ok(())
     }
+}
+
+/// Every handler of `app` reads request bodies up to `max` bytes (`[server] max_body_bytes`).
+/// A route's own `DefaultBodyLimit`, set closer to it, wins.
+pub fn with_body_limit(app: Router, max: usize) -> Router {
+    app.layer(axum::extract::DefaultBodyLimit::max(max))
 }
 
 /// `<binary> healthcheck [port]`: for container health checks in images without curl. Asks this
@@ -241,10 +250,10 @@ mod tests {
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let service = Service {
             name: "app-test".into(),
-            server: ServerConfig { port, shutdown_grace_seconds: 1 },
+            server: ServerConfig { port, shutdown_grace_seconds: 1, ..ServerConfig::default() },
             telemetry,
             health,
-            eureka: None,
+            registry: None,
             cors: false,
         };
         let registration = lighthouse_client::registration("app-test", port, "/readyz")
@@ -284,6 +293,34 @@ mod tests {
         let n = c.len();
         assert_eq!((c[n - 2].0.as_str(), c[n - 1].0.as_str()), ("status OUT_OF_SERVICE", "delete"));
         assert!(c[n - 1].1 - c[n - 2].1 >= Duration::from_millis(900), "the grace period sits between them");
+    }
+
+    /// QA-0475: a 4 MB page save answered 413 under axum's 2 MiB default.
+    #[tokio::test]
+    async fn request_bodies_up_to_the_configured_limit_are_read() {
+        use axum::body::{Body, Bytes};
+        use axum::extract::DefaultBodyLimit;
+        use axum::http::{Request, StatusCode};
+        use axum::routing::put;
+        use tower::ServiceExt;
+
+        use crate::config::{ServerConfig, DEFAULT_MAX_BODY_BYTES};
+
+        async fn status(app: Router, len: usize) -> StatusCode {
+            let req = Request::put("/p").body(Body::from(vec![b'a'; len])).unwrap();
+            app.oneshot(req).await.unwrap().status()
+        }
+        let echo = || Router::new().route("/p", put(|b: Bytes| async move { b.len().to_string() }));
+        let max = ServerConfig::default().max_body_bytes;
+        assert_eq!(max, DEFAULT_MAX_BODY_BYTES);
+        assert_eq!(status(echo(), 3 * 1024 * 1024).await, StatusCode::PAYLOAD_TOO_LARGE, "axum's 2 MiB without the layer");
+        assert_eq!(status(with_body_limit(echo(), max), 4 * 1024 * 1024).await, StatusCode::OK);
+        assert_eq!(status(with_body_limit(echo(), max), max).await, StatusCode::OK);
+        assert_eq!(status(with_body_limit(echo(), max), max + 1).await, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(status(with_body_limit(echo(), 10), 11).await, StatusCode::PAYLOAD_TOO_LARGE, "configurable per unit");
+        // A route's own limit (files disables it) wins over the shared one.
+        let own = Router::new().route("/p", put(|b: Bytes| async move { b.len().to_string() }).layer(DefaultBodyLimit::disable()));
+        assert_eq!(status(with_body_limit(own, 10), 1000).await, StatusCode::OK);
     }
 
     #[test]

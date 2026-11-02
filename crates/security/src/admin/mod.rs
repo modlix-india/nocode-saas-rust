@@ -25,12 +25,13 @@ use anyhow::Result;
 use axum::{middleware, Router};
 use platform::app::Service;
 use platform::cache::CacheService;
-use platform::eureka::Eureka;
+use platform::registry::Registry;
 use platform::health::Health;
 use platform::upstream::Upstream;
 
 use crate::config::AuthConfig;
 use crate::events::{AmqpEvents, EventSink, LoggedEvents};
+pub use clients::hosting::Hosting;
 use crate::handlers::security_headers;
 use crate::internal::Internal;
 
@@ -43,6 +44,9 @@ pub struct Admin {
     pub events: Arc<dyn EventSink>,
     /// `IFeignFilesService`; `None` when `[files] upstream` is not configured.
     pub files: Option<Upstream>,
+    /// The certificate authority, key maker and Cloudflare client (`[letsencrypt]`,
+    /// `[cloudflare]`), one per process.
+    pub hosting: Arc<Hosting>,
 }
 
 impl Deref for Admin {
@@ -56,15 +60,22 @@ impl Deref for Admin {
 pub type AdminState = Arc<Admin>;
 
 /// The unit, wired from configuration (no network is touched until it is used).
-pub fn build(cfg: &AuthConfig, pool: sqlx::MySqlPool, cache: CacheService, eureka: Option<&Eureka>) -> Result<Arc<Admin>> {
+pub fn build(cfg: &AuthConfig, pool: sqlx::MySqlPool, cache: CacheService, registry: Option<&Registry>) -> Result<Arc<Admin>> {
     let internal = crate::internal::build(cfg, pool, cache);
     let events: Arc<dyn EventSink> = if cfg.events.publish_events && !cfg.mq.uri.is_empty() {
         Arc::new(AmqpEvents::new(&cfg.mq.uri, &cfg.mq.exchange, &cfg.mq.routing_keys))
     } else {
         Arc::new(LoggedEvents)
     };
-    let files = if cfg.files.upstream.entries().is_empty() { None } else { Some(Upstream::from_config(&cfg.files.upstream, eureka)?) };
-    Ok(Arc::new(Admin { internal, events, files }))
+    let files = if cfg.files.upstream.entries().is_empty() { None } else { Some(Upstream::from_config(&cfg.files.upstream, registry)?) };
+    let hosting = Arc::new(Hosting::from_config(cfg)?);
+    Ok(Arc::new(Admin { internal, events, files, hosting }))
+}
+
+/// The commands besides serving (`security-admin acme-register ...`, see
+/// [`clients::acme::run_if_asked`]); `None` for a normal start.
+pub async fn run_if_asked(args: &[String]) -> Option<i32> {
+    clients::acme::run_if_asked(args).await
 }
 
 pub fn router(state: AdminState) -> Router {
@@ -86,9 +97,9 @@ pub async fn run() -> Result<()> {
     crate::check_jwt_key(&cfg)?;
     crate::configure_messages(&cfg)?;
     let pool = platform::db::mysql_pool(&cfg.database).await?;
-    let cache = CacheService::new(&cfg.redis.cache_prefix, &cfg.redis.eviction_channel, Some(cfg.redis.url.as_str()))?;
-    let eureka = crate::eureka_for(&cfg)?;
-    let state = build(&cfg, pool.clone(), cache.clone(), eureka.as_ref())?;
+    let cache = CacheService::configured(&cfg.redis)?;
+    let registry = crate::registry_for(&cfg)?;
+    let state = build(&cfg, pool.clone(), cache.clone(), registry.as_ref())?;
     cache.spawn_eviction_listener();
 
     let health = Health::new(telemetry.metrics.clone());
@@ -100,7 +111,7 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, eureka, cors: true }
+    Service { name: NAME.to_string(), server: cfg.server.clone(), telemetry, health, registry, cors: true }
         .run(router(state))
         .await
 }

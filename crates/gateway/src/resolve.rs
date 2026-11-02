@@ -4,6 +4,12 @@
 //! The host answer cache is the Java gateway's `gatewayClientAppCodeType`, so security's eviction
 //! of it (`cmn-gatewayClientAppCodeType:*` on the eviction channel, when a client URL changes)
 //! clears it here too.
+//!
+//! Codes in front of `/api/` (no `/page/` before it) count only when they name an app and a
+//! client that owns it or has access to it: security's `hasReadAccess`, cached under security's
+//! own name for it (`appReadAccess`, `<appCode>:<clientCode>`), so security's evictions when an
+//! app's access changes, or an app is created or deleted, reach this cache too. Rust only
+//! (DIFFERENCES.md): Java never read those codes.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,10 +20,13 @@ use platform::cache::LocalCaches;
 use platform::upstream::Upstream;
 use serde_json::Value;
 
-use crate::path::{codes_from_url, is_draft_token_label};
+use crate::path::{codes_from_url, is_draft_token_label, plausible_codes};
 
 pub const DEFAULT_CLIENT: &str = "SYSTEM";
 pub const DEFAULT_APP: &str = "nothing";
+
+/// Security's `AppService.CACHE_NAME_APP_READ_ACCESS`: the same name, so its evictions land here.
+pub const APP_READ_ACCESS: &str = "appReadAccess";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
@@ -39,6 +48,7 @@ pub struct Resolver {
     security: Upstream,
     http: reqwest::Client,
     hosts: Arc<LocalCaches<String, (String, String, String)>>,
+    access: Arc<LocalCaches<String, bool>>,
     drafts: Cache<String, DraftAnswer>,
     draft_trust_seconds: i64,
 }
@@ -59,12 +69,14 @@ impl Resolver {
     pub fn new(
         security: Upstream,
         hosts: Arc<LocalCaches<String, (String, String, String)>>,
+        access: Arc<LocalCaches<String, bool>>,
         draft_trust_seconds: u64,
     ) -> Result<Self> {
         Ok(Self {
             security,
             http: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
             hosts,
+            access,
             drafts: Cache::builder()
                 .max_capacity(50_000)
                 .time_to_live(Duration::from_secs(draft_trust_seconds.max(1)))
@@ -74,25 +86,32 @@ impl Resolver {
     }
 
     /// `scheme`, `host` (no port) and `port` as `getSchemeHostPort` computes them; the codes part
-    /// of the path; and the caller's own `clientCode` / `appCode` headers (for draft hosts).
+    /// of the path and whether it is only a candidate (`SplitPath::codes_unverified`); and the
+    /// caller's own `clientCode` / `appCode` headers (for draft hosts).
+    #[allow(clippy::too_many_arguments)]
     pub async fn resolve(
         &self,
         scheme: &str,
         host: &str,
         port: &str,
         codes_part: &str,
+        codes_unverified: bool,
         header_client: Option<&str>,
         header_app: Option<&str>,
     ) -> Result<Resolved> {
         if !is_draft_token_label(host) {
             if let Some((client_code, app_code)) = codes_from_url(codes_part) {
-                return Ok(Resolved { client_code, app_code, draft: false });
+                if !codes_unverified || self.names_real_app(&client_code, &app_code).await {
+                    return Ok(Resolved { client_code, app_code, draft: false });
+                }
             }
             let (client_code, app_code, surface) = self.host_codes(scheme, host, port).await?;
             return Ok(Resolved { client_code, app_code, draft: surface.eq_ignore_ascii_case("DRAFT") });
         }
 
-        let (client, app) = match codes_from_url(codes_part) {
+        // Draft hosts keep Java's rule: codes in front of `/api/` count only after a `/page/`.
+        let url_codes = if codes_unverified { None } else { codes_from_url(codes_part) };
+        let (client, app) = match url_codes {
             Some((c, a)) => (c, a),
             None => (
                 header_client.unwrap_or("").to_string(),
@@ -100,6 +119,40 @@ impl Resolver {
             ),
         };
         Ok(self.draft_surface(host, &client, &app).await)
+    }
+
+    /// Whether the client owns the app or has access to it (`hasReadAccess`), cached (see the
+    /// module notes). An unknown app or client is `false`. A failed lookup is `false` too (the
+    /// host decides, as before) and is not cached.
+    async fn names_real_app(&self, client_code: &str, app_code: &str) -> bool {
+        if !plausible_codes(client_code, app_code) {
+            return false;
+        }
+        let key = format!("{app_code}:{client_code}");
+        let (security, http) = (self.security.clone(), self.http.clone());
+        let (client, app) = (client_code.to_string(), app_code.to_string());
+        let answer = self
+            .access
+            .get_or_load(APP_READ_ACCESS, key, || async move {
+                let path = "/api/security/applications/internal/hasReadAccess";
+                let base = security.base_for(path).await?;
+                let resp = http
+                    .get(format!("{base}{path}"))
+                    .query(&[("appCode", app.as_str()), ("clientCode", client.as_str())])
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let v: Value = serde_json::from_slice(&resp.bytes().await?).context("hasReadAccess body")?;
+                Ok::<_, anyhow::Error>(Some(v.as_bool().unwrap_or(false)))
+            })
+            .await;
+        match answer {
+            Ok(v) => v.unwrap_or(false),
+            Err(e) => {
+                tracing::warn!(app_code, client_code, error = %e, "app access lookup failed, resolving by host");
+                false
+            }
+        }
     }
 
     /// `getClientCodeNType`, cached as Java caches it (`<scheme>:<host>:<port>`).

@@ -98,7 +98,7 @@ impl TestNode {
         self.node.stop();
     }
 
-    pub fn eureka(&self) -> String {
+    pub fn registry(&self) -> String {
         format!("{}/eureka", self.url)
     }
 }
