@@ -122,9 +122,10 @@ fn check_enum(m: &JMap, field: &str, allowed: &[&str]) -> AppResult<()> {
     }
 }
 
-/// The app's `publishMode`, or for an app saved before it existed its `iosPublishMode`.
-fn publish_mode(details: &JMap) -> Option<&str> {
-    str_field(details, "publishMode").or_else(|| str_field(details, "iosPublishMode"))
+/// The app's `publishMode`, or for an app saved before it existed its `iosPublishMode`; neither
+/// means Modlix's accounts for both stores (Kiran, 2026-11-02).
+fn publish_mode(details: &JMap) -> &str {
+    str_field(details, "publishMode").or_else(|| str_field(details, "iosPublishMode")).unwrap_or("PLATFORM_ACCOUNT")
 }
 
 /// The details as the class reads them (unknown keys dropped, defaults for the primitives).
@@ -135,10 +136,9 @@ fn details_of(v: Option<&JValue>) -> AppResult<Option<JMap>> {
             let mut details = convert_json(&APP_DETAILS, d);
             check_enum(&details, "iosPublishMode", &PUBLISH_MODES)?;
             check_enum(&details, "publishMode", &PUBLISH_MODES)?;
-            if let Some(mode) = publish_mode(&details).map(|m| JValue::Str(m.to_string())) {
-                details.insert("publishMode".into(), mode.clone());
-                details.insert("iosPublishMode".into(), mode);
-            }
+            let mode = JValue::Str(publish_mode(&details).to_string());
+            details.insert("publishMode".into(), mode.clone());
+            details.insert("iosPublishMode".into(), mode);
             details.insert(
                 "splashScreen".into(),
                 match d.get("splashScreen") {
@@ -168,9 +168,9 @@ pub fn decode(d: &mongodb::bson::Document) -> JMap {
     let mut app = decode_bson(&MOBILE_APP, d);
     if let Some(JValue::Object(details)) = app.get("details").cloned() {
         let mut dd = convert_json(&APP_DETAILS, &details);
-        if let Some(mode) = publish_mode(&dd).map(|m| JValue::Str(m.to_string())) {
-            dd.insert("publishMode".into(), mode);
-        }
+        let mode = JValue::Str(publish_mode(&dd).to_string());
+        dd.insert("publishMode".into(), mode.clone());
+        dd.insert("iosPublishMode".into(), mode);
         if let Some(JValue::Object(s)) = details.get("splashScreen") {
             dd.insert("splashScreen".into(), JValue::Object(convert_json(&SPLASH_SCREEN, s)));
         }
@@ -343,7 +343,7 @@ impl MobileApps {
     /// On Modlix's developer accounts: Modlix signs and publishes it, and its push goes through
     /// Modlix's Firebase project and Apple key. Any other app uses only its client's own.
     fn platform_account(app: &JMap) -> bool {
-        Self::details(app).and_then(publish_mode) == Some("PLATFORM_ACCOUNT")
+        Self::details(app).map_or("PLATFORM_ACCOUNT", publish_mode) == "PLATFORM_ACCOUNT"
     }
 
     fn platform_ios(app: &JMap) -> bool {
@@ -592,7 +592,8 @@ mod tests {
         let p = || Some("PLATFORM_ACCOUNT".to_string());
         assert_eq!(mode(br#"{"details":{"publishMode":"PLATFORM_ACCOUNT","iosPublishMode":"TENANT_ACCOUNT"}}"#), (p(), p()));
         assert_eq!(mode(br#"{"details":{"iosPublishMode":"PLATFORM_ACCOUNT"}}"#), (p(), p()));
-        assert_eq!(mode(br#"{"details":{"name":"N"}}"#), (None, None));
+        // Neither: Modlix's accounts for both stores.
+        assert_eq!(mode(br#"{"details":{"name":"N"}}"#), (p(), p()));
         assert!(read_body(br#"{"details":3}"#).is_err());
         assert!(read_body(br#"{"details":{"splashScreen":3}}"#).is_err());
         assert!(read_body(b"[]").is_err());

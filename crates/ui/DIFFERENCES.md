@@ -396,6 +396,8 @@ The write path is the `overridable` crate's, so its differences hold here too
     `appId`, `projectId`, `messagingSenderId`) and `iosPushReady`. `publishMode` is one choice
     of developer accounts for both stores (`PLATFORM_ACCOUNT` or `TENANT_ACCOUNT`); Java has only
     `iosPublishMode`, which is kept equal to it (an app saved before reads its `iosPublishMode`).
+    Neither set means `PLATFORM_ACCOUNT` for both stores, and a save writes it (Kiran,
+    2026-11-02); Java and the build machine read a missing `iosPublishMode` as `TENANT_ACCOUNT`.
     With push on, an app on the platform's accounts gets its Android package registered in the
     platform's Firebase project (`editor.firebase_credentials`, Firebase Management API) and,
     on iOS, Push Notifications turned on for its bundle with a new App Store profile, once. An
