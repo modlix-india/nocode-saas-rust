@@ -6,8 +6,9 @@
 //! `push` template, or, without one, an `inapp` template (whose `title`, `description`, `image`
 //! and `url` are used). Each device is reached with the credentials of the account it was built
 //! against: the client's own (the PUSH connection) when the account matches, otherwise the
-//! platform's ([`crate::config::PushSection`]). Devices the push services call gone are
-//! deleted; any other failure is logged and never stops the notification.
+//! platform's ([`crate::config::PushSection`]) when that matches, otherwise the key the client
+//! uploaded for the app and that account (`notification_push_key`). Devices the push services
+//! call gone are deleted; any other failure is logged and never stops the notification.
 
 pub mod apns;
 pub mod fcm;
@@ -26,7 +27,7 @@ use serde_json::{json, Map, Value};
 
 use crate::calls::CoreClient;
 use crate::config::PushSection;
-use crate::dao::{Dao, DeviceRow, Platform};
+use crate::dao::{Dao, DeviceRow, Platform, PushKeyRow};
 use crate::inapp::INAPP_TEMPLATE_NAME;
 use crate::model::{CoreNotification, NotificationUser, PushConnection};
 use crate::template::{language, processed_template};
@@ -160,6 +161,26 @@ pub fn pick<'a, T>(account: Option<&str>, own: Option<&'a T>, platform: Option<&
     }
 }
 
+/// A key a client uploaded, ready to sign with.
+#[derive(Clone)]
+pub enum Uploaded {
+    Fcm(Arc<FcmAccount>),
+    Apns(Arc<ApnsAccount>),
+}
+
+impl Uploaded {
+    /// The row's key, checked: a service account JSON for Android, a `.p8` key for iOS.
+    pub fn of(row: &PushKeyRow) -> Result<Self> {
+        Ok(match row.platform {
+            Platform::Android => Self::Fcm(Arc::new(FcmAccount::from_json(&Value::String(row.secret.clone()))?)),
+            Platform::Ios => Self::Apns(Arc::new(ApnsAccount::new(&row.account, row.key_id.as_deref().unwrap_or(""), &row.secret)?)),
+            Platform::Web => anyhow::bail!("Web Push signs with the platform's keys only"),
+        })
+    }
+}
+
+type KeyOf = (String, Platform, String);
+
 pub struct PushService {
     pub dao: Dao,
     pub core: CoreClient,
@@ -171,6 +192,8 @@ pub struct PushService {
     /// Per app: whether it has notifications, and since when that is known.
     apps: Mutex<HashMap<String, (bool, Instant)>>,
     app_check: Duration,
+    /// Per app, platform and account: the uploaded key (or none), and since when that is known.
+    uploaded: Mutex<HashMap<KeyOf, (Option<Uploaded>, Instant)>>,
 }
 
 impl PushService {
@@ -203,6 +226,7 @@ impl PushService {
             platform_apns,
             apps: Mutex::new(HashMap::new()),
             app_check: Duration::from_secs(cfg.app_check_seconds),
+            uploaded: Mutex::new(HashMap::new()),
         })
     }
 
@@ -232,6 +256,35 @@ impl PushService {
         }
     }
 
+    /// The key uploaded for the device's app and account, kept `app_check_seconds` on this
+    /// instance (an upload here forgets it at once). A key that no longer parses is logged and
+    /// taken as none; a failed read is not kept.
+    pub async fn uploaded(&self, d: &DeviceRow) -> Option<Uploaded> {
+        let account = d.provider_account.as_deref().map(str::trim).filter(|a| !a.is_empty())?;
+        let at: KeyOf = (d.app_code.clone(), d.platform, account.to_string());
+        if let Some((k, when)) = self.uploaded.lock().get(&at) {
+            if when.elapsed() < self.app_check {
+                return k.clone();
+            }
+        }
+        let key = match self.dao.push_key(&d.app_code, d.platform, account).await {
+            Ok(row) => row.and_then(|r| {
+                Uploaded::of(&r).map_err(|e| tracing::error!("push key of {} {} {account}: {e:#}", d.app_code, d.platform.name())).ok()
+            }),
+            Err(e) => {
+                tracing::warn!("could not read the push key of {} {account}: {e:#}", d.app_code);
+                return None;
+            }
+        };
+        self.uploaded.lock().insert(at, (key.clone(), Instant::now()));
+        key
+    }
+
+    /// After an upload: the next push reads the key again.
+    pub fn forget_uploaded(&self, app_code: &str, platform: Platform, account: &str) {
+        self.uploaded.lock().remove(&(app_code.to_string(), platform, account.to_string()));
+    }
+
     async fn deliver_to(&self, d: &DeviceRow, m: &PushMessage, own_fcm: Option<&FcmAccount>, own_apns: Option<&ApnsAccount>) -> (u64, Platform, Delivery) {
         (d.id, d.platform, self.deliver(d, m, own_fcm, own_apns).await)
     }
@@ -243,7 +296,13 @@ impl PushService {
                 None => Delivery::Failed("Web Push is not configured".into()),
             },
             Platform::Android => {
-                match pick(d.provider_account.as_deref(), own_fcm, self.platform_fcm.as_deref(), |a| a.project_id.as_str()) {
+                let found = pick(d.provider_account.as_deref(), own_fcm, self.platform_fcm.as_deref(), |a| a.project_id.as_str());
+                let uploaded = if found.is_none() { self.uploaded(d).await } else { None };
+                let upl = match &uploaded {
+                    Some(Uploaded::Fcm(a)) => Some(a.as_ref()),
+                    _ => None,
+                };
+                match found.or(upl) {
                     Some(a) => self.fcm.send(a, &d.token, m).await,
                     None => Delivery::Failed(format!("no FCM credentials for project {:?}", d.provider_account)),
                 }
@@ -252,7 +311,13 @@ impl PushService {
                 let Some(topic) = d.app_identifier.as_deref().filter(|t| !t.is_empty()) else {
                     return Delivery::Gone("iOS device without a bundle id".into());
                 };
-                match pick(d.provider_account.as_deref(), own_apns, self.platform_apns.as_deref(), |a| a.team_id.as_str()) {
+                let found = pick(d.provider_account.as_deref(), own_apns, self.platform_apns.as_deref(), |a| a.team_id.as_str());
+                let uploaded = if found.is_none() { self.uploaded(d).await } else { None };
+                let upl = match &uploaded {
+                    Some(Uploaded::Apns(a)) => Some(a.as_ref()),
+                    _ => None,
+                };
+                match found.or(upl) {
                     Some(a) => self.apns.send(a, &d.token, topic, d.apns_env.as_deref() == Some("sandbox"), m).await,
                     None => Delivery::Failed(format!("no APNs key for team {:?}", d.provider_account)),
                 }

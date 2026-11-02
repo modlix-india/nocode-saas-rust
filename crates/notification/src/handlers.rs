@@ -12,6 +12,8 @@
 //! | `POST /api/notification/push/devices?appCode=` | registers the caller's browser or phone (Rust only) |
 //! | `DELETE /api/notification/push/devices?appCode=` | removes it, on sign-out (Rust only) |
 //! | `GET /api/notification/push/sw.js` | the service worker, to anyone (Rust only) |
+//! | `GET /api/notification/push/keys?appCode=[&platform=&account=]` | the push keys the caller's client uploaded, without the secrets (Rust only) |
+//! | `POST /api/notification/push/keys?appCode=` | uploads a Firebase service account or Apple push key (Rust only) |
 //!
 //! Around them, what Spring does: CORS for any origin (preflights answered before security),
 //! the caller from security on every request, a 403 for anyone not signed in (OPTIONS
@@ -38,10 +40,10 @@ use serde_json::{Map, Value};
 use crate::calls::to_failure;
 use crate::errors::{internal_error, Failure};
 use crate::inapp::InAppService;
-use crate::dao::{NewDevice, Platform};
+use crate::dao::{NewDevice, Platform, PushKeyRow};
 use crate::preference::PreferenceService;
 use crate::push_send::webpush::allowed_endpoint;
-use crate::push_send::PushService;
+use crate::push_send::{PushService, Uploaded};
 use crate::spring::{big_integer, Pageable, Params};
 use crate::sse::{key, Hub};
 
@@ -67,6 +69,7 @@ enum Route {
     PushConfig,
     PushDevices,
     PushWorker,
+    PushKeys,
 }
 
 impl Route {
@@ -80,6 +83,7 @@ impl Route {
             "/api/notification/push/config" => Some(Self::PushConfig),
             "/api/notification/push/devices" => Some(Self::PushDevices),
             "/api/notification/push/sw.js" => Some(Self::PushWorker),
+            "/api/notification/push/keys" => Some(Self::PushKeys),
             _ => None,
         }
     }
@@ -94,13 +98,14 @@ impl Route {
             Self::PushConfig => "/api/notification/push/config",
             Self::PushDevices => "/api/notification/push/devices",
             Self::PushWorker => "/api/notification/push/sw.js",
+            Self::PushKeys => "/api/notification/push/keys",
         }
     }
 
     /// The `Allow` header Spring's OPTIONS handler writes.
     fn allow(self) -> &'static str {
         match self {
-            Self::Preference => "GET,HEAD,POST,OPTIONS",
+            Self::Preference | Self::PushKeys => "GET,HEAD,POST,OPTIONS",
             Self::Read => "POST,OPTIONS",
             Self::PushDevices => "POST,DELETE,OPTIONS",
             _ => "GET,HEAD,OPTIONS",
@@ -111,7 +116,7 @@ impl Route {
         match self {
             Self::Read => *m == Method::POST,
             Self::PushDevices => *m == Method::POST || *m == Method::DELETE,
-            Self::Preference => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
+            Self::Preference | Self::PushKeys => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
             _ => *m == Method::GET || *m == Method::HEAD,
         }
     }
@@ -277,6 +282,33 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             Ok(json_body(&serde_json::json!({"removed": n})))
         }
         (Route::PushWorker, _) => Ok(service_worker()),
+        (Route::PushKeys, post) => {
+            let app = required_app(&params, req.headers())?;
+            if !ca.has_authority(MOBILE_APP_CREATE) {
+                return Err(Coded::permission_required(&[MOBILE_APP_CREATE]).debug("push keys need the mobile app permission").into());
+            }
+            let Some(push) = st.devices.as_ref() else { return Ok(json_body(&Value::Array(Vec::new()))) };
+            if !post {
+                let keys = push.dao.push_keys_of(ca.user.client_id, &app).await.map_err(internal_error)?;
+                // `platform` and `account` narrow it: a screen asks whether its own project's or
+                // team's key is there.
+                let (platform, account) = (params.string("platform").and_then(|p| Platform::parse(&p)), params.string("account"));
+                let wanted = |k: &&PushKeyRow| platform.is_none_or(|p| k.platform == p) && account.as_deref().is_none_or(|a| k.account == a.trim());
+                return Ok(json_body(&Value::Array(keys.iter().filter(wanted).map(key_json).collect())));
+            }
+            let body = read_body(req).await?.unwrap_or_default();
+            let key = upload(&body)?;
+            if let Some(there) = push.dao.push_key(&app, key.platform, &key.account).await.map_err(internal_error)? {
+                if there.client_id != ca.user.client_id {
+                    return Err(Coded::new("NOTIF.PUSH_KEY_TAKEN")
+                        .debug(format!("{} {} {} is client {}'s", app, key.platform.name(), key.account, there.client_id))
+                        .into());
+                }
+            }
+            push.dao.save_push_key(ca.user.client_id, &app, &key, ca.user.id).await.map_err(internal_error)?;
+            push.forget_uploaded(&app, key.platform, &key.account);
+            Ok(json_body(&key_json(&key)))
+        }
         (Route::Preference, false) => {
             let app = required(&params, "appCode")?;
             let user_id = user_id(&params)?;
@@ -373,6 +405,60 @@ async fn register_device(st: &AppState, ca: &ContextAuthentication, app: &str, b
     };
     push.dao.upsert_device(&device).await.map_err(internal_error)?;
     Ok(json_body(&serde_json::json!({"registered": true})))
+}
+
+/// Who may give an app's push keys: whoever may make its mobile apps (ui's permission).
+const MOBILE_APP_CREATE: &str = "Authorities.ROLE_MobileApp_CREATE";
+
+/// A key as the screens see it: never the secret.
+fn key_json(k: &PushKeyRow) -> Value {
+    serde_json::json!({"platform": k.platform.name(), "account": k.account, "keyId": k.key_id})
+}
+
+/// A file's text as the screens send it: the text itself, or base64 of the file (what
+/// `files/generic/convertToBase64` answers), with or without a `data:` prefix.
+fn file_text(s: &str) -> Option<String> {
+    use base64::Engine;
+    let s = s.trim();
+    if s.starts_with('{') || s.starts_with("-----BEGIN") {
+        return Some(s.to_string());
+    }
+    let b64 = s.split_once("base64,").map_or(s, |(_, b)| b);
+    let compact: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(compact).ok()?;
+    String::from_utf8(bytes).ok().map(|t| t.trim().to_string())
+}
+
+/// `POST /push/keys`: `{platform: "ANDROID", serviceAccount}` (the Firebase service account JSON;
+/// its `project_id` is the account) or `{platform: "IOS", teamId, keyId, privateKey}` (the
+/// `.p8`). The key is checked by making the signer from it.
+fn upload(body: &Map<String, Value>) -> Res<PushKeyRow> {
+    let platform = text_field(body, "platform").and_then(Platform::parse);
+    let not = |code: &'static str, why: String| -> Failure { Coded::new(code).debug(why).into() };
+    let row = match platform {
+        Some(Platform::Android) => {
+            let secret = text_field(body, "serviceAccount").and_then(file_text).unwrap_or_default();
+            let mut row = PushKeyRow { client_id: 0, platform: Platform::Android, account: String::new(), key_id: None, secret };
+            match Uploaded::of(&row) {
+                Ok(Uploaded::Fcm(a)) => row.account = a.project_id.clone(),
+                Ok(_) => unreachable!("an Android row parses as FCM"),
+                Err(e) => return Err(not("NOTIF.PUSH_KEY_NOT_FIREBASE", format!("{e:#}"))),
+            }
+            row
+        }
+        Some(Platform::Ios) => {
+            let secret = text_field(body, "privateKey").and_then(file_text).unwrap_or_default();
+            let (team, key_id) = (text_field(body, "teamId").unwrap_or(""), text_field(body, "keyId").unwrap_or(""));
+            if team.len() > 64 || key_id.len() > 64 {
+                return Err(not("NOTIF.PUSH_KEY_NOT_APPLE", "teamId or keyId over 64 characters".into()));
+            }
+            let row = PushKeyRow { client_id: 0, platform: Platform::Ios, account: team.to_string(), key_id: Some(key_id.to_string()), secret };
+            Uploaded::of(&row).map_err(|e| not("NOTIF.PUSH_KEY_NOT_APPLE", format!("{e:#}")))?;
+            row
+        }
+        _ => return Err(input::param_invalid("platform", Some("ANDROID or IOS")).debug("push keys are for ANDROID or IOS").into()),
+    };
+    Ok(row)
 }
 
 /// The service worker script, allowed to control the whole origin.
@@ -539,9 +625,22 @@ mod tests {
         assert!(Route::PushDevices.accepts(&Method::DELETE) && !Route::PushDevices.accepts(&Method::GET));
         assert_eq!(Route::PushDevices.allow(), "POST,DELETE,OPTIONS");
         assert_eq!(Route::of("/api/notification/push/sw.js"), Some(Route::PushWorker));
-        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference, Route::PushConfig, Route::PushDevices, Route::PushWorker] {
+        assert_eq!(Route::of("/api/notification/push/keys"), Some(Route::PushKeys));
+        assert!(Route::PushKeys.accepts(&Method::POST) && !Route::PushKeys.accepts(&Method::DELETE));
+        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference, Route::PushConfig, Route::PushDevices, Route::PushWorker, Route::PushKeys] {
             assert!(r.template().starts_with("/api/notification/"));
         }
+    }
+
+    #[test]
+    fn uploaded_files_as_text() {
+        use base64::Engine;
+        let b64 = |t: &str| base64::engine::general_purpose::STANDARD.encode(t);
+        assert_eq!(file_text(" {\"a\": 1} ").as_deref(), Some("{\"a\": 1}"));
+        assert_eq!(file_text(&b64("{\"a\": 1}\n")).as_deref(), Some("{\"a\": 1}"));
+        assert_eq!(file_text(&format!("data:application/json;base64,{}", b64("{}"))).as_deref(), Some("{}"));
+        assert_eq!(file_text("-----BEGIN PRIVATE KEY-----x").as_deref(), Some("-----BEGIN PRIVATE KEY-----x"));
+        assert_eq!(file_text("not base64 !"), None);
     }
 
     #[test]
