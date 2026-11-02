@@ -467,6 +467,33 @@ impl Dao {
         Ok(q.execute(&self.pool).await?.rows_affected())
     }
 
+    /// The app's web push key pair: its public half and its stored private half.
+    pub async fn app_vapid_key(&self, app_code: &str) -> Result<Option<(String, String)>> {
+        let row = sqlx::query("SELECT PUBLIC_KEY, PRIVATE_KEY FROM notification_push_app_key WHERE APP_CODE = ?")
+            .bind(app_code)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|r| Ok((r.try_get("PUBLIC_KEY")?, r.try_get("PRIVATE_KEY")?))).transpose()
+    }
+
+    /// Keeps a new pair for the app: unless it already has one (two requests may race: the
+    /// first one kept wins), or in place of the one it has with `replace`.
+    pub async fn add_app_vapid_key(&self, app_code: &str, public: &str, private: &str, replace: bool) -> Result<()> {
+        let sql = if replace {
+            "INSERT INTO notification_push_app_key (APP_CODE, PUBLIC_KEY, PRIVATE_KEY) VALUES (?, ?, ?) \
+             ON DUPLICATE KEY UPDATE PUBLIC_KEY = VALUES(PUBLIC_KEY), PRIVATE_KEY = VALUES(PRIVATE_KEY), CREATED_AT = CURRENT_TIMESTAMP"
+        } else {
+            "INSERT IGNORE INTO notification_push_app_key (APP_CODE, PUBLIC_KEY, PRIVATE_KEY) VALUES (?, ?, ?)"
+        };
+        sqlx::query(sql)
+            .bind(app_code)
+            .bind(public)
+            .bind(private)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// The key the app's devices built against this project or team are reached with.
     pub async fn push_key(&self, app_code: &str, platform: Platform, account: &str) -> Result<Option<PushKeyRow>> {
         let sql = format!("SELECT {PUSH_KEY_COLUMNS} FROM notification_push_key WHERE APP_CODE = ? AND PLATFORM = ? AND ACCOUNT = ?");

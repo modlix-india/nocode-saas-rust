@@ -34,7 +34,7 @@ use crate::template::{language, processed_template};
 
 use apns::{Apns, ApnsAccount};
 use fcm::{Fcm, FcmAccount};
-use webpush::WebPush;
+use webpush::{Vapid, WebPush};
 
 pub const PUSH_TEMPLATE_NAME: &str = "push";
 
@@ -184,7 +184,10 @@ type KeyOf = (String, Platform, String);
 pub struct PushService {
     pub dao: Dao,
     pub core: CoreClient,
-    pub web: Option<WebPush>,
+    pub web: WebPush,
+    /// The platform's web push key from config: what browsers subscribed with before their app
+    /// had its own, and the key handed out when an app's own cannot be read or made.
+    pub platform_vapid: Option<Arc<Vapid>>,
     pub fcm: Fcm,
     pub apns: Apns,
     pub platform_fcm: Option<Arc<FcmAccount>>,
@@ -194,6 +197,8 @@ pub struct PushService {
     app_check: Duration,
     /// Per app, platform and account: the uploaded key (or none), and since when that is known.
     uploaded: Mutex<HashMap<KeyOf, (Option<Uploaded>, Instant)>>,
+    /// Per app: its own web push key (or none), and since when that is known.
+    app_vapid: Mutex<HashMap<String, (Option<Arc<Vapid>>, Instant)>>,
 }
 
 impl PushService {
@@ -201,12 +206,13 @@ impl PushService {
     /// (logged), rather than stopping the unit.
     pub fn new(dao: Dao, core: CoreClient, cfg: &PushSection) -> Result<Self> {
         let timeout = Duration::from_secs(cfg.timeout_seconds.max(1));
-        let web = if cfg.vapid_public_key.is_empty() || cfg.vapid_private_key.is_empty() {
+        let platform_vapid = if cfg.vapid_public_key.is_empty() || cfg.vapid_private_key.is_empty() {
             None
         } else {
-            WebPush::new(&cfg.vapid_public_key, &cfg.vapid_private_key, &cfg.vapid_subject, timeout)
-                .map_err(|e| tracing::error!("[push] VAPID keys: {e:#}; Web Push is off"))
+            Vapid::new(&cfg.vapid_public_key, &cfg.vapid_private_key)
+                .map_err(|e| tracing::error!("[push] VAPID keys: {e:#}; only apps' own keys are used"))
                 .ok()
+                .map(Arc::new)
         };
         let platform_fcm = (!cfg.fcm_credentials.trim().is_empty())
             .then(|| FcmAccount::from_json(&Value::String(cfg.fcm_credentials.clone())))
@@ -219,7 +225,8 @@ impl PushService {
         Ok(Self {
             dao,
             core,
-            web,
+            web: WebPush::new(&cfg.vapid_subject, timeout)?,
+            platform_vapid,
             fcm: Fcm::new(timeout)?,
             apns: Apns::new(timeout)?,
             platform_fcm,
@@ -227,12 +234,72 @@ impl PushService {
             apps: Mutex::new(HashMap::new()),
             app_check: Duration::from_secs(cfg.app_check_seconds),
             uploaded: Mutex::new(HashMap::new()),
+            app_vapid: Mutex::new(HashMap::new()),
         })
     }
 
-    /// The key browsers subscribe with; `None` when Web Push is not configured.
-    pub fn vapid_public_key(&self) -> Option<&str> {
-        self.web.as_ref().map(WebPush::public_key)
+    /// The app's own web push key, if someone allowed to change the app has made one; kept
+    /// `app_check_seconds` on this instance. A failed read is logged, not kept, and answers
+    /// none (the platform's key is used meanwhile).
+    pub async fn app_vapid(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        if let Some((k, at)) = self.app_vapid.lock().get(app_code) {
+            if at.elapsed() < self.app_check {
+                return k.clone();
+            }
+        }
+        self.read_app_vapid(app_code).await
+    }
+
+    async fn read_app_vapid(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        let read = async {
+            match self.dao.app_vapid_key(app_code).await? {
+                Some((_, private)) => Vapid::stored(&private).map(|k| Some(Arc::new(k))),
+                None => Ok(None),
+            }
+        };
+        match read.await {
+            Ok(k) => {
+                self.app_vapid.lock().insert(app_code.to_string(), (k.clone(), Instant::now()));
+                k
+            }
+            Err(e) => {
+                tracing::error!("web push key of {app_code}: {e:#}");
+                None
+            }
+        }
+    }
+
+    /// Makes the app's own web push key; with `replace`, a new one even when it has one (every
+    /// browser subscribed with the old one gets nothing until it subscribes again, which it does
+    /// quietly at its next sign-in). The caller has checked the person may change the app.
+    pub async fn make_app_vapid(&self, app_code: &str, replace: bool) -> Result<Arc<Vapid>> {
+        let (made, private) = Vapid::generate()?;
+        self.dao.add_app_vapid_key(app_code, made.public_key(), &private, replace).await?;
+        // Without `replace`, another request may have made one first: whichever was kept is it.
+        self.read_app_vapid(app_code).await.ok_or_else(|| anyhow::anyhow!("the web push key of {app_code} was not kept"))
+    }
+
+    /// The key a browser of this app subscribes with now: the app's own, else the platform's;
+    /// `None` when there is neither (no Web Push).
+    pub async fn web_key(&self, app_code: &str) -> Option<Arc<Vapid>> {
+        match self.app_vapid(app_code).await {
+            Some(k) => Some(k),
+            None => self.platform_vapid.clone(),
+        }
+    }
+
+    /// The key a browser subscription was made with: the one whose public half the device was
+    /// registered with, and the platform's for a device registered before apps had their own.
+    pub async fn web_key_of(&self, d: &DeviceRow) -> Option<Arc<Vapid>> {
+        let Some(public) = d.provider_account.as_deref().filter(|a| !a.is_empty()) else { return self.platform_vapid.clone() };
+        if let Some(k) = self.platform_vapid.as_ref().filter(|k| k.public_key() == public) {
+            return Some(k.clone());
+        }
+        match self.app_vapid(&d.app_code).await.filter(|k| k.public_key() == public) {
+            Some(k) => Some(k),
+            // Made or replaced on another instance since this one last read it.
+            None => self.read_app_vapid(&d.app_code).await.filter(|k| k.public_key() == public),
+        }
     }
 
     /// Whether the app has a notification that reaches the screen; push is offered only then,
@@ -291,9 +358,9 @@ impl PushService {
 
     async fn deliver(&self, d: &DeviceRow, m: &PushMessage, own_fcm: Option<&FcmAccount>, own_apns: Option<&ApnsAccount>) -> Delivery {
         match d.platform {
-            Platform::Web => match &self.web {
-                Some(w) => w.send(&d.token, d.web_p256dh.as_deref(), d.web_auth.as_deref(), m.web_json().to_string().as_bytes()).await,
-                None => Delivery::Failed("Web Push is not configured".into()),
+            Platform::Web => match self.web_key_of(d).await {
+                Some(k) => self.web.send(&k, &d.token, d.web_p256dh.as_deref(), d.web_auth.as_deref(), m.web_json().to_string().as_bytes()).await,
+                None => Delivery::Failed("no web push key for this subscription".into()),
             },
             Platform::Android => {
                 let found = pick(d.provider_account.as_deref(), own_fcm, self.platform_fcm.as_deref(), |a| a.project_id.as_str());

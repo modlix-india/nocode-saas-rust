@@ -9,6 +9,10 @@ use ring::signature::EcdsaKeyPair;
 use ring::{aead, agreement, hkdf};
 use serde_json::json;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING;
+
 use super::keys::{b64_any, jwt_es256, vapid_pair, vapid_public};
 use super::Delivery;
 
@@ -88,19 +92,31 @@ pub fn encrypt(p256dh: &str, auth: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
     encrypt_with(&secret, as_public.as_ref(), &ua_public, &auth, &salt, plaintext)
 }
 
-/// The platform's VAPID identity and the client that posts.
-pub struct WebPush {
+/// A VAPID identity: the platform's (from config) or one app's (made by this service).
+pub struct Vapid {
     key: EcdsaKeyPair,
     public: String,
-    subject: String,
-    http: reqwest::Client,
 }
 
-impl WebPush {
-    pub fn new(public: &str, private: &str, subject: &str, timeout: Duration) -> Result<Self> {
+impl Vapid {
+    /// From config: the base64url raw scalar and uncompressed point.
+    pub fn new(public: &str, private: &str) -> Result<Self> {
         let key = vapid_pair(public, private)?;
-        let public = vapid_public(&key);
-        Ok(Self { key, public, subject: subject.to_string(), http: reqwest::Client::builder().timeout(timeout).build()? })
+        Ok(Self { public: vapid_public(&key), key })
+    }
+
+    /// A new pair, and its private half as stored (base64 of the PKCS#8 document).
+    pub fn generate() -> Result<(Self, String)> {
+        let doc = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new()).map_err(|_| anyhow!("could not make a P-256 key"))?;
+        let stored = STANDARD.encode(doc.as_ref());
+        Ok((Self::stored(&stored)?, stored))
+    }
+
+    /// From its stored private half.
+    pub fn stored(pkcs8: &str) -> Result<Self> {
+        let der = STANDARD.decode(pkcs8.trim()).map_err(|e| anyhow!("stored VAPID key is not base64: {e}"))?;
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new()).map_err(|e| anyhow!("stored VAPID key: {e}"))?;
+        Ok(Self { public: vapid_public(&key), key })
     }
 
     /// The key browsers subscribe with.
@@ -108,14 +124,27 @@ impl WebPush {
         &self.public
     }
 
-    fn authorization(&self, endpoint: &str) -> Result<String> {
+    fn authorization(&self, endpoint: &str, subject: &str) -> Result<String> {
         let aud = reqwest::Url::parse(endpoint)?.origin().ascii_serialization();
         let exp = chrono::Utc::now().timestamp() + 12 * 3600;
-        let jwt = jwt_es256(&self.key, &json!({"typ": "JWT", "alg": "ES256"}), &json!({"aud": aud, "exp": exp, "sub": self.subject}))?;
+        let jwt = jwt_es256(&self.key, &json!({"typ": "JWT", "alg": "ES256"}), &json!({"aud": aud, "exp": exp, "sub": subject}))?;
         Ok(format!("vapid t={jwt}, k={}", self.public))
     }
+}
 
-    pub async fn send(&self, endpoint: &str, p256dh: Option<&str>, auth: Option<&str>, payload: &[u8]) -> Delivery {
+/// The client that posts to the push services, and the contact they see.
+pub struct WebPush {
+    subject: String,
+    http: reqwest::Client,
+}
+
+impl WebPush {
+    pub fn new(subject: &str, timeout: Duration) -> Result<Self> {
+        Ok(Self { subject: subject.to_string(), http: reqwest::Client::builder().timeout(timeout).build()? })
+    }
+
+    /// Posts `payload` to the subscription, signed as `vapid` (the key it was made with).
+    pub async fn send(&self, vapid: &Vapid, endpoint: &str, p256dh: Option<&str>, auth: Option<&str>, payload: &[u8]) -> Delivery {
         if !allowed_endpoint(endpoint) {
             return Delivery::Gone(format!("not a push service: {endpoint}"));
         }
@@ -124,7 +153,7 @@ impl WebPush {
             Ok(b) => b,
             Err(e) => return Delivery::Gone(format!("{e:#}")),
         };
-        let authorization = match self.authorization(endpoint) {
+        let authorization = match vapid.authorization(endpoint, &self.subject) {
             Ok(a) => a,
             Err(e) => return Delivery::Failed(format!("{e:#}")),
         };
@@ -181,6 +210,19 @@ mod tests {
         assert_eq!(a.len(), 16 + 4 + 1 + 65 + 2 + 16);
         assert_ne!(a, b);
         assert!(encrypt("AAAA", "BTBZMqHH6r4Tts7J_aSIgg", b"x").is_err());
+    }
+
+    #[test]
+    fn app_keys_are_made_and_read_back() {
+        let (made, stored) = Vapid::generate().unwrap();
+        let read = Vapid::stored(&stored).unwrap();
+        assert_eq!(read.public_key(), made.public_key());
+        assert_eq!(b64_any(made.public_key()).unwrap().len(), 65, "an uncompressed P-256 point");
+        assert_ne!(Vapid::generate().unwrap().0.public_key(), made.public_key());
+        let auth = read.authorization("https://fcm.googleapis.com/fcm/send/x", "mailto:a@b").unwrap();
+        assert!(auth.starts_with("vapid t=") && auth.ends_with(&format!(", k={}", made.public_key())));
+        assert!(Vapid::stored("not base64 !").is_err());
+        assert!(Vapid::stored(&STANDARD.encode(b"junk")).is_err());
     }
 
     #[test]

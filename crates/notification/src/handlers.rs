@@ -70,6 +70,7 @@ enum Route {
     PushDevices,
     PushWorker,
     PushKeys,
+    PushAppKey,
 }
 
 impl Route {
@@ -84,6 +85,7 @@ impl Route {
             "/api/notification/push/devices" => Some(Self::PushDevices),
             "/api/notification/push/sw.js" => Some(Self::PushWorker),
             "/api/notification/push/keys" => Some(Self::PushKeys),
+            "/api/notification/push/app-key" => Some(Self::PushAppKey),
             _ => None,
         }
     }
@@ -99,13 +101,14 @@ impl Route {
             Self::PushDevices => "/api/notification/push/devices",
             Self::PushWorker => "/api/notification/push/sw.js",
             Self::PushKeys => "/api/notification/push/keys",
+            Self::PushAppKey => "/api/notification/push/app-key",
         }
     }
 
     /// The `Allow` header Spring's OPTIONS handler writes.
     fn allow(self) -> &'static str {
         match self {
-            Self::Preference | Self::PushKeys => "GET,HEAD,POST,OPTIONS",
+            Self::Preference | Self::PushKeys | Self::PushAppKey => "GET,HEAD,POST,OPTIONS",
             Self::Read => "POST,OPTIONS",
             Self::PushDevices => "POST,DELETE,OPTIONS",
             _ => "GET,HEAD,OPTIONS",
@@ -116,7 +119,7 @@ impl Route {
         match self {
             Self::Read => *m == Method::POST,
             Self::PushDevices => *m == Method::POST || *m == Method::DELETE,
-            Self::Preference | Self::PushKeys => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
+            Self::Preference | Self::PushKeys | Self::PushAppKey => *m == Method::GET || *m == Method::HEAD || *m == Method::POST,
             _ => *m == Method::GET || *m == Method::HEAD,
         }
     }
@@ -264,7 +267,10 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             let app = required_app(&params, req.headers())?;
             let Some(push) = st.devices.as_ref() else { return Ok(json_body(&serde_json::json!({"enabled": false}))) };
             let enabled = push.app_has_notifications(&app).await;
-            Ok(json_body(&serde_json::json!({"enabled": enabled, "vapidPublicKey": push.vapid_public_key()})))
+            // The app's own web push key once someone allowed to change the app made it, else the
+            // platform's.
+            let key = if enabled { push.web_key(&app).await } else { None };
+            Ok(json_body(&serde_json::json!({"enabled": enabled, "vapidPublicKey": key.as_ref().map(|k| k.public_key())})))
         }
         (Route::PushDevices, true) => {
             let app = required_app(&params, req.headers())?;
@@ -309,6 +315,20 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             push.forget_uploaded(&app, key.platform, &key.account);
             Ok(json_body(&key_json(&key)))
         }
+        (Route::PushAppKey, post) => {
+            let app = required_app(&params, req.headers())?;
+            let Some(push) = st.devices.as_ref() else { return Ok(json_body(&serde_json::json!({"publicKey": null}))) };
+            if !post {
+                let key = push.app_vapid(&app).await;
+                return Ok(json_body(&serde_json::json!({"publicKey": key.as_ref().map(|k| k.public_key())})));
+            }
+            let body = read_body(req).await?.unwrap_or_default();
+            let client = text_field(&body, "clientCode").map(str::to_string).or_else(|| params.string("clientCode"));
+            may_change_app(st, ca, &app, client.as_deref().unwrap_or(ca.client_code())).await?;
+            let replace = body.get("replace") == Some(&Value::Bool(true));
+            let key = push.make_app_vapid(&app, replace).await.map_err(internal_error)?;
+            Ok(json_body(&serde_json::json!({"publicKey": key.public_key()})))
+        }
         (Route::Preference, false) => {
             let app = required(&params, "appCode")?;
             let user_id = user_id(&params)?;
@@ -325,6 +345,24 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             }
         }
     }
+}
+
+/// Who may change an app's push settings for a client (Kiran, 2026-11-02): someone with
+/// application write whose own client has write access to the app, or whose client manages
+/// that client and that client has write access to the app.
+async fn may_change_app(st: &AppState, ca: &ContextAuthentication, app: &str, client: &str) -> Res<()> {
+    if !ca.has_authority(APPLICATION_UPDATE) {
+        return Err(Coded::permission_required(&[APPLICATION_UPDATE]).debug("changing an app's push key needs application write").into());
+    }
+    let directory = &st.prefs.directory;
+    let refused = |why: String| -> Failure { Coded::new("COMMON.FORBIDDEN").debug(why).into() };
+    if client != ca.client_code() && !directory.does_client_manage_client_code(ca.client_code(), client).await.map_err(internal_error)? {
+        return Err(refused(format!("{} does not manage {client}", ca.client_code())));
+    }
+    if !directory.has_write_access(app, client).await.map_err(internal_error)? {
+        return Err(refused(format!("{client} has no write access to {app}")));
+    }
+    Ok(())
 }
 
 /// The app of a push route: `appCode`, else the `appCode` header.
@@ -388,7 +426,13 @@ async fn register_device(st: &AppState, ca: &ContextAuthentication, app: &str, b
         return Ok(json_body(&serde_json::json!({"registered": false})));
     }
     let limited = |s: Option<&str>| s.map(|v| v.chars().take(256).collect::<String>());
-    let (app_identifier, provider_account) = (limited(text_field(body, "appIdentifier")), limited(text_field(body, "providerAccount")));
+    let app_identifier = limited(text_field(body, "appIdentifier"));
+    // A browser subscribes with the key push/config handed out, which is the one this app hands
+    // out now: kept as the device's account, so it is sent with that key even after a change.
+    let provider_account = match platform {
+        Platform::Web => push.web_key(app).await.map(|k| k.public_key().to_string()),
+        _ => limited(text_field(body, "providerAccount")),
+    };
     let agent: Option<String> = agent.map(|a| a.chars().take(512).collect());
     let device = NewDevice {
         user_id: ca.user.id,
@@ -409,6 +453,8 @@ async fn register_device(st: &AppState, ca: &ContextAuthentication, app: &str, b
 
 /// Who may give an app's push keys: whoever may make its mobile apps (ui's permission).
 const MOBILE_APP_CREATE: &str = "Authorities.ROLE_MobileApp_CREATE";
+/// Application write: what changing an app's own web push key needs.
+const APPLICATION_UPDATE: &str = "Authorities.Application_UPDATE";
 
 /// A key as the screens see it: never the secret.
 fn key_json(k: &PushKeyRow) -> Value {
@@ -627,7 +673,8 @@ mod tests {
         assert_eq!(Route::of("/api/notification/push/sw.js"), Some(Route::PushWorker));
         assert_eq!(Route::of("/api/notification/push/keys"), Some(Route::PushKeys));
         assert!(Route::PushKeys.accepts(&Method::POST) && !Route::PushKeys.accepts(&Method::DELETE));
-        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference, Route::PushConfig, Route::PushDevices, Route::PushWorker, Route::PushKeys] {
+        assert_eq!(Route::of("/api/notification/push/app-key"), Some(Route::PushAppKey));
+        for r in [Route::Notifications, Route::Subscribe, Route::New, Route::Preference, Route::PushConfig, Route::PushDevices, Route::PushWorker, Route::PushKeys, Route::PushAppKey] {
             assert!(r.template().starts_with("/api/notification/"));
         }
     }

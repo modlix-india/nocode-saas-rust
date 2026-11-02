@@ -222,6 +222,9 @@ pub fn router(state: ShellState) -> Router {
     let r = Router::new()
         .route("/js/dist/{*path}", with_rest(get(js_dist), &g))
         .route("/manifest/manifest.json", with_rest(get(manifest), &g))
+        // The same under /api/: nginx forwards only /api/ paths to the gateway, so this is the
+        // address the page head links to.
+        .route("/api/manifest/manifest.json", with_rest(get(manifest), &g))
         .route("/apiDocs", with_rest(get(api_docs), &g))
         .route("/.well-known/acme-challenge/{token}", with_rest(get(acme), &g))
         .route("/hassso", with_rest(get(hassso), &g))
@@ -727,8 +730,8 @@ pub async fn js_file(st: &ShellState, file_path: &str) -> Result<Arc<JsFile>, Fa
     Ok(v.unwrap_or_else(empty))
 }
 
-/// `GET /manifest/manifest.json`: the app's `manifest` property, which `applyChange` has
-/// already removed, so in practice always empty.
+/// `GET /manifest/manifest.json` (and `/api/manifest/manifest.json`): the app's `manifest`
+/// property, empty when it has none.
 async fn manifest(State(st): State<ShellState>, h: HeaderMap) -> Response {
     let r = async {
         let caller = caller(&st, &h).await?;

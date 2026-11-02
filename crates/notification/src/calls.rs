@@ -248,6 +248,20 @@ impl DirectoryClient {
             .await
     }
 
+    /// `hasWriteAccess(appCode, clientCode)`: whether the client may change the app.
+    pub async fn has_write_access(&self, app_code: &str, client_code: &str) -> Result<bool> {
+        let q = Feign::query(&[("appCode", Some(app_code.to_string())), ("clientCode", Some(client_code.to_string()))]);
+        let answer = self.feign.send("GET", &format!("/api/security/applications/internal/hasWriteAccess{q}"), None, Feign::headers(None, &[])).await?;
+        Ok(answer == Some(Value::Bool(true)))
+    }
+
+    /// `doesClientManageClientCode(managingClientCode, clientCode)`.
+    pub async fn does_client_manage_client_code(&self, managing: &str, client_code: &str) -> Result<bool> {
+        let q = Feign::query(&[("managingClientCode", Some(managing.to_string())), ("clientCode", Some(client_code.to_string()))]);
+        let answer = self.feign.send("GET", &format!("/api/security/clients/internal/doesClientManageClientCode{q}"), None, Feign::headers(None, &[])).await?;
+        Ok(answer == Some(Value::Bool(true)))
+    }
+
     /// `isUserClientManageClient(appCode, userId, userClientId, targetClientId)`.
     pub async fn is_user_client_manage_client(
         &self,
