@@ -20,7 +20,7 @@ use notification::dao::Dao;
 use notification::handlers::{router, AppState};
 use notification::inapp::{InAppService, InAppSink};
 use notification::push::Push;
-use notification::push_send::PushService;
+use notification::push_send::{PushService, Uploaded};
 use notification::model::{CoreNotification, NotificationUser};
 use notification::preference::PreferenceService;
 use notification::sse::Hub;
@@ -674,6 +674,82 @@ async fn push_devices_register_move_and_leave() {
         assert_eq!(delete(&r.app, "/api/notification/push/devices?appCode=rsapp", &web_key).await.json()["removed"], 1);
         assert!(dao.devices_of("rsapp", &[143]).await.unwrap().is_empty());
         assert_eq!(dao.devices_of("rsapp", &[142]).await.unwrap().len(), 1);
+    })
+    .await;
+}
+
+/// A fresh P-256 key as Apple hands out a `.p8`, then base64 of the file as the screens send it.
+fn apple_key_upload() -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+    let der = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &ring::rand::SystemRandom::new()).unwrap();
+    let pem = format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", STANDARD.encode(der.as_ref()));
+    STANDARD.encode(pem)
+}
+
+#[tokio::test]
+#[ignore = "needs the local MySQL: NOTIFICATION_LOCAL_STACK=1"]
+async fn push_keys_upload_list_and_stay_with_their_client() {
+    if !local_stack() {
+        return;
+    }
+    with_scratch(|pool, _| async move {
+        let r = rig(pool).await;
+        let as_client = |client: u64, can: bool| {
+            let mut c = context(true);
+            c["user"]["clientId"] = json!(client);
+            if can {
+                c["user"]["stringAuthorities"] = json!(["Authorities.Logged_IN", "Authorities.ROLE_MobileApp_CREATE"]);
+            }
+            Answer::json(c)
+        };
+        let ios = json!({"platform": "IOS", "teamId": "TEAMX", "keyId": "KEY1", "privateKey": apple_key_upload()}).to_string();
+
+        // Only whoever may make the app's mobile apps.
+        r.security.answer("GET", AUTH_PATH, as_client(1, false));
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.coded(), is(StatusCode::FORBIDDEN, "COMMON.PERMISSION_REQUIRED"));
+
+        r.security.answer("GET", AUTH_PATH, as_client(1, true));
+        let g = post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await;
+        assert_eq!(g.json(), json!({"platform": "IOS", "account": "TEAMX", "keyId": "KEY1"}), "{}", g.body);
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.status, StatusCode::OK, "the owner replaces it");
+        let listed = get(&r.app, "/api/notification/push/keys?appCode=rsapp").await;
+        assert_eq!(listed.json(), json!([{"platform": "IOS", "account": "TEAMX", "keyId": "KEY1"}]));
+        assert!(!listed.body.contains("PRIVATE"), "never the secret");
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&platform=IOS&account=TEAMX").await.json().as_array().map(Vec::len), Some(1));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&platform=ANDROID").await.json(), json!([]));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp&account=TEAMY").await.json(), json!([]));
+
+        // What is refused.
+        for (bad, code) in [
+            (json!({"platform": "ANDROID", "serviceAccount": "not a key"}), "NOTIF.PUSH_KEY_NOT_FIREBASE"),
+            (json!({"platform": "ANDROID", "serviceAccount": "{\"project_id\": \"p\"}"}), "NOTIF.PUSH_KEY_NOT_FIREBASE"),
+            (json!({"platform": "IOS", "teamId": "TEAMX", "privateKey": apple_key_upload()}), "NOTIF.PUSH_KEY_NOT_APPLE"),
+            (json!({"platform": "IOS", "teamId": "TEAMX", "keyId": "K", "privateKey": "aGVsbG8="}), "NOTIF.PUSH_KEY_NOT_APPLE"),
+            (json!({"platform": "WEB"}), "COMMON.PARAM_INVALID"),
+        ] {
+            let g = post(&r.app, "/api/notification/push/keys?appCode=rsapp", &bad.to_string()).await;
+            assert_eq!(g.coded(), is(StatusCode::BAD_REQUEST, code), "{bad}");
+        }
+
+        // Another client can neither replace nor see it.
+        r.security.answer("GET", AUTH_PATH, as_client(2, true));
+        assert_eq!(post(&r.app, "/api/notification/push/keys?appCode=rsapp", &ios).await.coded(), is(StatusCode::FORBIDDEN, "NOTIF.PUSH_KEY_TAKEN"));
+        assert_eq!(get(&r.app, "/api/notification/push/keys?appCode=rsapp").await.json(), json!([]));
+
+        // The sender finds it for a device of the app built against that team, and only then.
+        let push = PushService::new(Dao::new(r.pool.clone()), CoreClient::new(Upstream::fixed(&["http://127.0.0.1:9"]), Duration::from_secs(1)).unwrap(), &vapid()).unwrap();
+        r.security.answer("GET", "/api/core/notifications/internal/app/rsapp", Answer::json(json!({"count": 1})));
+        let phone = json!({"platform": "IOS", "token": "ABCD", "appIdentifier": "com.client.app", "providerAccount": "TEAMX"}).to_string();
+        assert_eq!(post(&r.app, "/api/notification/push/devices?appCode=rsapp", &phone).await.json()["registered"], true);
+        let mut device = Dao::new(r.pool.clone()).devices_of("rsapp", &[142]).await.unwrap().remove(0);
+        assert!(matches!(push.uploaded(&device).await, Some(Uploaded::Apns(a)) if a.team_id == "TEAMX"));
+        device.provider_account = Some("TEAMY".into());
+        assert!(push.uploaded(&device).await.is_none());
+        device.app_code = "otherapp".into();
+        device.provider_account = Some("TEAMX".into());
+        assert!(push.uploaded(&device).await.is_none(), "keys are per app");
     })
     .await;
 }

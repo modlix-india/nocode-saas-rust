@@ -239,21 +239,33 @@ A third channel, `push`, reaches the recipients' registered browsers (Web Push),
   `inapp` or `push` channel (kept `[push] app_check_seconds`, 10 min). A site without
   notifications never registers a service worker.
 - **Credentials.** Web Push always signs with the platform's VAPID keys. FCM and APNs use the
-  client's PUSH connection (`fcm.credentials`, the service account JSON; `apns.{teamId, keyId,
-  privateKey}`) when its Firebase project or Apple team matches the one the device was built
-  against (`providerAccount`), else the platform's (`[push]`) when that matches, else nothing.
-  The project and team follow the mobile app's developer accounts (ui's `publishMode`): an app
-  on the platform's accounts is built against the platform's Firebase project and Apple team,
-  one on the client's own accounts against the client's, so the platform's keys never serve a
-  client's own app.
+  first whose Firebase project or Apple team matches the one the device was built against
+  (`providerAccount`): the client's PUSH connection (`fcm.credentials`, the service account
+  JSON; `apns.{teamId, keyId, privateKey}`), then the platform's (`[push]`), then the key the
+  client uploaded for the app and that account; else nothing. The project and team follow the
+  mobile app's developer accounts (ui's `publishMode`): an app on the platform's accounts is
+  built against the platform's Firebase project and Apple team, one on the client's own
+  accounts against the client's, so the platform's keys never serve a client's own app.
+- **Uploaded keys.** The mobile app screens upload a client's own keys to
+  `POST /push/keys?appCode=`: `{platform: "ANDROID", serviceAccount}` (the JSON; its
+  `project_id` is the account) or `{platform: "IOS", teamId, keyId, privateKey}` (the `.p8`),
+  as text or as base64 of the file. The caller needs `Authorities.ROLE_MobileApp_CREATE` (ui's
+  mobile app permission). A key is checked by making the signer from it
+  (`NOTIF.PUSH_KEY_NOT_FIREBASE`, `NOTIF.PUSH_KEY_NOT_APPLE`), and kept in
+  `notification_push_key` (`sql/notification/V6__Push keys.sql`), one per app, platform and
+  account. The first client to give an account's key owns it; another client is refused
+  (`NOTIF.PUSH_KEY_TAKEN`). `GET /push/keys?appCode=` lists the caller's client's keys without
+  the secrets. Keys never leave this service: no internal route hands them out, because
+  internal routes are reachable through the gateway. The sender keeps a key it read for
+  `app_check_seconds`; an upload forgets it on the instance that took it.
 - **Web Push endpoints** are URLs the browser hands in, so only `https` on the known push
   services (`fcm.googleapis.com`, `push.services.mozilla.com`, `notify.windows.com`,
   `push.apple.com` and their subdomains) are taken or posted to.
 - **APNs and HTTP/2.** reqwest's `http2` feature would switch HTTP/2 on for every unit's clients
   (features unify across the workspace), so the APNs client is hyper with `hyper-rustls`, in this
   crate only.
-- **Routes.** `GET /push/config`, `POST` and `DELETE /push/devices` need a signed-in caller as
-  every route does; `GET /push/sw.js` is the service worker, served to anyone with
+- **Routes.** `GET /push/config`, `POST` and `DELETE /push/devices`, `GET` and `POST /push/keys`
+  need a signed-in caller as every route does; `GET /push/sw.js` is the service worker, served to anyone with
   `Service-Worker-Allowed: /`. It shows a push only when no tab of the site is focused (a
   visible tab already shows the in-app toast) and opens the push's `url` on a click.
 
