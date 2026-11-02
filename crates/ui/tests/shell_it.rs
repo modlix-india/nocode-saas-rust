@@ -439,7 +439,7 @@ async fn index_pages_behind_the_hosting_gate() {
     assert_eq!(a.header("content-security-policy-report-only").as_deref(), Some("img-src * cdn.example;"));
     let html = a.text();
     assert!(html.contains("<title>Test App</title>"));
-    assert!(!html.contains("rel=\"manifest\""), "applyChange removed the manifest");
+    assert!(html.contains("<link rel=\"manifest\" href=\"api/manifest/manifest.json\" />"), "the app's manifest is linked");
     assert!(html.contains("data-autocapture"), "analytics beacon");
     assert!(html.ends_with("<script src=\"https://cdn.example/js/dist/app.js\"></script></body></html>"));
     let tag = a.etag();
@@ -483,11 +483,12 @@ async fn index_pages_behind_the_hosting_gate() {
 async fn manifest_api_docs_js_and_acme() {
     let Some(s) = shell().await else { return };
     seed(&s).await;
-    let m = s.call(gw("/manifest/manifest.json")).await;
-    assert_eq!(m.status, StatusCode::OK);
-    assert_eq!(m.header("etag").as_deref(), Some("W/\"d41d8cd98f00b204e9800998ecf8427e\""));
-    assert_eq!(m.header("content-type").as_deref(), Some("application/json;charset=UTF-8"));
-    assert!(m.body.is_empty());
+    for path in ["/manifest/manifest.json", "/api/manifest/manifest.json"] {
+        let m = s.call(gw(path)).await;
+        assert_eq!(m.status, StatusCode::OK);
+        assert_eq!(m.header("content-type").as_deref(), Some("application/json;charset=UTF-8"));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&m.text()).unwrap(), serde_json::json!({"name": "m"}), "{path}");
+    }
     assert_eq!(s.call(gw("/manifest/manifest.json").app("nosuchapp")).await.status, StatusCode::OK);
     assert_eq!(s.call(gw("/manifest/manifest.json").no_header("clientCode")).await.status, StatusCode::BAD_REQUEST);
     let d = s.call(gw("/apiDocs")).await;

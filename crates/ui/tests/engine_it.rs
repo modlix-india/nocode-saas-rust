@@ -118,7 +118,8 @@ async fn application_inlines_shell_consent_and_filler() {
     assert_eq!(prop(&app, "consentPageDefinition").unwrap().as_object().unwrap()["name"], s("consent"));
     assert_eq!(prop(&app, "fillerValues").unwrap().as_object().unwrap()["brand"], s("Acme"));
     assert!(prop(&app, "mobileApps").is_none());
-    assert!(prop(&app, "manifest").is_none());
+    // Rust only: the manifest stays, for the page heads to link (Java removed it).
+    assert!(prop(&app, "manifest").is_some_and(|m| m.as_object().is_some_and(|o| !o.is_empty())));
     e.done().await;
 }
 

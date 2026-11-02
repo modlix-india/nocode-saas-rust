@@ -406,3 +406,10 @@ The write path is the `overridable` crate's, so its differences hold here too
     registered for it. Its push keys (the Firebase service account, the Apple `.p8`) are not on
     the mobile app: the screens upload them to notification's `POST /api/notification/push/keys`,
     which keeps them (crates/notification/DIFFERENCES.md, "Uploaded keys").
+44. **An app's PWA manifest is served (Rust only, Kiran 2026-11-02).** Java's `applyChange` removed
+    `properties.manifest` before anything read it, so `manifest.json` was always empty and no page
+    linked it. The read keeps it: the application definition the browser gets carries it, the
+    shell's index page links it when it is a non-empty object, and `GET /manifest/manifest.json`
+    answers it, also as `GET /api/manifest/manifest.json` because nginx forwards only `/api/`
+    paths. The link is `api/manifest/manifest.json`, relative like the app's icon links (the
+    gateway cuts whatever comes before `/api/`); SSR and the dev server's page write the same link.
