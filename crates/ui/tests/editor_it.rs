@@ -2145,16 +2145,23 @@ async fn an_android_app_with_push_is_registered_in_the_platform_firebase_project
     assert_eq!(again.obj().get("firebaseAndroid"), Some(&fb));
     assert!(fake.calls.lock().unwrap().is_empty());
 
-    // On the client's own accounts (said, or not said): its own Firebase values, used as they
-    // are, and the platform's project is never asked.
+    // On the client's own accounts: its own Firebase values, used as they are, and the
+    // platform's project is never asked.
     let tenant_fb = r#""firebaseAndroid":{"apiKey":"A","appId":"1:5:android:z","projectId":"tenant-fb","messagingSenderId":"5"}"#;
-    for mode in [r#","publishMode":"TENANT_ACCOUNT""#, ""] {
-        let own = format!(r#"{{"details":{{"name":"Own","android":true,"pushNotifications":true{mode}}},{tenant_fb}}}"#);
-        let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &own).await;
-        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
-        assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
-    }
+    let own = format!(r#"{{"details":{{"name":"Own","android":true,"pushNotifications":true,"publishMode":"TENANT_ACCOUNT"}},{tenant_fb}}}"#);
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], &own).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("tenant-fb")));
     assert!(fake.calls.lock().unwrap().is_empty());
+    // No choice at all is Modlix's accounts (both stores): saved as such, and the app's
+    // already registered package is looked up in the platform's project.
+    let unsaid = r#"{"details":{"name":"Shop App","android":true,"pushNotifications":true}}"#;
+    let r = e.send("POST", "/api/ui/applications/testapp/mobileApps", Some(SYSTEM), &[("x-test-auth", MOBILE)], unsaid).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(path(&r.obj(), &["details", "publishMode"]), Some(&s("PLATFORM_ACCOUNT")));
+    assert_eq!(path(&r.obj(), &["details", "iosPublishMode"]), Some(&s("PLATFORM_ACCOUNT")));
+    assert_eq!(path(&r.obj(), &["firebaseAndroid", "projectId"]), Some(&s("modlix-push")));
+    fake.calls.lock().unwrap().clear();
     // ... without them, or with the platform's, the save is refused.
     let platform_fb = r#""firebaseAndroid":{"apiKey":"KEY99","appId":"1:99:android:new","projectId":"modlix-push","messagingSenderId":"99"}"#;
     for extra in ["", &format!(",{platform_fb}"), r#","firebaseAndroid":{"projectId":"tenant-fb"}"#] {

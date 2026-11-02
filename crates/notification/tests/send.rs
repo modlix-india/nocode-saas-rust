@@ -25,7 +25,9 @@ use serde_json::{json, Map, Value};
 struct Sinks {
     emails: Mutex<Vec<(Option<i64>, Option<String>)>>,
     in_app: Mutex<Vec<(usize, Option<String>, Option<String>, Value)>>,
-    fail_email: Mutex<bool>,
+    /// The recipient whose mail the email service refuses.
+    fail_email: Mutex<Option<i64>>,
+    fail_in_app: Mutex<bool>,
     /// Each push: the recipients' ids, the app, and the client's PUSH connection details.
     pushes: Mutex<Vec<(Vec<Option<i64>>, String, Option<Map<String, Value>>)>>,
     fail_push: Mutex<bool>,
@@ -45,7 +47,7 @@ impl PushSink for Sinks {
 #[async_trait]
 impl EmailSink for Sinks {
     async fn send_email(&self, user: &NotificationUser, mail: &MailConnection, _: &CoreNotification, _: &Map<String, Value>) -> Result<bool> {
-        if *self.fail_email.lock() {
+        if user.id.is_some() && *self.fail_email.lock() == user.id {
             anyhow::bail!("SendGrid refused");
         }
         self.emails.lock().push((user.id, mail.connection_sub_type.clone()));
@@ -63,6 +65,9 @@ impl InAppSink for Sinks {
         category: Option<&str>,
         payload: &Map<String, Value>,
     ) -> Result<()> {
+        if *self.fail_in_app.lock() {
+            anyhow::bail!("the in-app table is locked");
+        }
         self.in_app.lock().push((users.len(), app_code.map(str::to_string), category.map(str::to_string), Value::Object(payload.clone())));
         Ok(())
     }
@@ -233,17 +238,17 @@ async fn channels_are_chosen_from_connection_and_templates() {
     let r = rig().await;
     // A mail connection but only an in-app template: in-app only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SMTP"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0 });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 0 });
 
     // Both templates, both channels; every recipient gets mail, then in-app runs once.
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
     r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2, "emailId": "b@x.com"}])));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0 });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 0 });
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(1), Some("SMTP".into())), (Some(2), Some("SMTP".into()))]);
 
     // The connection does not allow in-app: email only.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": false, "mail": {"connectionSubType": "SENDGRID"}})));
-    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0 });
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0, failed: 0 });
 
     // No mail connection and no in-app: nothing to send, and no recipients asked for.
     r.security.clear();
@@ -292,25 +297,35 @@ async fn each_recipient_gets_the_channels_they_chose() {
         .collect(),
     );
     let service = SendService { prefs: Some(Arc::new(prefs)), ..r.service };
-    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0 });
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 0 });
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(2), Some("SMTP".into())), (Some(3), Some("SMTP".into()))]);
     assert_eq!(r.sinks.in_app.lock()[0].0, 3, "users 1, 2 and the one without an id; 3 turned in-app off");
 
     // Nobody wants in-app: it does not run.
     r.sinks.in_app.lock().clear();
     r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 3}])));
-    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false, pushed: 0 });
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 1, in_app: false, pushed: 0, failed: 0 });
     assert!(r.sinks.in_app.lock().is_empty());
 }
 
 #[tokio::test]
-async fn a_failed_mail_stops_the_rest() {
+async fn a_failed_send_never_stops_the_others() {
     let r = rig().await;
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"inApp": true, "mail": {"connectionSubType": "SENDGRID"}})));
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "email": {}}})));
-    *r.sinks.fail_email.lock() = true;
-    assert!(r.service.send(&message(false)).await.is_err());
-    assert!(r.sinks.in_app.lock().is_empty(), "in-app never ran");
+    r.security.answer("POST", USERS_PATH, Answer::json(json!([{"id": 1}, {"id": 2}, {"id": 3}])));
+    // The second recipient's mail is refused: the first and third still get theirs, and the
+    // in-app rows are stored for all three.
+    *r.sinks.fail_email.lock() = Some(2);
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: true, pushed: 0, failed: 1 });
+    assert_eq!(r.sinks.emails.lock().iter().map(|e| e.0).collect::<Vec<_>>(), vec![Some(1), Some(3)]);
+    assert_eq!(r.sinks.in_app.lock().first().map(|i| i.0), Some(3));
+
+    // In-app failing too: the mails still went, and the run still ends without an error.
+    r.sinks.emails.lock().clear();
+    *r.sinks.fail_in_app.lock() = true;
+    assert_eq!(r.service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 2, in_app: false, pushed: 0, failed: 2 });
+    assert_eq!(r.sinks.emails.lock().len(), 2);
 }
 
 #[tokio::test]
@@ -360,7 +375,7 @@ async fn the_authority_filter_narrows_a_normal_notification() {
         filter_authorization: Some("Authorities.Calls".into()),
         ..message(false)
     };
-    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true, pushed: 0 });
+    assert_eq!(r.service.send(&m).await.unwrap(), Outcome::Sent { emails: 1, in_app: true, pushed: 0, failed: 0 });
     let asked = r.security.calls_to(USERS_PATH);
     assert_eq!(asked[0].json(), json!({"clientId": 3, "appCode": "testapp", "filterAuthorization": "Authorities.Calls"}));
     assert_eq!(*r.sinks.emails.lock(), vec![(Some(7), Some("SMTP".into()))]);
@@ -494,7 +509,7 @@ async fn push_goes_to_who_wants_it_and_never_fails_the_message() {
     // Push only, with the platform's credentials, from the inapp template.
     r.core.answer("GET", CONN_PATH, Answer::json(json!({"push": {}})));
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}}})));
-    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: false, pushed: 2 });
+    assert_eq!(service.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: false, pushed: 2, failed: 0 });
     assert!(r.sinks.in_app.lock().is_empty(), "the connection has no inApp");
     assert_eq!(r.sinks.pushes.lock()[0], (vec![Some(1), Some(2)], "testapp".to_string(), None));
 
@@ -504,14 +519,14 @@ async fn push_goes_to_who_wants_it_and_never_fails_the_message() {
     r.core.answer("GET", NOTIF_PATH, Answer::json(json!({"channelTemplates": {"inapp": {}, "push": {}}, "channelEnabled": {"push": false}})));
     let prefs = Prefs([(2, json!({"channels": {"push": true}}).as_object().unwrap().clone())].into_iter().collect());
     let chooser = SendService { prefs: Some(Arc::new(prefs)), ..service };
-    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 1 });
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 1, failed: 0 });
     let pushes = r.sinks.pushes.lock().clone();
     assert_eq!(pushes[0].0, vec![Some(2)], "push is opt in here: only 2 turned it on");
     assert_eq!(pushes[0].2.as_ref().unwrap()["apns"]["teamId"], "T");
 
     // A failing push service is logged; the message still went out.
     *r.sinks.fail_push.lock() = true;
-    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0 });
+    assert_eq!(chooser.send(&message(false)).await.unwrap(), Outcome::Sent { emails: 0, in_app: true, pushed: 0, failed: 1 });
     *r.sinks.fail_push.lock() = false;
 
     // An email-only definition has nothing to push.
