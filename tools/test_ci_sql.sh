@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # the backticks in single quotes are MySQL quoting
 # Tests tools/ci_sql.sh end to end with nothing shared: a throwaway MySQL container on its own Docker
 # network (no port published, a random root password, removed on exit, whatever happens) and copies of
 # sql/ in a temporary folder. It never reaches mysqldev8 or any environment.
@@ -116,8 +117,26 @@ out=$(plan) || die "plan on an empty server: $out"
   || die "plan created a database"
 ok "plan on an empty server lists all $total files as pending and changes nothing"
 
-out=$(migrate) || die "migrate from V1: $out"
+# security does not build from V1 on its own: V40 looks up a role named 'Super Admin' that no file
+# creates (every environment had it before V40 ran) and stops on a NULL ROLE_ID. So security goes in two
+# steps: V1 to V39, the role as a stand-in, then the rest (which also checks migrate carries on from a
+# database part way up).
+mkdir "$WORK/security.later"
+for f in "$WORK/sql/security"/V*.sql; do
+  v=$(basename "$f"); v=${v#V}; v=${v%%__*}
+  [ "$v" -gt 39 ] && mv "$f" "$WORK/security.later/"
+done
+later=$(files_in "$WORK/security.later")
+
+out=$(migrate) || die "migrate from V1 (security to V39): $out"
 [ "$(pending_of "$out")" = 0 ] || die "migrate from V1 left files pending: $out"
+sq security -e "INSERT INTO security_v2_role (CLIENT_ID, NAME, DESCRIPTION)
+  SELECT ID, 'Super Admin', 'test stand-in: every environment had this role before V40' FROM security_client WHERE CODE = 'SYSTEM'"
+mv "$WORK/security.later"/*.sql "$WORK/sql/security/"
+out=$(plan) || die "plan with security at V39: $out"
+[ "$(pending_of "$out")" = "$later" ] || die "plan with security at V39: expected $later pending: $out"
+out=$(migrate) || die "migrate security V40 onwards: $out"
+[ "$(pending_of "$out")" = 0 ] || die "migrate security V40 onwards left files pending: $out"
 for db in $(databases); do
   want=$(files_in "$WORK/sql/$db")
   got=$(sq -e "SELECT COUNT(*) FROM \`$db\`.flyway_schema_history WHERE type = 'SQL' AND success = 1 AND checksum IS NOT NULL AND installed_by = 'root'")

@@ -1,0 +1,60 @@
+# The SQL archive on its own, before anything reaches an environment (sql/README.md):
+#   tools/ci_sql.sh rules <base>   no file the base has is edited, renamed or removed; a new file numbers
+#                                  above the base's highest version and has its rollback
+#   tools/test_ci_sql.sh           Flyway builds every database from V1 on a throwaway MySQL in this
+#                                  runner, then plan / migrate / an edited file / a new file
+# No secret, no host, no environment database: what an environment would apply is listed by sql-plan in
+# rust-build-deploy.yml on the deploy itself, behind rust-sql-<env> before anything is applied.
+
+name: rust-sql-check
+
+on:
+  pull_request:
+    paths:
+      - 'sql/**'
+      - 'tools/ci_sql.sh'
+      - 'tools/test_ci_sql.sh'
+      - '.github/workflows/rust-sql-check.yml'
+  # Pushes to master too (changes mostly land there without a pull request); the environment branches
+  # receive what master already passed.
+  push:
+    branches:
+      - master
+    paths:
+      - 'sql/**'
+      - 'tools/ci_sql.sh'
+      - 'tools/test_ci_sql.sh'
+      - '.github/workflows/rust-sql-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-sql-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # rules compares against the base, so its history is needed.
+          fetch-depth: 0
+
+      - name: The archive rules against the base
+        env:
+          # A pull request: its target branch. A push: the commit before it. By hand, or a push that
+          # creates the branch: no base, so only the names and versions are checked.
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || '' }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            tools/ci_sql.sh rules
+          else
+            tools/ci_sql.sh rules "$BASE"
+          fi
+
+      - name: Build every database from V1 with Flyway on a throwaway MySQL
+        run: tools/test_ci_sql.sh
