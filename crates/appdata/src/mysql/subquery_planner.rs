@@ -6,7 +6,7 @@ use indexmap::{IndexMap, IndexSet};
 use super::aggregate_builder;
 use super::field_resolver::FieldResolver;
 use super::filter_builder::FilterResult;
-use super::sql::{Cond, FieldOps, Select, Sql};
+use super::sql::{quote, Cond, FieldOps, Select, Sql};
 use crate::aggregate_validator::{alias_ok, ALIAS_PATTERN};
 use crate::model::{AggregateFunction, Condition, RelationType, Storage, StorageSubQuery};
 
@@ -24,6 +24,20 @@ pub struct SubQueryTable {
     pub measures: IndexSet<String>,
     /// INNER, so a parent with no children drops.
     pub required: bool,
+    /// The same measures as one correlated subquery each, or None when a HAVING makes
+    /// that a different answer.
+    pub correlated: Option<Correlated>,
+}
+
+/// The pieces of the grouped read, kept apart so each measure can be read per parent row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Correlated {
+    /// The child table under the subquery's own alias.
+    pub from: Sql,
+    /// The relation column, qualified by that alias.
+    pub key: Sql,
+    pub where_: Option<Cond>,
+    pub measures: Vec<(String, Sql)>,
 }
 
 impl SubQueryTable {
@@ -37,6 +51,42 @@ impl SubQueryTable {
 
     pub fn output_key(&self, measure: &str) -> String {
         format!("{}.{}", self.alias, measure)
+    }
+
+    /// Whether `sql` reads one of this subquery's measures.
+    pub fn referenced_by(&self, sql: &Sql) -> bool {
+        sql.render().0.contains(&format!("{}.", quote(&self.alias)))
+    }
+
+    /// A LEFT subquery has one row per parent at most, so leaving it out changes no count.
+    pub fn countless(&self, condition: &Sql) -> bool {
+        !self.required && !self.referenced_by(condition)
+    }
+
+    /// A LEFT subquery that neither filters nor sorts can be read for the page's rows
+    /// alone, instead of grouping every child row before the page is cut.
+    pub fn per_row(&self, condition: &Sql, order: &[Sql]) -> bool {
+        self.countless(condition) && self.correlated.is_some() && !order.iter().any(|o| self.referenced_by(o))
+    }
+
+    /// Each measure as `(select <measure> from <child> where <key> = <parent> ...) as alias.measure`.
+    /// `having count(*) > 0` keeps "no children" a null, as the LEFT join gives it, also for a count.
+    pub fn per_row_selection(&self, parent_alias: &str) -> Vec<Sql> {
+        let Some(c) = &self.correlated else { return Vec::new() };
+        let link = c.key.equal(Sql::name(&[parent_alias, &self.parent_field]));
+        let filter = match &c.where_ {
+            None => link,
+            Some(w) => w.clone().and_also(link),
+        };
+        c.measures
+            .iter()
+            .map(|(name, measure)| {
+                Sql::raw("(")
+                    .then_sql(&Select::fields(vec![measure.clone()], c.from.clone()).filter(filter.clone()).to_sql())
+                    .then(" having count(*) > 0)")
+                    .alias(&self.output_key(name))
+            })
+            .collect()
     }
 }
 
@@ -163,7 +213,8 @@ pub fn measures(sq: &StorageSubQuery) -> IndexSet<String> {
     out
 }
 
-/// The grouped child query, keyed on the relation column, its HAVING inside.
+/// The grouped child query, keyed on the relation column, its HAVING inside, and the same
+/// read split for per-row use (None with a HAVING).
 pub fn derived(
     child_table: &Sql,
     sq: &StorageSubQuery,
@@ -171,19 +222,30 @@ pub fn derived(
     where_: Option<Cond>,
     having: Option<Cond>,
     child_json_columns: IndexSet<String>,
-) -> FilterResult<Sql> {
+) -> FilterResult<(Sql, Option<Correlated>)> {
     let resolver = FieldResolver::of(child_json_columns);
     let key = Sql::name(&[relation_column]);
+    let alias = sq.resolved_alias().unwrap_or_default();
 
-    let mut select = vec![key.alias(KEY)];
+    let mut measures = Vec::new();
     match sq.aggregations.as_ref().filter(|a| !a.is_empty()) {
-        None => select.push(Sql::raw("count(*)").alias(DEFAULT_MEASURE)),
+        None => measures.push((DEFAULT_MEASURE.to_string(), Sql::raw("count(*)"))),
         Some(aggs) => {
             for a in aggs {
-                select.push(aggregate_builder::measure(a, &resolver)?.alias(&a.resolved_alias().unwrap_or_default()));
+                measures.push((a.resolved_alias().unwrap_or_default(), aggregate_builder::measure(a, &resolver)?));
             }
         }
     }
+
+    let correlated = having.is_none().then(|| Correlated {
+        from: child_table.clone().then(" as ").then(&quote(&alias)),
+        key: Sql::name(&[&alias, relation_column]),
+        where_: where_.clone(),
+        measures: measures.clone(),
+    });
+
+    let mut select = vec![key.alias(KEY)];
+    select.extend(measures.iter().map(|(name, m)| m.alias(name)));
 
     let filter = match where_ {
         None => key.is_not_null(),
@@ -199,11 +261,11 @@ pub fn derived(
         ..Default::default()
     };
 
-    Ok(grouped.as_table(&sq.resolved_alias().unwrap_or_default()))
+    Ok((grouped.as_table(&alias), correlated))
 }
 
 /// Hang the derived tables off the parent.
-pub fn attach(from: Sql, parent_alias: &str, sub_queries: &[SubQueryTable]) -> Sql {
+pub fn attach<'a>(from: Sql, parent_alias: &str, sub_queries: impl IntoIterator<Item = &'a SubQueryTable>) -> Sql {
     let mut table = from;
     for sq in sub_queries {
         let kind = if sq.required { " join " } else { " left outer join " };
@@ -213,7 +275,7 @@ pub fn attach(from: Sql, parent_alias: &str, sub_queries: &[SubQueryTable]) -> S
 }
 
 /// Every measure, prefixed.
-pub fn selection(sub_queries: &[SubQueryTable]) -> Vec<Sql> {
+pub fn selection<'a>(sub_queries: impl IntoIterator<Item = &'a SubQueryTable>) -> Vec<Sql> {
     let mut fields = Vec::new();
     for sq in sub_queries {
         for m in &sq.measures {

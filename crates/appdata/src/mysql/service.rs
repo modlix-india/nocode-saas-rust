@@ -819,6 +819,7 @@ impl MySqlAppDataService {
     fn resolver(&self, schema: &PhysicalSchema, defs: Option<&ColumnDefinitions>, attached: &Attached, text: IndexSet<String>)
         -> AppDataResult<FieldResolver> {
         let json = type_mapper::json_columns(schema.schema(), defs).map_err(internal)?;
+        let booleans = type_mapper::boolean_columns(schema.schema(), defs).map_err(internal)?;
         let r = if attached.is_empty() {
             FieldResolver::of(json)
         } else {
@@ -829,7 +830,7 @@ impl MySqlAppDataService {
                 subquery_planner::by_alias(&attached.sub_queries),
             )
         };
-        Ok(r.with_text_columns(text).with_stemming(self.config.text_search_stemming))
+        Ok(r.with_text_columns(text).with_boolean_columns(booleans).with_stemming(self.config.text_search_stemming))
     }
 
     fn can_read(&self, cx: &Ctx, target: &Storage) -> AppDataResult<()> {
@@ -932,15 +933,17 @@ impl MySqlAppDataService {
         let child_db = self.ensure_table(cx, pool, client_code, child).await?;
         let child_schema = self.physical_schema(child, cx.draft).await;
         let child_json = type_mapper::json_columns(child_schema.schema(), defs(child).as_ref()).map_err(internal)?;
+        let child_booleans = type_mapper::boolean_columns(child_schema.schema(), defs(child).as_ref()).map_err(internal)?;
+        let child_resolver = FieldResolver::of(child_json.clone()).with_boolean_columns(child_booleans);
         let where_ = match &sq.condition {
             None => None,
-            Some(c) => Some(filter_builder::build_for_read(Some(c), &FieldResolver::of(child_json.clone())).map_err(unsupported_filter)?),
+            Some(c) => Some(filter_builder::build_for_read(Some(c), &child_resolver).map_err(unsupported_filter)?),
         };
         let having = match &sq.having {
             None => None,
             Some(h) => Some(filter_builder::build_json(Some(h), IndexSet::new()).map_err(unsupported_filter)?),
         };
-        let derived = subquery_planner::derived(
+        let (derived, correlated) = subquery_planner::derived(
             &Sql::name(&[&child_db, &child.unique_name]),
             sq,
             &relation_name,
@@ -960,6 +963,7 @@ impl MySqlAppDataService {
             parent_field,
             measures: subquery_planner::measures(sq),
             required: sq.required != Some(false),
+            correlated,
         })
     }
 
@@ -984,10 +988,16 @@ impl MySqlAppDataService {
     }
 
     fn from_clause(db_name: &str, storage: &Storage, attached: &Attached) -> Sql {
+        Self::from_with(db_name, storage, attached, |_| true)
+    }
+
+    /// The parent with its joins and the subqueries `keep` lets through.
+    fn from_with(db_name: &str, storage: &Storage, attached: &Attached, keep: impl Fn(&SubQueryTable) -> bool) -> Sql {
         if attached.is_empty() {
             return table(db_name, storage);
         }
-        subquery_planner::attach(join_planner::from(&table(db_name, storage), &attached.joins), PARENT, &attached.sub_queries)
+        let from = join_planner::from(&table(db_name, storage), &attached.joins);
+        subquery_planner::attach(from, PARENT, attached.sub_queries.iter().filter(|s| keep(s)))
     }
 
     fn decode_joined(&self, flat: Document, decoding: &Decoding, attached: &Attached) -> Document {
@@ -1042,13 +1052,19 @@ impl MySqlAppDataService {
             return Ok(rows.into_iter().map(|r| decoding.row(r, schema)).collect());
         }
 
+        let order_by = joined_order(schema, &page.sort, &resolver, attached)?;
+        let where_sql = condition.to_sql();
+        let per_row = |s: &SubQueryTable| s.per_row(&where_sql, &order_by);
         let mut selection = join_planner::selection(&selected_parent_columns(schema, query)?, &attached.joins);
-        selection.extend(subquery_planner::selection(&attached.sub_queries));
+        selection.extend(subquery_planner::selection(attached.sub_queries.iter().filter(|s| !per_row(s))));
+        for sq in attached.sub_queries.iter().filter(|s| per_row(s)) {
+            selection.extend(sq.per_row_selection(PARENT));
+        }
         let select = Select {
             fields: selection,
-            from: Self::from_clause(db_name, storage, attached),
+            from: Self::from_with(db_name, storage, attached, |s| !per_row(s)),
             where_: Some(condition),
-            order_by: joined_order(schema, &page.sort, &resolver, attached)?,
+            order_by,
             limit: Some((page.page_size(), page.offset())),
             ..Default::default()
         };
@@ -1068,8 +1084,9 @@ impl MySqlAppDataService {
         let d = defs(storage);
         let resolver = self.resolver(schema, d.as_ref(), attached, text_columns(storage, schema, d.as_ref())?)?;
         let condition = filter_builder::build_for_read(query.condition.as_ref(), &resolver).map_err(unsupported_filter)?;
-        let select = Select::count(Self::from_clause(db_name, storage, attached)).filter(condition);
-        count(pool, &select.to_sql()).await
+        let where_sql = condition.to_sql();
+        let from = Self::from_with(db_name, storage, attached, |s| !s.countless(&where_sql));
+        count(pool, &Select::count(from).filter(condition).to_sql()).await
     }
 
     fn check_aggregate_fields(storage: &Storage, schema: &PhysicalSchema, query: &AggregateQuery, attached: &Attached)
@@ -1947,7 +1964,10 @@ impl AppDataEngine for MySqlAppDataService {
         let schema = self.physical_schema(storage, cx.draft).await;
         let d = defs(storage);
         let json = type_mapper::json_columns(schema.schema(), d.as_ref()).map_err(internal)?;
-        let resolver = FieldResolver::of(json).with_text_columns(text_columns(storage, &schema, d.as_ref())?);
+        let booleans = type_mapper::boolean_columns(schema.schema(), d.as_ref()).map_err(internal)?;
+        let resolver = FieldResolver::of(json)
+            .with_text_columns(text_columns(storage, &schema, d.as_ref())?)
+            .with_boolean_columns(booleans);
         let condition = filter_builder::build(query.condition.as_ref(), &resolver).map_err(unsupported_filter)?;
         if dev_mode == Some(true) {
             return count(&pool, &Select::count(table(&db_name, storage)).filter(condition).to_sql()).await;
