@@ -144,6 +144,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let mq = Arc::new(integrations::Mq::from_config(&cfg.mq));
     let defs = storage_defs(&cache, definitions.clone(), core_schemas.clone());
     let events = Arc::new(integrations::MqEvents { mq: mq.clone() });
+    storage::service::describe_metrics();
     let appdata = Arc::new(storage_service(cfg, &cache, defs.clone(), security, kirun_schemas.clone(), events));
     let integrations = Arc::new(integrations::Integrations::new(
         cfg,
@@ -271,6 +272,7 @@ pub(crate) fn storage_service(
         a.builder_app_codes.clone(),
         events,
     )
+    .with_anonymous_client_pick(cfg.anonymous.client_pick)
 }
 
 /// Starts core-exec and serves until a shutdown signal.

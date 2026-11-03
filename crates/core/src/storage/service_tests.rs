@@ -134,9 +134,56 @@ async fn an_unknown_client_is_refused_not_empty() {
 
 #[tokio::test]
 async fn an_anonymous_caller_keeps_what_it_sent() {
-    assert_eq!(client_code_of(Some("FIN"), caller("SYSTEM", false, &[], "")).await.unwrap(), "FIN");
+    // Report mode (the default) lets a pick through.
+    assert_eq!(client_code_of(Some("BP1"), caller("SYSTEM", false, &[], "")).await.unwrap(), "BP1");
     // The url client code (FIN in these callers' requests).
     assert_eq!(client_code_of(Some(""), caller("SYSTEM", false, &[], "")).await.unwrap(), "FIN");
+}
+
+/// An anonymous caller on `url_client`'s site with `authorities`.
+fn visitor(url_client: &str, authorities: &[&str]) -> Arc<context::RequestContext> {
+    request(
+        auth(json!({"user": {"id": 0, "stringAuthorities": authorities}, "authenticated": false}), Some(url_client), Some("leadzumptwo")),
+        false,
+        None,
+    )
+}
+
+async fn picked(mode: AnonymousMode, cc: &str, ctx: Arc<context::RequestContext>) -> CoreResult<String> {
+    let base = security_stub(MANAGES, &["leadzumptwo"]).await;
+    let svc = policy(MemoryCatalog::with(vec![]), Arc::new(MemoryEngine::default()), &base, Arc::new(RecordingEvents::default()))
+        .with_anonymous_client_pick(mode);
+    as_caller(ctx, async { svc.client_code(Some(cc)).await }).await
+}
+
+#[tokio::test]
+async fn enforce_refuses_a_visitor_naming_another_tenant() {
+    let e = picked(AnonymousMode::Enforce, "BP1", visitor("FINSUB", &[])).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::FORBIDDEN);
+    // A client the url's client manages is still another tenant: SYSTEM's own sites name nobody.
+    assert!(picked(AnonymousMode::Enforce, "FIN", visitor("SYSTEM", &[])).await.is_err());
+    assert!(picked(AnonymousMode::Enforce, "BP1", visitor("FIN", &[])).await.is_err());
+}
+
+#[tokio::test]
+async fn enforce_lets_a_visitor_name_its_site_or_a_client_above_it() {
+    assert_eq!(picked(AnonymousMode::Enforce, "BP1", visitor("BP1", &[])).await.unwrap(), "BP1");
+    assert_eq!(picked(AnonymousMode::Enforce, "FIN", visitor("BP1", &[])).await.unwrap(), "FIN");
+    assert_eq!(picked(AnonymousMode::Enforce, "SYSTEM", visitor("BP1", &[])).await.unwrap(), "SYSTEM");
+}
+
+#[tokio::test]
+async fn event_and_webhook_runs_name_any_client() {
+    for runner in [crate::events::EVENT_RUNNER_AUTHORITY, crate::events::WEBHOOK_AUTHORITY] {
+        let ctx = visitor("SYSTEM", &[crate::events::ANONYMOUS_AUTHORITY, runner]);
+        assert_eq!(picked(AnonymousMode::Enforce, "BP1", ctx).await.unwrap(), "BP1", "{runner}");
+    }
+}
+
+#[tokio::test]
+async fn report_and_off_never_refuse() {
+    assert_eq!(picked(AnonymousMode::Report, "BP1", visitor("FINSUB", &[])).await.unwrap(), "BP1");
+    assert_eq!(picked(AnonymousMode::Off, "BP1", visitor("FINSUB", &[])).await.unwrap(), "BP1");
 }
 
 // ---------------------------------------------------------------- AppDataServiceEventTenantTest
