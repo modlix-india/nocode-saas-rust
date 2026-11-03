@@ -366,6 +366,10 @@ fn positive(
     resolver: &FieldResolver,
 ) -> FilterResult<Cond> {
     match op {
+        // An integer column holds 1 / 0, so the comparison an index can serve says the same as
+        // the text cast, which every other column needs.
+        FilterOperator::IsTrue if resolver.is_boolean(field_name) => return Ok(field.equal(Sql::raw("1"))),
+        FilterOperator::IsFalse if resolver.is_boolean(field_name) => return Ok(field.equal(Sql::raw("0"))),
         FilterOperator::IsTrue => return Ok(field.is_true()),
         FilterOperator::IsFalse => return Ok(field.is_false()),
         FilterOperator::IsNull => return Ok(field.is_null()),
@@ -447,6 +451,18 @@ mod tests {
 
     fn read(c: impl Into<Condition>) -> FilterResult<String> {
         Ok(build_for_read(Some(&c.into()), &FieldResolver::of(IndexSet::new()))?.inlined())
+    }
+
+    #[test]
+    fn a_boolean_column_compares_so_an_index_can_serve_it() {
+        let resolver = FieldResolver::of(["flags"].iter().map(|s| s.to_string()).collect())
+            .with_boolean_columns(["done"].iter().map(|s| s.to_string()).collect());
+        let s = |c: FilterCondition| build_for_read(Some(&c.into()), &resolver).unwrap().inlined();
+        assert_eq!(s(fc(Some("done"), FilterOperator::IsTrue, None)), "`done` = 1");
+        assert_eq!(s(fc(Some("done"), FilterOperator::IsFalse, None)), "`done` = 0");
+        assert_eq!(s(fc(Some("done"), FilterOperator::IsFalse, None).negated()), "not (`done` = 0)");
+        assert!(s(fc(Some("flags.done"), FilterOperator::IsTrue, None)).contains("as char) in ("), "a JSON path keeps the cast");
+        assert!(s(fc(Some("other"), FilterOperator::IsTrue, None)).contains("as char) in ("), "so does a column of no known type");
     }
 
     fn text_sql(term: &str, stemming: bool) -> String {
