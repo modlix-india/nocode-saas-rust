@@ -33,6 +33,7 @@ use platform::security::SecurityClient;
 use super::defs::{not_found_or_forbidden, Catalog};
 use super::values::{clone_map_object, gson_object};
 use crate::authorities;
+use crate::config::AnonymousMode;
 use crate::context;
 use crate::error::{CoreError, CoreResult};
 use crate::exec::{self, Arguments};
@@ -254,6 +255,21 @@ pub struct AppDataService {
     events: Arc<dyn EventSink>,
     /// The execution state, for triggers; set once the state that holds this service exists.
     runner: OnceLock<Arc<dyn TriggerRunner>>,
+    /// `[anonymous] client_pick`.
+    anonymous_client_pick: AnonymousMode,
+}
+
+/// Storage calls from callers who are not signed in that named a client other than the url's
+/// client or one that manages it, by `app` and `mode` (report: let through, enforce: refused).
+pub const ANONYMOUS_CLIENT_PICK: &str = "core_anonymous_client_pick_total";
+
+/// The description of the counter above, for `/metrics`.
+pub fn describe_metrics() {
+    metrics::describe_counter!(
+        ANONYMOUS_CLIENT_PICK,
+        metrics::Unit::Count,
+        "Storage calls by callers not signed in that named another client, by app and mode."
+    );
 }
 
 /// One related object a write names: created, checked, or failed.
@@ -333,7 +349,21 @@ impl AppDataService {
         builder_app_codes: Vec<String>,
         events: Arc<dyn EventSink>,
     ) -> Self {
-        Self { defs, security, engines, builder_app_codes, events, runner: OnceLock::new() }
+        Self {
+            defs,
+            security,
+            engines,
+            builder_app_codes,
+            events,
+            runner: OnceLock::new(),
+            anonymous_client_pick: AnonymousMode::default(),
+        }
+    }
+
+    /// Applies `[anonymous] client_pick` instead of the default (report).
+    pub fn with_anonymous_client_pick(mut self, mode: AnonymousMode) -> Self {
+        self.anonymous_client_pick = mode;
+        self
     }
 
     /// Runs triggers with `runner` instead of the execution state (tests).
@@ -363,17 +393,19 @@ impl AppDataService {
             .unwrap_or_default()
     }
 
-    /// `clientCode(clientCode)`: a signed-out caller gets what it sent, or its url client; a
-    /// signed-in one its own client when it sent none, or one it manages or is managed by.
+    /// `clientCode(clientCode)`: a signed-out caller gets its url client when it sent none, else
+    /// what it sent, checked by `[anonymous] client_pick`; a signed-in one its own client when it
+    /// sent none, or one it manages or is managed by.
     async fn client_code(&self, client_code: Option<&str>) -> CoreResult<String> {
         let ca = context::authentication();
         let blank = client_code.is_none_or(|c| c.trim().is_empty());
         if !ca.is_authenticated() {
-            return Ok(if blank {
-                ca.url_client_code().unwrap_or_default().to_string()
-            } else {
-                client_code.unwrap_or_default().to_string()
-            });
+            if blank {
+                return Ok(ca.url_client_code().unwrap_or_default().to_string());
+            }
+            let cc = client_code.unwrap_or_default();
+            self.anonymous_client_pick(&ca, cc).await?;
+            return Ok(cc.to_string());
         }
         if blank {
             return Ok(ca.client_code().unwrap_or_default().to_string());
@@ -387,6 +419,44 @@ impl AppDataService {
         } else {
             Err(forbidden(msg::FORBIDDEN_CLIENT_CODE, cc))
         }
+    }
+
+    /// A caller who is not signed in naming client `cc`: allowed when it is the url's client or
+    /// one that manages it (a tenant site reading its partner's or SYSTEM's shared rows), and for
+    /// event and webhook runs, which act for the client their event or provider named. Anything
+    /// else is counted and logged, and refused in enforce mode: a visitor of one site must not
+    /// read or write another tenant's rows.
+    async fn anonymous_client_pick(&self, ca: &crate::auth::Authentication, cc: &str) -> CoreResult<()> {
+        let mode = self.anonymous_client_pick;
+        if mode == AnonymousMode::Off {
+            return Ok(());
+        }
+        let url = ca.url_client_code().unwrap_or_default();
+        if cc == url {
+            return Ok(());
+        }
+        let runner = ca
+            .authorities()
+            .iter()
+            .any(|a| a == crate::events::EVENT_RUNNER_AUTHORITY || a == crate::events::WEBHOOK_AUTHORITY);
+        if runner {
+            return Ok(());
+        }
+        // SYSTEM manages every client; a failed check counts as a pick (report never fails a call).
+        if cc == "SYSTEM" || (!url.is_empty() && matches!(self.security.does_client_manage_client_code(cc, url).await, Ok(true))) {
+            return Ok(());
+        }
+        let app = context::owner_app_code()
+            .or_else(|| ca.url_app_code().map(str::to_string))
+            .unwrap_or_default();
+        let enforce = mode == AnonymousMode::Enforce;
+        metrics::counter!(ANONYMOUS_CLIENT_PICK, "app" => app.clone(), "mode" => if enforce { "enforce" } else { "report" })
+            .increment(1);
+        tracing::warn!(app, url_client = url, client = cc, in_kirun = context::in_kirun(), enforce, "anonymous storage call names another client");
+        if enforce {
+            return Err(forbidden(msg::FORBIDDEN_CLIENT_CODE, cc));
+        }
+        Ok(())
     }
 
     /// `connectionService.read("appData", ac, cc, APP_DATA)` and the engine it selects.

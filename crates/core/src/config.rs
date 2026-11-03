@@ -39,6 +39,8 @@ pub struct CoreConfig {
     pub runs: crate::run_pool::RunsSection,
     /// The HTML to PDF renderer (`crate::pdf_render`): the pdf-render sidecar, else text.
     pub pdf: crate::pdf_render::PdfConfig,
+    /// `[anonymous]`: what callers who are not signed in may do.
+    pub anonymous: AnonymousSection,
 }
 
 impl Default for CoreConfig {
@@ -62,8 +64,29 @@ impl Default for CoreConfig {
             events: EventsSection::default(),
             runs: crate::run_pool::RunsSection::default(),
             pdf: crate::pdf_render::PdfConfig::default(),
+            anonymous: AnonymousSection::default(),
         }
     }
+}
+
+/// How a rule for callers who are not signed in is applied: `report` logs and counts what it
+/// would refuse, `enforce` refuses it, `off` does neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnonymousMode {
+    Off,
+    #[default]
+    Report,
+    Enforce,
+}
+
+/// `[anonymous]` of core-exec and core-editor.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnonymousSection {
+    /// A storage call from a caller who is not signed in that names a client other than the
+    /// url's client or one that manages it. Event and webhook runs are exempt.
+    pub client_pick: AnonymousMode,
 }
 
 /// `events.mq.queues` and how core-events consumes them.
