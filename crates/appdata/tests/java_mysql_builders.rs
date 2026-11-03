@@ -2271,7 +2271,7 @@ mod extra {
     /// Messages from `MySQLSubQueryPlanner.check`, and the derived table jOOQ renders.
     mod subquery_planner {
         use super::*;
-        use appdata::mysql::subquery_planner::{check, derived, measures};
+        use appdata::mysql::subquery_planner::{check, derived, measures, SubQueryTable, KEY};
 
         fn parent() -> Storage {
             Storage { name: "orders".into(), ..Default::default() }
@@ -2402,7 +2402,7 @@ mod extra {
         #[test]
         fn the_derived_table() {
             let table = Sql::name(&["db", "items"]);
-            let d = derived(&table, &items(), "order", None, None, none()).unwrap();
+            let (d, _) = derived(&table, &items(), "order", None, None, none()).unwrap();
             assert_eq!(
                 outer(&d, "items", &["count"]),
                 "select `items`.`__parent`, `items`.`count` from (select `order` as `__parent`, count(*) as `count` from `db`.`items` where `order` is not null group by `order`) as `items`"
@@ -2415,11 +2415,56 @@ mod extra {
             };
             let where_ = Sql::name(&["status"]).equal(Sql::param(Bind::Text("open".into())));
             let having = Sql::name(&["total"]).cmp(">", Sql::param(Bind::Int(5)));
-            let d = derived(&table, &lines, "order", Some(where_), Some(having), none()).unwrap();
+            let (d, correlated) = derived(&table, &lines, "order", Some(where_), Some(having), none()).unwrap();
             assert_eq!(
                 outer(&d, "lines", &["total"]),
                 "select `lines`.`__parent`, `lines`.`total` from (select `order` as `__parent`, sum(`qty`) as `total` from `db`.`items` where (`status` = 'open' and `order` is not null) group by `order` having `total` > 5) as `lines`"
             );
+            assert_eq!(correlated, None, "a HAVING keeps the derived table");
+        }
+
+        fn table_of(sq: &StorageSubQuery, required: bool, where_: Option<Cond>) -> SubQueryTable {
+            let (derived, correlated) = derived(&Sql::name(&["db", "items"]), sq, "order", where_, None, none()).unwrap();
+            SubQueryTable {
+                alias: sq.resolved_alias().unwrap(),
+                derived,
+                key_column: KEY.into(),
+                parent_field: "_id".into(),
+                measures: measures(sq),
+                required,
+                correlated,
+            }
+        }
+
+        #[test]
+        fn a_left_subquery_read_per_row() {
+            let lines = StorageSubQuery {
+                alias: Some("lines".into()),
+                aggregations: Some(vec![
+                    Aggregation::new(AggregateFunction::Max, Some("due")).with_alias("mx"),
+                    Aggregation::new(AggregateFunction::Count, None).with_alias("n"),
+                ]),
+                ..items()
+            };
+            let open = Sql::name(&["status"]).equal(Sql::param(Bind::Text("open".into())));
+            let t = table_of(&lines, false, Some(open));
+            let fields: Vec<String> = t.per_row_selection("p").iter().map(|s| s.inlined()).collect();
+            assert_eq!(
+                fields,
+                vec![
+                    "(select max(`due`) from `db`.`items` as `lines` where (`status` = 'open' and `lines`.`order` = `p`.`_id`) having count(*) > 0) as `lines.mx`",
+                    "(select count(*) from `db`.`items` as `lines` where (`status` = 'open' and `lines`.`order` = `p`.`_id`) having count(*) > 0) as `lines.n`",
+                ]
+            );
+
+            let plain = Sql::name(&["p", "name"]).equal(Sql::param(Bind::Text("x".into()))).to_sql();
+            let on_measure = Sql::name(&["lines", "mx"]).is_not_null().to_sql();
+            assert!(t.countless(&plain) && t.per_row(&plain, &[]));
+            assert!(!t.countless(&on_measure) && !t.per_row(&on_measure, &[]), "a filter on a measure keeps the join");
+            assert!(!t.per_row(&plain, &[Sql::name(&["lines", "mx"]).desc()]), "a sort on a measure keeps the join");
+
+            let inner = table_of(&lines, true, None);
+            assert!(!inner.countless(&plain) && !inner.per_row(&plain, &[]), "INNER drops parents, so it stays");
         }
     }
 }
