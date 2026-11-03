@@ -105,6 +105,12 @@ crates/platform/DIFFERENCES.md.
 Only pools a unit opens through `platform::db` are exported. The per-tenant pools appdata opens
 for app data connections are not.
 
+## core-exec and core-editor
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `core_anonymous_client_pick_total` | counter | `app`, `mode` (`report`, `enforce`) | Storage calls from a caller who is not signed in that named a client other than the url's client or one that manages it (event and webhook runs excluded). `report` was let through, `enforce` was refused (`[anonymous] client_pick`). Each one is also logged at WARN with the url client and the client named. |
+
 ## core-scheduler
 
 From each pass (every `core.scheduler.tick_ms`). `kind` is `cron` (a recurring schedule's tick)
