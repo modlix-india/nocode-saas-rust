@@ -96,8 +96,7 @@ pub struct MySqlAppDataService {
 /// `<client>_<app>[_draft]`, checked before it can become DDL.
 pub fn database_name(client_code: &str, app_code: &str, draft: bool) -> AppDataResult<String> {
     let name = format!("{client_code}_{app_code}{}", if draft { DRAFT_DB_SUFFIX } else { "" });
-    let ok = !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-    if !ok {
+    if !crate::engine::is_usable_schema_name(&name) {
         return Err(AppDataError::internal(format!("IllegalArgumentException: not a usable tenant schema name: {name}")));
     }
     Ok(name)
@@ -2581,6 +2580,16 @@ mod tests {
         assert!(database_name("CL`; DROP", "app", false).is_err());
         assert!(database_name(&"x".repeat(60), "app", false).is_ok());
         assert!(database_name(&"x".repeat(61), "app", false).is_err());
+        // Client codes come from names in any script; each of these is a real code.
+        for code in ["夜夜", "يوسفح", "อนนตข", "김서진", "ÖMERF", "QUỐCT", "ΓΙΆΝΝ", "بيدغي1"] {
+            assert_eq!(database_name(code, "leadzumptwo", true).unwrap(), format!("{code}_leadzumptwo_draft"));
+            assert_eq!(client_code_of(&database_name(code, "leadzumptwo", false).unwrap(), "leadzumptwo"), code);
+        }
+        assert!(database_name(&"夜".repeat(60), "app", false).is_ok());
+        assert!(database_name(&"夜".repeat(61), "app", false).is_err());
+        for hostile in ["夜`; DROP", "夜 夜", "夜\"", "夜'", "夜\\", "夜-x", "夜.x", "😀"] {
+            assert!(database_name(hostile, "app", false).is_err(), "{hostile}");
+        }
         assert_eq!(client_code_of("CL_app", "app"), "CL");
         assert_eq!(client_code_of("CL_app_draft", "app"), "CL");
         assert_eq!(client_code_of("CL_other", "app"), "CL_other");
