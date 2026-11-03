@@ -44,6 +44,7 @@ async fn every_route_reports_its_spring_pattern() {
         (Method::POST, "/api/files/transform/static/a", "/api/files/transform/{resourceType}/**"),
         (Method::POST, "/api/files/generic/client", "/api/files/generic/client"),
         (Method::POST, "/api/files/generic/user", "/api/files/generic/user"),
+        (Method::DELETE, "/api/files/generic/user", "/api/files/generic/user"),
         (Method::POST, "/api/files/generic/resize", "/api/files/generic/resize"),
         (Method::POST, "/api/files/generic/convertToBase64", "/api/files/generic/convertToBase64"),
         (Method::POST, "/api/files/generic/convertToBase64WithDetails", "/api/files/generic/convertToBase64WithDetails"),
@@ -486,6 +487,39 @@ async fn picture_refusals() {
     let r = h.form("/api/files/generic/client", Some("cliaAdmin"), &[FormPart::Text("clientId", "11"), pic()]).await;
     assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(h.object(Kind::Static, "SYSTEM/_clientImages/11.png").is_some());
+}
+
+/// `DELETE generic/user`: the same caller rules as the upload, checked before the bucket is
+/// touched; an allowed call removes the object, then the row needs the database.
+#[tokio::test]
+async fn photo_removal_refusals() {
+    let h = manage().await;
+    h.sec.token("cliaAdmin", ca(501, 10, "CLIA", false, &["Authorities.Client_UPDATE", "Authorities.User_UPDATE"]));
+    let del = |uri: &'static str, token: &'static str| h.call(Method::DELETE, uri, Some(token));
+
+    let r = h.call(Method::DELETE, "/api/files/generic/user", Some("anon")).await;
+    assert_eq!((r.status, r.code()), (StatusCode::FORBIDDEN, "COMMON.SIGN_IN_REQUIRED".to_string()));
+    // Someone else's photo without User_UPDATE.
+    let r = del("/api/files/generic/user?userId=500", "child").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.message(), "Permission to SECURED resource in the path User Images is forbidden");
+    // With it, of a user whose client the caller does not manage.
+    let r = del("/api/files/generic/user?userId=142", "cliaAdmin").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    // Of a user security does not know.
+    let r = del("/api/files/generic/user?userId=7777", "cliaAdmin").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = del("/api/files/generic/user?userId=x", "cliaAdmin").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(h.s3_calls("DELETE"), 0);
+
+    // Allowed, one's own: the object goes, then the row needs the database.
+    h.put_object(Kind::Secured, "SYSTEM/_userImages/600.png", &png(4, 4));
+    h.put_object(Kind::Secured, "SYSTEM/_userImages/500.png", &png(4, 4));
+    let r = del("/api/files/generic/user", "child").await;
+    assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(h.object(Kind::Secured, "SYSTEM/_userImages/600.png").is_none());
+    assert!(h.object(Kind::Secured, "SYSTEM/_userImages/500.png").is_some());
 }
 
 #[tokio::test]
