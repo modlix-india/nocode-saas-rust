@@ -48,16 +48,23 @@ pub const PROTECTED_DATABASES: &[&str] = &[
 /// words, compared ignoring case. No client code is one of them, so no tenant database is lost.
 pub const PROTECTED_DATABASE_PREFIXES: &[&str] = &["mysql", "sys", "performance", "information", "entity"];
 
+/// A schema name safe to put between backticks in DDL: letters and digits of any script (Basic
+/// Multilingual Plane only, as MySQL identifiers are) and `_`, at most 64 characters. Client
+/// codes are the first letters of the client's name in whatever script it is written
+/// (`client_code_prefix`), so an ASCII-only rule left those clients with no tenant schema.
+pub fn is_usable_schema_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().count() <= 64 && name.chars().all(|c| c == '_' || (c.is_alphanumeric() && (c as u32) <= 0xFFFF))
+}
+
 /// Rust only, for the admin purge: whether `name` can be a tenant database
-/// (`<CLIENT>_<app>[_draft]`): ASCII letters, digits and `_`, at most 64 long, a client part of
-/// letters and digits before the first `_` and something after it, and not a protected name.
+/// (`<CLIENT>_<app>[_draft]`): a usable schema name, a client part of letters and digits
+/// before the first `_` and something after it, and not a protected name.
 pub fn is_tenant_database_name(name: &str) -> bool {
     let Some((client, rest)) = name.split_once('_') else { return false };
     !client.is_empty()
-        && client.bytes().all(|b| b.is_ascii_alphanumeric())
+        && client.chars().all(char::is_alphanumeric)
         && !rest.is_empty()
-        && name.len() <= 64
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && is_usable_schema_name(name)
         && !PROTECTED_DATABASES.iter().any(|p| p.eq_ignore_ascii_case(name))
         && !PROTECTED_DATABASE_PREFIXES.iter().any(|p| p.eq_ignore_ascii_case(client))
 }
@@ -432,7 +439,7 @@ mod tests {
 
     #[test]
     fn tenant_database_names() {
-        for ok in ["ZZPURGE1_zzpurgeapp", "ZZPURGE1_zzpurgeapp_draft", "SYSTEM_appbuilder", "ABC_my_app"] {
+        for ok in ["ZZPURGE1_zzpurgeapp", "ZZPURGE1_zzpurgeapp_draft", "SYSTEM_appbuilder", "ABC_my_app", "يوسفح_leadzumptwo", "夜夜_leadzumptwo_draft"] {
             assert!(is_tenant_database_name(ok), "{ok}");
         }
         for no in [
