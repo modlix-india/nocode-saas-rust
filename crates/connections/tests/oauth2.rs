@@ -544,3 +544,163 @@ async fn client_credentials_token_request_with_a_body_and_basic_authentication()
     assert!(e.message().contains("java.util.Map.forEach"), "{}", e.message());
     assert!(seen.lock().is_empty());
 }
+
+// ---------------------------------------------------------------- LZT-2106: whose token
+
+/// Security's hierarchy as pairs (managing, managed).
+struct Hierarchy(Vec<(&'static str, &'static str)>);
+#[async_trait]
+impl connections::notification::HierarchyChecks for Hierarchy {
+    async fn is_user_part_of_hierarchy(&self, _: i128, _: &str) -> ConnResult<bool> {
+        Ok(false)
+    }
+    async fn does_client_manage_client(&self, _: u64, _: i128) -> ConnResult<bool> {
+        Ok(false)
+    }
+    async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> ConnResult<bool> {
+        Ok(self.0.iter().any(|(m, c)| *m == managing && *c == client))
+    }
+}
+
+/// The intake's caller: SYSTEM's anonymous event runner inside a KIRun definition.
+fn system_event_runner() -> Caller {
+    Caller {
+        present: true,
+        authenticated: false,
+        user_id: Some(0),
+        client_code: Some("SYSTEM".into()),
+        url_client_code: Some("SYSTEM".into()),
+        url_app_code: Some("leadzumptwo".into()),
+        system_client: true,
+        authorities: vec!["Authorities._Anonymous".into(), "Authorities._Event_Runner".into()],
+        in_kirun: true,
+        ..Default::default()
+    }
+}
+
+fn signed_in(client: &str) -> Caller {
+    Caller {
+        client_code: Some(client.into()),
+        url_client_code: Some(client.into()),
+        user_id: Some(7),
+        ..caller()
+    }
+}
+
+fn client_token(client: &str, value: &str, clock: JavaClock) -> CoreToken {
+    CoreToken { client_code: Some(client.into()), is_lifetime_token: Some(true), expires_at: None, ..token(TokenType::Access, value, None, clock) }
+}
+
+/// The Authorization header the Graph call carried, or the error the call failed with.
+async fn meta_call(svc: &Connections, log: &Mutex<Vec<(String, String, Vec<(String, String)>)>>, caller: &Caller, client: &str) -> Result<String, String> {
+    log.lock().clear();
+    let request = RestRequest { url: "/1275441844766420".into(), ..Default::default() };
+    match connections::rest::do_call(svc, caller, Some("marketingai"), Some(client), "META_API", request, false).await {
+        Ok(r) => {
+            assert_eq!(r.status, 200, "{:?}", r.data);
+            let calls = log.lock().clone();
+            Ok(header(&calls.last().unwrap().2, "authorization").join(","))
+        }
+        Err(e) => Err(e.message().to_string()),
+    }
+}
+
+const DENIED: &str = "Access denied: Integration token unavailable or expired";
+
+#[tokio::test]
+async fn system_run_naming_a_client_uses_that_clients_token() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let (svc, tokens) = setup(connection(port, "AUTHORIZATION_CODE"));
+    tokens.create(&client_token("FIN", "fin-token", tokens.clock)).await.unwrap();
+
+    // Before LZT-2106 this looked up (SYSTEM, marketingai, META_API), found nothing and was denied.
+    let runner = system_event_runner();
+    assert_eq!(meta_call(&svc, &log, &runner, "FIN").await.as_deref(), Ok("Bearer fin-token"));
+    // A signed-in SYSTEM user's function the same.
+    let mut user = signed_in("SYSTEM");
+    user.system_client = true;
+    assert_eq!(meta_call(&svc, &log, &user, "FIN").await.as_deref(), Ok("Bearer fin-token"));
+    // A webhook run too.
+    let mut hook = system_event_runner();
+    hook.authorities = vec!["Authorities._Anonymous".into(), "Authorities._Webhook".into()];
+    assert_eq!(meta_call(&svc, &log, &hook, "FIN").await.as_deref(), Ok("Bearer fin-token"));
+
+    // SYSTEM naming itself (or naming no client) keeps its own token: none here, so denied.
+    assert_eq!(meta_call(&svc, &log, &runner, "SYSTEM").await, Err(DENIED.into()));
+    tokens.create(&client_token("SYSTEM", "system-token", tokens.clock)).await.unwrap();
+    // A fresh service, so nothing from the denied lookup is cached.
+    let svc = Connections::new(
+        ConnectionsConfig { block_private_targets: false, ..Default::default() },
+        Arc::new(OneConnection(connection(port, "AUTHORIZATION_CODE"))),
+        tokens.clone(),
+        platform::cache::CacheService::new("cmn", "evictionChannel", None).unwrap(),
+        Arc::new(NoFunctions),
+    );
+    assert_eq!(meta_call(&svc, &log, &runner, "SYSTEM").await.as_deref(), Ok("Bearer system-token"));
+    // Both tokens are cached under their own client: neither answers for the other.
+    assert_eq!(meta_call(&svc, &log, &runner, "FIN").await.as_deref(), Ok("Bearer fin-token"));
+    assert_eq!(meta_call(&svc, &log, &runner, "SYSTEM").await.as_deref(), Ok("Bearer system-token"));
+}
+
+#[tokio::test]
+async fn a_client_that_does_not_manage_the_named_client_never_gets_its_token() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let (svc, tokens) = setup(connection(port, "AUTHORIZATION_CODE"));
+    let svc = svc.with_hierarchy_checks(Arc::new(Hierarchy(vec![("PARENT", "FIN")])));
+    tokens.create(&client_token("FIN", "fin-token", tokens.clock)).await.unwrap();
+    tokens.create(&client_token("OTHER", "other-token", tokens.clock)).await.unwrap();
+
+    // OTHER names FIN: its own token, as before; FIN's is never sent.
+    let other = signed_in("OTHER");
+    assert_eq!(meta_call(&svc, &log, &other, "FIN").await.as_deref(), Ok("Bearer other-token"));
+    // The same for an event run of OTHER.
+    let mut other_run = system_event_runner();
+    other_run.system_client = false;
+    other_run.client_code = Some("OTHER".into());
+    assert_eq!(meta_call(&svc, &log, &other_run, "FIN").await.as_deref(), Ok("Bearer other-token"));
+    // A client with no token of its own is denied rather than handed FIN's.
+    assert_eq!(meta_call(&svc, &log, &signed_in("STRANGER"), "FIN").await, Err(DENIED.into()));
+    assert!(log.lock().iter().all(|(_, _, h)| !header(h, "authorization").contains(&"Bearer fin-token")));
+
+    // The client that manages FIN acts for it.
+    assert_eq!(meta_call(&svc, &log, &signed_in("PARENT"), "FIN").await.as_deref(), Ok("Bearer fin-token"));
+}
+
+#[tokio::test]
+async fn the_callers_own_client_is_unchanged() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let (svc, tokens) = setup(connection(port, "AUTHORIZATION_CODE"));
+    let svc = svc.with_hierarchy_checks(Arc::new(Hierarchy(vec![("FIN", "SUB")])));
+    tokens.create(&client_token("FIN", "fin-token", tokens.clock)).await.unwrap();
+    let fin = signed_in("FIN");
+    assert_eq!(meta_call(&svc, &log, &fin, "FIN").await.as_deref(), Ok("Bearer fin-token"));
+    // No client named: the caller's own.
+    log.lock().clear();
+    let r = connections::rest::do_call(&svc, &fin, Some("marketingai"), None, "META_API", RestRequest { url: "/me".into(), ..Default::default() }, false)
+        .await
+        .unwrap();
+    assert_eq!(r.status, 200);
+    assert_eq!(header(&log.lock()[0].2, "authorization"), vec!["Bearer fin-token"]);
+}
+
+#[tokio::test]
+async fn only_a_kirun_run_or_signed_in_caller_acts_for_another_client() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let port = server(log.clone()).await;
+    let (svc, tokens) = setup(connection(port, "AUTHORIZATION_CODE"));
+    tokens.create(&client_token("FIN", "fin-token", tokens.clock)).await.unwrap();
+
+    // CoreServices.REST.* executed straight over HTTP (no KIRun definition running): the HTTP
+    // caller chose the arguments, so SYSTEM's own token only.
+    let mut direct = system_event_runner();
+    direct.in_kirun = false;
+    assert_eq!(meta_call(&svc, &log, &direct, "FIN").await, Err(DENIED.into()));
+    // A browser's anonymous visitor on a SYSTEM site: neither a webhook nor an event run.
+    let mut visitor = system_event_runner();
+    visitor.authorities = vec!["Authorities._Anonymous".into()];
+    assert_eq!(meta_call(&svc, &log, &visitor, "FIN").await, Err(DENIED.into()));
+    assert!(log.lock().is_empty(), "no Graph call was made");
+}

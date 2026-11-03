@@ -30,6 +30,7 @@ use platform::cache::{CacheService, LocalCaches};
 
 use crate::connection::ConnectionStore;
 use crate::context::{AuthorityCheck, NoEvaluator};
+use crate::notification::HierarchyChecks;
 use crate::rest::auth::AuthTokenFunction;
 use crate::rest::http::HttpClient;
 use crate::tokens::{CoreToken, JavaClock, TokenStore};
@@ -77,6 +78,10 @@ pub struct Connections {
     /// [`Connections::with_authority_check`] supplies one, so an unset check refuses every
     /// non-blank expression.
     pub authority_check: Arc<dyn AuthorityCheck>,
+    /// Security's client hierarchy, which says whether the caller's client manages the client
+    /// a REST step names (so an OAuth2 call may use that client's token). Until
+    /// [`Connections::with_hierarchy_checks`] supplies it, only SYSTEM acts for another client.
+    pub hierarchy: Option<Arc<dyn HierarchyChecks>>,
     pub(crate) oauth_cache: Arc<LocalCaches<String, CoreToken>>,
     pub(crate) auth_cache: Arc<LocalCaches<String, AuthTokenTuple>>,
 }
@@ -97,6 +102,7 @@ impl Connections {
             auth_cache: cache.family(),
             clock,
             authority_check: Arc::new(NoEvaluator),
+            hierarchy: None,
             config,
             store,
             tokens,
@@ -108,6 +114,12 @@ impl Connections {
     /// Evaluates authority expressions (a connection's `consentAuth`) with `check`.
     pub fn with_authority_check(mut self, check: Arc<dyn AuthorityCheck>) -> Self {
         self.authority_check = check;
+        self
+    }
+
+    /// Answers "does this client manage that one" with `checks` (see [`Connections::hierarchy`]).
+    pub fn with_hierarchy_checks(mut self, checks: Arc<dyn HierarchyChecks>) -> Self {
+        self.hierarchy = Some(checks);
         self
     }
 }

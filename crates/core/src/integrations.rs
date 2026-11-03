@@ -422,15 +422,17 @@ impl Integrations {
         };
         let connection_docs = Arc::new(ConnectionDocs { source: docs.clone() });
         let auth_functions = Arc::new(AuthFunctions::default());
+        let checks = Arc::new(SecurityChecks { security: security.clone() });
         let connections = Arc::new(
             Connections::new(conn_cfg, connection_docs.clone(), tokens, cache, auth_functions.clone())
-                .with_authority_check(Arc::new(crate::authorities::KirunAuthorityCheck)),
+                .with_authority_check(Arc::new(crate::authorities::KirunAuthorityCheck))
+                .with_hierarchy_checks(checks.clone()),
         );
         Ok(Self {
             connections,
             connection_docs,
             templates: Arc::new(TemplateDocs { source: docs }),
-            checks: Arc::new(SecurityChecks { security: security.clone() }),
+            checks,
             downloads: files.map(|files| Arc::new(Downloads { security, files })),
             mq,
             auth_functions,
