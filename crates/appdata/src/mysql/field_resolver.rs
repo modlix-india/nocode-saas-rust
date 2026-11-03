@@ -20,6 +20,8 @@ pub struct FieldResolver {
     joins: IndexMap<String, JoinedTable>,
     sub_queries: IndexMap<String, SubQueryTable>,
     text_columns: IndexSet<String>,
+    /// BOOLEAN fields held in an integer column, so a truth test can be `= 1` / `= 0`.
+    boolean_columns: IndexSet<String>,
     stemming: bool,
 }
 
@@ -41,7 +43,24 @@ impl FieldResolver {
             joins,
             sub_queries,
             text_columns: IndexSet::new(),
+            boolean_columns: IndexSet::new(),
             stemming: true,
+        }
+    }
+
+    pub fn with_boolean_columns(mut self, boolean_columns: IndexSet<String>) -> FieldResolver {
+        self.boolean_columns = boolean_columns;
+        self
+    }
+
+    /// A whole BOOLEAN column of the parent or of a join: never a JSON path or a measure.
+    pub fn is_boolean(&self, name: &str) -> bool {
+        match name.split_once('.') {
+            None => self.boolean_columns.contains(&column_names::column(name)),
+            Some((head, tail)) if !tail.contains('.') => {
+                self.joins.get(head).is_some_and(|j| j.boolean_columns.contains(&column_names::column(tail)))
+            }
+            Some(_) => false,
         }
     }
 

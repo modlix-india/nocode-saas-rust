@@ -1233,6 +1233,27 @@ mod mysql_join_operations_integration_test {
                     .await
                     .unwrap();
                 assert_eq!(num(&named(&page, "Asha")["orders"].as_object().unwrap()["total"]), 300.0);
+                // SubQueries.leftReadPerRow: a LEFT subquery nothing filters or sorts on is read for
+                // the page's rows; a parent with no matching child keeps a null measure, as the join gave.
+                let left = r#"{"subQueries":[{"storage":"orders","relation":"customer","alias":"big","required":false,"condition":{"field":"amount","value":150,"operator":"GREATER_THAN"},"aggregations":[{"function":"COUNT","alias":"n"},{"function":"SUM","field":"amount","alias":"total"}]}],"count":true}"#;
+                let page = f.read(&cx(), &cu, left).await.unwrap();
+                assert_eq!((page.content.len(), page.total), (2, 2), "LEFT keeps every customer, and the count agrees");
+                let asha_big = named(&page, "Asha")["big"].as_object().expect("an object").clone();
+                assert_eq!((num(&asha_big["n"]), num(&asha_big["total"])), (1.0, 200.0));
+                let bo_big = named(&page, "Bo")["big"].as_object().expect("an object").clone();
+                assert!(bo_big["n"].is_null() && bo_big["total"].is_null(), "no children reads null, not 0: {bo_big:?}");
+                // SubQueries.leftFilteredOnItsMeasure: still joined, so the filter applies to page and count.
+                let page = f
+                    .read(&cx(), &cu, r#"{"subQueries":[{"storage":"orders","relation":"customer","alias":"orders","required":false}],"condition":{"field":"orders.count","value":1,"operator":"GREATER_THAN"},"count":true}"#)
+                    .await
+                    .unwrap();
+                assert_eq!((page.content.len(), page.total), (1, 1));
+                // SubQueries.leftSortedByItsMeasure
+                let page = f
+                    .read(&cx(), &cu, r#"{"subQueries":[{"storage":"orders","relation":"customer","alias":"orders","required":false}],"sort":[{"property":"orders.count","direction":"DESC"}]}"#)
+                    .await
+                    .unwrap();
+                assert_eq!(page.content[0]["name"], Value::from("Asha"));
                 // SubQueries.sortByChildCount
                 let page = f
                     .read(&cx(), &cu, r#"{"subQueries":[{"storage":"orders","relation":"customer","alias":"orders"}],"sort":[{"property":"orders.count","direction":"DESC"}]}"#)
