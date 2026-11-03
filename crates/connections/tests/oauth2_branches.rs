@@ -242,3 +242,93 @@ async fn callback_with_a_lifetime_token_and_no_refresh() {
     assert_eq!(rows.len(), 1, "no refresh token in the answer, no refresh row");
     assert_eq!((rows[0].expires_at, rows[0].is_lifetime_token), (None, Some(true)));
 }
+
+/// Security's hierarchy: `PARENT` manages `FIN`; `BROKEN` cannot be asked.
+struct Hierarchy;
+#[async_trait::async_trait]
+impl connections::notification::HierarchyChecks for Hierarchy {
+    async fn is_user_part_of_hierarchy(&self, _: i128, _: &str) -> connections::error::ConnResult<bool> {
+        Ok(false)
+    }
+    async fn does_client_manage_client(&self, _: u64, _: i128) -> connections::error::ConnResult<bool> {
+        Ok(false)
+    }
+    async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> connections::error::ConnResult<bool> {
+        if managing == "BROKEN" {
+            return Err(connections::error::ConnError::other("security is down"));
+        }
+        Ok(managing == "PARENT" && client == "FIN")
+    }
+}
+
+/// LZT-2106: which client's token a REST step uses, rule by rule.
+#[tokio::test]
+async fn token_client_rules() {
+    use connections::context::Caller;
+    use connections::rest::token_client;
+    let plain = service(vec![], Arc::new(MemTokens::default()), Functions::answering(None));
+    let svc = service(vec![], Arc::new(MemTokens::default()), Functions::answering(None)).with_hierarchy_checks(Arc::new(Hierarchy));
+    let as_client = |code: &str| {
+        let mut c = caller();
+        c.client_code = Some(code.into());
+        c
+    };
+    let mut system = as_client("SYSTEM");
+    system.system_client = true;
+
+    // SYSTEM acts for any client, hierarchy or not.
+    assert_eq!(token_client(&plain, &system.clone(), "FIN").await.unwrap().as_deref(), Some("FIN"));
+    assert_eq!(token_client(&svc, &system.clone(), "FIN").await.unwrap().as_deref(), Some("FIN"));
+    // A blank step client keeps the caller's own.
+    assert_eq!(token_client(&svc, &system.clone(), " ").await.unwrap().as_deref(), Some("SYSTEM"));
+    // A managing client acts for the client it manages, only with the hierarchy wired.
+    assert_eq!(token_client(&svc, &as_client("PARENT"), "FIN").await.unwrap().as_deref(), Some("FIN"));
+    assert_eq!(token_client(&plain, &as_client("PARENT"), "FIN").await.unwrap().as_deref(), Some("PARENT"));
+    // Anyone else keeps its own; its own client is unchanged.
+    assert_eq!(token_client(&svc, &as_client("OTHER"), "FIN").await.unwrap().as_deref(), Some("OTHER"));
+    assert_eq!(token_client(&svc, &as_client("FIN"), "FIN").await.unwrap().as_deref(), Some("FIN"));
+    assert_eq!(token_client(&svc, &as_client("FIN"), "PARENT").await.unwrap().as_deref(), Some("FIN"));
+    // Outside a KIRun run, or as a browser's anonymous visitor, never another client.
+    let mut direct = system.clone();
+    direct.in_kirun = false;
+    assert_eq!(token_client(&svc, &direct, "FIN").await.unwrap().as_deref(), Some("SYSTEM"));
+    let mut visitor = system.clone();
+    visitor.authenticated = false;
+    visitor.authorities = vec!["Authorities._Anonymous".into()];
+    assert_eq!(token_client(&svc, &visitor.clone(), "FIN").await.unwrap().as_deref(), Some("SYSTEM"));
+    visitor.authorities.push("Authorities._Event_Runner".into());
+    assert_eq!(token_client(&svc, &visitor, "FIN").await.unwrap().as_deref(), Some("FIN"));
+    // No caller, or a caller without a client: as before.
+    assert_eq!(token_client(&svc, &Caller::default(), "FIN").await.unwrap(), None);
+    let mut no_client = caller();
+    no_client.client_code = None;
+    assert_eq!(token_client(&svc, &no_client, "FIN").await.unwrap(), None);
+    // A hierarchy that cannot answer fails the call rather than guessing.
+    assert_eq!(token_client(&svc, &as_client("BROKEN"), "FIN").await.unwrap_err().message(), "security is down");
+}
+
+/// The named client's token is refreshed, revoked and stored under that client.
+#[tokio::test]
+async fn refresh_for_the_named_client() {
+    let (port, log) = server(vec![Canned::json(200, r#"{"access_token":"fin-fresh","expires_in":600}"#), Canned::json(200, "{}")]).await;
+    let tokens = Arc::new(MemTokens::default());
+    let fin = |t: CoreToken| CoreToken { client_code: Some("FIN".into()), ..t };
+    tokens.create(&fin(token(&tokens, TokenType::Access, "fin-old", Some(-5)))).await.unwrap();
+    tokens.create(&fin(token(&tokens, TokenType::Refresh, "fin-refresh", None))).await.unwrap();
+    let conn = oauth(port, "AUTHORIZATION_CODE", json!({}));
+    let svc = service(vec![conn], tokens.clone(), Functions::answering(None));
+    let mut c = caller();
+    c.system_client = true;
+    let r = connections::rest::do_call(&svc, &c, Some("app"), Some("FIN"), "oa", RestRequest { url: "/x".into(), ..Default::default() }, false)
+        .await
+        .unwrap();
+    assert_eq!(r.status, 200);
+    let seen = log.lock().clone();
+    assert!(seen[0].starts_with("GET /token?refresh_token=fin-refresh "), "{}", seen[0]);
+    assert!(seen[1].to_lowercase().contains("authorization: fin-fresh"));
+    let rows = tokens.rows.lock().clone();
+    assert_eq!(rows[0].is_revoked, Some(true), "FIN's old access token revoked");
+    let fresh = rows.iter().find(|t| t.token.as_deref() == Some("fin-fresh")).unwrap();
+    assert_eq!(fresh.client_code.as_deref(), Some("FIN"));
+    assert!(rows.iter().all(|t| t.client_code.as_deref() == Some("FIN")), "nothing stored under SYSTEM");
+}

@@ -39,7 +39,7 @@ pub fn cache_key(connection_name: Option<&str>, client_code: Option<&str>, app_c
 }
 
 /// The app whose tokens a call uses: the app owning the connection, or the caller's URL app
-/// when the connection has none. The client stays the caller's own.
+/// when the connection has none. The client is chosen apart ([`super::token_client`]).
 pub fn token_app_code(conn: Option<&Connection>, caller: Option<&Caller>) -> Option<String> {
     if let Some(app) = conn.and_then(|c| c.app_code.as_deref()).filter(|a| !java::is_blank(a)) {
         return Some(app.to_string());
@@ -56,10 +56,25 @@ fn details_map<'a>(conn: &'a Connection, key: &str) -> Option<&'a Map<String, Va
 }
 
 /// `OAuth2RestService.call`: a token, then the basic call with `Authorization` (and the
-/// connection's `headers`) added to the request's headers.
+/// connection's `headers`) added to the request's headers. The token is the caller's own
+/// client's, as in Java; [`super::do_call`] uses [`call_with_token_client`].
 pub async fn call(
     svc: &Connections,
     caller: &Caller,
+    conn: &Connection,
+    request: RestRequest,
+    file_download: bool,
+) -> ConnResult<Option<RestResponse>> {
+    call_with_token_client(svc, caller, caller.client_code.as_deref(), conn, request, file_download).await
+}
+
+/// [`call`] with the token of `token_client`, which [`super::token_client`] chose: the caller's
+/// own client, or the client the REST step names when the caller may act for it. The token
+/// lookup, its cache key and a refresh all use that client.
+pub async fn call_with_token_client(
+    svc: &Connections,
+    caller: &Caller,
+    token_client: Option<&str>,
     conn: &Connection,
     mut request: RestRequest,
     file_download: bool,
@@ -68,7 +83,7 @@ pub async fn call(
         return Err(npe("com.fincity.saas.commons.security.jwt.ContextAuthentication.getClientCode()"));
     }
     let app = token_app_code(Some(conn), Some(caller));
-    let token = access_token(svc, caller, app.as_deref(), caller.client_code.as_deref(), conn).await?;
+    let token = access_token(svc, caller, app.as_deref(), token_client, conn).await?;
 
     let prefix = conn.detail(AUTH_HEADER_PREFIX).filter(|v| !v.is_null()).map(java::to_java_string);
     let token_text = token.unwrap_or_else(|| "null".into());

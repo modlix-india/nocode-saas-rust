@@ -20,6 +20,7 @@ use crate::connection::{self, ConnectionSubType, ConnectionType};
 use crate::context::Caller;
 use crate::error::ConnResult;
 use crate::java::json;
+use crate::rest::call::{EVENT_RUNNER_AUTHORITY, WEBHOOK_AUTHORITY};
 use crate::Connections;
 
 /// `RestRequest`.
@@ -137,7 +138,10 @@ pub async fn do_call(
 
     let response = match conn.connection_sub_type {
         Some(ConnectionSubType::RestApiBasic) => basic::call(svc, &conn, request, file_download).await?,
-        Some(ConnectionSubType::RestApiOAuth2) => oauth2::call(svc, caller, &conn, request, file_download).await?,
+        Some(ConnectionSubType::RestApiOAuth2) => {
+            let token_client = token_client(svc, caller, &client).await?;
+            oauth2::call_with_token_client(svc, caller, token_client.as_deref(), &conn, request, file_download).await?
+        }
         Some(ConnectionSubType::RestApiAuth) => auth::call(svc, caller, &conn, request, file_download).await?,
         // `Mono.just(services.get(subType))` with no service for the sub type: Reactor's
         // null check fails with this message.
@@ -148,4 +152,33 @@ pub async fn do_call(
     Ok(response.unwrap_or_else(|| {
         RestResponse::message(StatusCode::INTERNAL_SERVER_ERROR, format!("No response from connection {connection_name}"))
     }))
+}
+
+/// The client whose OAuth2 token a REST step uses (LZT-2106). Java always used the caller's own
+/// client, so a SYSTEM run (an anonymous webhook, a scheduled `_Event_Runner` intake) naming
+/// FIN's connection looked up SYSTEM's token and failed. Here the step's client is used instead
+/// when every one of these holds; otherwise the caller's own client, exactly as before:
+/// - the step names a client other than the caller's;
+/// - the step runs inside a stored KIRun definition (`in_kirun`), never a direct HTTP execution
+///   of `CoreServices.REST.*`, whose arguments the HTTP caller chooses;
+/// - the caller is signed in, or is a webhook or event run (`_Webhook`, `_Event_Runner`), never
+///   a browser's anonymous visitor (the same callers [`call::Downloader::of`] accepts);
+/// - the caller's client is SYSTEM, or manages the step's client in security's hierarchy.
+pub async fn token_client(svc: &Connections, caller: &Caller, step_client: &str) -> ConnResult<Option<String>> {
+    let own = caller.client_code.clone();
+    let Some(own_code) = own.as_deref() else { return Ok(own) };
+    if !caller.present || own_code == step_client || crate::java::is_blank(step_client) || !caller.in_kirun {
+        return Ok(own);
+    }
+    let acts_as_itself = caller.authenticated || caller.has_authority(WEBHOOK_AUTHORITY) || caller.has_authority(EVENT_RUNNER_AUTHORITY);
+    if !acts_as_itself {
+        return Ok(own);
+    }
+    if caller.system_client {
+        return Ok(Some(step_client.to_string()));
+    }
+    match svc.hierarchy.as_deref() {
+        Some(h) if h.does_client_manage_client_code(own_code, step_client).await? => Ok(Some(step_client.to_string())),
+        _ => Ok(own),
+    }
 }
