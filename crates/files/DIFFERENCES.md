@@ -171,6 +171,13 @@ split. A missing file's empty 404 stays empty.
   its objects and rows, and the app's retention rules; SYSTEM with `Application_DELETE` only.
   Answers `{dryRun, objects: {STATIC|SECURED: n}, rows: {table: n}, errors}`; refusals are
   `FILES.PURGE_FORBIDDEN` (403) and `FILES.PURGE_BAD_CODE` (400).
+- **Removing a user's photo (new, 2026-11-03, no Java counterpart).** `DELETE /api/files/generic/user`
+  (optional `?userId=`) deletes `SYSTEM/_userImages/<id>.png` from the secured bucket and its row,
+  then evicts SYSTEM's secured caches. Same caller rules as the upload: one's own needs nothing
+  more; another user's needs `User_UPDATE` and the caller's client managing that user's client,
+  else the `User Images` 403. Answers `true` when a photo was removed, `false` when there was
+  none. A tenant user cannot do this through `DELETE /secured/**` (no write access to SYSTEM's
+  folder); the My profile page's Remove photo uses it (CXZ-1327).
 
 ## Known, kept
 
