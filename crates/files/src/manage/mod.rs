@@ -3,7 +3,7 @@
 //! | Spring pattern | Handler |
 //! |---|---|
 //! | `GET/DELETE/POST /api/files/{static,secured}/**`, `.../directory/**`, `.../import/**`, `.../export/**`, `.../exports`, `.../imports`, `/static/copyToClientPage`, `/secured/createKey/**` | [`resources`] |
-//! | `POST /api/files/transform/{resourceType}/**`, `/api/files/generic/*` | [`generic`] |
+//! | `POST /api/files/transform/{resourceType}/**`, `/api/files/generic/*`, `DELETE /api/files/generic/user` | [`generic`] |
 //! | `/api/files/internal/*` (bar the file read) | [`internal`] |
 //! | `/api/files/accesspath/**`, `/api/files/retention/**` | here |
 //!
@@ -44,6 +44,8 @@ enum Route {
     Transform(Kind),
     GenericClient,
     GenericUser,
+    /// `DELETE generic/user`: removes a user's picture (no Java twin).
+    GenericUserDelete,
     GenericResize,
     GenericPopulate,
     GenericBase64,
@@ -105,7 +107,7 @@ impl Route {
             CreateKey => "/api/files/secured/createKey/**",
             Transform(_) => "/api/files/transform/{resourceType}/**",
             GenericClient => "/api/files/generic/client",
-            GenericUser => "/api/files/generic/user",
+            GenericUser | GenericUserDelete => "/api/files/generic/user",
             GenericResize => "/api/files/generic/resize",
             GenericPopulate => "/api/files/generic/internal/fs/populate",
             GenericBase64 => "/api/files/generic/convertToBase64",
@@ -200,6 +202,9 @@ fn route(method: &Method, rest: &str) -> Option<Route> {
     }
 
     if let Some(g) = rest.strip_prefix("generic/") {
+        if g == "user" && method == Method::DELETE {
+            return Some(GenericUserDelete);
+        }
         return match (g, post, get) {
             ("client", true, _) => Some(GenericClient),
             ("user", true, _) => Some(GenericUser),
@@ -354,6 +359,7 @@ async fn handle(st: AppState, r: Route, uri: String, req: Request) -> AppResult<
         Transform(k) => generic::transform(&mut cx, k, req).await,
         GenericClient => generic::client_image(&mut cx, req).await,
         GenericUser => generic::user_image(&mut cx, req).await,
+        GenericUserDelete => generic::remove_user_image(&cx).await,
         GenericResize => generic::resize(&mut cx, req).await,
         GenericPopulate => generic::populate(&cx).await,
         GenericBase64 => generic::base64(&mut cx, req, false).await,
@@ -506,6 +512,12 @@ mod tests {
         assert_eq!(r(Method::GET, "retention/effective"), Some(RetentionEffective));
         assert_eq!(r(Method::PUT, "retention/3"), Some(RetentionUpdate("3".into())));
         assert_eq!(r(Method::GET, "generic/internal/fs/populate"), Some(GenericPopulate));
+        assert_eq!(r(Method::POST, "generic/user"), Some(GenericUser));
+        assert_eq!(r(Method::DELETE, "generic/user"), Some(GenericUserDelete));
+        assert_eq!(GenericUserDelete.template(), "/api/files/generic/user");
+        assert_eq!(r(Method::DELETE, "generic/client"), None);
+        assert_eq!(r(Method::DELETE, "generic/user/5"), None);
+        assert_eq!(r(Method::GET, "generic/user"), None);
         assert!(GenericPopulate.is_public() && !List(Kind::Static).is_public());
     }
 }

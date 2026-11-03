@@ -678,6 +678,21 @@ async fn pictures_are_named_by_id() {
         let call = h.sec.calls.lock().unwrap().iter().rev().find(|c| c.contains("isUserClientManageClient")).cloned().unwrap();
         assert!(call.contains("userId=501") && call.contains("userClientId=10") && call.contains("targetClientId=11"), "{call}");
 
+        // Removing: one's own, then a managed user's; a second removal finds nothing.
+        let r = h.call(Method::DELETE, "/api/files/generic/user", Some("clia")).await;
+        assert_eq!((r.status, r.text()), (StatusCode::OK, "true".to_string()));
+        assert!(h.object(Kind::Secured, "SYSTEM/_userImages/500.png").is_none());
+        let r = h.call(Method::DELETE, "/api/files/generic/user?userId=500", Some("clia")).await;
+        assert_eq!((r.status, r.text()), (StatusCode::OK, "false".to_string()));
+        let r = h.call(Method::DELETE, "/api/files/generic/user?userId=600", Some("clia")).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN);
+        assert!(h.object(Kind::Secured, "SYSTEM/_userImages/600.png").is_some());
+        let r = h.call(Method::DELETE, "/api/files/generic/user?userId=600", Some("cliaAdmin")).await;
+        assert_eq!((r.status, r.text()), (StatusCode::OK, "true".to_string()));
+        assert!(h.object(Kind::Secured, "SYSTEM/_userImages/600.png").is_none());
+        let r = h.get("/api/files/secured/file/SYSTEM/_userImages/600.png", Some("cliaAdmin")).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
+
         // Overwriting drops the disk copy: the next read is the new picture.
         let first = h.get("/api/files/static/file/SYSTEM/_clientImages/10.png", None).await;
         assert_eq!(image::load_from_memory(&first.body).unwrap().width(), 4);

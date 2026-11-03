@@ -171,18 +171,11 @@ pub async fn client_image(cx: &mut Ctx, req: Request) -> AppResult<Response> {
     })
 }
 
-/// `POST /api/files/generic/user`: a user's picture at `SYSTEM/_userImages/<userId>.png`
-/// (secured). Your own needs nothing more; another's needs `User_UPDATE` and your client
-/// managing theirs.
-pub async fn user_image(cx: &mut Ctx, req: Request) -> AppResult<Response> {
-    let ca = cx.ca().clone();
-    let dir = TempDir::new(&cx.st, "user").map_err(AppError::Internal)?;
-    let mut form = read_form(req, &dir.path).await?;
-    cx.params.extend(form.texts.clone());
-    let d = details(&form)?;
-    let user_id = super::opt_i64(&cx.params, "userId")?.map(|v| v as u64);
-    let part = form.take_file("file").ok_or_else(|| missing("file"))?;
-
+/// Whose picture a `generic/user` call may touch: the caller's own (no `userId`, or the caller's
+/// id) needs nothing more; another user's needs `User_UPDATE` and the caller's client managing
+/// that user's client. Anything else is the `User Images` 403.
+async fn picture_owner(cx: &Ctx, user_id: Option<u64>) -> AppResult<u64> {
+    let ca = cx.ca();
     let uid = match user_id {
         None => Some(ca.user.id),
         Some(u) if u == ca.user.id => Some(u),
@@ -207,7 +200,25 @@ pub async fn user_image(cx: &mut Ctx, req: Request) -> AppResult<Response> {
             }
         }
     };
-    let Some(uid) = uid else { return Err(forbidden_path(Kind::Secured, "User Images")) };
+    uid.ok_or_else(|| forbidden_path(Kind::Secured, "User Images"))
+}
+
+/// The secured key of a user's picture.
+fn picture_key(uid: u64) -> String {
+    format!("SYSTEM/_userImages/{uid}.png")
+}
+
+/// `POST /api/files/generic/user`: a user's picture at `SYSTEM/_userImages/<userId>.png`
+/// (secured). Your own needs nothing more; another's needs `User_UPDATE` and your client
+/// managing theirs.
+pub async fn user_image(cx: &mut Ctx, req: Request) -> AppResult<Response> {
+    let dir = TempDir::new(&cx.st, "user").map_err(AppError::Internal)?;
+    let mut form = read_form(req, &dir.path).await?;
+    cx.params.extend(form.texts.clone());
+    let d = details(&form)?;
+    let user_id = super::opt_i64(&cx.params, "userId")?.map(|v| v as u64);
+    let part = form.take_file("file").ok_or_else(|| missing("file"))?;
+    let uid = picture_owner(cx, user_id).await?;
     let img = transform_image(decode(&bytes_of(&part.file.path).await?)?, true, &d)?;
     let name = format!("{uid}.png");
     let fd = store_image(cx, Kind::Secured, &dir, "SYSTEM", "_userImages", Some(&name), &name, encode(&img, true)?, true).await?;
@@ -215,6 +226,18 @@ pub async fn user_image(cx: &mut Ctx, req: Request) -> AppResult<Response> {
         Some(d) => json(&DetailOut::of(&d).with_creation_paths(Kind::Secured, "/_userImages", "SYSTEM").json()),
         None => jackson::text(""),
     })
+}
+
+/// `DELETE /api/files/generic/user[?userId=]`: removes a user's picture, the mirror of
+/// [`user_image`] with the same caller rules. `true` when a picture was removed, `false` when
+/// there was none. The pages then show the user's initial instead.
+pub async fn remove_user_image(cx: &Ctx) -> AppResult<Response> {
+    let user_id = super::opt_i64(&cx.params, "userId")?.map(|v| v as u64);
+    let uid = picture_owner(cx, user_id).await?;
+    let fs = Fs::new(&cx.st, Kind::Secured);
+    let deleted = fs.delete(&picture_key(uid)).await.app()?;
+    fs.evict("SYSTEM").await;
+    Ok(json(&Value::Bool(deleted)))
 }
 
 /// `POST /api/files/generic/resize`: the edited image straight back (jpg, jpeg and png only).
