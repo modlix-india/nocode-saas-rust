@@ -100,12 +100,14 @@ pub(crate) async fn handle(cx: &Ctx, kind: &str, code: &str) -> AppResult<Respon
 }
 
 /// The object-key prefixes and the client of each, per bucket: `<client>/` for a client; for an
-/// app, `<client>/<app>/` for every client holding a root folder of that name.
-async fn prefixes(cx: &Ctx, target: &Target, kind: Kind, r: &mut Report) -> Vec<(String, String)> {
+/// app, `<client>/<app>/` for every client holding a root folder of exactly that name, with the
+/// folder's id. The rows below are deleted from that id: a name lookup without case would take
+/// another folder (2026-11-04 on local: `marketingai` removed SYSTEM's shared `MarketingAI`).
+async fn prefixes(cx: &Ctx, target: &Target, kind: Kind, r: &mut Report) -> Vec<(String, String, Option<u64>)> {
     match target {
-        Target::Client(c) => vec![(c.clone(), format!("{c}/"))],
+        Target::Client(c) => vec![(c.clone(), format!("{c}/"), None)],
         Target::App(a) => match cx.st.dao().read_app_root_folders(kind, a).await {
-            Ok(rows) => rows.into_iter().map(|(cc, _)| (cc.clone(), format!("{cc}/{a}/"))).collect(),
+            Ok(rows) => rows.into_iter().map(|(cc, id)| (cc.clone(), format!("{cc}/{a}/"), Some(id))).collect(),
             Err(e) => {
                 r.errors.push(format!("{}: app folders: {e:#}", kind.db_name()));
                 Vec::new()
@@ -119,7 +121,7 @@ async fn run(cx: &Ctx, target: &Target, dry: bool) -> Report {
     let mut touched: Vec<String> = Vec::new();
     for kind in [Kind::Static, Kind::Secured] {
         let store = cx.st.store(kind);
-        for (cc, prefix) in prefixes(cx, target, kind, &mut r).await {
+        for (cc, prefix, folder) in prefixes(cx, target, kind, &mut r).await {
             let objects = match store.list_objects(&prefix).await {
                 Ok(o) => o,
                 Err(e) => {
@@ -145,10 +147,9 @@ async fn run(cx: &Ctx, target: &Target, dry: bool) -> Report {
             // The rows: the client's whole tree, or the app folder and everything under it.
             let rows = match target {
                 Target::Client(c) => tree_rows(cx, kind, c, None, dry).await,
-                Target::App(a) => match cx.st.dao().read_root_folder_id(kind, &cc, a).await {
-                    Ok(Some(id)) => tree_rows(cx, kind, &cc, Some(id), dry).await,
-                    Ok(None) => Ok(0),
-                    Err(e) => Err(e),
+                Target::App(_) => match folder {
+                    Some(id) => tree_rows(cx, kind, &cc, Some(id), dry).await,
+                    None => Ok(0),
                 },
             };
             match rows {
