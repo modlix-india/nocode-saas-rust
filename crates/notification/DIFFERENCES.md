@@ -191,6 +191,8 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   digit strings) or `{"all": true}` marks the caller's own unread rows in that app and answers
   `{"read": <rows changed>}`; other users' rows and other apps are left alone; a body naming
   neither is a 400 `COMMON.PARAM_MISSING`, ids that are not whole numbers a 400.
+  `GET /notifications?unread=true` lists only the rows not yet read, newest first and paged as
+  usual (any other value, or none, lists all as Java did; LoopZump LZ-788 "Unread only", 2026-11-04).
 - **N18. One failed send never stops the others** (Kiran, 2026-11-02: "We cannot drop others
   emails just one fails"). Java ended the run at the first mail the email service refused, so the
   later recipients, the in-app rows and (now) the push were lost, and the message was acked. Each

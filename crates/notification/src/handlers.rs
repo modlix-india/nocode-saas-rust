@@ -2,7 +2,7 @@
 //!
 //! | Route | Answer |
 //! |---|---|
-//! | `GET /api/notification/notifications` | a page of the caller's in-app notifications (marked read, unless `markRead=false`) |
+//! | `GET /api/notification/notifications` | a page of the caller's in-app notifications (marked read, unless `markRead=false`; only the unread ones with `unread=true`, Rust only) |
 //! | `GET /api/notification/subscribe?appCode=` | the SSE stream (`init`, then `notification` events and keepalives) |
 //! | `GET /api/notification/new` | the caller's unread count |
 //! | `POST /api/notification/read?appCode=` | marks the caller's `{"ids": [...]}` or `{"all": true}` read (Rust only) |
@@ -243,9 +243,10 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             let app = params.string("appCode").or_else(|| header_str(req.headers(), "appcode"));
             let pageable = Pageable::from_params(&params);
             let mark_read = !params.string("markRead").is_some_and(|v| v.eq_ignore_ascii_case("false"));
+            let unread = params.string("unread").is_some_and(|v| v.eq_ignore_ascii_case("true"));
             let page = st
                 .inapp
-                .read(app.as_deref(), params.string("type").as_deref(), params.string("category").as_deref(), &pageable, uid, mark_read)
+                .read(app.as_deref(), params.string("type").as_deref(), params.string("category").as_deref(), &pageable, uid, mark_read, unread)
                 .await
                 .map_err(internal_error)?;
             Ok(json_body(&page))
