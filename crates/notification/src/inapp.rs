@@ -95,7 +95,9 @@ impl InAppService {
 
     /// `readNotifications`: one page, newest first; the rows returned are then marked read
     /// (the page still shows them as they were before), unless `mark_read` is false (Rust only:
-    /// an app that marks each row read itself, through [`Self::mark_read`]).
+    /// an app that marks each row read itself, through [`Self::mark_read`]). `unread_only` lists
+    /// only the rows not yet read (Rust only).
+    #[allow(clippy::too_many_arguments)]
     pub async fn read(
         &self,
         app_code: Option<&str>,
@@ -104,12 +106,13 @@ impl InAppService {
         pageable: &Pageable,
         user_id: u64,
         mark_read: bool,
+        unread_only: bool,
     ) -> Result<Value> {
         let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else {
             return Ok(page_json(Vec::new(), pageable));
         };
         let filter = InAppFilter { app_code, user_id, notification_type: not_blank(notification_type), category: not_blank(category) };
-        let rows = self.dao.page(&filter, pageable.size, pageable.offset()).await?;
+        let rows = self.dao.page(&filter, unread_only, pageable.size, pageable.offset()).await?;
         if mark_read && !rows.is_empty() {
             let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
             self.dao.mark_read(&ids).await?;
