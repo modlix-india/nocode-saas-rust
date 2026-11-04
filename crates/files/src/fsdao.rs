@@ -511,11 +511,13 @@ impl Dao {
         Ok(())
     }
 
-    /// `readAppRootFolders`: clients with an `<appCode>` folder at their root, with its id.
+    /// `readAppRootFolders`: clients with an `<appCode>` folder at their root, with its id. The name
+    /// matches exactly (`BINARY`): NAME is `utf8mb4_unicode_ci`, and the object keys these folders
+    /// stand for are case-sensitive, so `marketingai` must not find SYSTEM's shared `MarketingAI`.
     pub async fn read_app_root_folders(&self, kind: Kind, app_code: &str) -> Result<Vec<(String, u64)>> {
         let rows = sqlx::query(
             "SELECT CODE, ID FROM files_file_system WHERE TYPE = ? AND FILE_TYPE = 'DIRECTORY' \
-             AND PARENT_ID IS NULL AND NAME = ? ORDER BY CODE ASC",
+             AND PARENT_ID IS NULL AND BINARY NAME = ? ORDER BY CODE ASC",
         )
         .bind(kind.db_name())
         .bind(app_code)

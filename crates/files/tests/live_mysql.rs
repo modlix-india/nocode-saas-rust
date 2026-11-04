@@ -1123,6 +1123,10 @@ async fn dao_corners() {
         // Two root folders named like the app: the client is listed once.
         exec(&pool, "INSERT INTO files_file_system (TYPE, CODE, NAME, FILE_TYPE) VALUES ('STATIC', 'C1', 'app', 'DIRECTORY'), ('STATIC', 'C1', 'app', 'DIRECTORY')").await;
         assert_eq!(dao.read_app_root_folders(Kind::Static, "app").await.unwrap().len(), 1);
+        // A root folder whose name differs only in case is another folder (the purge of app
+        // marketingai must not reach SYSTEM's shared MarketingAI folder).
+        exec(&pool, "INSERT INTO files_file_system (TYPE, CODE, NAME, FILE_TYPE) VALUES ('STATIC', 'C3', 'App', 'DIRECTORY')").await;
+        assert_eq!(dao.read_app_root_folders(Kind::Static, "app").await.unwrap().len(), 1);
         // No authorities: only the user's own rules count.
         exec(&pool, "INSERT INTO files_access_path (CLIENT_CODE, USER_ID, RESOURCE_TYPE, PATH, WRITE_ACCESS, ALLOW_SUB_PATH_ACCESS) VALUES ('C1', 5, 'SECURED', '/s', 1, 1), ('C1', 5, 'STATIC', 'p', 1, 1)").await;
         assert!(dao.has_secured_path_read_access("/s/a", 5, "C1", &[]).await.unwrap());
