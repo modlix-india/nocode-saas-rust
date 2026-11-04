@@ -281,9 +281,10 @@ impl Dao {
         Ok(q.fetch_one(&self.pool).await?.try_get::<i64, _>(0)?)
     }
 
-    /// `readNotifications`' select: newest first, one page.
-    pub async fn page(&self, f: &InAppFilter<'_>, limit: i64, offset: i64) -> Result<Vec<InAppRow>> {
-        let (cond, binds) = Self::filtered(f, false);
+    /// `readNotifications`' select: newest first, one page; only the unread rows when
+    /// `unread_only` (Rust only).
+    pub async fn page(&self, f: &InAppFilter<'_>, unread_only: bool, limit: i64, offset: i64) -> Result<Vec<InAppRow>> {
+        let (cond, binds) = Self::filtered(f, unread_only);
         let sql = format!("SELECT {INAPP_COLUMNS} FROM notification_inapp{cond} ORDER BY CREATED_AT DESC LIMIT ? OFFSET ?");
         let mut q = sqlx::query(&sql);
         for b in binds {

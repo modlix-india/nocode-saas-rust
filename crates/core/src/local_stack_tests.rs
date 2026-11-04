@@ -2,7 +2,7 @@
 //! entity-processor, as `config/core-exec.toml` names them, with the secrets of
 //! `config/local.toml` in the environment. They only read: the definitions they execute are the
 //! local ones (appbuilder `Test.fibonacci`, leadzumptwo `LeadZumpV2.wzHoldText`, leadzump's
-//! entity-processor and marketingai dependency), nothing is written.
+//! entity-processor, leadzumptwo's hrms dependency), nothing is written.
 //!
 //! Run: `eval "$(tools/local-env.py)"; CORE_LOCAL_STACK=1 cargo test -p core -- --include-ignored`.
 //!
@@ -175,12 +175,12 @@ async fn serves_every_route_on_the_local_stack() {
     let lz = caller("leadzump");
     let a = c.post(&format!("{ex}/EntityProcessor.Campaign/ReadPageFilter"), &lz, Some(r#"{"pageable":{"page":0,"size":1}}"#)).await;
     assert_eq!(a.status, StatusCode::OK, "{}", a.text);
-    // Found through the marketingai dependency; with a wrong verify token it raises no event,
-    // as it does in Java.
-    let a = c.get(&format!("{ex}/MarketingAI/verifyLeadgen?hubChallenge=5&hubMode=subscribe&hubVerifyToken=x"), &lz).await;
-    assert_eq!(a.status, StatusCode::INTERNAL_SERVER_ERROR);
-    // KIRun's own text first; the steps it came out of (if any) follow on their own lines.
-    assert!(a.json()["debugMessage"].as_str().is_some_and(|d| d.lines().next() == Some("No events raised")), "{}", a.text);
+    // Found through leadzumptwo's hrms dependency (not found would be 404): its executeAuth
+    // (Authorities.Logged_IN since 2026-11-04) refuses an anonymous caller. marketingai, the
+    // dependency this used to go through, was removed on 2026-11-04.
+    let a = c.post(&format!("{ex}/hrms/getUserProfileByIdTest"), &caller("leadzumptwo"), Some("{}")).await;
+    assert_eq!(a.status, StatusCode::FORBIDDEN, "{}", a.text);
+    assert_eq!(a.json()["code"], json!("CORE.FORBIDDEN_EXECUTION"));
 
     // repositoryFind / repositoryFilter.
     let f = "/api/core/functions";
@@ -254,11 +254,11 @@ async fn executes_with_the_execution_authority() {
     .unwrap();
     assert!(out.starts_with("[{\"name\":\"output\""));
 
-    // A function leadzump reaches through its marketingai dependency belongs to marketingai.
-    let repo = app_function_repository(&exec.state.inner().definitions, "leadzump", "SYSTEM").await.unwrap();
-    let f = repo.find(Some("MarketingAI"), "verifyLeadgen").await.unwrap().unwrap();
+    // A function leadzumptwo reaches through its hrms dependency belongs to hrms.
+    let repo = app_function_repository(&exec.state.inner().definitions, "leadzumptwo", "SYSTEM").await.unwrap();
+    let f = repo.find(Some("hrms"), "getUserProfileById").await.unwrap().unwrap();
     let d = f.as_any().unwrap().downcast_ref::<crate::repos::definition::DefinitionFunction>().unwrap();
-    assert_eq!(d.owner_app_code(), Some("marketingai"));
+    assert_eq!(d.owner_app_code(), Some("hrms"));
 }
 
 /// The app repositories and the remote-repository lookup, read directly.
@@ -291,8 +291,8 @@ async fn reads_definitions_and_remote_repositories() {
     assert!(defs.filter(&FunctionDoc, "appbuilder", "SYSTEM", "Test").await.unwrap().len() >= 1);
     assert!(defs.store().db().name() == "core");
 
-    let deps = defs.dependencies("leadzump").await.unwrap();
-    assert!(deps.contains(&"marketingai".to_string()));
+    let deps = defs.dependencies("leadzumptwo").await.unwrap();
+    assert!(deps.contains(&"hrms".to_string()));
     assert!(app_schema_repository(&defs, "leadzump", "SYSTEM").await.unwrap().filter("").await.is_ok());
     assert!(app_schema_repository(&defs, "appbuilder", "SYSTEM").await.unwrap().find(Some("Test"), "UserRecord").await.unwrap().is_some());
 
