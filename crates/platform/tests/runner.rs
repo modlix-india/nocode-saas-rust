@@ -63,6 +63,7 @@ async fn serves_observes_and_shuts_down() {
             trace_sample_ratio: 1.0,
             environment: "test".into(),
             instance: "i1".into(),
+            slow_request_ms: 1000,
         },
     )
     .unwrap();

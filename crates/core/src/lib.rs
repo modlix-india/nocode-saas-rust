@@ -259,6 +259,7 @@ pub(crate) fn storage_service(
                 default_username: Some(db.username.clone()),
                 default_password: Some(db.password.clone()),
                 retention,
+                slow_statement_ms: a.slow_statement_ms,
                 ..Default::default()
             },
             hooks,
