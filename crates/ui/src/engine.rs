@@ -152,7 +152,8 @@ impl<'a> Engine<'a> {
                 else {
                     return Ok::<_, anyhow::Error>(None);
                 };
-                let Some(merged) = store.read_drafted(&ApplicationDoc, &stored, draft, cc).await? else {
+                let drafts_of = overridable::Store::draft_client(&stored, url_cc, cc);
+                let Some(merged) = store.read_drafted(&ApplicationDoc, &stored, draft, drafts_of).await? else {
                     return Ok(None);
                 };
                 let cloned = resolve(&APPLICATION, &merged);

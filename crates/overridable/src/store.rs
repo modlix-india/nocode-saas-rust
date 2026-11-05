@@ -461,6 +461,20 @@ impl Store {
 
     /// `readDrafted`: on the draft surface, the requesting client's own draft of exactly this
     /// document, reconciled onto live; otherwise the ordinary merged read.
+    /// Whose draft the draft surface lays over `stored` for a read served to `client_code` on the URL client
+    /// `url_client_code`. The draft surface is the URL client's: a document that client owns shows its draft to
+    /// everyone on that host. Before, only callers served as the owner saw it, so a tenant or a customer who had
+    /// signed up there (served as their own client, [`Self::served_client_code`]) got the live document, and an
+    /// app built as drafts went blank the moment they signed in (Event tracker sign-up, 2026-11-05). A document
+    /// another client owns keeps that client's own draft.
+    pub fn draft_client<'a>(stored: &JMap, url_client_code: &'a str, client_code: &'a str) -> &'a str {
+        if !url_client_code.is_empty() && str_field(stored, "clientCode") == Some(url_client_code) {
+            url_client_code
+        } else {
+            client_code
+        }
+    }
+
     pub async fn read_drafted(&self, dt: &dyn DocType, stored: &JMap, draft: bool, client_code: &str) -> Result<Option<JMap>> {
         let id = str_field(stored, "id").unwrap_or_default().to_string();
         if !draft || !dt.draftable() || str_field(stored, "clientCode") != Some(client_code) {
@@ -682,7 +696,8 @@ impl Store {
                 else {
                     return Ok::<_, anyhow::Error>(None);
                 };
-                let Some(merged) = self.read_drafted(dt, &stored, draft, client_code).await? else {
+                let drafts_of = Self::draft_client(&stored, url_client_code, client_code);
+                let Some(merged) = self.read_drafted(dt, &stored, draft, drafts_of).await? else {
                     return Ok(None);
                 };
                 Ok(Some(Arc::new(resolve(dt.pojo(), &merged))))
