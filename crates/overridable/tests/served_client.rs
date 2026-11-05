@@ -152,3 +152,39 @@ async fn the_filler_read_is_keyed_by_the_client_served() {
     };
     assert_eq!(value(f.read(&fillers, &tenant, APP, SYSTEM, false).await.unwrap()), JValue::from("MID"));
 }
+
+/// The draft surface is the host's: a user served as their own client (a tenant without its own copy, or a
+/// customer who signed up there) sees the host's drafted page, as an anonymous visitor does. Before, signing in
+/// made a drafted app go blank (Event tracker, 2026-11-05). A tenant's own copy keeps its own draft or live.
+#[tokio::test]
+async fn the_draft_surface_shows_the_hosts_drafts_to_everyone_on_the_host() {
+    let e = shared_host();
+    // A customer who signed up on the host: managed by the host, no copy of its own.
+    const SOLO: &str = "LZSOLO";
+    e.dir.hierarchy(SOLO, &[SOLO, SYSTEM]);
+    e.dir.set(|a| {
+        a.chains.insert(SOLO.into(), vec![SYSTEM.into(), SOLO.into()]);
+    });
+    let host_page = e
+        .raw("page")
+        .into_iter()
+        .find(|d| d.get_str("clientCode") == Ok(SYSTEM))
+        .and_then(|d| d.get_object_id("_id").ok().map(|o| o.to_hex()).or_else(|| d.get_str("_id").ok().map(str::to_string)))
+        .unwrap();
+    let (mut d, _) = e.pages.read_draft_with_version(&system(), &host_page).await.unwrap();
+    d.get_mut("properties").and_then(JValue::as_object_mut).unwrap().insert("title".into(), JValue::Str("Drafted".into()));
+    e.pages.save_draft(&system(), d, None).await.unwrap();
+    let drafted = |ca: ContextAuthentication| {
+        let e = &e;
+        async move {
+            let r = e.pages.read_resolved(&ca, NAME, APP, SYSTEM, true).await.unwrap().unwrap();
+            prop_str(&r.entity, "title").map(str::to_string)
+        }
+    };
+    assert_eq!(drafted(anonymous_on(SYSTEM)).await.as_deref(), Some("Drafted"));
+    assert_eq!(drafted(user(SYSTEM, SYSTEM)).await.as_deref(), Some("Drafted"));
+    assert_eq!(drafted(user(SOLO, SYSTEM)).await.as_deref(), Some("Drafted"), "served as LZSOLO, which has no copy of its own");
+    assert_eq!(drafted(user(LEAF, SYSTEM)).await.as_deref(), Some("MID label"), "LEAF inherits MID's own copy");
+    assert_eq!(drafted(user(MID, SYSTEM)).await.as_deref(), Some("MID label"), "MID's own copy, which has no draft");
+    assert_eq!(read(&e, &user(SOLO, SYSTEM), SYSTEM).await.as_deref(), Some("Submit"), "live stays live");
+}
