@@ -290,6 +290,9 @@ pub struct AppDataSection {
     /// as `VersionRetentionDefaults` reads them.
     pub version_retention_days: i32,
     pub version_retention_count: i32,
+    /// A MySQL storage statement that runs at least this long is logged at WARN as `slow
+    /// statement` (SQL, rows, elapsed). `0` turns it off.
+    pub slow_statement_ms: u64,
     /// `[appdata.migration_recovery]`: core-editor's sweep of interrupted MySQL migrations.
     pub migration_recovery: crate::editor::recovery::RecoverySettings,
 }
@@ -309,6 +312,7 @@ impl Default for AppDataSection {
             text_search_stemming: true,
             version_retention_days: appdata::retention::DEFAULT_DAYS,
             version_retention_count: appdata::retention::DEFAULT_COUNT,
+            slow_statement_ms: 500,
             migration_recovery: crate::editor::recovery::RecoverySettings::default(),
         }
     }

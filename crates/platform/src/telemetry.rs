@@ -125,6 +125,7 @@ fn traces_url(endpoint: &str) -> String {
 /// Sets up logging, metrics and (optionally) trace export for `service`.
 pub fn init(service: &str, cfg: &TelemetryConfig) -> Result<Telemetry> {
     crate::crypto::install();
+    crate::http::set_slow_request_ms(cfg.slow_request_ms);
     let instance = instance_name(cfg);
 
     let filter = EnvFilter::try_from_default_env()

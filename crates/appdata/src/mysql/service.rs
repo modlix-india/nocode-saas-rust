@@ -66,6 +66,9 @@ pub struct MySqlEngineConfig {
     /// Issue no DDL: no CREATE for a missing table, no index or key sync. Off in service;
     /// on for read-only tooling (the parity run) that must not change a real tenant.
     pub skip_provisioning: bool,
+    /// A statement that runs at least this long is logged at WARN by sqlx (`slow statement`,
+    /// with the SQL, rows and elapsed time; bound values are not logged). `0` turns it off.
+    pub slow_statement_ms: u64,
 }
 
 impl Default for MySqlEngineConfig {
@@ -80,6 +83,7 @@ impl Default for MySqlEngineConfig {
             default_password: None,
             retention: VersionRetention::default(),
             skip_provisioning: false,
+            slow_statement_ms: 500,
         }
     }
 }
@@ -508,7 +512,10 @@ impl MySqlAppDataService {
         if let Some(p) = pools.get(&key) {
             return Ok(p.clone());
         }
-        let opts = db::connect_options(&db::credentials(conn, &self.default_credentials()))?;
+        let opts = db::with_slow_statement_log(
+            db::connect_options(&db::credentials(conn, &self.default_credentials()))?,
+            self.config.slow_statement_ms,
+        );
         let pool = db::create_pool(
             opts,
             self.config.pool_initial_size,

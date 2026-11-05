@@ -33,6 +33,18 @@ pub fn header_style() -> HeaderStyle {
     HEADER_STYLE.get().copied().unwrap_or(HeaderStyle::Reactive)
 }
 
+static SLOW_REQUEST_SECS: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+
+/// Sets the time from which [`observe`] logs a request as `slow request`; call once at startup.
+/// Unset or `0` logs none.
+pub fn set_slow_request_ms(ms: u64) {
+    let _ = SLOW_REQUEST_SECS.set(ms as f64 / 1000.0);
+}
+
+fn is_slow(elapsed_secs: f64) -> bool {
+    SLOW_REQUEST_SECS.get().is_some_and(|&t| t > 0.0 && elapsed_secs >= t)
+}
+
 /// The headers Spring Security writes on responses it gets to finish: errors, 304s, and
 /// anything not streamed. `no_cache` adds the cache-busting trio it adds when the controller
 /// set no cache header of its own.
@@ -174,6 +186,8 @@ pub async fn observe(req: Request, next: Next) -> Response {
 
     if status >= 500 {
         tracing::warn!(parent: &span, status, elapsed_ms = elapsed * 1000.0, "request failed");
+    } else if is_slow(elapsed) {
+        tracing::warn!(parent: &span, status, route, elapsed_ms = elapsed * 1000.0, "slow request");
     } else {
         tracing::debug!(parent: &span, status, elapsed_ms = elapsed * 1000.0, "request done");
     }

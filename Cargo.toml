@@ -74,6 +74,8 @@ tokio-util = { version = "0.7", features = ["io"] }
 tower = "0.5"
 
 tracing = "0.1"
+# Only for sqlx's statement logging levels (`ConnectOptions::log_slow_statements`).
+log = "0.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 axum = "0.8"
 
