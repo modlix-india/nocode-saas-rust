@@ -124,6 +124,16 @@ async fn context_authentication_sends_what_jwt_filter_sends() {
     // No cache configured: every call asks.
     sec.context_authentication(&caller("tok", false)).await.unwrap();
     assert_eq!(count(&f, CTX), 4);
+
+    // A caller without codes (another service's internal call) sends no empty `clientCode` or
+    // `appCode`: security reads "" as a client code no client has (LZT-2209).
+    for codes in [None, Some(String::new())] {
+        let bare = CallerContext { client_code: codes.clone(), app_code: codes, ..caller("", false) };
+        sec.context_authentication(&bare).await.unwrap();
+        let (_, h) = last(&f, CTX);
+        assert!(h.get("clientcode").is_none() && h.get("appcode").is_none(), "{h:?}");
+        assert_eq!(h["x-forwarded-host"], "apps.local");
+    }
 }
 
 #[tokio::test]

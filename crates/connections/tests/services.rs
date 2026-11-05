@@ -336,6 +336,50 @@ async fn notification_access_rules() {
     assert!(prepare(&route, &Checks(false), &sys, req("Client Code", None, None)).await.unwrap().is_some());
     assert!(prepare(&route, &Checks(true), &Default::default(), req("User Id", Some(1), None)).await.unwrap().is_none());
 
+    // A named clientCode (LZT-2209): SYSTEM's event runner creating a FIN deal sends as FIN.
+    let named = |code: Option<&str>| NotificationRequest { client_code: code.map(str::to_string), ..req("User Id", Some(7), None) };
+    let mut runner = caller();
+    runner.system_client = true;
+    runner.authenticated = false;
+    runner.client_code = Some("SYSTEM".into());
+    runner.url_client_code = Some("SYSTEM".into());
+    let sent_as = |m: &connections::mq::NotificationMessage| (m.client_code.clone(), m.url_client_code.clone());
+    let fin = (Some("FIN".to_string()), Some("FIN".to_string()));
+    let system = (Some("SYSTEM".to_string()), Some("SYSTEM".to_string()));
+    let (_, m) = prepare(&route, &Checks(false), &runner, named(Some(" FIN "))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), fin, "a system client may name any client");
+    for blank in [None, Some(""), Some("  ")] {
+        let (_, m) = prepare(&route, &Checks(false), &runner, named(blank)).await.unwrap().unwrap();
+        assert_eq!(sent_as(&m), system, "no name: the URL client, as Java");
+    }
+    // Reaches every target, manages no client.
+    struct ManagesNothing;
+    #[async_trait]
+    impl HierarchyChecks for ManagesNothing {
+        async fn is_user_part_of_hierarchy(&self, _: i128, _: &str) -> ConnResult<bool> {
+            Ok(true)
+        }
+        async fn does_client_manage_client(&self, _: u64, _: i128) -> ConnResult<bool> {
+            Ok(true)
+        }
+        async fn does_client_manage_client_code(&self, _: &str, _: &str) -> ConnResult<bool> {
+            Ok(false)
+        }
+    }
+    // A tenant caller: its own client, or one it manages; anything else is ignored.
+    let mut tenant = caller();
+    tenant.client_code = Some("FIN".into());
+    tenant.url_client_code = Some("FIN".into());
+    let (_, m) = prepare(&route, &Checks(true), &tenant, named(Some("FINCI"))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), (Some("FINCI".to_string()), Some("FINCI".to_string())), "FIN manages FINCI");
+    let mut on_site = tenant.clone();
+    on_site.url_client_code = Some("SITE".into());
+    let (_, m) = prepare(&route, &ManagesNothing, &on_site, named(Some("FIN"))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), fin, "the caller's own client");
+    // A client the caller does not manage: the name is ignored.
+    let (_, m) = prepare(&route, &ManagesNothing, &tenant, named(Some("OTHER"))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), fin, "a client the caller does not manage is ignored");
+
     let (key, body) = prepare_event(&Route::events(), &c, EventMessage { event_name: Some("E".into()), ..Default::default() });
     assert_eq!(key, "events2");
     assert!(body.contains("\"draft\" : true") && body.contains("\"xdebug\" : \"d\""));
