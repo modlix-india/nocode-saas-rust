@@ -520,3 +520,12 @@ Who may purge (2026-10-26, Kiran): a client only by a client that manages it, th
 is its client manager (`caller_manages_client`), never by the client itself (403
 `SEC.PURGE_REFUSED`), and the SYSTEM client never, whoever asks (400). An app purge stays SYSTEM's.
 A purge evicts the purged users' own tokens, not the whole token cache.
+
+## A new client's code is never blank (2026-11-05, LZT-2209)
+
+Java's `ClientDAO.getValidClientCode` numbers a new client under the letters of its name, so a
+name with no letters ("123", spaces) got the code "" (or the spaces). Such a client then answered
+every lookup for an empty `clientCode`, which hid a missing header on every environment that had
+one and broke production, which had none. `register::valid_client_code` numbers such a name under
+`CLNT` instead (`CLNT`, then `CLNT1`, `CLNT2`...). `client_code_prefix` itself keeps Java's answer.
+Tests: `admin::clients::register::tests::code_prefixes`.
