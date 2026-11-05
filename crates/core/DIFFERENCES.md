@@ -40,6 +40,18 @@ error unchanged (KIRun, the event run log and the scheduler parity read Java's w
   stand for Java's text and Rust's answer, put back into Java's shape, must match everything
   else. Such cases read `EXPECTED coded` (or keep their rule's tag, with the code noted).
 
+## Asking security who is calling: no empty `clientCode` (2026-11-05, LZT-2209)
+
+Java's Feign client leaves out a header whose value is null, so a request that came with no
+`clientCode` / `appCode` reached security without them and was resolved by its host (SYSTEM for
+an internal address). core-exec sent them as empty strings, and security reads an empty
+`clientCode` as a client code. Dev and stage each hold a client whose code is blank, so the
+call quietly became that client's anonymous user there; prod has none, so every internal call
+without a `clientCode` (the notification service reading its connection) was refused 401
+`SEC.UNKNOWN_CLIENT`, and no notification went out after the cutover. `AuthClient::authenticate`
+(and `platform::security::SecurityClient::context_authentication`, which the other units use)
+now send the two headers only when they have a value.
+
 ## D: this unit
 
 - **D1 number representation** (`D1-number-repr`). Mostly gone since 2026-10-17: kirun-rust's

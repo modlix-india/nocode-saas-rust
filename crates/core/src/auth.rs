@@ -207,9 +207,15 @@ impl AuthClient {
             .get(format!("{base}{path}"))
             .headers(h)
             .header("X-Forwarded-Host", &caller.forwarded_host)
-            .header("X-Forwarded-Port", &caller.forwarded_port)
-            .header("clientCode", caller.client_code.as_deref().unwrap_or(""))
-            .header("appCode", caller.app_code.as_deref().unwrap_or(""));
+            .header("X-Forwarded-Port", &caller.forwarded_port);
+        // Feign leaves out a null header. An empty `clientCode` is a client code to security, one
+        // no client has, so a caller that sent none (another service's internal call) was refused
+        // `SEC.UNKNOWN_CLIENT` instead of being resolved by its host (LZT-2209).
+        for (name, value) in [("clientCode", &caller.client_code), ("appCode", &caller.app_code)] {
+            if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
+                rb = rb.header(name, v);
+            }
+        }
         if !authorization.is_empty() {
             rb = rb.header(header::AUTHORIZATION, &authorization);
         }
@@ -370,6 +376,8 @@ mod tests {
                 "user": {"id": 1, "stringAuthorities": ["Authorities.X"]},
                 "authenticated": !authz.is_empty(), "clientCode": "SYSTEM", "accessToken": authz, "debug": debug,
                 "host": h.get("x-forwarded-host").and_then(|v| v.to_str().ok()).unwrap_or(""),
+                "sentClientCode": h.get("clientcode").and_then(|v| v.to_str().ok()),
+                "sentAppCode": h.get("appcode").and_then(|v| v.to_str().ok()),
             }))
             .into_response(),
             _ => (StatusCode::OK, "[]").into_response(),
@@ -400,8 +408,16 @@ mod tests {
         assert_eq!(a.raw["host"], json!("apps.local"));
         assert_eq!(a.url_app_code(), Some("appbuilder"));
 
+        assert_eq!((&a.raw["sentClientCode"], &a.raw["sentAppCode"]), (&json!("SYSTEM"), &json!("appbuilder")));
+
         let anonymous = client.authenticate(&CallerContext::default()).await.unwrap();
         assert!(!anonymous.is_authenticated());
+        // A caller without codes (another service's internal call) sends no empty headers:
+        // security would read "" as a client code and refuse it (LZT-2209).
+        assert_eq!((&anonymous.raw["sentClientCode"], &anonymous.raw["sentAppCode"]), (&Value::Null, &Value::Null));
+        let blank = CallerContext { client_code: Some(String::new()), app_code: Some(String::new()), ..Default::default() };
+        let blank = client.authenticate(&blank).await.unwrap();
+        assert_eq!((&blank.raw["sentClientCode"], &blank.raw["sentAppCode"]), (&Value::Null, &Value::Null));
 
         let refused = CallerContext { token: "refuse".into(), ..Default::default() };
         let e = client.authenticate(&refused).await.unwrap_err();

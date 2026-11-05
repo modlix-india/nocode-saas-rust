@@ -341,12 +341,17 @@ impl SecurityClient {
         let path = "/api/security/internal/securityContextAuthentication";
         let resp = self
             .send(path, caller.debug.as_deref(), |http, url| {
-                let rb = http
+                let mut rb = http
                     .get(url)
                     .header("X-Forwarded-Host", &caller.forwarded_host)
-                    .header("X-Forwarded-Port", &caller.forwarded_port)
-                    .header("clientCode", caller.client_code.as_deref().unwrap_or(""))
-                    .header("appCode", caller.app_code.as_deref().unwrap_or(""));
+                    .header("X-Forwarded-Port", &caller.forwarded_port);
+                // Feign leaves out a null header; an empty `clientCode` is a client code no client
+                // has, refused `SEC.UNKNOWN_CLIENT` (LZT-2209).
+                for (name, value) in [("clientCode", &caller.client_code), ("appCode", &caller.app_code)] {
+                    if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
+                        rb = rb.header(name, v);
+                    }
+                }
                 if authorization.is_empty() { rb } else { rb.header(header::AUTHORIZATION, &authorization) }
             })
             .await?;
