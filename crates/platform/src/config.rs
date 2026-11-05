@@ -293,6 +293,9 @@ pub struct TelemetryConfig {
     pub environment: String,
     /// Which copy this is (`blue`, `green-2`, a pod name). Defaults to the hostname.
     pub instance: String,
+    /// A request that takes at least this long to answer is logged at WARN as `slow request`
+    /// (method, path, route, status, elapsed). `0` turns it off.
+    pub slow_request_ms: u64,
 }
 
 impl Default for TelemetryConfig {
@@ -304,6 +307,7 @@ impl Default for TelemetryConfig {
             trace_sample_ratio: 1.0,
             environment: "local".into(),
             instance: String::new(),
+            slow_request_ms: 1000,
         }
     }
 }

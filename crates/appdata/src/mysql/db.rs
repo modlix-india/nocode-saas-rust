@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use sha2::{Digest, Sha256};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
-use sqlx::{Column, Executor, MySql, Row, TypeInfo, ValueRef};
+use sqlx::{Column, ConnectOptions, Executor, MySql, Row, TypeInfo, ValueRef};
 
 use super::sql::{Bind, Sql};
 use crate::error::{AppDataError, AppDataResult};
@@ -157,6 +157,13 @@ fn redact(url: &str) -> String {
         Some(i) => format!("***{}", &url[i..]),
         None => url.to_string(),
     }
+}
+
+/// sqlx warns about a statement that runs at least `ms` (its own default is a fixed 1 s); `0`
+/// turns the warning off.
+pub fn with_slow_statement_log(opts: MySqlConnectOptions, ms: u64) -> MySqlConnectOptions {
+    let level = if ms == 0 { log::LevelFilter::Off } else { log::LevelFilter::Warn };
+    opts.log_slow_statements(level, Duration::from_millis(ms))
 }
 
 /// Small by default: pools are per app, and an idle app should cost nothing. Connections
