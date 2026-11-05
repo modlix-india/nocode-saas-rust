@@ -105,13 +105,13 @@ pub async fn prepare(
     if !has_access {
         return Ok(None);
     }
+    let client = sending_client(checks, caller, req.client_code.as_deref()).await?;
 
     let key = route.next_key().to_string();
     let message = NotificationMessage {
         app_code: app,
-        // Java sets the resolved client code and then overwrites it with the URL client code.
-        client_code: caller.url_client_code.clone(),
-        url_client_code: caller.url_client_code.clone(),
+        client_code: client.clone(),
+        url_client_code: client,
         triggered_user_id: caller.user_id,
         target_id: req.target_id.map(|t| Value::from(t as i64)),
         target_type: Some(req.target_type.clone()),
@@ -126,6 +126,29 @@ pub async fn prepare(
         ..Default::default()
     };
     Ok(Some((key, message)))
+}
+
+/// The client the notification is sent as: its connection, its definition and their templates
+/// are read for this client. Java always took the caller's URL client code. A run without a
+/// signed-in user on a tenant's behalf (a provider's webhook on the platform's address, an event
+/// that client SYSTEM runs) has SYSTEM there, so the alert for a tenant's deal went out as
+/// SYSTEM. A step that names a `clientCode` is now sent as that client, when the caller is a
+/// system client, is that client, or manages it; any other name is ignored and the URL client
+/// code stays, as before.
+async fn sending_client(checks: &dyn HierarchyChecks, caller: &Caller, named: Option<&str>) -> ConnResult<Option<String>> {
+    let Some(named) = named.map(str::trim).filter(|c| !c.is_empty()) else {
+        return Ok(caller.url_client_code.clone());
+    };
+    if caller.url_client_code.as_deref() == Some(named) {
+        return Ok(caller.url_client_code.clone());
+    }
+    let may = caller.system_client || caller.client_code() == named || checks.does_client_manage_client_code(caller.client_code(), named).await?;
+    if may {
+        Ok(Some(named.to_string()))
+    } else {
+        tracing::warn!(named, caller_client = caller.client_code(), "SendNotification: the caller may not send as this client; sent as the URL client");
+        Ok(caller.url_client_code.clone())
+    }
 }
 
 /// The longest event name a data notification may carry.

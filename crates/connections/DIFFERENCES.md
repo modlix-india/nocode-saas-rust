@@ -150,6 +150,7 @@ Everything in those runs is the same except what is listed here.
     `application/pdf`, ...) come back as a byte array, which a KIRun step sees as an array of
     signed bytes, as Gson writes `byte[]`.
 22. **`processAndSendNotification` overwrites the message's `clientCode` with `urlClientCode`.**
+    Still so when the step names no `clientCode`; a named one is used since 2026-11-05 (38).
 23. **Client-credentials tokens are stored under the connection's client and app**, but they
     are looked up under the caller's. When the two differ (a connection inherited from another
     client), every call mints a new token.
@@ -293,6 +294,15 @@ Everything in those runs is the same except what is listed here.
     kept. A step that names the customer and a template whose `toExpression` names them again
     sent one mail with the customer twice in `To` (CXZ-1202). The event action
     (`SendEmailTask`) reads `to` through the same function.
+38. **`SendNotification` sends as the `clientCode` it names** (2026-11-05, LZT-2209; Java always
+    took the caller's URL client code). A deal made with no signed-in user, as a Meta lead is
+    (the webhook arrives on the platform's own address, so its intake runs as SYSTEM's event
+    runner), sent the tenant's "dealCreated" alert as SYSTEM: SYSTEM's connection and
+    definition, never the tenant's own. `notification::prepare` now puts a named, non-blank
+    `clientCode` in both `clientCode` and `urlClientCode` when the caller is a system client,
+    is that client, or manages it (`doesClientManageClientCode`); a name the caller may not use
+    is logged and ignored, and the URL client code goes as before. Data notifications follow
+    the same rule; the notification service does not read their client.
 
 ## Error codes (2026-10-17)
 
