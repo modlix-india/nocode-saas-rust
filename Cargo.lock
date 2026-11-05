@@ -125,6 +125,7 @@ dependencies = [
  "hostname",
  "http 1.5.0",
  "indexmap",
+ "log",
  "mongodb",
  "platform",
  "rand 0.8.8",
