@@ -36,6 +36,27 @@ const IGNORED: &[&str] = &["clientCode", "appCode", "size", "page", "sort", "eag
 /// One index: rows a client sees in an app, as headers.
 const INDEX_PAGE_SIZE: i64 = 1000;
 
+/// The header texts a list row shows. A client's copy that follows a base stores only what it
+/// changes, so its `title` and `description` usually live on the row it follows. A blank one is
+/// taken from that base row (`baseClientCode`), else from another row of the same name in the
+/// chain, so the list shows what a read of the merged object would (see `DIFFERENCES.md`).
+fn inherit_texts(row: &mut JMap, rows: &[JMap]) {
+    let blank = |r: &JMap, f: &str| str_field(r, f).map_or(true, |v| v.trim().is_empty());
+    let name_of = |r: &JMap| r.get("name").cloned().unwrap_or_default().java_to_string();
+    let (name, id) = (name_of(row), str_field(row, "id").map(str::to_string));
+    let base = str_field(row, "baseClientCode").map(str::to_string);
+    let mut others: Vec<&JMap> = rows.iter().filter(|r| name_of(r) == name && str_field(r, "id").map(str::to_string) != id).collect();
+    others.sort_by_key(|r| base.is_none() || str_field(r, "clientCode") != base.as_deref());
+    for field in ["title", "description"] {
+        if !blank(row, field) {
+            continue;
+        }
+        if let Some(text) = others.iter().find(|r| !blank(r, field)).and_then(|r| str_field(r, field)) {
+            row.insert(field.into(), JValue::Str(text.to_string()));
+        }
+    }
+}
+
 /// A computed list page: its rows (Jackson maps) and the total before paging.
 #[derive(Debug, Clone)]
 pub struct LroPage {
@@ -204,6 +225,7 @@ impl<K: Kind> OverridableService<K> {
         let mut content = Vec::with_capacity(slice.len());
         for row in slice {
             let mut row = row.clone();
+            inherit_texts(&mut row, &rows);
             if eager {
                 let id = str_field(&row, "id").unwrap_or_default().to_string();
                 let data = self.read(ca, &id).await?;
@@ -258,5 +280,66 @@ impl<K: Kind> OverridableService<K> {
             .find_one_named(name, app, client)
             .await?
             .map(|e| (crate::write::service::version_of(&e), str_field(&e, "id").unwrap_or_default().to_string())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: &str, client: &str, base: Option<&str>, title: Option<&str>, description: Option<&str>) -> JMap {
+        let mut m = JMap::new();
+        m.insert("id".into(), JValue::Str(id.into()));
+        m.insert("name".into(), JValue::Str("LZ_WA_OUTBOX".into()));
+        m.insert("clientCode".into(), JValue::Str(client.into()));
+        if let Some(b) = base {
+            m.insert("baseClientCode".into(), JValue::Str(b.into()));
+        }
+        if let Some(t) = title {
+            m.insert("title".into(), JValue::Str(t.into()));
+        }
+        if let Some(d) = description {
+            m.insert("description".into(), JValue::Str(d.into()));
+        }
+        m
+    }
+
+    #[test]
+    fn a_following_row_takes_the_texts_of_its_base() {
+        let rows = vec![row("1", "SYSTEM", None, Some("WhatsApp sending"), Some("Sends the queue")), row("2", "FIN", Some("SYSTEM"), None, None)];
+        let mut fin = rows[1].clone();
+        inherit_texts(&mut fin, &rows);
+        assert_eq!(str_field(&fin, "title"), Some("WhatsApp sending"));
+        assert_eq!(str_field(&fin, "description"), Some("Sends the queue"));
+    }
+
+    #[test]
+    fn own_texts_win_and_blanks_are_filled_one_by_one() {
+        let rows = vec![row("1", "SYSTEM", None, Some("Base title"), Some("Base text")), row("2", "FIN", Some("SYSTEM"), Some("Own title"), Some("  "))];
+        let mut fin = rows[1].clone();
+        inherit_texts(&mut fin, &rows);
+        assert_eq!(str_field(&fin, "title"), Some("Own title"));
+        assert_eq!(str_field(&fin, "description"), Some("Base text"));
+    }
+
+    #[test]
+    fn the_base_row_is_preferred_over_other_rows_of_the_name() {
+        let rows = vec![
+            row("1", "SYSTEM", None, Some("System title"), None),
+            row("2", "MID", Some("SYSTEM"), Some("Mid title"), None),
+            row("3", "FIN", Some("MID"), None, None),
+        ];
+        let mut fin = rows[2].clone();
+        inherit_texts(&mut fin, &rows);
+        assert_eq!(str_field(&fin, "title"), Some("Mid title"));
+        assert_eq!(str_field(&fin, "description"), None);
+    }
+
+    #[test]
+    fn a_row_with_nothing_to_follow_is_left_alone() {
+        let rows = vec![row("1", "SYSTEM", None, None, None)];
+        let mut sys = rows[0].clone();
+        inherit_texts(&mut sys, &rows);
+        assert_eq!(sys, rows[0]);
     }
 }

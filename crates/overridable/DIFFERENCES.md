@@ -71,6 +71,14 @@ the platform's (`COMMON.*`). The status codes are Java's, unchanged; so is the 4
    - Rust: the draft surface's entry has its own key (`<client>:draft`), and `evictDraft` clears
      the cache.
    - Java keys the `update` eviction on the body's `appCode`; Rust uses the stored one.
+7b. **List rows show the texts of the row they follow.**
+   - Java: `readPageFilterLRO` returns each name's row as stored. A client's copy that follows a
+     base stores only its differences, so its row has no `title` or `description` unless the
+     list is eager, and `eager` re-reads every row with the `<Object>_READ` authority, which app
+     users do not have (the whole list then answers 404).
+   - Rust: a blank `title` or `description` on a listed row is taken from the row it follows
+     (`baseClientCode`), else from another row of the same name in the chain. Nothing else of
+     the base row is copied, and those texts are already listed for the base row itself.
 
 ## Ordering and determinism
 
