@@ -266,8 +266,11 @@ fn user_check_scope(check: &str, app_client: u64, client_id: u64, h: &ClientHier
 
 /// `UserMember`.
 fn member_json(id: u64, first: Option<String>, last: Option<String>, user_name: Option<String>, status: Option<String>, client_code: Option<String>) -> Value {
-    let first = first.filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_string());
-    let last = last.filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_string());
+    // A name part with no letter or digit ("-", ".") is a placeholder typed into a required field: drop it, so a
+    // user with first name "Antera" and last name "-" is named "Antera", not "Antera -" (CXZ-rmdash, 2026-11-05).
+    let real = |v: &String| v.chars().any(char::is_alphanumeric);
+    let first = first.filter(real).map(|v| v.trim().to_string());
+    let last = last.filter(real).map(|v| v.trim().to_string());
     let uname = user_name.filter(|u| !u.trim().is_empty() && u.trim() != PLACEHOLDER && !u.contains('@')).map(|u| u.trim().to_string());
     let mut name = [first.clone(), last.clone()].into_iter().flatten().collect::<Vec<_>>().join(" ");
     if name.is_empty() {
@@ -1090,6 +1093,10 @@ mod tests {
         let m = member_json(7, Some(" A ".into()), None, Some("x@y".into()), Some("ACTIVE".into()), Some("FIN".into()));
         assert_eq!(m, json!({"id": 7, "firstName": "A", "name": "A", "statusCode": "ACTIVE", "clientCode": "FIN"}));
         assert_eq!(member_json(8, None, None, Some("NONE".into()), None, None)["name"], "User 8");
+        let dash = member_json(9, Some("Antera".into()), Some(" - ".into()), None, None, None);
+        assert_eq!((dash["name"].as_str(), dash.get("lastName")), (Some("Antera"), None));
+        assert_eq!(member_json(10, Some(".".into()), Some("-".into()), Some("NONE".into()), None, None)["name"], "User 10");
+        assert_eq!(member_json(11, Some("Ana".into()), Some("D'Souza".into()), None, None, None)["name"], "Ana D'Souza");
         let other = User { email_id: Some("A@B".into()), ..Default::default() };
         assert_eq!(taken_identity(&other, Some("a@b"), None), "email");
         assert_eq!(taken_identity(&other, None, Some("1")), "user name");

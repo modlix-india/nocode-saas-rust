@@ -551,10 +551,21 @@ async fn client_by_code(s: &AdminState, code: Option<&str>) -> AuthResult<Option
     }
 }
 
+/// The prefix a name with no letters ("123", "  ") is numbered under. Java numbered it under its
+/// blank prefix and saved a client whose code was "" (or spaces), which a lookup for an empty
+/// `clientCode` then found, hiding a missing header everywhere but production (LZT-2209).
+const BLANK_NAME_PREFIX: &str = "CLNT";
+
+/// The prefix a new client's code is numbered under: `client_code_prefix`, or
+/// `BLANK_NAME_PREFIX` when that has nothing but blanks.
+fn code_prefix_for(name: &str) -> String {
+    Some(client_code_prefix(name)).filter(|p| !p.trim().is_empty()).unwrap_or_else(|| BLANK_NAME_PREFIX.to_string())
+}
+
 /// `ClientDAO.getValidClientCode(name)`: the prefix, else the prefix numbered one past the
 /// highest number already after it.
 pub async fn valid_client_code(s: &AdminState, name: &str) -> AuthResult<String> {
-    let prefix = client_code_prefix(name);
+    let prefix = code_prefix_for(name);
     let from = (prefix.encode_utf16().count() + 1) as i64;
     let row = sqlx::query(
         "SELECT COUNT(CASE WHEN CODE = ? THEN 1 END), MAX(CASE WHEN SUBSTRING(CODE, ?) REGEXP '^[0-9]+$' THEN CAST(SUBSTRING(CODE, ?) AS SIGNED) END) \
@@ -1092,6 +1103,11 @@ mod tests {
         assert_eq!(client_code_prefix("a1-b2"), "AB");
         assert_eq!(client_code_prefix("zz.reg@example.com"), "ZZREG");
         assert_eq!(client_code_prefix("123"), "");
+        // A new client's code is never blank (LZT-2209).
+        assert_eq!(code_prefix_for("Kailash Traders"), "KAILA");
+        assert_eq!(code_prefix_for("123"), "CLNT");
+        assert_eq!(code_prefix_for("  "), "CLNT");
+        assert_eq!(code_prefix_for(""), "CLNT");
     }
 
     #[test]
