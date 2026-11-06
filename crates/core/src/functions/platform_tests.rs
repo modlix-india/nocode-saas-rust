@@ -796,8 +796,9 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     assert!(other.find(Some("CoreServices"), "Platform.Meter").await.unwrap().is_none());
     assert!(other.find(Some("CoreServices.Hash"), "HashData").await.unwrap().is_some());
     // The 72 Java has, SendDataNotification, Storage.GetFields, Storage.Batch / UpdateIf /
-    // NextSequence, Event.GetScheduleState and Security.SendContactCode / VerifyContactCode.
-    assert_eq!(other.filter("").await.unwrap().len(), 80);
+    // NextSequence, Event.GetScheduleState, Security.SendContactCode / VerifyContactCode,
+    // Connection.VerifySignature (LZT-2267) and REST.OAuth2TokenInfo (LZT-2270).
+    assert_eq!(other.filter("").await.unwrap().len(), 82);
     assert_eq!(other.filter("senddatanotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);
     assert!(other.filter("platform").await.unwrap().is_empty());
     let mine = listed(core.clone(), "platform");

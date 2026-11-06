@@ -9,6 +9,7 @@ pub mod apple;
 pub mod config;
 pub mod firebase;
 pub mod index;
+pub mod indexnow;
 pub mod jks;
 pub mod kinds;
 pub mod mobile;
@@ -39,7 +40,7 @@ pub const NAME: &str = "ui-editor";
 /// The editor's state on a store, with every ui kind's service.
 pub fn state(store: overridable::Store, cache: CacheService, callers: Arc<dyn CallerSource>, cfg: &EditorConfig, http: reqwest::Client) -> Arc<EditorState> {
     let cx = Commons::new(store, cache.clone(), ui_messages(), EDITOR_AUTH_NAMES);
-    let ev = Arc::new(UiEvictions { ssr_channel: cfg.editor.ssr_channel.clone() });
+    let ev = Arc::new(UiEvictions { ssr_channel: cfg.editor.ssr_channel.clone(), ..Default::default() });
     let svc = |o: UiObject| OverridableService::new(UiKind::new(o, ev.clone()), cx.clone());
     let applications = svc(UiObject::Application);
     let pages = svc(UiObject::Page);
@@ -93,7 +94,10 @@ pub async fn run() -> Result<()> {
     }
     let guard: Arc<dyn purge::ManagedClients> = Arc::new(security.clone());
     let callers: Arc<dyn CallerSource> = Arc::new(SecurityCallers { security, server_port: cfg.server.port });
+    let indexnow = indexnow::IndexNow::new(cfg.aeo.clone(), reqwest::Client::new(), platform::security::security_upstream(&cfg.security, registry.as_ref())?);
     let mut st = state(store, cache.clone(), callers, &cfg, reqwest::Client::new());
+    // Set once, before the first request.
+    let _ = st.ev.indexnow.set(Arc::new(indexnow));
     if let Some(s) = Arc::get_mut(&mut st) {
         s.purge = Some(Arc::new(db.clone()));
         s.purge_guard = Some(guard);

@@ -297,6 +297,14 @@ now send the two headers only when they have a value.
   OTP expiry. security-internal keeps a subject's rows in `security_otp` with no `USER_ID` and
   `PURPOSE` `CONTACT_SUBJECT:<sha256 of client code and key>`. The send also records the caller's
   address (D48) in `IP_ADDRESS`.
+- **D50 `CoreServices.Connection.VerifySignature`** (2026-11-06, Rust only, LZT-2267). An HMAC
+  webhook signature checked against a secret stored in a connection (`connectionName` plus
+  `secretPath`, a dotted path into `connectionDetails`, e.g. `tokenDetails.queryParams.client_secret`),
+  so the secret never enters KIRun scope. Answers only `isValid`, `configured` and `reason`
+  (`VALID`, `INVALID_SIGNATURE`, `BAD_SIGNATURE_FORMAT`, `NO_CONNECTION`, `NO_SECRET`,
+  `WEAK_SECRET`); nothing of the secret, not its length. Only inside a server function, only for
+  the running definition's own app, the connection read as a REST step reads it (own client or
+  app level, `onlyThruKIRun` honoured). No signing counterpart on purpose.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
