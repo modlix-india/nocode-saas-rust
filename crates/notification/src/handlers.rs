@@ -233,6 +233,13 @@ fn user_id(p: &Params) -> Res<Option<i128>> {
     big_integer(p.first("userId")).map_err(|why| input::param_invalid("userId", Some("a whole number")).debug(why).into())
 }
 
+/// A list filter parameter (N19): `name` and `type`, comma separated and/or repeated (`type=a,b`
+/// or `type=a&type=b`); blanks are dropped, so none means every value (a single `type` filters as
+/// Java did).
+fn list_param(params: &Params, key: &str) -> Vec<String> {
+    params.all(key).iter().flat_map(|v| v.split(',')).map(str::trim).filter(|n| !n.is_empty()).map(String::from).collect()
+}
+
 async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Request) -> Res<Response> {
     let params = Params::from_query(req.uri().query());
     let debug = header_str(req.headers(), "x-debug");
@@ -246,7 +253,7 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
             let unread = params.string("unread").is_some_and(|v| v.eq_ignore_ascii_case("true"));
             let page = st
                 .inapp
-                .read(app.as_deref(), params.string("type").as_deref(), params.string("category").as_deref(), &pageable, uid, mark_read, unread)
+                .read(app.as_deref(), &list_param(&params, "type"), params.string("category").as_deref(), &list_param(&params, "name"), &pageable, uid, mark_read, unread)
                 .await
                 .map_err(internal_error)?;
             Ok(json_body(&page))
@@ -260,7 +267,11 @@ async fn handle(st: &AppState, r: Route, ca: &ContextAuthentication, req: Reques
         }
         (Route::New, _) => {
             let app = params.string("appCode").or_else(|| header_str(req.headers(), "appcode"));
-            let n = st.inapp.check_for_new(app.as_deref(), params.string("type").as_deref(), uid).await.map_err(internal_error)?;
+            let n = st
+                .inapp
+                .check_for_new(app.as_deref(), &list_param(&params, "type"), &list_param(&params, "name"), uid)
+                .await
+                .map_err(internal_error)?;
             Ok(json_body(&Value::from(n)))
         }
         (Route::Subscribe, _) => subscribe(st, &params, req.headers(), uid),
