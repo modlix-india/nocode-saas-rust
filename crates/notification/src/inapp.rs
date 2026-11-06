@@ -53,7 +53,8 @@ pub fn event_json(r: &InAppRow) -> String {
 
 /// `NotificationInApp` as the list writes it. Its `type` is never filled: jOOQ maps
 /// `NOTIFICATION_TYPE` to a `notificationType` property the class does not have, so Java always
-/// leaves it out, and so does this.
+/// leaves it out, and so does this. Rust only (N19): each item also carries `notificationName`
+/// (the template it came from) and `notificationType`, so a page can tell the kinds apart.
 pub fn list_item_json(r: &InAppRow) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), Value::from(r.id));
@@ -67,7 +68,13 @@ pub fn list_item_json(r: &InAppRow) -> Value {
     if let Some(t) = r.read_at {
         m.insert("readAt".into(), Value::from(t));
     }
-    for (k, v) in [("mimeUrl", r.mime_url.as_ref()), ("notificationCategory", Some(&r.notification_category)), ("url", r.url.as_ref())] {
+    for (k, v) in [
+        ("mimeUrl", r.mime_url.as_ref()),
+        ("notificationCategory", Some(&r.notification_category)),
+        ("notificationName", Some(&r.notification_name)),
+        ("notificationType", Some(&r.notification_type)),
+        ("url", r.url.as_ref()),
+    ] {
         if let Some(v) = v.filter(|v| !v.is_empty()) {
             m.insert(k.into(), Value::from(v.clone()));
         }
@@ -86,23 +93,25 @@ pub struct InAppService {
 }
 
 impl InAppService {
-    /// `checkForNewNotifications`: 0 for a blank app code.
-    pub async fn check_for_new(&self, app_code: Option<&str>, notification_type: Option<&str>, user_id: u64) -> Result<i64> {
+    /// `checkForNewNotifications`: 0 for a blank app code. `types` and `names` (several values:
+    /// Rust only, N19) count only those notification types and names; empty counts every one.
+    pub async fn check_for_new(&self, app_code: Option<&str>, types: &[String], names: &[String], user_id: u64) -> Result<i64> {
         let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else { return Ok(0) };
-        let notification_type = not_blank(notification_type);
-        self.dao.count_unread(&InAppFilter { app_code, user_id, notification_type, category: None }).await
+        self.dao.count_unread(&InAppFilter { app_code, user_id, types, category: None, names }).await
     }
 
     /// `readNotifications`: one page, newest first; the rows returned are then marked read
     /// (the page still shows them as they were before), unless `mark_read` is false (Rust only:
     /// an app that marks each row read itself, through [`Self::mark_read`]). `unread_only` lists
-    /// only the rows not yet read (Rust only).
+    /// only the rows not yet read (Rust only). `types` and `names` list only those notification
+    /// types and names (several values: Rust only, N19); empty lists every one.
     #[allow(clippy::too_many_arguments)]
     pub async fn read(
         &self,
         app_code: Option<&str>,
-        notification_type: Option<&str>,
+        types: &[String],
         category: Option<&str>,
+        names: &[String],
         pageable: &Pageable,
         user_id: u64,
         mark_read: bool,
@@ -111,7 +120,7 @@ impl InAppService {
         let Some(app_code) = app_code.filter(|a| !connections::java::is_blank(a)) else {
             return Ok(page_json(Vec::new(), pageable));
         };
-        let filter = InAppFilter { app_code, user_id, notification_type: not_blank(notification_type), category: not_blank(category) };
+        let filter = InAppFilter { app_code, user_id, types, category: not_blank(category), names };
         let rows = self.dao.page(&filter, unread_only, pageable.size, pageable.offset()).await?;
         if mark_read && !rows.is_empty() {
             let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
@@ -223,13 +232,15 @@ mod tests {
         assert_eq!(
             list_item_json(&row()),
             serde_json::json!({"id": 5686, "title": "H\u{e9}llo Ann", "message": "Line one\nline \"two\" 3", "createdAt": 1792121644,
-                "mimeUrl": "api/files/x.svg", "notificationCategory": "Parity", "url": "/page/Ann"})
+                "mimeUrl": "api/files/x.svg", "notificationCategory": "Parity", "notificationName": "rsNotifParity",
+                "notificationType": "ALERT", "url": "/page/Ann"})
         );
         let read = InAppRow { read_at: Some(1792121700), url: None, mime_url: Some(String::new()), message: String::new(), title: String::new(), ..row() };
         let v = list_item_json(&read);
         assert_eq!(v["readAt"], 1792121700);
         assert!(v.get("url").is_none() && v.get("mimeUrl").is_none() && v.get("message").is_none() && v.get("title").is_none());
         let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["id", "createdAt", "readAt", "notificationCategory"]);
+        assert_eq!(keys, ["id", "createdAt", "readAt", "notificationCategory", "notificationName", "notificationType"]);
+        assert!(v.get("type").is_none(), "Java's `type` stays out");
     }
 }
