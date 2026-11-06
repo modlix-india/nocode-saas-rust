@@ -82,12 +82,16 @@ impl Db {
              ON security_client_hierarchy.CLIENT_ID = security_client.ID WHERE ",
         );
         push_in_str(&mut qb, "security_client.CODE", codes);
-        qb.push(
-            " AND (security_client.STATUS_CODE IS NULL OR security_client.STATUS_CODE = 'ACTIVE') AND NOT EXISTS \
-             (SELECT 1 FROM security_client manager WHERE manager.ID IN (security_client_hierarchy.MANAGE_CLIENT_LEVEL_0, \
-             security_client_hierarchy.MANAGE_CLIENT_LEVEL_1, security_client_hierarchy.MANAGE_CLIENT_LEVEL_2, \
-             security_client_hierarchy.MANAGE_CLIENT_LEVEL_3) AND manager.STATUS_CODE <> 'ACTIVE')",
-        );
+        qb.push(" AND (security_client.STATUS_CODE IS NULL OR security_client.STATUS_CODE = 'ACTIVE')");
+        // One primary-key probe per level. `manager.ID IN (level_0, .., level_3)` cannot use the key,
+        // so MySQL scanned every client once per candidate (prod 2026-11-06: 2 s for 79 codes, 5 s
+        // for all; this form is under 1 ms and 13 ms, same rows).
+        for level in 0..4 {
+            qb.push(format!(
+                " AND NOT EXISTS (SELECT 1 FROM security_client manager WHERE \
+                 manager.ID = security_client_hierarchy.MANAGE_CLIENT_LEVEL_{level} AND manager.STATUS_CODE <> 'ACTIVE')"
+            ));
+        }
         let rows = qb.build().fetch_all(&self.pool).await?;
         rows.iter().map(|r| Ok(r.try_get::<String, _>(0)?)).collect()
     }

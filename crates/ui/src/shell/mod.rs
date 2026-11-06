@@ -4,6 +4,7 @@
 
 pub mod analytics;
 pub mod config;
+pub mod discovery;
 pub mod gson;
 pub mod index;
 pub mod ipfilter;
@@ -83,6 +84,7 @@ pub async fn run() -> Result<()> {
         js: cache.family_weighed(|v: &std::sync::Arc<server::JsFile>| v.body.capacity() + v.unique_id.capacity()),
         patterns: cache.family_weighed(|v: &std::sync::Arc<Vec<String>>| platform::cache::strings_bytes(v)),
         analytics: cache.family_weighed(|v: &std::sync::Arc<Option<overridable::JValue>>| v.as_ref().as_ref().map_or(0, overridable::JValue::heap_bytes)),
+        aeo: cache.family_weighed(|v: &std::sync::Arc<discovery::AeoFile>| v.heap_bytes()),
         entrypoints,
         redis,
     });

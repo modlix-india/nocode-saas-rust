@@ -29,6 +29,7 @@ use crate::engine::Engine;
 use crate::respond::{build_text, unknown_error, with_ui_layers, Caching, OwnCsp};
 use crate::shell::analytics::{self, check_authorized, engine_request, resolve_time_zone};
 use crate::shell::config::ShellConfig;
+use crate::shell::discovery::{self, AeoFile};
 use crate::shell::gson::{self, G};
 use crate::shell::index::{index_html, IndexPage, CACHE_NAME_INDEX};
 use crate::shell::javautil::{absolute_http_uri, client_facing_host, decide_redirect_without_lookup, js_string, md5_unique_id};
@@ -64,6 +65,8 @@ pub struct ShellInner {
     pub patterns: Arc<LocalCaches<String, Arc<Vec<String>>>>,
     /// `analyticsQueryCache`, key the SHA-256 of the engine request.
     pub analytics: Arc<LocalCaches<String, Arc<Option<JValue>>>>,
+    /// `aeoFilesCache-<app>` (Rust only): robots.txt, sitemap.xml, llms.txt, the IndexNow key.
+    pub aeo: Arc<LocalCaches<String, Arc<AeoFile>>>,
     /// The page's webpack entry points, read once at start.
     pub entrypoints: Vec<String>,
     /// For the SSR invalidation channel and the `KEYS` walk of `evictAllCaches`.
@@ -91,7 +94,7 @@ impl From<AppError> for Fail {
 
 type R = Result<Response, Fail>;
 
-fn unknown(status: StatusCode, debug: &str) -> Fail {
+pub(crate) fn unknown(status: StatusCode, debug: &str) -> Fail {
     Fail(unknown_error(status, debug))
 }
 
@@ -109,16 +112,16 @@ fn relay(e: anyhow::Error) -> Fail {
     }
 }
 
-fn finish(r: R, route: &'static str) -> Response {
+pub(crate) fn finish(r: R, route: &'static str) -> Response {
     with_route(r.unwrap_or_else(|f| f.0), route)
 }
 
-fn header<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
     h.get(name).and_then(|v| v.to_str().ok())
 }
 
 /// `@RequestHeader(name)`: required.
-fn required<'a>(h: &'a HeaderMap, name: &str) -> Result<&'a str, Fail> {
+pub(crate) fn required<'a>(h: &'a HeaderMap, name: &str) -> Result<&'a str, Fail> {
     header(h, name).ok_or_else(|| {
         unknown(StatusCode::BAD_REQUEST, &format!("400 BAD_REQUEST \"Required header '{name}' is not present.\""))
     })
@@ -190,7 +193,7 @@ fn route_request(method: &Method, uri: &Uri, h: &HeaderMap) -> RouteRequest {
     }
 }
 
-async fn caller(st: &ShellState, h: &HeaderMap) -> Result<Caller, Fail> {
+pub(crate) async fn caller(st: &ShellState, h: &HeaderMap) -> Result<Caller, Fail> {
     Ok(st.inner.ui.caller(h).await?)
 }
 
@@ -228,6 +231,11 @@ pub fn router(state: ShellState) -> Router {
         .route("/apiDocs", with_rest(get(api_docs), &g))
         .route("/.well-known/acme-challenge/{token}", with_rest(get(acme), &g))
         .route("/hassso", with_rest(get(hassso), &g))
+        // Rust only: the discovery files (`discovery`).
+        .route("/robots.txt", with_rest(get(discovery::robots), &g))
+        .route("/sitemap.xml", with_rest(get(discovery::sitemap), &g))
+        .route("/llms.txt", with_rest(get(discovery::llms), &g))
+        .route(crate::aeo::INDEXNOW_KEY_PATH, with_rest(get(discovery::indexnow_key), &g))
         .route("/sso/{token}", with_rest(get(sso), &g))
         .route("/api/ui/analytics/query", with_rest(post(analytics_query), &[Method::POST]))
         .route("/api/ui/internal/cache", with_rest(get(cache_names).delete(cache_reset_all), &[Method::GET, Method::DELETE]))
@@ -365,15 +373,20 @@ fn admit(found: Option<Arc<Resolved>>, refused: Option<Fail>) -> Result<Option<A
     }
 }
 
-/// The hosting gate, then the index page of the app and client it chooses.
-async fn index_page(st: &ShellState, caller: &Caller, app: &str, client: &str, etag: Option<&str>) -> R {
-    let (serve_app, serve_client) = match st.inner.ui.inner().security.billing_hosting(app, client).await {
+/// The hosting gate: the app and client a host's request is served.
+pub(crate) async fn served_codes(st: &ShellState, app: &str, client: &str) -> (String, String) {
+    match st.inner.ui.inner().security.billing_hosting(app, client).await {
         Ok(Some(d)) => (
             d.get("serveAppCode").and_then(serde_json::Value::as_str).unwrap_or(app).to_string(),
             d.get("serveClientCode").and_then(serde_json::Value::as_str).unwrap_or(client).to_string(),
         ),
         _ => (app.to_string(), client.to_string()),
-    };
+    }
+}
+
+/// The hosting gate, then the index page of the app and client it chooses.
+async fn index_page(st: &ShellState, caller: &Caller, app: &str, client: &str, etag: Option<&str>) -> R {
+    let (serve_app, serve_client) = served_codes(st, app, client).await;
     let page = index_of(st, caller, &serve_app, &serve_client).await?;
     Ok(build_text(
         &page.unique_id,
@@ -524,6 +537,13 @@ async fn run_route(
         let args = webhook::webhook_arguments(input.body, raw);
         let json = gson::to_string(&uripath::with_mapped_params(Some(&args), req, path_string, fx));
         let text = execute_function(st, &call, None, Some(json)).await?;
+        // A hand-off to the tenant the payload is for: only from a route its owner runs (the
+        // app's shared route on the owner's own URL), never to the same client, and only once.
+        let owner_runs = str_field(uri_path, "clientCode") == Some(g.client);
+        if let Some(fw) = webhook::forward(text.as_deref(), fx).filter(|f| owner_runs && f.client != g.client) {
+            let target = Hop { caller, req, h, peer: input.peer, app, g };
+            return forward_webhook(st, &target, &args, fw).await.map(Some);
+        }
         if let Some(resp) = webhook::reply(text.as_deref(), fx)? {
             return Ok(Some(resp));
         }
@@ -541,6 +561,65 @@ async fn run_route(
         Ok(Some(RouteAnswer::Error(status, m))) | Err(RouteAnswer::Error(status, m)) => Err(AppError::new(status, m).into()),
         Ok(Some(RouteAnswer::Fault(m))) | Err(RouteAnswer::Fault(m)) => Err(unknown(StatusCode::INTERNAL_SERVER_ERROR, &m)),
         Err(RouteAnswer::Body(status, b)) => Ok(Some(uripath::text_response(status, b, content_type))),
+    }
+}
+
+/// The request a webhook hand-off repeats for another client.
+struct Hop<'a> {
+    caller: &'a Caller,
+    req: &'a RouteRequest,
+    h: &'a HeaderMap,
+    peer: Option<IpAddr>,
+    app: &'a str,
+    g: &'a Gateway<'a>,
+}
+
+/// `forwardClientCode`: the same request through the named client's webhook route of the same
+/// app, at `forwardPath` or the request's own path, as that client's webhook user. The answer is
+/// that route's reply (its own hand-off is not followed). No webhook route there: 502, so the
+/// provider retries and the miss shows.
+async fn forward_webhook(st: &ShellState, hop: &Hop<'_>, args: &G, fw: webhook::Forward) -> Result<Response, Fail> {
+    let freq = RouteRequest { path: fw.path.clone().unwrap_or_else(|| hop.req.path.clone()), ..hop.req.clone() };
+    let not_routed = || {
+        tracing::warn!(app = hop.app, client = fw.client, path = freq.path, "webhook hand-off found no webhook route");
+        uripath::text_response(StatusCode::BAD_GATEWAY, format!("No webhook route for client {}", fw.client), "text/plain;charset=UTF-8")
+    };
+    let Some(doc) = find_route(st, hop.caller, &freq, hop.app, &fw.client).await?.filter(|d| webhook::is_webhook(&d.entity)) else {
+        return Ok(not_routed());
+    };
+    let uri_path = &doc.entity;
+    let Some(def) = map_field(uri_path, "pathDefinitions").and_then(|m| m.get(&freq.method)).and_then(JValue::as_object) else {
+        return Ok(not_routed());
+    };
+    let route_name = str_field(uri_path, "name").unwrap_or("");
+    ipfilter::check(def, route_name, &freq.method, ipfilter::caller_ip(hop.h, hop.peer))?;
+    let (Some("KIRUN_FUNCTION"), Some(fx)) = (str_field(def, "uriType"), map_field(def, "kiRunFxDefinition")) else {
+        return Ok(not_routed());
+    };
+    let call = CoreCall {
+        route: CoreRoute::Webhook,
+        namespace: str_field(fx, "namespace").unwrap_or("null"),
+        name: str_field(fx, "name").unwrap_or("null"),
+        authorization: None,
+        forwarded_host: hop.g.forwarded_host,
+        forwarded_port: hop.g.forwarded_port,
+        app_code: str_field(uri_path, "appCode").unwrap_or(hop.app),
+        client_code: &fw.client,
+        debug: header(hop.h, "x-debug"),
+        draft: hop.caller.draft,
+    };
+    let json = gson::to_string(&uripath::with_mapped_params(Some(args), &freq, str_field(uri_path, "pathString"), fx));
+    let text = execute_function(st, &call, None, Some(json)).await?;
+    if let Some(resp) = webhook::reply(text.as_deref(), fx)? {
+        return Ok(resp);
+    }
+    match answer(text.as_deref(), fx) {
+        Ok(None) => Ok(StatusCode::BAD_REQUEST.into_response()),
+        Ok(Some(RouteAnswer::Body(status, b))) | Err(RouteAnswer::Body(status, b)) => {
+            Ok(uripath::text_response(status, b, "application/json;charset=UTF-8"))
+        }
+        Ok(Some(RouteAnswer::Error(status, m))) | Err(RouteAnswer::Error(status, m)) => Err(AppError::new(status, m).into()),
+        Ok(Some(RouteAnswer::Fault(m))) | Err(RouteAnswer::Fault(m)) => Err(unknown(StatusCode::INTERNAL_SERVER_ERROR, &m)),
     }
 }
 

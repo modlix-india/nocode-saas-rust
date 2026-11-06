@@ -314,6 +314,7 @@ async fn shell_with(redis: Option<redis::Client>, prefix_channel: Option<(&str, 
         js: cache.family(),
         patterns: cache.family(),
         analytics: cache.family(),
+        aeo: cache.family(),
         entrypoints: vec!["app.js".into()],
         redis,
     });
@@ -730,6 +731,7 @@ async fn uri_path_routes_run_kirun_functions_on_core() {
         js: s.state.inner().js.clone(),
         patterns: s.state.inner().patterns.clone(),
         analytics: s.state.inner().analytics.clone(),
+        aeo: s.state.inner().aeo.clone(),
         entrypoints: vec![],
         redis: None,
     });
@@ -1044,4 +1046,83 @@ async fn entry_points_from_a_file_the_cdn_or_the_fallback() {
     assert_eq!(ui::shell::server::load_entrypoints(&cfg, &http).await.len(), 2);
     let _ = std::fs::remove_dir_all(dir);
     assert!(common::mongo_uri().is_some() || common::mongo_uri().is_none());
+}
+
+/// Rust only (PLAT-1547, PLAT-1549, PLAT-1550, SZ-930): robots.txt, sitemap.xml, llms.txt and
+/// the IndexNow key, per app, from the request's host.
+#[tokio::test]
+#[ignore = "needs the local MongoDB (MODLIX__MONGO__URI)"]
+async fn discovery_files() {
+    let Some(s) = shell().await else { return };
+    s.env
+        .insert(
+            "application",
+            doc! {"name": APP, "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32,
+            "properties": {"title": "Test App", "description": "What it does", "defaultPage": "home", "loginPage": "login",
+                "aiVisibility": {"allowTrainingBots": false}}},
+        )
+        .await;
+    s.env.insert("application", doc! {"name": "quiet", "appCode": "quiet", "clientCode": "SYSTEM", "version": 1_i32,
+        "properties": {"aiVisibility": {"llmsTxt": false}}}).await;
+    let at = mongodb::bson::DateTime::from_millis(1_762_400_000_000);
+    for (name, permission, props) in [
+        ("home", None, doc! {"title": {"name": {"value": "Welcome"}}}),
+        ("about", None, doc! {"seo": {"description": {"value": "Who we are"}}}),
+        ("admin", Some("Authorities.ROLE_Owner"), doc! {}),
+        ("login", None, doc! {}),
+    ] {
+        let mut d = doc! {"name": name, "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32, "updatedAt": at, "properties": props};
+        if let Some(p) = permission {
+            d.insert("permission", p);
+        }
+        s.env.insert("page", d).await;
+    }
+    s.env.insert("page", doc! {"name": "draftonly", "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32, "published": false}).await;
+    s.env
+        .insert("uri_path", doc! {"name": "/who", "appCode": APP, "clientCode": "SYSTEM", "version": 1_i32, "pathString": "/who",
+            "pathDefinitions": {"GET": {"uriType": "REDIRECTION", "redirectionDefinition": {"targetUrl": "/about"}}}})
+        .await;
+
+    let r = s.call(gw("/robots.txt")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.header("content-type").as_deref(), Some("text/plain;charset=UTF-8"));
+    assert_eq!(r.header("cache-control").as_deref(), Some("no-cache"));
+    let robots = r.text();
+    assert!(robots.starts_with("User-agent: *\nAllow: /\n"), "{robots}");
+    assert!(robots.contains("User-agent: GPTBot\n") && robots.contains("User-agent: CCBot\n"), "{robots}");
+    assert!(!robots.contains("Googlebot") && !robots.contains("admin"), "{robots}");
+    assert!(robots.ends_with("Sitemap: https://testapp.example/sitemap.xml\n"), "{robots}");
+    let etag = r.header("etag").unwrap();
+    assert_eq!(s.call(gw("/robots.txt").header("If-None-Match", &etag)).await.status, StatusCode::NOT_MODIFIED);
+
+    let m = s.call(gw("/sitemap.xml")).await;
+    assert_eq!(m.status, StatusCode::OK);
+    assert_eq!(m.header("content-type").as_deref(), Some("application/xml;charset=UTF-8"));
+    let xml = m.text();
+    for loc in ["https://testapp.example/", "https://testapp.example/about", "https://testapp.example/who"] {
+        assert!(xml.contains(&format!("<loc>{loc}</loc>")), "{loc}: {xml}");
+    }
+    for hidden in ["admin", "login", "draftonly", "/home"] {
+        assert!(!xml.contains(hidden), "{hidden}: {xml}");
+    }
+    assert!(xml.contains("<lastmod>"), "{xml}");
+
+    let l = s.call(gw("/llms.txt")).await;
+    assert_eq!(l.status, StatusCode::OK);
+    assert_eq!(
+        l.text(),
+        "# Test App\n\n> What it does\n\n## Pages\n\n- [Welcome](https://testapp.example/)\n- [about](https://testapp.example/about): Who we are\n"
+    );
+    assert_eq!(s.call(gw("/llms.txt").app("quiet")).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(s.call(gw("/llms.txt").app("nosuchapp")).await.status, StatusCode::NOT_FOUND);
+
+    let k = s.call(gw("/indexnow.txt")).await;
+    assert_eq!(k.status, StatusCode::OK);
+    assert_eq!(k.text(), ui::aeo::indexnow_key("modlix-indexnow", APP));
+
+    // A preview (draft) host is closed to crawlers and lists nothing.
+    let d = s.call(gw("/robots.txt").header("x-draft", "true")).await;
+    assert!(d.text().contains("User-agent: *\nDisallow: /\n"), "{}", d.text());
+    assert_eq!(s.call(gw("/sitemap.xml").header("x-draft", "true")).await.status, StatusCode::NOT_FOUND);
+    s.done().await;
 }

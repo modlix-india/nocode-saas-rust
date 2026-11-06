@@ -21,6 +21,7 @@ use platform::error::{AppError, AppResult};
 use platform::security::ContextAuthentication;
 
 use crate::docs::{ApplicationDoc, FunctionDoc, PageDoc, SchemaDoc, StyleDoc, ThemeDoc};
+use crate::editor::indexnow::IndexNow;
 use crate::shell::paths::PathPattern;
 use crate::shell::uripath::UriPathDoc;
 use crate::ssr;
@@ -101,9 +102,12 @@ impl UiObject {
 }
 
 /// The SSR channel and anything else every kind of one process shares.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct UiEvictions {
     pub ssr_channel: String,
+    /// The IndexNow pinger (Rust only), set once the process has its configuration; unset in
+    /// tests, where nothing is pinged.
+    pub indexnow: std::sync::OnceLock<Arc<IndexNow>>,
 }
 
 impl UiEvictions {
@@ -126,7 +130,20 @@ impl UiEvictions {
     pub async fn ui_base(&self, cx: &Commons, app: Option<&str>) -> bool {
         let a = app.unwrap_or("null");
         self.oui(cx, a, &[APPLICATION_OUI, PAGE_OUI]).await;
+        self.discovery_files(cx, a).await;
         self.ssr(cx, app).await
+    }
+
+    /// ui-shell's robots.txt, sitemap.xml and llms.txt of the app (Rust only).
+    pub async fn discovery_files(&self, cx: &Commons, app: &str) {
+        cx.evict_all(&crate::aeo::cache_name(app)).await;
+    }
+
+    /// The IndexNow ping for a page whose live definition was just written (Rust only).
+    fn page_published(&self, cx: &Commons, page: &JMap) {
+        if let Some(ix) = self.indexnow.get() {
+            ix.page_written(&cx.store, page);
+        }
     }
 
     /// `ApplicationService.evictAll`: the index page, the manifest, the properties (both
@@ -143,6 +160,7 @@ impl UiEvictions {
     /// `URIPatternCache`, keyed `<app>-<client>`.
     pub async fn uri_patterns(&self, cx: &Commons, app: Option<&str>, client: Option<&str>) {
         cx.evict("URIPatternCache", &format!("{}-{}", app.unwrap_or("null"), client.unwrap_or("null"))).await;
+        self.discovery_files(cx, app.unwrap_or("null")).await;
     }
 }
 
@@ -454,6 +472,8 @@ impl Kind for UiKind {
                 self.ev.app_caches(cx, app.unwrap_or("null")).await;
             }
             UiObject::UriPath => self.ev.uri_patterns(cx, app, str_field(created, "clientCode")).await,
+            // A page made live at once (not as a draft) is a new address.
+            UiObject::Page if created.get("published") != Some(&JValue::Bool(false)) => self.ev.page_published(cx, created),
             _ => {}
         }
         Ok(())
@@ -513,6 +533,8 @@ impl Kind for UiKind {
                 self.ev.app_caches(cx, app.unwrap_or("null")).await;
             }
             UiObject::UriPath => self.ev.uri_patterns(cx, app, str_field(saved, "clientCode")).await,
+            // A publish runs through `update` too, so this is every change of the live page.
+            UiObject::Page => self.ev.page_published(cx, saved),
             _ => {}
         }
         Ok(())

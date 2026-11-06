@@ -10,6 +10,7 @@ pub mod http;
 pub mod media_type;
 pub mod oauth2;
 pub mod spring_uri;
+pub mod token_info;
 
 use std::collections::HashMap;
 
