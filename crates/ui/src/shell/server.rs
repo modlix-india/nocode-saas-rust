@@ -1040,7 +1040,7 @@ async fn analytics_query(State(st): State<ShellState>, req: Request) -> Response
             // An app that does not exist: Java's chain ends empty and answers 200 with no body.
             return Ok(StatusCode::OK.into_response());
         };
-        if !analytics::analytics_enabled(&read.entity) {
+        if analytics::needs_analytics_enabled(&body) && !analytics::analytics_enabled(&read.entity) {
             return Err(crate::catalogue::error(StatusCode::FORBIDDEN, analytics::NOT_ENABLED, &[]).into());
         }
         let zone = match analytics::requested_zone(&body) {

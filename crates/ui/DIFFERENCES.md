@@ -186,6 +186,11 @@ headers for a control character in a query parameter name); and no `WWW-Authenti
 26. **A Feign error that is not a JSON one** (core or security answering text, or not
     answering) is the generic 500 in both; the `debugMessage` names the call in Feign's words
     but not in Feign's exact text.
+27. **`crawlerVisits` is answered for an app without `properties.analytics.enabled`** (Rust
+    only, PLAT-1551). Crawler visits are reported by the SSR, not the beacon, and record no
+    person, so the app's opt-in to measuring its visitors does not gate them; sign in,
+    `Application_UPDATE`, write access and the managed-client check still do. Every other widget
+    keeps the 403.
 
 ## ui-editor
 
