@@ -11,6 +11,12 @@
 //! webhook route, as the tenant's anonymous user with `Authorities._Webhook`, and gets the request
 //! as it came (`rawBody`, `rawBodyEncoding`, `headers`, `query`) next to the parsed body. Its output
 //! event can set the reply (`status`, `contentType`, `headers`, `body`).
+//!
+//! A provider that calls one URL for every tenant (an app-level callback) reaches the route of
+//! the client that owns it; its function can read the payload, find the tenant, and hand the
+//! request over with `forwardClientCode` (and `forwardPath`) in its output ([`forward`]): the
+//! shell then runs that client's webhook route with the same request, once, in this
+//! environment, and answers with that route's reply.
 
 use std::convert::Infallible;
 
@@ -193,6 +199,54 @@ pub fn reply(text: Option<&str>, def: &JMap) -> Result<Option<Response>, AppErro
     }
 }
 
+/// The output keys a webhook function hands its request to another client with (see [`forward`]).
+pub const FORWARD_CLIENT: &str = "forwardClientCode";
+pub const FORWARD_PATH: &str = "forwardPath";
+
+/// A hand-off: the route's function read the provider's payload, found the tenant it is for, and
+/// asks for the same request (body bytes, headers, query) to run that client's webhook route of
+/// the same app at `path` (the request's own path when it names none). It stays in this
+/// environment: the shell runs the other route itself, nothing is sent over the network.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Forward {
+    pub client: String,
+    pub path: Option<String>,
+}
+
+/// The hand-off a webhook function's output asks for, if any: a client code of letters, digits,
+/// `_` and `-` (at most 64), and a path, when given, under `/api/` with no `..`. Anything else
+/// is no hand-off, and the route answers as usual.
+pub fn forward(text: Option<&str>, def: &JMap) -> Option<Forward> {
+    let text = text.filter(|t| !t.trim().is_empty())?;
+    let output = str_field(def, "outputEventName").filter(|s| !s.trim().is_empty())?;
+    let events = gson::parse_array(text).ok()?;
+    let v = match output_value(&events, output, str_field(def, "outputEventParamName")) {
+        Ok(Some(v @ G::Obj(_))) => v,
+        _ => return None,
+    };
+    let client = match v.get(FORWARD_CLIENT) {
+        Some(G::Str(s)) => s.trim().to_string(),
+        _ => return None,
+    };
+    let code_ok = !client.is_empty() && client.len() <= 64 && client.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if !code_ok {
+        return None;
+    }
+    let path = match v.get(FORWARD_PATH) {
+        None | Some(G::Null) => None,
+        Some(G::Str(p)) if p.trim().is_empty() => None,
+        Some(G::Str(p)) => {
+            let p = p.trim();
+            if !p.starts_with("/api/") || p.contains("..") || p.contains('?') || p.contains('#') {
+                return None;
+            }
+            Some(p.to_string())
+        }
+        Some(_) => return None,
+    };
+    Some(Forward { client, path })
+}
+
 /// A primitive's text; anything else as JSON.
 fn text_of(v: &G) -> String {
     match v {
@@ -370,6 +424,42 @@ mod tests {
         Some((status, ct, hs, String::from_utf8(body.to_vec()).unwrap()))
     }
 
+    fn forward_of(result: &str, param: Option<&str>) -> Option<Forward> {
+        forward(Some(&format!(r#"[{{"name":"output","result":{result}}}]"#)), &def(param))
+    }
+
+    #[test]
+    fn hand_offs_the_function_asks_for() {
+        let fw = |c: &str, p: Option<&str>| Some(Forward { client: c.into(), path: p.map(str::to_string) });
+        assert_eq!(forward_of(r#"{"forwardClientCode":"FIN","status":200}"#, None), fw("FIN", None));
+        assert_eq!(forward_of(r#"{"forwardClientCode":" FIN_2-a ","forwardPath":"/api/webhooks/whatsapp"}"#, None), fw("FIN_2-a", Some("/api/webhooks/whatsapp")));
+        assert_eq!(forward_of(r#"{"forwardClientCode":"FIN","forwardPath":""}"#, None), fw("FIN", None));
+        assert_eq!(forward_of(r#"{"forwardClientCode":"FIN","forwardPath":null}"#, None), fw("FIN", None));
+        assert_eq!(forward_of(r#"{"r":{"forwardClientCode":"FIN"}}"#, Some("result.r")), fw("FIN", None));
+        // Not a hand-off.
+        for bad in [
+            r#"{"forwardClientCode":""}"#,
+            r#"{"forwardClientCode":"  "}"#,
+            r#"{"forwardClientCode":null}"#,
+            r#"{"forwardClientCode":12}"#,
+            r#"{"forwardClientCode":"FIN/x"}"#,
+            r#"{"forwardClientCode":"F IN"}"#,
+            r#"{"forwardClientCode":"FIN","forwardPath":"webhooks/whatsapp"}"#,
+            r#"{"forwardClientCode":"FIN","forwardPath":"/page/x"}"#,
+            r#"{"forwardClientCode":"FIN","forwardPath":"/api/../x"}"#,
+            r#"{"forwardClientCode":"FIN","forwardPath":"/api/x?y=1"}"#,
+            r#"{"forwardClientCode":"FIN","forwardPath":5}"#,
+            r#"{"status":200}"#,
+            r#""FIN""#,
+        ] {
+            assert_eq!(forward_of(bad, None), None, "{bad}");
+        }
+        assert_eq!(forward_of(&format!(r#"{{"forwardClientCode":"{}"}}"#, "A".repeat(65)), None), None);
+        assert_eq!(forward(None, &def(None)), None);
+        assert_eq!(forward(Some("not json"), &def(None)), None);
+        assert_eq!(forward(Some(r#"[{"name":"output","result":{"forwardClientCode":"FIN"}}]"#), &JMap::new()), None);
+    }
+
     #[tokio::test]
     async fn replies_the_function_sets() {
         // A text reply (Meta's hub.challenge).
@@ -401,6 +491,8 @@ mod tests {
         assert!(reply(Some(r#"[{"name":"output","result":{"body":"x"}}]"#), &JMap::new()).unwrap().is_none());
         assert!(reply(Some("not json"), &def(None)).unwrap().is_none());
         assert!(reply(Some(r#"[{"name":"output"}]"#), &def(None)).unwrap().is_none());
+        // A hand-off is not a reply by itself.
+        assert!(reply_of(r#"{"forwardClientCode":"FIN"}"#, None).await.is_none());
         // A status that is not one.
         for bad in [r#""abc""#, "99", "600", "200.5", "true", "[200]"] {
             let text = format!(r#"[{{"name":"output","result":{{"status":{bad}}}}}]"#);

@@ -38,6 +38,11 @@ app_code_suffix = ".local"
 ssr_channel = "ssr:cache:invalidation"
 apple_bundle_id_prefix = "com.modlix.apps"
 
+[aeo]
+# Rust only: the IndexNow ping when a page is published (crates/ui/src/editor/indexnow.rs). Off on
+# local: the ping is only logged ("IndexNow ping not sent"). indexnow_key_salt must match ui-shell's.
+indexnow_enabled = false
+
 [registry]
 # Registers in the local Lighthouse pair (dashboard http://localhost:8761/).
 register = true

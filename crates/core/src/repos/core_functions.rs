@@ -75,6 +75,10 @@ impl CoreFunctions {
         functions.extend(crate::functions::platform::all(&deps.platform));
         // Rust only: contact codes (security-internal keeps and checks them).
         functions.extend(crate::functions::contact_codes::all(&deps.security, &deps.integrations));
+        // Rust only: a webhook signature checked against a secret stored in a connection.
+        functions.extend(crate::functions::connection_signature::all(&deps.integrations));
+        // Rust only: what the provider says about a connection's stored OAuth2 token (LZT-2270).
+        functions.extend(crate::functions::oauth2_token_info::all(&deps.integrations));
         let mut map = HashMap::new();
         let mut names = Vec::new();
         for f in functions {
@@ -114,15 +118,20 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 87);
+        assert_eq!(core.names().len(), 89);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence and Event.GetScheduleState.
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
             core.names()[85..],
-            ["CoreServices.Security.SendContactCode", "CoreServices.Security.VerifyContactCode"],
-            "the contact codes come last"
+            [
+                "CoreServices.Security.SendContactCode",
+                "CoreServices.Security.VerifyContactCode",
+                "CoreServices.Connection.VerifySignature",
+                "CoreServices.REST.OAuth2TokenInfo"
+            ],
+            "the contact codes, then the connection signature check, then the token info, come last"
         );
         assert_eq!(
             core.names()[78..85],
@@ -163,6 +172,8 @@ mod tests {
             "CoreServices.Storage.CopyToDraft",
             "CoreServices.Storage.GetFields",
             "CoreServices.Notification.SendDataNotification",
+            "CoreServices.Connection.VerifySignature",
+            "CoreServices.REST.OAuth2TokenInfo",
         ] {
             let (ns, name) = full.rsplit_once('.').unwrap();
             assert!(core.find(Some(ns), name).await.unwrap().is_some(), "{full}");

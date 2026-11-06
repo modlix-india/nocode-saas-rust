@@ -3,9 +3,11 @@
 //! names and schemas, events), since stored definitions call them by name.
 
 pub mod caller_security;
+pub mod connection_signature;
 pub mod contact_codes;
 pub mod crypto;
 pub mod file;
+pub mod oauth2_token_info;
 pub mod hash;
 pub mod integration_fns;
 pub mod java_sig;

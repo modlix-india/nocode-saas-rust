@@ -322,6 +322,22 @@ The write path is the `overridable` crate's, so its differences hold here too
       `{"body": Arguments.query["hub.challenge"]}`, an Exotel connect applet a JSON body, a
       provider that wants an empty 200 `{"status": 200}`. Without those keys the answer is
       today's; error events answer as before.
+    - **Hand-off to the tenant (`forwardClientCode`).** A provider that calls ONE URL for all
+      tenants (Meta's app-level callback) reaches the route of the client in that URL. When the
+      output object has `forwardClientCode` (a code of letters, digits, `_`, `-`, at most 64)
+      and, optionally, `forwardPath` (under `/api/`, no `..`, `?` or `#`; the request's own path
+      when absent), ui-shell runs the same request (same body bytes, headers and query, same
+      method) through that client's webhook route of the same app at that path, as that
+      client's webhook user, and answers with that route's reply. Only when the forwarding
+      route is the app owner's own document run on the owner's URL (the URI path's
+      `clientCode` is the URL client), never to the URL client itself, and once (the second
+      route's own `forwardClientCode` is not followed). It never leaves this environment: no
+      network call, the route is run in-process. When the client has no webhook route there
+      (or none for the method) the answer is `502 No webhook route for client X` so the
+      provider retries. The second function verifies the provider's signature again over the
+      same bytes. Example: leadzumptwo `/api/webhooks/whatsapp/app` (LeadZumpV2.waRoute) finds
+      the tenant of a WhatsApp payload by its `phone_number_id` and hands it to that tenant's
+      `/api/webhooks/whatsapp`.
     - **Durability.** A webhook function should verify the signature (`CoreServices.Crypto.
       SignatureValidator` over `rawBody`: Meta's `X-Hub-Signature-256` is `HmacSHA256`, hex,
       after `sha256=`; HmacSHA1 is there for providers that sign with it), write the raw event to
@@ -413,3 +429,34 @@ The write path is the `overridable` crate's, so its differences hold here too
     answers it, also as `GET /api/manifest/manifest.json` because nginx forwards only `/api/`
     paths. The link is `api/manifest/manifest.json`, relative like the app's icon links (the
     gateway cuts whatever comes before `/api/`); SSR and the dev server's page write the same link.
+45. **Discovery files and IndexNow (Rust only, AEO: PLAT-1547, PLAT-1549, PLAT-1550, SZ-930,
+    2026-11-06).** Java had no `/robots.txt`, `/sitemap.xml` or `/llms.txt`: they fell to the
+    index page. ui-shell now answers them, and `/indexnow.txt`, per app and client from the host
+    (the gateway's `appCode` / `clientCode`, then the hosting gate), with every address on the
+    host the request came to (`src/aeo.rs`, `src/shell/discovery.rs`). `Cache-Control: no-cache`
+    with an ETag; a missing file is a plain 404.
+    - The switches are the app's `properties.aiVisibility` (`allowSearchBots`,
+      `allowTrainingBots`, `llmsTxt`, each on unless `false`); the bot lists are
+      `aeo::SEARCH_BOTS` and `aeo::TRAINING_BOTS`. robots.txt lets everyone crawl everything
+      (`/api/` included: a crawler that renders the page shell needs it), gives each switched off
+      group `Disallow: /`, and names the sitemap. It never names a page.
+    - The sitemap and llms.txt list the app's live pages for the client (each client's copy laid
+      over the ones below it, projected fields only), except pages with a `permission` (signed
+      in), pages whose `seo.robots` says `noindex`, and the app's login, not found, forbidden,
+      shell and consent pages. The default page is `/`, any other `/<name>`; a page's static
+      `seo.paths` map (PLAT-1546's proposal) adds `/<name>/<slug>`; a URI path that is a literal
+      path redirecting (GET, `REDIRECTION`) to a relative address of a listed page adds its own
+      path. `lastmod` is the page's newest `updatedAt`. At most 5,000 addresses.
+    - `properties.seoFiles.robotsTxt` / `.llmsTxt` (strings) replace the generated text.
+      `llmsTxt: false` answers 404 even then. A draft (preview) host answers a robots.txt that
+      disallows everything and 404 for the rest.
+    - Cached as `aeoFilesCache-<app>` (key client, surface, host, file); every editor write of
+      the app, a page, style or theme (`UiEvictions::ui_base`) and every URI path write clears it.
+    - ui-editor pings IndexNow when a page's live copy is written (a publish, or a save to the live
+      copy; also a page created live): one ping with the page's addresses on security's app URL
+      for the page's client (else `og.canonicalBase`), never for a page the sitemap leaves out or
+      an app with search crawlers off, at most once per page per `[aeo]
+      indexnow_min_interval_seconds` (600). The key is derived (`aeo::indexnow_key`: SHA-256 of
+      `<indexnow_key_salt>:<app>`, 32 hex), so nothing is stored; the ping names
+      `https://<host>/indexnow.txt` as `keyLocation`. `[aeo] indexnow_enabled` is off by default
+      (and on local): the body is logged instead of sent.

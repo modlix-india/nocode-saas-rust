@@ -4,6 +4,7 @@
 use platform::config::{RegistryConfig, MongoConfig, RedisConfig, SecurityConfig, ServerConfig, TelemetryConfig};
 use serde::{Deserialize, Serialize};
 
+use crate::aeo::AeoConfig;
 use crate::config::{UiConfig, UiSection};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,8 @@ pub struct EditorConfig {
     pub mongo: MongoConfig,
     pub ui: UiSection,
     pub editor: EditorSection,
+    /// Rust only: the IndexNow ping on publish (`crate::aeo`, `crate::editor::indexnow`).
+    pub aeo: AeoConfig,
 }
 
 impl Default for EditorConfig {
@@ -30,6 +33,7 @@ impl Default for EditorConfig {
             mongo: MongoConfig::default(),
             ui: UiSection::default(),
             editor: EditorSection::default(),
+            aeo: AeoConfig::default(),
         }
     }
 }
@@ -104,5 +108,6 @@ mod tests {
         assert_eq!(c.editor.apple_bundle_id_prefix, "com.modlix.apps");
         assert_eq!(c.editor.ssr_channel, "ssr:cache:invalidation");
         assert_eq!(c.engine_config().server.port, 8107);
+        assert!(!c.aeo.indexnow_enabled, "IndexNow pings are off unless configured");
     }
 }

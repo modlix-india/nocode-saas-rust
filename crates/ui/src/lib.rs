@@ -12,6 +12,7 @@
 //! The second binary, ui-shell ([`shell`]), serves the rest of the request-time surface: the
 //! index page, the URI path routes, SSO, analytics and the cache endpoints.
 
+pub mod aeo;
 pub mod authority;
 pub mod catalogue;
 pub mod config;
