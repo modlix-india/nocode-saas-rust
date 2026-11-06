@@ -300,7 +300,8 @@ Everything in those runs is the same except what is listed here.
     runner), sent the tenant's "dealCreated" alert as SYSTEM: SYSTEM's connection and
     definition, never the tenant's own. `notification::prepare` now puts a named, non-blank
     `clientCode` in both `clientCode` and `urlClientCode` when the caller is a system client,
-    is that client, or manages it (`doesClientManageClientCode`); a name the caller may not use
+    is that client, manages it, or is managed by it (`doesClientManageClientCode` either way:
+    a channel partner's user names its business, 2026-11-06 LZT-2209b); a name the caller may not use
     is logged and ignored, and the URL client code goes as before. Data notifications follow
     the same rule; the notification service does not read their client.
 

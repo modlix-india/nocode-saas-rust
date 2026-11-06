@@ -114,6 +114,17 @@ pub fn analytics_enabled(app: &JMap) -> bool {
         == Some(&JValue::Bool(true))
 }
 
+/// Widgets about crawlers rather than visitors (PLAT-1551). A crawler visit is seen by the SSR,
+/// not the beacon, and records no person, so it is readable whether or not the app measures its
+/// visitors; every other check (sign in, authority, write access, managed client) still applies.
+pub const CRAWLER_WIDGETS: &[&str] = &["crawlerVisits"];
+
+/// Whether the request needs the app's `properties.analytics.enabled`: every widget but the
+/// crawler ones.
+pub fn needs_analytics_enabled(body: &JMap) -> bool {
+    !matches!(body.get("widget"), Some(JValue::Str(w)) if CRAWLER_WIDGETS.contains(&w.as_str()))
+}
+
 /// `resolveTimeZone` once the client record is known (`client` is `getClientByCode`'s answer):
 /// the request's zone, then the client's, then Asia/Kolkata. `Err` is the 400 for a requested
 /// zone that is not one.
@@ -395,6 +406,15 @@ mod tests {
         assert!(!analytics_enabled(&app(serde_json::json!({"analytics": true}))));
         assert!(!analytics_enabled(&app(serde_json::json!({}))));
         assert!(!analytics_enabled(&body(serde_json::json!({}))));
+    }
+
+    #[test]
+    fn crawler_visits_do_not_need_visitor_analytics() {
+        assert!(!needs_analytics_enabled(&body(serde_json::json!({"widget": "crawlerVisits"}))));
+        assert!(needs_analytics_enabled(&body(serde_json::json!({"widget": "aiReferrals"}))));
+        assert!(needs_analytics_enabled(&body(serde_json::json!({"widget": "topPages"}))));
+        assert!(needs_analytics_enabled(&body(serde_json::json!({"widget": 5}))));
+        assert!(needs_analytics_enabled(&body(serde_json::json!({}))));
     }
 
     #[test]
