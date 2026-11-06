@@ -379,6 +379,28 @@ async fn notification_access_rules() {
     // A client the caller does not manage: the name is ignored.
     let (_, m) = prepare(&route, &ManagesNothing, &tenant, named(Some("OTHER"))).await.unwrap().unwrap();
     assert_eq!(sent_as(&m), fin, "a client the caller does not manage is ignored");
+    // A channel partner's user (TESTP2, managed by FIN) on the platform's address names its
+    // business (LZT-2209b): sent as FIN. A client that neither manages nor is managed: ignored.
+    struct FinManagesTestp2;
+    #[async_trait]
+    impl HierarchyChecks for FinManagesTestp2 {
+        async fn is_user_part_of_hierarchy(&self, _: i128, _: &str) -> ConnResult<bool> {
+            Ok(true)
+        }
+        async fn does_client_manage_client(&self, _: u64, _: i128) -> ConnResult<bool> {
+            Ok(true)
+        }
+        async fn does_client_manage_client_code(&self, managing: &str, client: &str) -> ConnResult<bool> {
+            Ok(managing == "FIN" && client == "TESTP2")
+        }
+    }
+    let mut partner = caller();
+    partner.client_code = Some("TESTP2".into());
+    partner.url_client_code = Some("SYSTEM".into());
+    let (_, m) = prepare(&route, &FinManagesTestp2, &partner, named(Some("FIN"))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), fin, "the client that manages the caller's client");
+    let (_, m) = prepare(&route, &FinManagesTestp2, &partner, named(Some("OTHER"))).await.unwrap().unwrap();
+    assert_eq!(sent_as(&m), system, "an unrelated client is ignored");
 
     let (key, body) = prepare_event(&Route::events(), &c, EventMessage { event_name: Some("E".into()), ..Default::default() });
     assert_eq!(key, "events2");

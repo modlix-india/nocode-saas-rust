@@ -133,8 +133,9 @@ pub async fn prepare(
 /// signed-in user on a tenant's behalf (a provider's webhook on the platform's address, an event
 /// that client SYSTEM runs) has SYSTEM there, so the alert for a tenant's deal went out as
 /// SYSTEM. A step that names a `clientCode` is now sent as that client, when the caller is a
-/// system client, is that client, or manages it; any other name is ignored and the URL client
-/// code stays, as before.
+/// system client, is that client, manages it, or is managed by it (a channel partner's user
+/// sends the alert for its business's deal as that business, LZT-2209b); any other name is
+/// ignored and the URL client code stays, as before.
 async fn sending_client(checks: &dyn HierarchyChecks, caller: &Caller, named: Option<&str>) -> ConnResult<Option<String>> {
     let Some(named) = named.map(str::trim).filter(|c| !c.is_empty()) else {
         return Ok(caller.url_client_code.clone());
@@ -142,7 +143,10 @@ async fn sending_client(checks: &dyn HierarchyChecks, caller: &Caller, named: Op
     if caller.url_client_code.as_deref() == Some(named) {
         return Ok(caller.url_client_code.clone());
     }
-    let may = caller.system_client || caller.client_code() == named || checks.does_client_manage_client_code(caller.client_code(), named).await?;
+    let may = caller.system_client
+        || caller.client_code() == named
+        || checks.does_client_manage_client_code(caller.client_code(), named).await?
+        || checks.does_client_manage_client_code(named, caller.client_code()).await?;
     if may {
         Ok(Some(named.to_string()))
     } else {
