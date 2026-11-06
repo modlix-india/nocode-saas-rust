@@ -6,6 +6,7 @@ use platform::config::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::aeo::AeoConfig;
 use crate::config::{UiConfig, UiSection};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +21,8 @@ pub struct ShellConfig {
     pub ui: UiSection,
     pub shell: ShellSection,
     pub core: CoreConfig,
+    /// Rust only: the discovery files' settings (`crate::aeo`).
+    pub aeo: AeoConfig,
 }
 
 impl Default for ShellConfig {
@@ -34,6 +37,7 @@ impl Default for ShellConfig {
             ui: UiSection::default(),
             shell: ShellSection::default(),
             core: CoreConfig::default(),
+            aeo: AeoConfig::default(),
         }
     }
 }
