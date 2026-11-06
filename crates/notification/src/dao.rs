@@ -50,8 +50,11 @@ pub struct NewInApp<'a> {
 pub struct InAppFilter<'a> {
     pub app_code: &'a str,
     pub user_id: u64,
-    pub notification_type: Option<&'a str>,
+    /// Only these notification types (one value as Java; several Rust only, N19); empty: any type.
+    pub types: &'a [String],
     pub category: Option<&'a str>,
+    /// Only these notification names (Rust only, N19); empty: any name.
+    pub names: &'a [String],
 }
 
 const INAPP_COLUMNS: &str = "ID, USER_ID, APP_CODE, NOTIFICATION_NAME, TITLE, MESSAGE, MIME_URL, NOTIFICATION_TYPE, \
@@ -259,18 +262,32 @@ impl Dao {
             sql.push_str(" AND READ_AT IS NULL");
         }
         sql.push(')');
-        if let Some(t) = f.notification_type {
-            sql.push_str(" AND NOTIFICATION_TYPE = ?");
-            binds.push(Bind::Text(t));
-        }
+        Self::one_of(&mut sql, &mut binds, "NOTIFICATION_TYPE", f.types);
         if let Some(c) = f.category {
             sql.push_str(" AND NOTIFICATION_CATEGORY = ?");
             binds.push(Bind::Text(c));
         }
+        Self::one_of(&mut sql, &mut binds, "NOTIFICATION_NAME", f.names);
         (sql, binds)
     }
 
-    /// `checkForNewNotifications`: the unread rows of the user in the app (and type).
+    /// `AND <column> = ?` for one value (the statement jOOQ ran), `IN (?, ..)` for several, nothing
+    /// for none: the shared list filter of the list and count reads (N19).
+    fn one_of<'a>(sql: &mut String, binds: &mut Vec<Bind<'a>>, column: &str, values: &'a [String]) {
+        match values {
+            [] => {}
+            [one] => {
+                sql.push_str(&format!(" AND {column} = ?"));
+                binds.push(Bind::Text(one.as_str()));
+            }
+            many => {
+                sql.push_str(&format!(" AND {column} IN ({})", vec!["?"; many.len()].join(", ")));
+                binds.extend(many.iter().map(|v| Bind::Text(v.as_str())));
+            }
+        }
+    }
+
+    /// `checkForNewNotifications`: the unread rows of the user in the app (and type, and names).
     pub async fn count_unread(&self, f: &InAppFilter<'_>) -> Result<i64> {
         let (cond, binds) = Self::filtered(&InAppFilter { category: None, ..*f }, true);
         let sql = format!("SELECT COUNT(*) FROM notification_inapp{cond}");
@@ -568,10 +585,24 @@ mod tests {
 
     #[test]
     fn filters_like_jooq() {
-        let (sql, binds) = Dao::filtered(&InAppFilter { app_code: "a", user_id: 3, notification_type: Some("INFO"), category: Some("c") }, false);
+        let info = ["INFO".to_string()];
+        let (sql, binds) = Dao::filtered(&InAppFilter { app_code: "a", user_id: 3, types: &info, category: Some("c"), names: &[] }, false);
         assert_eq!(sql, " WHERE (APP_CODE = ? AND USER_ID = ?) AND NOTIFICATION_TYPE = ? AND NOTIFICATION_CATEGORY = ?");
         assert_eq!(binds, [Bind::Text("a"), Bind::Id(3), Bind::Text("INFO"), Bind::Text("c")]);
         let (sql, _) = Dao::filtered(&InAppFilter { app_code: "a", user_id: 3, ..Default::default() }, true);
         assert_eq!(sql, " WHERE (APP_CODE = ? AND USER_ID = ? AND READ_AT IS NULL)");
+    }
+
+    #[test]
+    fn filters_by_names() {
+        let names = ["taskDigest".to_string(), "taskReminder".to_string()];
+        let (sql, binds) = Dao::filtered(&InAppFilter { app_code: "a", user_id: 3, names: &names, ..Default::default() }, true);
+        assert_eq!(sql, " WHERE (APP_CODE = ? AND USER_ID = ? AND READ_AT IS NULL) AND NOTIFICATION_NAME IN (?, ?)");
+        assert_eq!(binds, [Bind::Text("a"), Bind::Id(3), Bind::Text("taskDigest"), Bind::Text("taskReminder")]);
+        let one = ["dealCreated".to_string()];
+        let types = ["INFO".to_string(), "REMINDER".to_string()];
+        let (sql, binds) = Dao::filtered(&InAppFilter { app_code: "a", user_id: 3, types: &types, names: &one, ..Default::default() }, false);
+        assert_eq!(sql, " WHERE (APP_CODE = ? AND USER_ID = ?) AND NOTIFICATION_TYPE IN (?, ?) AND NOTIFICATION_NAME = ?");
+        assert_eq!(binds, [Bind::Text("a"), Bind::Id(3), Bind::Text("INFO"), Bind::Text("REMINDER"), Bind::Text("dealCreated")]);
     }
 }
