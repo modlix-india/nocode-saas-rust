@@ -200,6 +200,16 @@ to the GETs and answers OPTIONS itself; the actuator endpoints are replaced by t
   recipient, an in-app failure is logged and push still runs, a push failure is logged. Each failure
   counts once in `Outcome::Sent.failed` and in `notification_failed_total{reason="send"}`. Failures
   before the sends (connection, definition, recipients, choices) still end the run with an error.
+- **N19. Lists and counts by notification name; items say their name and type** (Kiran, 2026-11-06,
+  LeadZump LZT-2301: the All notifications page splits into Deals, Deal assigned, Channel Partner
+  and Tasks tabs, and dealCreated and cpDealCreate share one category). `GET /notifications` and
+  `GET /new` take `name` and `type` as lists (comma separated and/or repeated, blanks dropped; none
+  means every value) and keep only rows whose `NOTIFICATION_NAME` / `NOTIFICATION_TYPE` is one of
+  them, together with `category`, `unread` and `markRead` as before. One `type` value filters with
+  the statement Java ran (`= ?`); several use `IN` (Java compared the joined `a,b` and matched
+  nothing). Both lists go through the one filter the list and the count share (`Dao::filtered`).
+  Each list item now also carries `notificationName` and `notificationType` (Java left both out;
+  Java's empty `type` stays out). No table change: both columns exist (V1/V2).
 
 ## Data notifications (Rust only, 2026-10-22)
 

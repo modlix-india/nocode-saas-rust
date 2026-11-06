@@ -268,10 +268,29 @@ async fn in_app_notifications_count_list_and_mark_read() {
         tokio::time::sleep(Duration::from_millis(1100)).await;
         let mut info = notification();
         info.notification_type = Some("INFO".into());
+        info.name = Some("rsNotifOther".into());
         r.inapp.send_in_app(&users(&[142]), &info, Some("rsapp"), None, &payload("Bob")).await.unwrap();
 
         assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp").await.body, "2");
         assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=ALERT").await.body, "1");
+        // N19: by notification name, comma separated or repeated; blanks dropped.
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&name=rsNotifOther").await.body, "1");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&name=rsNotifOther,rsNotifParity").await.body, "2");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&name=rsNotifOther&name=rsNotifParity").await.body, "2");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&name=nope").await.body, "0");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&name=,").await.body, "2", "a blank name filters nothing");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=ALERT,INFO").await.body, "2", "several types");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=INFO&type=ALERT").await.body, "2", "a repeated type");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=INFO,WARNING").await.body, "1");
+        assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=ALERT&name=rsNotifOther").await.body, "0", "type and name together");
+        let g = get(&r.app, "/api/notification/notifications?appCode=rsapp&type=INFO,WARNING&markRead=false").await;
+        let infos = g.json()["content"].clone();
+        assert_eq!(infos.as_array().unwrap().len(), 1);
+        assert_eq!(infos[0]["notificationType"], "INFO");
+        let g = get(&r.app, "/api/notification/notifications?appCode=rsapp&name=rsNotifParity&markRead=false").await;
+        let only = g.json()["content"].clone();
+        assert_eq!(only.as_array().unwrap().len(), 1);
+        assert_eq!((only[0]["notificationName"].clone(), only[0]["notificationType"].clone()), (json!("rsNotifParity"), json!("ALERT")));
         assert_eq!(get(&r.app, "/api/notification/new?appCode=rsapp&type=").await.body, "2", "a blank type filters nothing");
         assert_eq!(get(&r.app, "/api/notification/new?appCode=").await.body, "0", "a blank app code counts nothing");
         assert_eq!(get(&r.app, "/api/notification/new").await.body, "0", "the appCode header is appbuilder");
