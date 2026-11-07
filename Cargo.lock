@@ -2821,9 +2821,9 @@ dependencies = [
 
 [[package]]
 name = "kirun"
-version = "2.2.0"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6696a48db121cc67496f1816e2834ac5c294df17d0de6a54c362104a9622fe23"
+checksum = "24dfc646a5b74954d51a62db6e86e0aa7843264c81622ad708c2edff7837d01a"
 dependencies = [
  "async-trait",
  "chrono",
