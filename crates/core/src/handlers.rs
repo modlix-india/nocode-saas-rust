@@ -71,6 +71,10 @@ fn header(h: &HeaderMap, name: &str) -> Option<String> {
 pub(crate) async fn request_context(st: &AppState, h: &HeaderMap) -> Result<Arc<RequestContext>, CoreError> {
     let caller = CallerContext::from_headers(h, st.inner().config.server.port);
     let auth = st.inner().auth.authenticate(&caller).await?;
+    let user_agent = context::user_agent(h);
+    if is_python_client(&user_agent) {
+        log_python_call(&auth, &caller, &context::client_ip(h), &user_agent);
+    }
     Ok(Arc::new(RequestContext {
         auth: Arc::new(auth),
         app_code: caller.app_code.clone(),
@@ -83,9 +87,39 @@ pub(crate) async fn request_context(st: &AppState, h: &HeaderMap) -> Result<Arc<
             .is_some_and(|v| v.eq_ignore_ascii_case("true")),
         debug: caller.debug.clone(),
         client_ip: context::client_ip(h),
-        user_agent: context::user_agent(h),
+        user_agent,
         raised: Default::default(),
     }))
+}
+
+/// A Python HTTP library rather than a browser or one of our services. Scripts calling core
+/// this way (`python-requests` pulling dealQuery pages in bursts, a daily run at 02:30 UTC)
+/// trip the prod edge latency alert, and the nginx log shows only their IP.
+fn is_python_client(user_agent: &str) -> bool {
+    let ua = user_agent.to_ascii_lowercase();
+    ua.starts_with("python") || ua.contains("aiohttp") || ua.contains("httpx") || ua.contains("urllib")
+}
+
+/// One INFO line per Python call: who it ran as. The request span adds the method and path,
+/// and the unit's `slow request` / `request failed` lines carry the status and time. Never the
+/// token.
+fn log_python_call(auth: &crate::auth::Authentication, caller: &CallerContext, ip: &str, user_agent: &str) {
+    let ca = &auth.ca;
+    tracing::info!(
+        user_id = ca.user.id,
+        user_name = ca.user.user_name.as_deref().unwrap_or(""),
+        user_client_id = ca.user.client_id,
+        user_client_code = ca.client_code.as_deref().unwrap_or(""),
+        logged_in_from = ca.logged_in_from_client_code.as_deref().unwrap_or(""),
+        authenticated = ca.authenticated,
+        basic_auth = caller.is_basic,
+        app_code = caller.app_code.as_deref().unwrap_or(""),
+        client_code = caller.client_code.as_deref().unwrap_or(""),
+        host = %caller.forwarded_host,
+        ip,
+        user_agent,
+        "python call"
+    );
 }
 
 fn json_response(body: String) -> Response {
@@ -339,4 +373,28 @@ async fn schemas_filter(State(st): State<AppState>, RawQuery(raw): RawQuery, h: 
     })
     .await;
     finish(r, "/api/core/schemas/repositoryFilter")
+}
+
+#[cfg(test)]
+mod python_call_tests {
+    use super::is_python_client;
+
+    #[test]
+    fn python_http_libraries_are_python_clients() {
+        for ua in ["python-requests/2.32.5", "Python-urllib/3.12", "python-httpx/0.27.0", "Python/3.11 aiohttp/3.9.5"] {
+            assert!(is_python_client(ua), "{ua}");
+        }
+    }
+
+    #[test]
+    fn browsers_and_our_own_callers_are_not() {
+        for ua in [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+            "Blackbox-Exporter/0.28.0",
+            "node",
+            "",
+        ] {
+            assert!(!is_python_client(ua), "{ua}");
+        }
+    }
 }
