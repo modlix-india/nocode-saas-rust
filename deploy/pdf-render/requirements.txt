@@ -1,2 +1,4 @@
 weasyprint==66.0
 docxtpl==0.20.2
+pypdf==5.4.0
+pyhanko==0.38.0
