@@ -467,6 +467,51 @@ async fn the_raised_event_carries_its_run_and_completion_closes_it() {
 
 #[tokio::test]
 #[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
+async fn a_redelivered_tick_or_a_stale_one_off_does_not_run_again() {
+    on_scratch(|h| async move {
+        h.per_client_sweep(&["FIN"], &["FIN"]).await;
+        let a = h.instance();
+        a.scheduler.pass().await.unwrap();
+        let raised = h.events.of("FIN", SWEEP)[0].clone();
+        complete(&a, &raised, true).await;
+        // RabbitMQ hands the same tick over again after it was done: the work is not run.
+        let ran = Arc::new(AtomicBool::new(false));
+        let r = ran.clone();
+        let again = a.completion.track(&raised, async move {
+            r.store(true, Ordering::SeqCst);
+            Ok::<_, CoreError>(Some(false))
+        });
+        assert_eq!(again.await.unwrap(), Some(true));
+        assert!(!ran.load(Ordering::SeqCst), "a closed run must not run again");
+        assert_eq!(h.runs("FIN", SWEEP).await[0].status, Some(RunState::Done));
+
+        // A one-off whose lease ran out is claimed again; the first delivery is stale.
+        let t0 = h.now();
+        h.schedule(&a, "FIN", false, "stale-1", t0, json!({})).await;
+        let of_key = |key: &str| -> Vec<EventMessage> {
+            h.events.all().into_iter().filter(|q| marker(q).get("key") == Some(&json!(key))).collect()
+        };
+        a.scheduler.pass().await.unwrap();
+        let first = of_key("stale-1")[0].clone();
+        h.advance(settings().lease_seconds + 1);
+        a.scheduler.pass().await.unwrap();
+        let second = of_key("stale-1")[1].clone();
+        assert_ne!(marker(&first)["claimToken"], marker(&second)["claimToken"]);
+        let r = ran.clone();
+        let stale = a.completion.track(&first, async move {
+            r.store(true, Ordering::SeqCst);
+            Ok::<_, CoreError>(Some(true))
+        });
+        assert_eq!(stale.await.unwrap(), Some(true));
+        assert!(!ran.load(Ordering::SeqCst), "the stale delivery must not run");
+        complete(&a, &second, true).await;
+        assert_eq!(h.row("stale-1").await.status, Some(Status::Done));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local stack: CORE_LOCAL_STACK=1 and config/local.toml"]
 async fn a_tick_whose_predecessor_is_still_running_is_skipped_until_the_lease_runs_out() {
     on_scratch(|h| async move {
         h.per_client_sweep(&["FIN"], &["FIN"]).await;
