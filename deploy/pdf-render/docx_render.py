@@ -28,11 +28,19 @@ import signal
 import subprocess
 import tempfile
 import time
+import urllib.parse
 
 LOG = logging.getLogger("pdf-render.docx")
 
 DATA_IMAGE = re.compile(r"^data:image/(png|jpe?g);base64,(.+)$", re.S)
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Relative files URLs (`/api/files/...`, `api/files/...`) resolve against this, as HTML templates' do
+# in app.py, so the Policy sees a files URL.
+BASE_URL = "https://pdf-render.invalid/"
+
+
+def _fetch(url, policy):
+    return policy.fetch(urllib.parse.urljoin(BASE_URL, url))["string"]
 
 
 class BadTemplate(Exception):
@@ -49,7 +57,7 @@ def _read_file(url, policy):
         if not m:
             raise BadTemplate("file: only base64 data URLs are read")
         return base64.b64decode(m.group(1))
-    return policy.fetch(url)["string"]
+    return _fetch(url, policy)
 
 
 def _image_bytes(src, policy):
@@ -57,7 +65,7 @@ def _image_bytes(src, policy):
     if m:
         raw = base64.b64decode(m.group(2))
     else:
-        raw = policy.fetch(src)["string"]
+        raw = _fetch(src, policy)
     if len(raw) > MAX_IMAGE_BYTES:
         raise BadTemplate("image larger than 5 MiB")
     return raw
