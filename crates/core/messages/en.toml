@@ -928,6 +928,13 @@ java_text = "template_details_missing"
 when = "Making a PDF from a template whose body is empty in the chosen language (Java sends the bundle key itself as the message)."
 audience = "anyone"
 
+[CORE.TEMPLATE_DOCX_FILE_INVALID]
+status = 400
+text = "This Word template has no usable Word file."
+action = "Upload the Word file again for this template. It must be in the secured files of the organisation that owns the template."
+when = "Making a PDF from a template of type docx whose resources.docx.path is missing, is not a secured files URL, or is in another organisation's files. Rust only: Java had no Word templates."
+audience = "anyone"
+
 [CORE.FILE_FORMAT_INVALID]
 status = 404
 params = ["format"]

@@ -6,6 +6,10 @@
 //! sidecar fails and `[pdf] fallback_on_error` is on, [`crate::pdf`]'s text renderer makes the PDF,
 //! as before (DIFFERENCES D31). It is off by default (Kiran, 2026-10-22): a sidecar failure fails the
 //! call, so nobody is handed a plain-text cost sheet without knowing why.
+//!
+//! A Word template (`templateType` `docx`, [`docx_file`]) is not HTML: its `.docx` (in the
+//! template's `resources.docx.path`) and the data are posted to the sidecar's `/docx/render`,
+//! which fills it and converts it with LibreOffice. There is no text fallback for those.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -60,6 +64,49 @@ pub async fn render(html: String) -> Result<Vec<u8>, String> {
     }
 }
 
+/// The `templateType` of a Word template.
+pub const DOCX_TYPE: &str = "docx";
+
+const SECURED_FILES: &str = "api/files/secured/file/";
+
+/// The Word file of a template: `None` when the template is not a Word template; else its
+/// `resources.docx.path` as a secured files URL (`/api/files/secured/file/<client>/...`), or why it
+/// cannot be used. The file must be in the secured files of the template's own client
+/// (`clientCode`): the sidecar reads files without asking who is calling, so a template must not
+/// be able to name another organisation's file.
+pub fn docx_file(template: &serde_json::Value) -> Option<Result<String, String>> {
+    if template.get("templateType").and_then(serde_json::Value::as_str) != Some(DOCX_TYPE) {
+        return None;
+    }
+    let path = template.pointer("/resources/docx/path").and_then(serde_json::Value::as_str).map(str::trim).unwrap_or("");
+    if path.is_empty() {
+        return Some(Err("resources.docx.path is missing".into()));
+    }
+    let Some(rest) = path.trim_start_matches('/').strip_prefix(SECURED_FILES) else {
+        return Some(Err(format!("{path} is not a secured files URL")));
+    };
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    let segments: Vec<&str> = rest.split('/').collect();
+    if segments.len() < 2 || segments.iter().any(|s| s.is_empty() || *s == "." || *s == ".." || s.contains('\\')) {
+        return Some(Err(format!("{path} is not a file path")));
+    }
+    let owner = template.get("clientCode").and_then(serde_json::Value::as_str).unwrap_or("");
+    if owner.is_empty() || segments[0] != owner {
+        return Some(Err(format!("{path} is not in the files of {}", if owner.is_empty() { "the template's client" } else { owner })));
+    }
+    Some(Ok(format!("/{SECURED_FILES}{rest}")))
+}
+
+/// A Word template's file (from [`docx_file`]) filled with `data`, as a PDF, by the sidecar.
+pub async fn render_docx(file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
+    match RENDERER.get() {
+        Some(r) => r.render_docx(file, data).await,
+        None => Err(NO_DOCX_RENDERER.into()),
+    }
+}
+
+const NO_DOCX_RENDERER: &str = "Word templates need the pdf-render service: [pdf] upstream is not set";
+
 async fn text(html: String) -> Result<Vec<u8>, String> {
     tokio::task::spawn_blocking(move || crate::pdf::html_to_pdf(&html)).await.map_err(|e| e.to_string())
 }
@@ -107,6 +154,28 @@ impl PdfRenderer {
         } else {
             Err(format!("pdf-render failed: {failure}"))
         }
+    }
+
+    /// `/docx/render`: the Word file and the data as JSON. No text fallback: a plain-text page is
+    /// no stand-in for a builder's agreement.
+    pub async fn render_docx(&self, file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(NO_DOCX_RENDERER.into()) };
+        let body = serde_json::json!({"file": file, "data": data});
+        let sent = upstream.send("/docx/render", |base| http.post(format!("{base}/docx/render")).json(&body)).await;
+        let failure = match sent {
+            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(b) if b.starts_with(b"%PDF") => return Ok(b.to_vec()),
+                Ok(_) => "the answer is not a PDF".to_string(),
+                Err(e) => e.to_string(),
+            },
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                format!("{status}: {}", text.chars().take(300).collect::<String>())
+            }
+            Err(e) => e.to_string(),
+        };
+        Err(format!("pdf-render failed on the Word template: {failure}"))
     }
 }
 
@@ -197,6 +266,62 @@ mod tests {
         let pdf = renderer(&var("PDF_RENDER_URL"), false).render(html).await.unwrap();
         assert!(pdf.starts_with(b"%PDF") && !pdf.starts_with(b"%PDF-1.4"), "made by the sidecar, not the text renderer");
         std::fs::write(var("PDF_RENDER_OUT"), pdf).unwrap();
+    }
+
+    #[test]
+    fn a_word_template_names_a_file_of_its_own_client() {
+        use serde_json::json;
+        let t = |path: serde_json::Value, client: &str| json!({"templateType": "docx", "clientCode": client, "resources": {"docx": {"path": path}}});
+        assert!(docx_file(&json!({"templateType": "pdf", "resources": {"docx": {"path": "x"}}})).is_none(), "not a Word template");
+        assert!(docx_file(&json!({"templateParts": {}})).is_none());
+        let ok = docx_file(&t(json!("/api/files/secured/file/ANTER/cxzump/_templates/al.docx"), "ANTER")).unwrap();
+        assert_eq!(ok.unwrap(), "/api/files/secured/file/ANTER/cxzump/_templates/al.docx");
+        let ok = docx_file(&t(json!("api/files/secured/file/ANTER/a.docx?x=1"), "ANTER")).unwrap();
+        assert_eq!(ok.unwrap(), "/api/files/secured/file/ANTER/a.docx", "no leading slash, query dropped");
+        for (path, client) in [
+            (json!(null), "ANTER"),
+            (json!("  "), "ANTER"),
+            (json!("/api/files/static/file/ANTER/a.docx"), "ANTER"),
+            (json!("https://evil/x.docx"), "ANTER"),
+            (json!("/api/files/secured/file/OTHER/a.docx"), "ANTER"),
+            (json!("/api/files/secured/file/ANTER/../OTHER/a.docx"), "ANTER"),
+            (json!("/api/files/secured/file/ANTER//a.docx"), "ANTER"),
+            (json!("/api/files/secured/file/ANTER"), "ANTER"),
+            (json!("/api/files/secured/file/ANTER/a.docx"), ""),
+        ] {
+            assert!(docx_file(&t(path.clone(), client)).unwrap().is_err(), "{path} for {client}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_word_template_goes_to_the_sidecar_as_json() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+        let s2 = seen.clone();
+        let app = Router::new().route(
+            "/docx/render",
+            post(move |b: axum::Json<serde_json::Value>| {
+                let s = s2.clone();
+                async move {
+                    let fail = b.0["data"]["fail"] == true;
+                    s.lock().unwrap().push(b.0);
+                    if fail { (StatusCode::BAD_REQUEST, &b"docx: template: bad tag"[..]) } else { (StatusCode::OK, SIDECAR_PDF) }
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+
+        let data = serde_json::json!({"al": {"unit": {"number": "B-1504"}}});
+        let pdf = renderer(&base, true).render_docx("/api/files/secured/file/A/x.docx".into(), data.as_object().unwrap()).await.unwrap();
+        assert_eq!(pdf, SIDECAR_PDF);
+        assert_eq!(seen.lock().unwrap()[0], serde_json::json!({"file": "/api/files/secured/file/A/x.docx", "data": data}));
+        // A refusal is an error even with fallback_on_error: no text page for a Word template.
+        let bad = serde_json::json!({"fail": true});
+        let e = renderer(&base, true).render_docx("/f".into(), bad.as_object().unwrap()).await.unwrap_err();
+        assert!(e.contains("400") && e.contains("bad tag"), "{e}");
+        let none = PdfRenderer::from_config(&PdfConfig::default(), None).unwrap();
+        assert!(none.render_docx("/f".into(), data.as_object().unwrap()).await.unwrap_err().contains("[pdf] upstream"));
     }
 
     #[test]
