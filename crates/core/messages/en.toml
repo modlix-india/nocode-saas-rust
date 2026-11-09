@@ -935,6 +935,30 @@ action = "Upload the Word file again for this template. It must be in the secure
 when = "Making a PDF from a template of type docx whose resources.docx.path is missing, is not a secured files URL, or is in another organisation's files. Rust only: Java had no Word templates."
 audience = "anyone"
 
+[CORE.FILE_CLIENT_FORBIDDEN]
+status = 403
+params = ["client"]
+text = "You can't use the files of[ {client}] from here."
+action = "Use your own organisation's files, or those of a client your organisation manages."
+when = "CoreServices.File.DocxInspect, DocxPrepare or PdfStamp with a clientCode that is neither the caller's own client nor one it manages. Rust only."
+audience = "anyone"
+
+[CORE.FILE_NOT_CLIENTS]
+status = 400
+params = ["client"]
+text = "That file is not in the secured files of[ {client}]."
+action = "Upload the file to the organisation's own secured files, then try again."
+when = "CoreServices.File.DocxInspect, DocxPrepare or PdfStamp naming a file that is not a secured files URL of the client the call is for. Rust only."
+audience = "anyone"
+
+[CORE.DOCX_REQUEST_REFUSED]
+status = 400
+params = ["function", "reason"]
+text = "The document could not be made[ by {function}][: {reason}]."
+action = "Check the Word file and the mapping (a blank that moved, a field name, a signer), then try again."
+when = "pdf-render refused a Word template request: not a Word file, a blank not where the mapping says, a bad field or format, a signer key it does not know, a stamp without a signature image. Rust only."
+audience = "anyone"
+
 [CORE.FILE_FORMAT_INVALID]
 status = 404
 params = ["format"]

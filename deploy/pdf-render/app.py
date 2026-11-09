@@ -19,7 +19,11 @@ network). It never fetches what a template names on its own:
 
 Every fetch has a timeout and a size cap. Endpoints: `POST /render` (the HTML as the body,
 UTF-8) answers `application/pdf`; `POST /docx/render` (JSON `{file, data}`: a Word template filled
-and converted by LibreOffice, see docx_render.py) answers `application/pdf`; `GET /healthz` answers `ok`.
+and converted by LibreOffice, see docx_render.py) answers `application/pdf`; `POST /docx/inspect`
+(JSON `{file}`) answers the blanks of a Word file, `POST /docx/prepare` (JSON `{file, fields,
+conditions, options}`) the Word file with field tags in place of its blanks, `POST /pdf/stamp`
+(JSON `{file, stamps}`) the PDF with signatures drawn at its markers (docx_edit.py, pdf_stamp.py;
+what was done comes back as JSON in the `X-Result` header); `GET /healthz` answers `ok`.
 
 Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `ALLOWED_HOSTS`,
 `FONT_HOSTS` (fonts.googleapis.com,fonts.gstatic.com; empty turns web fonts off), `FONT_CACHE_BYTES`,
@@ -27,6 +31,7 @@ Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `AL
 `MAX_CONCURRENT` (2), `DOCX_CONCURRENT` (2), `DOCX_TIMEOUT_SECONDS` (90), `LOG_LEVEL` (INFO).
 """
 
+import json
 import logging
 import os
 import re
@@ -40,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = logging.getLogger("pdf-render")
 
 DEFAULT_FONT_HOSTS = "fonts.googleapis.com,fonts.gstatic.com"
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 FILES_PATH = re.compile(r"^/api/files/(static|secured)/file/(.+)$")
 # Relative URLs in a template resolve against this, so `/api/files/...` matches FILES_PATH.
 BASE_URL = "https://pdf-render.invalid/"
@@ -185,6 +191,7 @@ class Handler(BaseHTTPRequestHandler):
     max_body = 50 * 1024 * 1024
     slots = threading.BoundedSemaphore(2)
     converter = None
+    sealer = None  # pdf_seal.Sealer when PDF_SEAL_P12 is set
 
     def log_message(self, fmt, *args):
         LOG.debug("%s %s", self.address_string(), fmt % args)
@@ -202,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
     def do_POST(self):
-        if self.path not in ("/render", "/docx/render"):
+        if self.path not in ("/render", "/docx/render", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal"):
             return self._send(404, b"not found")
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -212,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(413, b"body too large")
         if self.path == "/docx/render":
             return self._docx(self.rfile.read(length))
+        if self.path == "/pdf/seal":
+            return self._seal(self.rfile.read(length))
+        if self.path in ("/docx/inspect", "/docx/prepare", "/pdf/stamp"):
+            return self._edit(self.path, self.rfile.read(length))
         html = self.rfile.read(length).decode("utf-8", errors="replace")
         if not html.strip():
             return self._send(400, b"empty body")
@@ -224,6 +235,63 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, f"render failed: {type(e).__name__}".encode())
         LOG.info("rendered %d bytes of HTML into %d bytes of PDF in %.0f ms", length, len(pdf), (time.monotonic() - started) * 1000)
         self._send(200, pdf, "application/pdf")
+
+    def _send_with(self, body, ctype, result):
+        """A file answered with what was done, as JSON in `X-Result`."""
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Result", json.dumps(result, separators=(",", ":")))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _edit(self, path, body):
+        """`/docx/inspect` (JSON), `/docx/prepare` (the prepared .docx) and `/pdf/stamp` (the
+        stamped PDF): see docx_edit.py and pdf_stamp.py."""
+        import docx_edit
+        import docx_render
+        import pdf_stamp
+
+        try:
+            req = json.loads(body)
+            if not isinstance(req, dict) or not isinstance(req.get("file"), str) or not req["file"]:
+                raise docx_edit.BadRequest("body: `file` is required")
+            if path == "/pdf/stamp":
+                with self.slots:
+                    pdf, result = pdf_stamp.stamp(docx_render._read_file(req["file"], self.policy), req.get("stamps"),
+                                                  bool(req.get("recordPage")), render_html=lambda m: render(m, self.policy))
+                return self._send_with(pdf, "application/pdf", result)
+            src = docx_render._read_file(req["file"], self.policy)
+            if path == "/docx/inspect":
+                return self._send(200, json.dumps(docx_edit.inspect(src)).encode(), "application/json")
+            out, done = docx_edit.prepare(src, req.get("fields"), req.get("conditions"), req.get("options"))
+            # the prepared file must fill: a bad tag is the caller's to fix now, not at the first document
+            docx_render.fill(out, {}, self.policy)
+            self._send_with(out, DOCX_TYPE, done)
+        except ValueError:
+            self._send(400, b"body: not JSON")
+        except (docx_edit.BadRequest, docx_render.BadTemplate, pdf_stamp.BadStamp, Refused) as e:
+            self._send(400, f"{path}: {e}".encode())
+        except Exception as e:
+            LOG.exception("%s failed", path)
+            self._send(500, f"{path} failed: {type(e).__name__}".encode())
+
+    def _seal(self, body):
+        """`/pdf/seal`: the PDF in the body sealed with the platform's certificate (pdf_seal.py), what was
+        done in `X-Result`. 501 when this environment has no certificate: the caller keeps the PDF as it is."""
+        if self.sealer is None:
+            return self._send(501, b"seal: no certificate on this environment (PDF_SEAL_P12)")
+        import pdf_seal
+
+        try:
+            with self.slots:
+                pdf, result = self.sealer.seal(body)
+        except pdf_seal.BadPdf as e:
+            return self._send(400, f"seal: {e}".encode())
+        except Exception as e:
+            LOG.exception("seal failed")
+            return self._send(500, f"seal failed: {type(e).__name__}".encode())
+        self._send_with(pdf, "application/pdf", result)
 
     def _docx(self, body):
         """Word templates have their own converters (docx_render.Converter), so a long agreement
@@ -254,6 +322,10 @@ def main():
     import docx_render
 
     Handler.converter = docx_render.Converter.from_env()
+    if os.environ.get("PDF_SEAL_P12", "").strip():  # only then is pdf_seal (and pyHanko) loaded at start
+        import pdf_seal
+
+        Handler.sealer = pdf_seal.Sealer.from_env()  # None: no seal on this environment (/pdf/seal answers 501)
     port = int(os.environ.get("PORT", "8120"))
     LOG.info("listening on %d (files: %s, allowed hosts: %s)", port, Handler.policy.files_url or "none", sorted(Handler.policy.allowed_hosts) or "none")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

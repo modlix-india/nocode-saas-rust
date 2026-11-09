@@ -79,6 +79,8 @@ impl CoreFunctions {
         functions.extend(crate::functions::connection_signature::all(&deps.integrations));
         // Rust only: what the provider says about a connection's stored OAuth2 token (LZT-2270).
         functions.extend(crate::functions::oauth2_token_info::all(&deps.integrations));
+        // Rust only: Word templates' blanks and tags, and signatures stamped onto a PDF (pdf-render).
+        functions.extend(crate::functions::docx::all(&deps.security, &deps.files));
         let mut map = HashMap::new();
         let mut names = Vec::new();
         for f in functions {
@@ -118,7 +120,7 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 89);
+        assert_eq!(core.names().len(), 92);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence and Event.GetScheduleState.
@@ -129,9 +131,12 @@ mod tests {
                 "CoreServices.Security.SendContactCode",
                 "CoreServices.Security.VerifyContactCode",
                 "CoreServices.Connection.VerifySignature",
-                "CoreServices.REST.OAuth2TokenInfo"
+                "CoreServices.REST.OAuth2TokenInfo",
+                "CoreServices.File.DocxInspect",
+                "CoreServices.File.DocxPrepare",
+                "CoreServices.File.PdfStamp"
             ],
-            "the contact codes, then the connection signature check, then the token info, come last"
+            "the contact codes, the connection signature check, the token info, then the Word template functions, come last"
         );
         assert_eq!(
             core.names()[78..85],
