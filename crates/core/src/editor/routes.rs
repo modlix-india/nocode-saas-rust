@@ -446,11 +446,14 @@ async fn template_preview(State(st): State<St>, h: HeaderMap, body: Bytes) -> Re
 
 async fn template_preview_pdf(State(st): State<St>, h: HeaderMap, body: Bytes) -> Response {
     const R: &str = "/api/core/templates/preview/pdf";
-    if let Err(r) = caller(&st, &h, R).await {
-        return r;
-    }
+    let ca = match caller(&st, &h, R).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    // A Word template's file may come only from the signed-in caller's own client's files.
+    let own = if ca.authenticated { ca.client_code() } else { "" };
     let r = match preview_request(&body) {
-        Ok((t, _, d)) => crate::editor::preview::render_pdf(t.as_ref(), d.as_ref())
+        Ok((t, _, d)) => crate::editor::preview::render_pdf(t.as_ref(), d.as_ref(), own)
             .await
             .map(|bytes| Reply { status: StatusCode::OK, headers: Vec::new(), body: c::ReplyBody::File { content_type: "application/pdf", bytes } })
             .map_err(unknown),

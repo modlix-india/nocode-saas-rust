@@ -48,8 +48,18 @@ pub fn render_parts(template: Option<&Value>, language: Option<&str>, data: Opti
 }
 
 /// `renderPdf(template, data)`: the `body` part (default language) as a PDF, with the
-/// installed renderer (`crate::pdf_render`).
-pub async fn render_pdf(template: Option<&Value>, data: Option<&Value>) -> Result<Vec<u8>, String> {
+/// installed renderer (`crate::pdf_render`). A Word template (Rust only) is its `.docx` filled by
+/// the sidecar; the template is posted by the caller, so its file must be in the files of
+/// `caller_client` (the signed-in caller's own client, `""` for anyone else), whatever
+/// `clientCode` the posted template claims.
+pub async fn render_pdf(template: Option<&Value>, data: Option<&Value>, caller_client: &str) -> Result<Vec<u8>, String> {
+    if let Some(t) = template.filter(|t| t.is_object()) {
+        let mut owned = t.clone();
+        owned["clientCode"] = Value::String(caller_client.to_string());
+        if let Some(file) = crate::pdf_render::docx_file(&owned) {
+            return crate::pdf_render::render_docx(file?, &data_for(t, data)).await;
+        }
+    }
     let parts = render_parts(template, Some(""), data)?;
     let body = parts.get("body").and_then(JValue::as_str).unwrap_or("").to_string();
     crate::pdf_render::render(body).await
@@ -77,7 +87,20 @@ mod tests {
         let p = render_parts(Some(&t), None, None).unwrap();
         assert_eq!((p.get("a"), p.get("b")), (Some(&JValue::Str(String::new())), Some(&JValue::Str("3".into()))));
         assert!(render_parts(Some(&json!({"templateParts": {"en": {"a": "${"}}})), None, None).is_err());
-        let pdf = render_pdf(Some(&json!({"templateParts": {"en": {"body": "<p>Hello</p>"}}})), None).await.unwrap();
+        let pdf = render_pdf(Some(&json!({"templateParts": {"en": {"body": "<p>Hello</p>"}}})), None, "").await.unwrap();
         assert!(pdf.starts_with(b"%PDF"));
+    }
+
+    #[tokio::test]
+    async fn a_word_template_preview_reads_only_the_callers_files() {
+        let t = |client: &str, path: &str| json!({"templateType": "docx", "clientCode": client, "resources": {"docx": {"path": path}}});
+        // The posted clientCode does not count: the caller's own client does.
+        let e = render_pdf(Some(&t("OTHER", "/api/files/secured/file/OTHER/a.docx")), None, "ANTER").await.unwrap_err();
+        assert!(e.contains("not in the files of ANTER"), "{e}");
+        let e = render_pdf(Some(&t("ANTER", "/api/files/secured/file/ANTER/a.docx")), None, "").await.unwrap_err();
+        assert!(e.contains("not in the files of"), "anonymous: {e}");
+        // Its own file passes the check (no sidecar in tests: the renderer says so).
+        let e = render_pdf(Some(&t("", "/api/files/secured/file/ANTER/a.docx")), None, "ANTER").await.unwrap_err();
+        assert!(e.contains("[pdf] upstream"), "{e}");
     }
 }
