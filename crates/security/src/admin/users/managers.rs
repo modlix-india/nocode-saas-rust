@@ -60,6 +60,7 @@ impl Admin {
         }
         self.db.add_client_manager(client_id, user_id, ca.user.id()).await?;
         self.evict_manager_flag(user_id, client_id).await;
+        self.notify_managed_change(ca, client_id, crate::admin::managed_changes::Change::Managers, None).await;
         Ok(true)
     }
 
@@ -100,6 +101,7 @@ impl Admin {
             self.evict_manager_flag(o, client_id).await;
         }
         self.evict_manager_flag(new, client_id).await;
+        self.notify_managed_change(ca, client_id, crate::admin::managed_changes::Change::Managers, None).await;
         Ok(true)
     }
 
@@ -113,6 +115,7 @@ impl Admin {
         }
         self.db.remove_client_manager(client_id, user_id).await?;
         self.evict_manager_flag(user_id, client_id).await;
+        self.notify_managed_change(ca, client_id, crate::admin::managed_changes::Change::Managers, None).await;
         Ok(true)
     }
 
@@ -137,6 +140,7 @@ impl Admin {
                 self.evict_manager_flag(from, c).await;
             }
             self.evict_manager_flag(to, c).await;
+            self.notify_managed_change(ca, c, crate::admin::managed_changes::Change::Managers, None).await;
         }
         Ok(n)
     }
@@ -163,6 +167,7 @@ impl Admin {
         for u in affected {
             self.evict_manager_flag(u, client_id).await;
         }
+        self.notify_managed_change(ca, client_id, crate::admin::managed_changes::Change::Managers, None).await;
         Ok(true)
     }
 }
