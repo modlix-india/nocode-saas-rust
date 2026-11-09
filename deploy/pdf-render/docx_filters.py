@@ -7,6 +7,8 @@ another shape) is shown as it is, never an error: a document must still be made.
 - `num_words`: 1 (One)
 - `date_dmy`: 09-11-2026; `date_long`: 9 November 2026;
   `date_words`: 9th Day of November, Two Thousand Twenty-Six
+- `age`: a date of birth as years today (`{{ a.dob|age }}`: 42)
+- `pct`: a number with at most 2 decimals, no trailing zeros (10, 12.5, 33.33)
 """
 
 import datetime
@@ -146,5 +148,21 @@ def date_words(v):
     return f"{_ordinal(d.day)} Day of {MONTHS[d.month - 1]}, {_year_words(d.year)}" if d else v
 
 
-ALL = {"inr": inr, "inr0": inr0, "words": words, "num_words": num_words,
+def age(v, today=None):
+    d = _date(v)
+    if not d:
+        return v
+    t = today or datetime.date.today()
+    return t.year - d.year - ((t.month, t.day) < (d.month, d.day))
+
+
+def pct(v):
+    d = _number(v)
+    if d is None:
+        return v
+    q = d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP).normalize()
+    return f"{q:f}"
+
+
+ALL = {"age": age, "pct": pct, "inr": inr, "inr0": inr0, "words": words, "num_words": num_words,
        "date_dmy": date_dmy, "date_long": date_long, "date_words": date_words}

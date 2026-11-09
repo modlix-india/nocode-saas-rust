@@ -17,6 +17,12 @@ database, a page or the core units:
 
 Without PDF_SEAL_P12, `Sealer.from_env()` is None and `/pdf/seal` answers 501, which the core reads as
 "no seal on this environment": the PDF is stored as it is.
+
+A client's own certificate (per app, in the client's Settings; the core keeps it encrypted and sends it only for
+one seal): `/pdf/seal` with a JSON body {pdf, p12, password} (base64 for the files) seals with it instead.
+`/seal/inspect` reads an uploaded .p12 (subject, issuer, validity, fingerprint; refuses one that cannot sign or
+has expired); `/seal/issue` makes a client a certificate signed by the platform's private CA
+(PDF_SEAL_CA_P12, PDF_SEAL_CA_PASSWORD or _FILE; 501 without it).
 """
 from __future__ import annotations
 
@@ -80,3 +86,152 @@ class Sealer:
         stamper = timestamps.HTTPTimeStamper(self.tsa_url) if self.tsa_url else None
         out = signers.sign_pdf(writer, meta, signer=self.signer, timestamper=stamper)
         return out.getvalue(), {"sealed": True, "signer": self.subject, "timestamped": bool(stamper)}
+
+    def with_p12(self, p12: bytes, password: str) -> "Sealer":
+        """The same seal settings (timestamp server, reason, location) with a client's own certificate."""
+        from pyhanko.sign import signers
+
+        try:
+            signer = signers.SimpleSigner.load_pkcs12_data(p12, other_certs=[], passphrase=password.encode("utf-8") if password else None)
+        except Exception as e:
+            raise BadCertificate(f"the certificate cannot be read: {type(e).__name__}") from e
+        if signer is None or signer.signing_cert is None:
+            raise BadCertificate("the certificate or its key cannot be read (wrong password?)")
+        return Sealer(signer, self.tsa_url, self.reason, self.location)
+
+    @classmethod
+    def defaults_from_env(cls) -> "Sealer":
+        """A sealer without a platform certificate, for sealing with a client's own (with_p12)."""
+        s = cls.__new__(cls)
+        s.signer, s.subject = None, ""
+        s.tsa_url = os.environ.get("PDF_SEAL_TSA_URL", "").strip()
+        s.reason = os.environ.get("PDF_SEAL_REASON", "").strip() or DEFAULT_REASON
+        s.location = os.environ.get("PDF_SEAL_LOCATION", "").strip()
+        return s
+
+
+class BadCertificate(Exception):
+    """A .p12 that cannot be read, has no key, cannot sign or has expired."""
+
+
+def _secret(var: str) -> str:
+    value = os.environ.get(var, "")
+    path = os.environ.get(var + "_FILE", "").strip()
+    if path:
+        with open(path, "rb") as f:
+            value = f.read().decode("utf-8").strip()
+    return value
+
+
+def inspect(p12: bytes, password: str) -> dict:
+    """What a .p12 holds, for the core to show and to refuse a certificate that cannot seal: subject, issuer,
+    validity, the SHA-256 fingerprint of the certificate, and whether it can sign now. Nothing secret."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    try:
+        key, cert, _chain = pkcs12.load_key_and_certificates(p12, password.encode("utf-8") if password else None)
+    except Exception as e:
+        raise BadCertificate("the file is not a .p12 / .pfx, or the password is wrong") from e
+    if cert is None or key is None:
+        raise BadCertificate("the file has no certificate with its private key")
+    try:
+        ku = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+        can_sign = bool(ku.digital_signature or ku.content_commitment)
+    except x509.ExtensionNotFound:
+        can_sign = True
+    now = datetime.datetime.now(datetime.timezone.utc)
+    info = {
+        "subject": cert.subject.rfc4514_string(),
+        "commonName": next((a.value for a in cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)), ""),
+        "organization": next((a.value for a in cert.subject.get_attributes_for_oid(x509.NameOID.ORGANIZATION_NAME)), ""),
+        "issuer": cert.issuer.rfc4514_string(),
+        "notBefore": cert.not_valid_before_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+        "notAfter": cert.not_valid_after_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+        "fingerprint": cert.fingerprint(hashes.SHA256()).hex(),
+        "selfSigned": cert.issuer == cert.subject,
+        "canSign": can_sign,
+        "expired": now > cert.not_valid_after_utc,
+        "notYetValid": now < cert.not_valid_before_utc,
+    }
+    if not can_sign:
+        raise BadCertificate("this certificate is not allowed to sign (key usage)")
+    if info["expired"]:
+        raise BadCertificate(f"this certificate expired on {info['notAfter']} (UTC)")
+    return info
+
+
+class Issuer:
+    """The platform's private document-seal CA (PDF_SEAL_CA_P12 + PDF_SEAL_CA_PASSWORD or _FILE): it issues a
+    client's own seal certificate, named after the client. Readers do not trust this CA unless told to, so such
+    a seal protects the file but shows "validity unknown"; a certificate bought from a trusted CA (uploaded)
+    shows the reader's green tick. Without PDF_SEAL_CA_P12 there is no Issuer and /seal/issue answers 501."""
+
+    def __init__(self, ca_key, ca_cert):
+        self.ca_key, self.ca_cert = ca_key, ca_cert
+
+    @classmethod
+    def from_p12(cls, data: bytes, password: str) -> "Issuer":
+        from cryptography.hazmat.primitives.serialization import pkcs12
+
+        try:
+            key, cert, _ = pkcs12.load_key_and_certificates(data, password.encode("utf-8") if password else None)
+        except Exception as e:
+            raise BadCertificate("the platform CA cannot be read") from e
+        if key is None or cert is None:
+            raise BadCertificate("the platform CA has no certificate with its key")
+        return cls(key, cert)
+
+    @classmethod
+    def from_env(cls) -> "Issuer | None":
+        path = os.environ.get("PDF_SEAL_CA_P12", "").strip()
+        if not path:
+            return None
+        from cryptography.hazmat.primitives.serialization import pkcs12
+
+        password = _secret("PDF_SEAL_CA_PASSWORD")
+        with open(path, "rb") as f:
+            key, cert, _ = pkcs12.load_key_and_certificates(f.read(), password.encode("utf-8") if password else None)
+        if key is None or cert is None:
+            raise RuntimeError(f"PDF_SEAL_CA_P12 {path}: no certificate with its key")
+        LOG.info("seal: issuing CA %s", cert.subject.rfc4514_string())
+        return cls(key, cert)
+
+    def issue(self, common_name: str, organization: str, days: int = 730) -> tuple[bytes, str, dict]:
+        """A new key and certificate for one client, signed by the CA, as a .p12 under a new random password:
+        (p12, password, inspect() of it)."""
+        import datetime
+        import secrets
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives.serialization import pkcs12
+        from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+        common_name = (common_name or "").strip()[:64]
+        organization = (organization or "").strip()[:64]
+        if not common_name:
+            raise BadCertificate("a name for the certificate is required")
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        attrs = [x509.NameAttribute(NameOID.COMMON_NAME, common_name)]
+        if organization:
+            attrs.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (x509.CertificateBuilder()
+                .subject_name(x509.Name(attrs)).issuer_name(self.ca_cert.subject).public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=days))
+                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True, key_encipherment=False,
+                                             data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                                             crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.EMAIL_PROTECTION]), critical=False)
+                .sign(self.ca_key, hashes.SHA256()))
+        password = secrets.token_urlsafe(24)
+        p12 = pkcs12.serialize_key_and_certificates(common_name.encode("utf-8"), key, cert, [self.ca_cert],
+                                                    serialization.BestAvailableEncryption(password.encode("utf-8")))
+        return p12, password, inspect(p12, password)

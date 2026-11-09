@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Result;
+use base64::Engine as _;
 use platform::config::UpstreamConfig;
 use platform::registry::Registry;
 use platform::upstream::Upstream;
@@ -158,6 +159,74 @@ pub async fn edit(path: &'static str, body: &serde_json::Value) -> Result<EditAn
     }
 }
 
+/// [`seal`] with the request's client's own certificate for the app when it has one
+/// ([`crate::seal_certs`]), else the platform's.
+pub async fn seal_for(pdf: Vec<u8>, app_code: &str, client_code: &str) -> Result<Sealed, String> {
+    let Some(r) = RENDERER.get() else { return Ok(Sealed::NotConfigured) };
+    let tsa = crate::seal_certs::tsa_url();
+    let owned = match crate::seal_certs::for_client(app_code, client_code).await {
+        Some((p12, password, _subject)) => Some(("client", p12, password)),
+        None => crate::seal_certs::platform().map(|(p12, password)| ("platform", p12, password)),
+    };
+    if let Some((owner, p12, password)) = owned {
+        return r.seal_with(pdf, &p12, &password, &tsa).await.map(|s| match s {
+            Sealed::Yes(b, mut info) => {
+                if let Some(o) = info.as_object_mut() {
+                    o.insert("owner".into(), owner.into());
+                }
+                Sealed::Yes(b, info)
+            }
+            other => other,
+        });
+    }
+    // no certificate in [seal]: the sidecar's own (PDF_SEAL_P12), if it has one
+    r.seal(pdf).await.map(|s| match s {
+        Sealed::Yes(b, mut info) => {
+            if let Some(o) = info.as_object_mut() {
+                o.insert("owner".into(), "platform".into());
+            }
+            Sealed::Yes(b, info)
+        }
+        other => other,
+    })
+}
+
+/// Why a certificate call to the sidecar did not answer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CertError {
+    /// No sidecar, or (issue) no platform CA on this environment.
+    NotConfigured,
+    /// The sidecar refused the input (400): the message is for the person.
+    Refused(String),
+    Failed(String),
+}
+
+/// `/seal/inspect`: what an uploaded `.p12` holds (subject, issuer, notBefore, notAfter, fingerprint, ...),
+/// refused when it cannot seal (no key, wrong password, cannot sign, expired).
+pub async fn inspect_cert(p12: &[u8], password: &str) -> Result<serde_json::Value, CertError> {
+    let Some(r) = RENDERER.get() else { return Err(CertError::NotConfigured) };
+    let body = serde_json::json!({"p12": base64::engine::general_purpose::STANDARD.encode(p12), "password": password});
+    r.cert_call("/seal/inspect", body).await
+}
+
+/// `/seal/issue`: a new certificate from the platform's private CA: `(p12, password, info)`.
+pub async fn issue_cert(common_name: &str, organization: &str) -> Result<(Vec<u8>, String, serde_json::Value), CertError> {
+    let Some(r) = RENDERER.get() else { return Err(CertError::NotConfigured) };
+    let mut body = serde_json::json!({"commonName": common_name, "organization": organization});
+    if let Some((ca, password)) = crate::seal_certs::ca() {
+        body["caP12"] = base64::engine::general_purpose::STANDARD.encode(ca).into();
+        body["caPassword"] = password.into();
+    }
+    let out = r.cert_call("/seal/issue", body).await?;
+    let p12 = out
+        .get("p12")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+        .ok_or_else(|| CertError::Failed("no p12 in the answer".into()))?;
+    let password = out.get("password").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+    Ok((p12, password, out.get("info").cloned().unwrap_or_default()))
+}
+
 const NO_DOCX_RENDERER: &str = "Word templates need the pdf-render service: [pdf] upstream is not set";
 
 async fn text(html: String) -> Result<Vec<u8>, String> {
@@ -243,7 +312,56 @@ impl PdfRenderer {
         Err(format!("pdf-render could not seal the PDF: {failure}"))
     }
 
-    /// `/docx/render`: the Word file and the data as JSON. No text fallback: a plain-text page is
+    /// `/pdf/seal` with a JSON body: sealed with the given client certificate.
+    pub async fn seal_with(&self, pdf: Vec<u8>, p12: &[u8], password: &str, tsa_url: &str) -> Result<Sealed, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Ok(Sealed::NotConfigured) };
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let body = serde_json::json!({"pdf": b64.encode(&pdf), "p12": b64.encode(p12), "password": password, "tsaUrl": tsa_url});
+        let sent = upstream.send("/pdf/seal", |base| http.post(format!("{base}/pdf/seal")).json(&body)).await;
+        let failure = match sent {
+            Ok(resp) if resp.status().is_success() => {
+                let result = resp
+                    .headers()
+                    .get("x-result")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| serde_json::from_str(v).ok())
+                    .unwrap_or_else(|| serde_json::json!({"sealed": true}));
+                match resp.bytes().await {
+                    Ok(b) if b.starts_with(b"%PDF") => return Ok(Sealed::Yes(b.to_vec(), result)),
+                    Ok(_) => "the answer is not a PDF".to_string(),
+                    Err(e) => e.to_string(),
+                }
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                format!("{status}: {}", text.chars().take(200).collect::<String>())
+            }
+            Err(e) => e.to_string(),
+        };
+        Err(format!("pdf-render could not seal the PDF with the client's certificate: {failure}"))
+    }
+
+    /// A JSON call to the sidecar's certificate routes.
+    async fn cert_call(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, CertError> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(CertError::NotConfigured) };
+        let sent = upstream.send(path, |base| http.post(format!("{base}{path}")).json(&body)).await;
+        match sent {
+            Ok(resp) if resp.status().is_success() => resp.json().await.map_err(|e| CertError::Failed(e.to_string())),
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_IMPLEMENTED => Err(CertError::NotConfigured),
+            Ok(resp) if resp.status() == reqwest::StatusCode::BAD_REQUEST => {
+                let text = resp.text().await.unwrap_or_default();
+                Err(CertError::Refused(text.trim_start_matches("seal: ").chars().take(300).collect()))
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                Err(CertError::Failed(format!("{status}: {}", resp.text().await.unwrap_or_default().chars().take(200).collect::<String>())))
+            }
+            Err(e) => Err(CertError::Failed(e.to_string())),
+        }
+    }
+
+    /// `/docx/render`: the Word file and the data as JSON.    /// `/docx/render`: the Word file and the data as JSON. No text fallback: a plain-text page is
     /// no stand-in for a builder's agreement.
     pub async fn render_docx(&self, file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
         let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(NO_DOCX_RENDERER.into()) };

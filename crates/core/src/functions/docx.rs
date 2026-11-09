@@ -12,7 +12,9 @@
 //!   staff writing into a buyer's client; a co-applicant signing through a link on the builder's
 //!   address, whose URL client manages the buyer's), else `CORE.FILE_CLIENT_FORBIDDEN`;
 //! - the file read must be in that client's secured files (`CORE.FILE_NOT_CLIENTS`), and what is
-//!   written goes to that client's secured files.
+//!   written goes to that client's secured files;
+//! - PdfStamp's `seal` uses the business's own certificate for the app (the request's URL client, as
+//!   TemplateToPdf does) when it has one, else the platform's (`pdf_render::seal_for`).
 
 use std::sync::Arc;
 
@@ -247,7 +249,15 @@ impl CoreFunction for DocxFn {
                 // file (the caller passes every signature so far), so no seal is ever stamped over.
                 let mut seal_note: Option<(bool, Value)> = None;
                 if arg_true(args, "seal") {
-                    seal_note = Some(match pdf_render::seal(pdf.clone()).await {
+                    // The business's own certificate for this app when it has one, else the platform's
+                    // (pdf_render::seal_for), chosen as TemplateToPdf chooses it: the business is the
+                    // request's URL client (whose address the call is on), never the file's client (a
+                    // buyer's folder), so no caller can seal with another client's certificate. The app:
+                    // the running definition's, else the URL's.
+                    let c = caller();
+                    let app = context::owner_app_code().or_else(|| c.url_app_code.clone()).unwrap_or_default();
+                    let business = c.url_client_code.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| client.clone());
+                    seal_note = Some(match pdf_render::seal_for(pdf.clone(), &app, &business).await {
                         Ok(pdf_render::Sealed::Yes(sealed, info)) => {
                             pdf = sealed;
                             (true, info)

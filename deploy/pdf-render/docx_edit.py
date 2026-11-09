@@ -16,7 +16,7 @@ Prepare actions per blank:
 - `TAG`: `{{ <expr>|<filters> }}` in place of the blank, in a run of its own that copies the
   blank's formatting (font, size, underline), optionally bold or in capitals;
 - `REMOVE`: the blank, or a wider span (`removeStart`/`removeEnd`, e.g. its label), goes; a
-  paragraph left empty goes too;
+  paragraph left empty goes too; `removeParagraph` takes the blank's whole paragraph out;
 - `SIGN`: the blank line stays, and an invisible marker `[[sig:<key>]]` (white, 1 pt) is written
   just before it, for `/pdf/stamp` to find in the PDF;
 - `KEEP`: the line stays, to fill by hand.
@@ -41,7 +41,7 @@ BLANK = re.compile(r"_{2,}|-{3,}|\.{4,}|…{2,}")
 TAG = re.compile(r"\{\{.*?\}\}|\{%.*?%\}")
 SIGNER_KEY = re.compile(r"^(A[1-9][0-9]?|A\*|B[1-9]?|W[1-9])$")
 FIELD_EXPR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*$")
-FILTERS = {"upper", "title", "inr", "inr0", "words", "num_words", "date_dmy", "date_long", "date_words"}
+FILTERS = {"upper", "title", "inr", "inr0", "words", "num_words", "date_dmy", "date_long", "date_words", "age", "pct"}
 PART_RE = re.compile(r"^word/(document|header[0-9]+|footer[0-9]+)\.xml$")
 MAX_TEXT = 300
 
@@ -474,6 +474,9 @@ def _prepare_part(data, part, fields, conditions, opts, done):
                 if f.get("bold"):
                     _set_prop(_rpr(run), "b")
                 done["tagged"] += 1
+            elif action == "REMOVE" and f.get("removeParagraph"):
+                emptied.append(p)  # the whole paragraph goes (its other blanks with it)
+                done["removed"] += 1
             elif action == "REMOVE":
                 rs, re_ = int(f.get("removeStart", s)), int(f.get("removeEnd", e))
                 if not (0 <= rs <= s and e <= re_ <= len(text)):
@@ -494,7 +497,7 @@ def _prepare_part(data, part, fields, conditions, opts, done):
                 done["kept"] += 1
             else:
                 raise BadRequest(f"action {action!r}: TAG, REMOVE, SIGN or KEEP")
-        if not para_text(segments(p)[0]).strip() and text.strip():
+        if not para_text(segments(p)[0]).strip() and text.strip() and p not in emptied:
             emptied.append(p)
     # paragraphs: conditions wrap ranges (by element, so removals cannot shift them), then empties go
     for c in conditions:
@@ -506,9 +509,16 @@ def _prepare_part(data, part, fields, conditions, opts, done):
         last.addnext(_jinja_paragraph(last, "{%p endif %}"))
         done["conditions"] += 1
     for p in emptied:
-        if p.getparent() is not None and p.getparent().tag != q("tc"):  # a table cell needs its paragraph
-            p.getparent().remove(p)
-            done["paragraphsRemoved"] += 1
+        parent = p.getparent()
+        if parent is None:
+            continue
+        if parent.tag == q("tc") and len(parent.findall("w:p", NS)) == 1:
+            for r in list(p):  # a table cell needs one paragraph: keep it, empty
+                if r.tag != q("pPr"):
+                    p.remove(r)
+        else:
+            parent.remove(p)
+        done["paragraphsRemoved"] += 1
     if opts.get("stripHighlights"):
         for h in list(root.iter(q("highlight"))):
             h.getparent().remove(h)

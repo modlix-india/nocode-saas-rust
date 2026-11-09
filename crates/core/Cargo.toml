@@ -58,6 +58,8 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha1.workspace = true
 sha2.workspace = true
+base64 = "0.22"
+ring = "0.17"
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

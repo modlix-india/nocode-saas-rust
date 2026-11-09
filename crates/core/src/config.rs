@@ -39,6 +39,8 @@ pub struct CoreConfig {
     pub runs: crate::run_pool::RunsSection,
     /// The HTML to PDF renderer (`crate::pdf_render`): the pdf-render sidecar, else text.
     pub pdf: crate::pdf_render::PdfConfig,
+    /// `[seal]`: clients' own PDF seal certificates (`crate::seal_certs`).
+    pub seal: crate::seal_certs::SealConfig,
     /// `[anonymous]`: what callers who are not signed in may do.
     pub anonymous: AnonymousSection,
 }
@@ -64,6 +66,7 @@ impl Default for CoreConfig {
             events: EventsSection::default(),
             runs: crate::run_pool::RunsSection::default(),
             pdf: crate::pdf_render::PdfConfig::default(),
+            seal: crate::seal_certs::SealConfig::default(),
             anonymous: AnonymousSection::default(),
         }
     }
