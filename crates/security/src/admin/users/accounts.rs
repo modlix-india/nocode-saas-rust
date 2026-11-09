@@ -480,6 +480,7 @@ impl Admin {
         activity(&self.db, Some(created.client_id), "User Create".into(), format!("{USER_CREATED_PREFIX}{label}"), None);
         self.evict_owner_cache(created.client_id, Some(ca.user.id())).await;
         self.evict_owner_cache(created.client_id, created.reporting_to).await;
+        self.notify_managed_change(ca, created.client_id, crate::admin::managed_changes::Change::UserCreated, Some(created.id)).await;
         Ok(created)
     }
 
@@ -548,6 +549,14 @@ impl Admin {
         if existing.reporting_to != updated.reporting_to {
             self.evict_manager_caches(updated.client_id, existing.reporting_to, updated.reporting_to).await;
         }
+        let change = if updated.status_code == "DELETED" {
+            crate::admin::managed_changes::Change::UserDeleted
+        } else if updated.status_code != existing.status_code {
+            crate::admin::managed_changes::Change::UserStatus
+        } else {
+            crate::admin::managed_changes::Change::UserChanged
+        };
+        self.notify_managed_change(ca, updated.client_id, change, Some(updated.id)).await;
         Ok(updated)
     }
 
@@ -688,6 +697,7 @@ impl Admin {
             let mut e = (*u).clone();
             e.status_code = target.into();
             self.user_store_update(ca, &e).await?;
+            self.notify_managed_change(ca, u.client_id, crate::admin::managed_changes::Change::UserStatus, Some(u.id)).await;
             true
         };
         self.evict_user(u.id, u.client_id).await?;
@@ -709,7 +719,11 @@ impl Admin {
         if !self.sub_org_allows(ca, u.client_id, id).await? {
             return Err(refused());
         }
-        self.db.user_status_to_active(id).await
+        let done = self.db.user_status_to_active(id).await?;
+        if done && u.status_code != "ACTIVE" {
+            self.notify_managed_change(ca, u.client_id, crate::admin::managed_changes::Change::UserStatus, Some(id)).await;
+        }
+        Ok(done)
     }
 
     /// `updateDesignation`.

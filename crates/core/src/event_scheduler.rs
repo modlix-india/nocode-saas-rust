@@ -122,6 +122,12 @@ pub const SKIPPED: &str = "core_scheduler_skipped_total";
 pub const FAILED: &str = "core_scheduler_failed_total";
 /// Cron ticks another instance claimed first.
 pub const LOST: &str = "core_scheduler_lost_total";
+/// Scheduled runs core-events finished, in seconds, by `app`, `event`, `kind` and `result`
+/// (`done`, `failed`): how often each job runs and how much time it takes.
+pub const RUN_SECONDS: &str = "core_scheduled_run_seconds";
+/// Scheduled deliveries core-events did not run because their run was already closed or the
+/// one-off had been claimed again, by `kind`.
+pub const DUPLICATES: &str = "core_scheduled_duplicates_total";
 
 /// The descriptions of the counters above, for `/metrics`.
 pub fn describe_metrics() {
@@ -132,6 +138,8 @@ pub fn describe_metrics() {
     describe_counter!(SKIPPED, Unit::Count, "Cron ticks skipped because the previous run was still going.");
     describe_counter!(FAILED, Unit::Count, "Claims that were not published, by kind.");
     describe_counter!(LOST, Unit::Count, "Cron ticks another instance claimed first.");
+    metrics::describe_histogram!(RUN_SECONDS, Unit::Seconds, "Scheduled runs core-events finished, by app, event, kind and result.");
+    describe_counter!(DUPLICATES, Unit::Count, "Scheduled deliveries not run because their run was already closed, by kind.");
 }
 
 /// What one pass did on this instance. `busy` is always 0 here: core-scheduler has no run
@@ -727,10 +735,22 @@ impl RunCompletion {
     where
         F: Future<Output = Result<Option<bool>, CoreError>>,
     {
-        if schedule_marker(qob).is_none() {
+        let Some(marker) = schedule_marker(qob) else {
             return processing.await;
+        };
+        let kind = marker.get("kind").and_then(Value::as_str).unwrap_or("").to_string();
+        if !self.still_open(qob).await {
+            metrics::counter!(DUPLICATES, "kind" => kind).increment(1);
+            tracing::info!(
+                "Scheduled {}.{} for {} not run again: its run is already closed or was handed out again",
+                qob.app_code.as_deref().unwrap_or("null"),
+                qob.event_name.as_deref().unwrap_or("null"),
+                qob.client_code.as_deref().unwrap_or("null")
+            );
+            return Ok(Some(true));
         }
-        match processing.await {
+        let started = std::time::Instant::now();
+        let outcome = match processing.await {
             Err(e) => {
                 // `e.getMessage()`.
                 self.complete(qob, false, Some(&e.text())).await;
@@ -741,7 +761,34 @@ impl RunCompletion {
                 self.complete(qob, ok, (!ok).then_some("The EventAction reported a failure")).await;
                 Ok(Some(ok))
             }
-        }
+        };
+        let result = if matches!(outcome, Ok(Some(true))) { "done" } else { "failed" };
+        metrics::histogram!(
+            RUN_SECONDS,
+            "app" => qob.app_code.clone().unwrap_or_default(),
+            "event" => qob.event_name.clone().unwrap_or_default(),
+            "kind" => kind,
+            "result" => result
+        )
+        .record(started.elapsed().as_secs_f64());
+        outcome
+    }
+
+    /// Whether this delivery's run is still open: a cron tick still RUNNING, or a one-off still
+    /// claimed under this delivery's claim. A marker that names nothing, or a store that cannot
+    /// answer, counts as open, so the run goes ahead as it did before this check.
+    async fn still_open(&self, qob: &EventMessage) -> bool {
+        let Some(marker) = schedule_marker(qob) else { return true };
+        let text = |k: &str| marker.get(k).and_then(Value::as_str);
+        let open = match (text("kind"), text("runId"), text("id"), text("claimToken")) {
+            (Some(KIND_CRON), Some(run_id), _, _) => self.store.run_is_open(run_id).await,
+            (Some(KIND_ONCE), _, Some(id), Some(token)) => self.store.one_off_claim_is_current(id, token).await,
+            _ => Ok(true),
+        };
+        open.unwrap_or_else(|e| {
+            tracing::warn!("Scheduler could not check whether a run is still open; running it: {e}");
+            true
+        })
     }
 
     async fn complete(&self, qob: &EventMessage, success: bool, error: Option<&str>) -> bool {
