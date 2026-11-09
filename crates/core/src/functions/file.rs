@@ -251,9 +251,26 @@ impl JavaFunction for TemplateToPdf {
         let Some((app, client)) = resolve_app_and_client(&app_code, &client_code)? else {
             return Err(empty_result(TEMPLATE_TO_PDF));
         };
-        let Some(bytes) = self.convert(&template_name, &app, &client, "pdf", &data).await? else {
+        let Some(mut bytes) = self.convert(&template_name, &app, &client, "pdf", &data).await? else {
             return Err(empty_result(TEMPLATE_TO_PDF));
         };
+        // Rust only: `seal` (optional, false) asks for the platform's seal over the finished PDF
+        // (pdf_render::seal). Never a reason to fail: without a certificate on this environment, or
+        // when sealing fails (logged), the PDF is stored as it is and `fileData.sealed` says so.
+        let mut seal_info: Option<(bool, Value)> = None;
+        if matches!(args.get("seal"), Some(Value::Bool(true))) || matches!(args.get("seal"), Some(Value::String(s)) if s.eq_ignore_ascii_case("true")) {
+            seal_info = Some(match crate::pdf_render::seal(bytes.clone()).await {
+                Ok(crate::pdf_render::Sealed::Yes(sealed, result)) => {
+                    bytes = sealed;
+                    (true, Value::from(result))
+                }
+                Ok(crate::pdf_render::Sealed::NotConfigured) => (false, Value::String("no seal certificate on this environment".into())),
+                Err(e) => {
+                    tracing::warn!(error = %e, template = %template_name, "the PDF is stored without the seal");
+                    (false, Value::String(e))
+                }
+            });
+        }
         let sha256 = sha256_hex(&bytes);
         let Some(mut details) =
             self.make_file_in_files(&client, &template_name, &file_name, &file_location, &file_type, overwrite, bytes).await?
@@ -263,6 +280,10 @@ impl JavaFunction for TemplateToPdf {
         // Rust only: the fingerprint of the exact bytes stored, so a signed form can name the
         // unsigned one it was made from (whichever renderer drew it).
         details.insert("sha256".into(), Value::String(sha256));
+        if let Some((sealed, info)) = seal_info {
+            details.insert("sealed".into(), Value::Bool(sealed));
+            details.insert(if sealed { "seal" } else { "sealNote" }.into(), info);
+        }
         Ok(output("fileData", gson_tree(Value::Object(details))))
     }
 }
