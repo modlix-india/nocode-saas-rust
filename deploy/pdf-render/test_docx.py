@@ -67,6 +67,22 @@ class FillTest(unittest.TestCase):
             docx_render.fill(make_docx("{{ image('file:///etc/passwd') }}"), {}, app.Policy())
 
 
+class FilesTest(unittest.TestCase):
+    def test_relative_files_urls_are_read_from_the_files_service(self):
+        from test_app import FakeFiles
+
+        srv, base = serve(FakeFiles)
+        try:
+            p = app.Policy(files_url=base)
+            before = len(FakeFiles.seen)
+            for url in ("/api/files/static/file/SYSTEM/x.png", "api/files/static/file/SYSTEM/x.png"):
+                self.assertEqual(docx_render._fetch(url, p), PNG, url)
+            self.assertEqual(len(FakeFiles.seen) - before, 2)
+            self.assertIn("/api/files/internal/static/file?filePath=SYSTEM%2Fx.png", FakeFiles.seen[-1])
+        finally:
+            srv.shutdown()
+
+
 class ConvertTest(unittest.TestCase):
     def test_a_filled_template_becomes_a_pdf(self):
         conv = docx_render.Converter(concurrent=1, timeout=120)

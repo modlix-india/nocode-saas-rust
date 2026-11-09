@@ -3,6 +3,7 @@
 //! the PDF of its `body` part.
 
 use overridable::{java_map, JMap, JValue};
+use platform::error::{AppError, Coded};
 use serde_json::{Map, Value};
 
 /// The part map of the language the preview is for: the one asked for, else the template's
@@ -52,17 +53,22 @@ pub fn render_parts(template: Option<&Value>, language: Option<&str>, data: Opti
 /// the sidecar; the template is posted by the caller, so its file must be in the files of
 /// `caller_client` (the signed-in caller's own client, `""` for anyone else), whatever
 /// `clientCode` the posted template claims.
-pub async fn render_pdf(template: Option<&Value>, data: Option<&Value>, caller_client: &str) -> Result<Vec<u8>, String> {
+pub async fn render_pdf(template: Option<&Value>, data: Option<&Value>, caller_client: &str) -> Result<Vec<u8>, AppError> {
+    let internal = |e: String| AppError::Internal(anyhow::anyhow!("{e}"));
     if let Some(t) = template.filter(|t| t.is_object()) {
         let mut owned = t.clone();
         owned["clientCode"] = Value::String(caller_client.to_string());
         if let Some(file) = crate::pdf_render::docx_file(&owned) {
-            return crate::pdf_render::render_docx(file?, &data_for(t, data)).await;
+            let file = file.map_err(|why| {
+                crate::catalogue::register();
+                AppError::Coded(Box::new(Coded { debug: Some(why), ..Coded::new("CORE.TEMPLATE_DOCX_FILE_INVALID") }))
+            })?;
+            return crate::pdf_render::render_docx(file, &data_for(t, data)).await.map_err(internal);
         }
     }
-    let parts = render_parts(template, Some(""), data)?;
+    let parts = render_parts(template, Some(""), data).map_err(internal)?;
     let body = parts.get("body").and_then(JValue::as_str).unwrap_or("").to_string();
-    crate::pdf_render::render(body).await
+    crate::pdf_render::render(body).await.map_err(internal)
 }
 
 #[cfg(test)]
@@ -94,13 +100,17 @@ mod tests {
     #[tokio::test]
     async fn a_word_template_preview_reads_only_the_callers_files() {
         let t = |client: &str, path: &str| json!({"templateType": "docx", "clientCode": client, "resources": {"docx": {"path": path}}});
+        let refused = |e: AppError| match e {
+            AppError::Coded(c) if c.code == "CORE.TEMPLATE_DOCX_FILE_INVALID" => c.debug.unwrap_or_default(),
+            other => panic!("not the docx refusal: {other}"),
+        };
         // The posted clientCode does not count: the caller's own client does.
-        let e = render_pdf(Some(&t("OTHER", "/api/files/secured/file/OTHER/a.docx")), None, "ANTER").await.unwrap_err();
+        let e = refused(render_pdf(Some(&t("OTHER", "/api/files/secured/file/OTHER/a.docx")), None, "ANTER").await.unwrap_err());
         assert!(e.contains("not in the files of ANTER"), "{e}");
-        let e = render_pdf(Some(&t("ANTER", "/api/files/secured/file/ANTER/a.docx")), None, "").await.unwrap_err();
+        let e = refused(render_pdf(Some(&t("ANTER", "/api/files/secured/file/ANTER/a.docx")), None, "").await.unwrap_err());
         assert!(e.contains("not in the files of"), "anonymous: {e}");
         // Its own file passes the check (no sidecar in tests: the renderer says so).
         let e = render_pdf(Some(&t("", "/api/files/secured/file/ANTER/a.docx")), None, "ANTER").await.unwrap_err();
-        assert!(e.contains("[pdf] upstream"), "{e}");
+        assert!(matches!(&e, AppError::Internal(_)) && e.to_string().contains("[pdf] upstream"), "{e}");
     }
 }
