@@ -259,7 +259,10 @@ impl JavaFunction for TemplateToPdf {
         // when sealing fails (logged), the PDF is stored as it is and `fileData.sealed` says so.
         let mut seal_info: Option<(bool, Value)> = None;
         if matches!(args.get("seal"), Some(Value::Bool(true))) || matches!(args.get("seal"), Some(Value::String(s)) if s.eq_ignore_ascii_case("true")) {
-            seal_info = Some(match crate::pdf_render::seal(bytes.clone()).await {
+            // Whose certificate: the client of the request's host (the business whose app this is: staff,
+            // its buyers and link signers all call on its host), never a client named by the caller.
+            let seal_client = context::request().and_then(|r| r.auth.url_client_code().map(str::to_string)).unwrap_or_else(|| client.clone());
+            seal_info = Some(match crate::pdf_render::seal_for(bytes.clone(), &app, &seal_client).await {
                 Ok(crate::pdf_render::Sealed::Yes(sealed, result)) => {
                     bytes = sealed;
                     (true, Value::from(result))
