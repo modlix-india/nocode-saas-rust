@@ -192,6 +192,70 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual(filled[3], "Aged about 1 (One) years,")
 
 
+def cell(text):
+    return f"<w:tc><w:tcPr/>{para(run(text)) if text else '<w:p/>'}</w:tc>"
+
+
+def row(*texts):
+    return "<w:tr>" + "".join(cell(t) for t in texts) + "</w:tr>"
+
+
+SCHEDULE = make_docx(
+    para(run("Allottee: ______")) +
+    para(run("Address: ______")) +
+    para(run("SCHEDULE G")) +
+    "<w:tbl><w:tblGrid>" + '<w:gridCol w:w="1800"/>' * 5 + "</w:tblGrid>" + row("Payment Schedule", "% of Billing", "Payment Schedule (in INR)", "GST", "Total")
+    + row("Booking Amount:", "5%", "", "", "") + row("On foundations", "15%", "", "", "") + row("On roof slab", "80%", "", "", "")
+    + row("Total Sale Value", "100%", "", "", "") + "</w:tbl>")
+PLAN = {"al": {"applicants": [{"name": "Asha Rao", "address": "Pune"}, {"name": "Ravi Rao", "address": "Mumbai"}],
+               "plan": [{"row": {"label": "Booking amount", "percent": 10, "amount": 1051575, "taxAmount": 56575}},
+                        {"row": {"label": "On agreement", "percent": 90, "amount": 9464175, "taxAmount": 509175}}],
+               "totals": {"basic": {"amount": "94,25,000"}}}}
+
+
+class TablesAndRepeatsTest(unittest.TestCase):
+    def test_inspect_lists_tables(self):
+        t = docx_edit.inspect(SCHEDULE)["tables"]
+        self.assertEqual((t[0]["part"], t[0]["table"], t[0]["rowCount"]), ("document", 0, 5))
+        self.assertEqual(t[0]["rows"][1], ["Booking Amount:", "5%", "", "", ""])
+
+    def test_rows_from_a_list_cells_and_a_block_per_applicant(self):
+        ins = docx_edit.inspect(SCHEDULE)
+        b = ins["blanks"]
+        fields = [{**{k: b[0][k] for k in ("part", "para", "start", "end", "text")}, "action": "TAG", "expr": "a.name"},
+                  {**{k: b[1][k] for k in ("part", "para", "start", "end", "text")}, "action": "TAG", "expr": "a.address"}]
+        conds = [{"kind": "FOR", "part": "document", "fromPara": 0, "toPara": 1, "list": "al.applicants", "var": "a"},
+                 {"kind": "ROWS", "part": "document", "table": 0, "fromRow": 1, "toRow": 3, "list": "al.plan", "var": "pl",
+                  "cells": [{"expr": "pl.row.label"}, {"expr": "pl.row.percent", "filters": ["pct"], "suffix": "%"},
+                            {"expr": "pl.row.amount - pl.row.taxAmount", "filters": ["inr0"]},
+                            {"expr": "pl.row.taxAmount", "filters": ["inr0"]}, {"expr": "pl.row.amount", "filters": ["inr0"], "bold": True}]},
+                 {"kind": "CELL", "part": "document", "table": 0, "row": 4, "col": 2, "expr": "al.totals.basic.amount"}]
+        out, done = docx_edit.prepare(SCHEDULE, fields, conds)
+        self.assertEqual((done["repeats"], done["tableRows"], done["cells"], done["tagged"]), (1, 1, 1, 2))
+        filled = [t for t in text_of(docx_render.fill(out, PLAN, app.Policy())) if t.strip()]
+        self.assertEqual(filled[:4], ["Allottee: Asha Rao", "Address: Pune", "Allottee: Ravi Rao", "Address: Mumbai"])
+        i = filled.index("Payment Schedule")
+        self.assertEqual(filled[i + 5:i + 10], ["Booking amount", "10%", "9,95,000", "56,575", "10,51,575"])
+        self.assertEqual(filled[i + 10:i + 15], ["On agreement", "90%", "89,55,000", "5,09,175", "94,64,175"])
+        self.assertEqual(filled[i + 15:], ["Total Sale Value", "100%", "94,25,000"])
+        self.assertNotIn("On foundations", filled, "the typed stage rows are replaced by the plan")
+
+    def test_refusals(self):
+        for c, why in [
+            ({"kind": "ROWS", "table": 5, "fromRow": 1, "list": "al.plan", "var": "pl"}, "table 5 does not exist"),
+            ({"kind": "ROWS", "table": 0, "fromRow": 9, "list": "al.plan", "var": "pl"}, "has no row 9"),
+            ({"kind": "ROWS", "table": 0, "fromRow": 1, "list": "al.plan", "var": "al"}, "var 'al'"),
+            ({"kind": "FOR", "fromPara": 0, "list": "al.plan()", "var": "pl"}, "list"),
+            ({"kind": "CELL", "table": 0, "row": 1, "col": 9, "expr": "al.x"}, "no column 9"),
+            ({"kind": "CELL", "table": 0, "row": 1, "col": 1, "expr": "al.x.__class__ - 1()"}, "a field is a path"),
+            ({"kind": "WHILE"}, "kind 'WHILE'"),
+            ({"kind": "CELL", "table": 0, "row": 1, "col": 1, "expr": "al.x", "suffix": "{{evil}}"}, "suffix"),
+        ]:
+            with self.subTest(why=why), self.assertRaises(docx_edit.BadRequest) as e:
+                docx_edit.prepare(SCHEDULE, [], [{"part": "document", **c}])
+            self.assertIn(why, str(e.exception))
+
+
 class FiltersTest(unittest.TestCase):
     def test_formats(self):
         import docx_filters as f

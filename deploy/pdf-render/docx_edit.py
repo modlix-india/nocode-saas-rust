@@ -20,8 +20,20 @@ Prepare actions per blank:
 - `SIGN`: the blank line stays, and an invisible marker `[[sig:<key>]]` (white, 1 pt) is written
   just before it, for `/pdf/stamp` to find in the PDF;
 - `KEEP`: the line stays, to fill by hand.
-`conditions` wrap paragraphs in `{%p if <test> %}` ... `{%p endif %}` (e.g. the second applicant's
-block, shown only when there is one). Options: `stripHighlights`, `stripComments`,
+`conditions` shape the document around the blanks, each by its `kind`:
+- `IF` (the default): paragraphs `fromPara`..`toPara` wrapped in `{%p if <test> %}` ... `{%p endif %}`
+  (e.g. the second applicant's block, shown only when there is one);
+- `FOR`: paragraphs `fromPara`..`toPara` repeated per item of `list` as `var`
+  (`{%p for var in list %}` ... `{%p endfor %}`): one block per applicant, its fields `var.name` ...;
+- `ROWS`: rows `fromRow`..`toRow` of table `table` (its index in the part, as inspect lists them) become
+  one row repeated per item of `list` as `var` (`{%tr for %}`), formatted as row `fromRow`, its cells
+  given by `cells` (a tag `{expr, filters, bold}` per column, or null for an empty cell): a payment
+  schedule from the plan, the header and total rows kept;
+- `CELL`: the cell `row`, `col` of table `table` filled with a tag (`expr`, `filters`, `bold`): an empty
+  total cell, for example.
+A tag's `expr` is a field path, or simple arithmetic over paths and numbers (`pl.row.amount - pl.row.taxAmount`);
+`prefix` / `suffix` add a little plain text around it (`%` after a percent in a table cell).
+Inspect lists the tables (`tables`: part, index and each row's cell texts) for ROWS and CELL. Options: `stripHighlights`, `stripComments`,
 `acceptTracked` (all on by default; acceptTracked is always applied to the result).
 """
 
@@ -41,6 +53,11 @@ BLANK = re.compile(r"_{2,}|-{3,}|\.{4,}|…{2,}")
 TAG = re.compile(r"\{\{.*?\}\}|\{%.*?%\}")
 SIGNER_KEY = re.compile(r"^(A[1-9][0-9]?|A\*|B[1-9]?|W[1-9])$")
 FIELD_EXPR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*$")
+_TERM = r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*|[0-9]+(?:\.[0-9]+)?)"
+ARITH_EXPR = re.compile(r"^" + _TERM + r"(?:\s*[-+*/]\s*" + _TERM + r")+$")
+LOOP_VAR = re.compile(r"^[a-z][a-z0-9_]{0,15}$")
+RESERVED_VARS = {"al", "data", "input", "pay", "case", "loop", "true", "false", "none", "for", "in", "if", "not", "and", "or"}
+MAX_TABLE_ROWS = 80
 FILTERS = {"upper", "title", "inr", "inr0", "words", "num_words", "date_dmy", "date_long", "date_words", "age", "pct"}
 PART_RE = re.compile(r"^word/(document|header[0-9]+|footer[0-9]+)\.xml$")
 MAX_TEXT = 300
@@ -193,10 +210,15 @@ def inspect(docx_bytes):
     ranges = {}  # comment id -> [(part, para, offset) start, end]
     per_para = []  # (part, index, text, segs) for comment matching
     paragraphs = 0
+    tables = []
     for path in _parts(z):
         part = _part_name(path)
         root = etree.fromstring(z.read(path))
         tracked = accept_tracked(root) or tracked
+        for ti, tbl in enumerate(root.iter(q("tbl"))):
+            rows = tbl.findall("w:tr", NS)
+            tables.append({"part": part, "table": ti, "rowCount": len(rows), "rows": [
+                [_cell_text(c)[:80] for c in r.findall("w:tc", NS)] for r in rows[:MAX_TABLE_ROWS]]})
         for i, p in enumerate(root.iter(q("p"))):
             paragraphs += 1
             segs, marks = segments(p)
@@ -257,7 +279,13 @@ def inspect(docx_bytes):
         "trackedChanges": tracked,
         "fonts": {"used": used, "missing": missing},
         "embeddedFonts": any(n.startswith("word/fonts/") for n in z.namelist()),
+        "tables": tables[:40],
     }
+
+
+def _cell_text(cell):
+    """A table cell's text: its own paragraphs (not a nested table's), joined by a space."""
+    return " ".join(para_text(segments(p)[0]) for p in cell.findall("w:p", NS)).strip()
 
 
 # ── prepare ─────────────────────────────────────────────────────────────────────────────────
@@ -360,15 +388,23 @@ def _drop_highlight(run):
 
 def field_tag(f):
     expr = (f.get("expr") or "").strip()
-    if not FIELD_EXPR.match(expr):
-        raise BadRequest(f"field {expr!r}: a field is a path such as al.unit.number")
+    if ARITH_EXPR.match(expr):
+        expr = "(" + re.sub(r"\s+", " ", expr) + ")"
+    elif not FIELD_EXPR.match(expr):
+        raise BadRequest(f"field {expr!r}: a field is a path such as al.unit.number, or arithmetic over paths and numbers")
     filters = list(f.get("filters") or [])
     if f.get("caps"):
         filters.append("upper")
     for flt in filters:
         if flt not in FILTERS:
             raise BadRequest(f"filter {flt!r} is not one of {sorted(FILTERS)}")
-    return "{{ " + "|".join([expr] + filters) + " }}"
+    fix = {}
+    for k in ("prefix", "suffix"):
+        v = str(f.get(k) or "")
+        if len(v) > 12 or "{" in v or "}" in v:
+            raise BadRequest(f"{k} {v!r}: up to 12 characters of plain text, such as % or Rs.")
+        fix[k] = v
+    return fix["prefix"] + "{{ " + "|".join([expr] + filters) + " }}" + fix["suffix"]
 
 
 def sign_marker_run(like, key):
@@ -411,6 +447,58 @@ def _jinja_paragraph(like, text):
     return p
 
 
+def _loop_of(c):
+    lst, var = str(c.get("list", "")).strip(), str(c.get("var", "")).strip()
+    if not FIELD_EXPR.match(lst):
+        raise BadRequest(f"list {lst!r}: a path to a list, such as al.plan or al.applicants")
+    if not LOOP_VAR.match(var) or var in RESERVED_VARS:
+        raise BadRequest(f"var {var!r}: a short lower-case name for each item, such as pl or a (not al, data, input, pay, loop)")
+    return lst, var
+
+
+def _run_like(rpr, text, bold=False):
+    r = etree.Element(q("r"))
+    if rpr is not None:
+        r.append(copy.deepcopy(rpr))
+    if bold:
+        _set_prop(_rpr(r), "b")
+    t = etree.SubElement(r, q("t"))
+    t.text = text
+    t.set(XML_SPACE, "preserve")
+    return r
+
+
+def _fill_cell(tc, text, bold=False):
+    """The cell holds one paragraph with `text` (or nothing), formatted as its first run and paragraph were."""
+    ps = tc.findall("w:p", NS)
+    if not ps:
+        ps = [etree.SubElement(tc, q("p"))]
+    first_run = next((r for p in ps for r in p.findall("w:r", NS)), None)
+    rpr = first_run.find("w:rPr", NS) if first_run is not None else None
+    if rpr is None:  # an empty cell: the paragraph mark's formatting
+        ppr_rpr = ps[0].find("w:pPr/w:rPr", NS)
+        rpr = copy.deepcopy(ppr_rpr) if ppr_rpr is not None else None
+        if rpr is not None:
+            rpr.tag = q("rPr")
+    rpr = copy.deepcopy(rpr) if rpr is not None else None
+    for p in ps[1:]:
+        tc.remove(p)
+    p = ps[0]
+    for ch in list(p):
+        if ch.tag != q("pPr"):
+            p.remove(ch)
+    if text:
+        p.append(_run_like(rpr, text, bold))
+
+
+def _tag_row(like, text):
+    """A copy of the row `like` whose cells are empty but the first, which holds a `{%tr ... %}` tag."""
+    tr = copy.deepcopy(like)
+    for k, tc in enumerate(tr.findall("w:tc", NS)):
+        _fill_cell(tc, text if k == 0 else "")
+    return tr
+
+
 def prepare(docx_bytes, fields, conditions=(), options=None):
     """The Word file with the mapping applied (bytes), and what was done."""
     opts = {"stripHighlights": True, "stripComments": True, **(options or {})}
@@ -428,7 +516,8 @@ def prepare(docx_bytes, fields, conditions=(), options=None):
     for part in set(by_part) | set(conds):
         if part not in known:
             raise BadRequest(f"part {part!r} is not in the file")
-    done = {"tagged": 0, "removed": 0, "signSpots": [], "kept": 0, "conditions": 0, "paragraphsRemoved": 0}
+    done = {"tagged": 0, "removed": 0, "signSpots": [], "kept": 0, "conditions": 0, "paragraphsRemoved": 0,
+            "repeats": 0, "tableRows": 0, "cells": 0}
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
         for info in zin.infolist():
@@ -444,8 +533,18 @@ def _prepare_part(data, part, fields, conditions, opts, done):
     root = etree.fromstring(data)
     accept_tracked(root)
     paras = list(root.iter(q("p")))
+    tables = list(root.iter(q("tbl")))
+    table_rows = [t.findall("w:tr", NS) for t in tables]  # as inspect numbered them, before any change
     if opts.get("stripComments"):
         _strip_comments(root)
+
+    def row_of(c, key):
+        ti, ri = c.get("table"), c.get(key)
+        if not isinstance(ti, int) or not 0 <= ti < len(tables):
+            raise BadRequest(f"{part}: table {ti!r} does not exist")
+        if not isinstance(ri, int) or not 0 <= ri < len(table_rows[ti]):
+            raise BadRequest(f"{part}: table {ti} has no row {ri!r}")
+        return table_rows[ti][ri]
 
     def para(i):
         if not isinstance(i, int) or not 0 <= i < len(paras):
@@ -499,15 +598,58 @@ def _prepare_part(data, part, fields, conditions, opts, done):
                 raise BadRequest(f"action {action!r}: TAG, REMOVE, SIGN or KEEP")
         if not para_text(segments(p)[0]).strip() and text.strip() and p not in emptied:
             emptied.append(p)
-    # paragraphs: conditions wrap ranges (by element, so removals cannot shift them), then empties go
-    for c in conditions:
-        test = str(c.get("test", "")).strip()
-        if not test or "%" in test or "{" in test:
-            raise BadRequest("a condition needs a test such as al.applicants|length > 1")
+    # tables first (single cells, then repeated rows), then paragraph ranges (by element, so removals cannot
+    # shift them), then empties go
+    kinds = [(str(c.get("kind") or "IF").upper(), c) for c in conditions]
+    for kind, c in kinds:
+        if kind not in ("IF", "FOR", "ROWS", "CELL"):
+            raise BadRequest(f"condition kind {kind!r}: IF, FOR, ROWS or CELL")
+    for kind, c in kinds:
+        if kind == "CELL":
+            cells = row_of(c, "row").findall("w:tc", NS)
+            col = c.get("col")
+            if not isinstance(col, int) or not 0 <= col < len(cells):
+                raise BadRequest(f"{part}: table {c.get('table')} row {c.get('row')} has no column {col!r}")
+            _fill_cell(cells[col], field_tag(c), bool(c.get("bold")))
+            done["cells"] += 1
+    for kind, c in kinds:
+        if kind != "ROWS":
+            continue
+        lst, var = _loop_of(c)
+        first, last = row_of(c, "fromRow"), row_of(c, "toRow" if "toRow" in c else "fromRow")
+        rows = table_rows[c["table"]]
+        a, z = rows.index(first), rows.index(last)
+        if z < a:
+            raise BadRequest(f"{part}: table {c['table']}: toRow comes before fromRow")
+        specs = c.get("cells") or []
+        tcs = first.findall("w:tc", NS)
+        if len(specs) > len(tcs):
+            raise BadRequest(f"{part}: table {c['table']} row {a} has {len(tcs)} columns, cells gives {len(specs)}")
+        for k, tc in enumerate(tcs):
+            spec = specs[k] if k < len(specs) else None
+            _fill_cell(tc, field_tag(spec) if spec and spec.get("expr") else "", bool(spec and spec.get("bold")))
+        for r in rows[a + 1:z + 1]:
+            if r.getparent() is not None:
+                r.getparent().remove(r)
+        first.addprevious(_tag_row(first, "{%tr for " + var + " in " + lst + " %}"))
+        first.addnext(_tag_row(first, "{%tr endfor %}"))
+        done["tableRows"] += 1
+    for kind, c in kinds:
+        if kind not in ("IF", "FOR"):
+            continue
+        if kind == "IF":
+            test = str(c.get("test", "")).strip()
+            if not test or "%" in test or "{" in test:
+                raise BadRequest("a condition needs a test such as al.applicants|length > 1")
+            open_, close = "{%p if " + test + " %}", "{%p endif %}"
+            done["conditions"] += 1
+        else:
+            lst, var = _loop_of(c)
+            open_, close = "{%p for " + var + " in " + lst + " %}", "{%p endfor %}"
+            done["repeats"] += 1
         first, last = para(c.get("fromPara")), para(c.get("toPara", c.get("fromPara")))
-        first.addprevious(_jinja_paragraph(first, "{%p if " + test + " %}"))
-        last.addnext(_jinja_paragraph(last, "{%p endif %}"))
-        done["conditions"] += 1
+        first.addprevious(_jinja_paragraph(first, open_))
+        last.addnext(_jinja_paragraph(last, close))
     for p in emptied:
         parent = p.getparent()
         if parent is None:
