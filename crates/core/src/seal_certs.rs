@@ -222,6 +222,26 @@ fn app_code_of(raw: Option<&str>) -> Option<String> {
     query_params(raw).into_iter().find(|(k, _)| k == "appCode").and_then(|(_, v)| v).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
+/// The common name (CN) of an RFC 4514 name, unescaped; else the organisation (O); else the whole name.
+fn display_name(rfc4514: &str) -> String {
+    let mut parts = Vec::new();
+    let (mut cur, mut esc) = (String::new(), false);
+    for ch in rfc4514.chars() {
+        match (esc, ch) {
+            (true, c) => {
+                cur.push(c);
+                esc = false;
+            }
+            (false, '\\') => esc = true,
+            (false, ',') => parts.push(std::mem::take(&mut cur)),
+            (false, c) => cur.push(c),
+        }
+    }
+    parts.push(cur);
+    let attr = |k: &str| parts.iter().find_map(|p| p.trim().strip_prefix(k).map(|v| v.trim().to_string()));
+    attr("CN=").or_else(|| attr("O=")).unwrap_or_else(|| rfc4514.to_string())
+}
+
 fn row_json(r: &sqlx::mysql::MySqlRow) -> Value {
     let dt = |c: &str| r.try_get::<NaiveDateTime, _>(c).map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()).unwrap_or_default();
     json!({
@@ -231,6 +251,9 @@ fn row_json(r: &sqlx::mysql::MySqlRow) -> Value {
         "notBefore": dt("NOT_BEFORE"),
         "notAfter": dt("NOT_AFTER"),
         "fingerprint": r.try_get::<String, _>("FINGERPRINT").unwrap_or_default(),
+        "name": display_name(&r.try_get::<String, _>("SUBJECT").unwrap_or_default()),
+        "issuerName": display_name(&r.try_get::<String, _>("ISSUER").unwrap_or_default()),
+        "validUntil": r.try_get::<NaiveDateTime, _>("NOT_AFTER").map(|d| d.format("%-d %b %Y").to_string()).unwrap_or_default(),
         "createdAt": r.try_get::<chrono::DateTime<chrono::Utc>, _>("CREATED_AT").map(|d| d.format("%Y-%m-%dT%H:%M:%S").to_string()).unwrap_or_default(),
     })
 }
@@ -423,6 +446,14 @@ mod tests {
         let other = key_of(&base64::engine::general_purpose::STANDARD.encode([8u8; 32])).unwrap().unwrap();
         assert!(open_bytes(&other, "FIN", "cxzump", &enc).is_err(), "another key cannot open it");
         assert_ne!(seal_bytes(&k, "FIN", "cxzump", b"x").unwrap(), seal_bytes(&k, "FIN", "cxzump", b"x").unwrap(), "fresh nonce each time");
+    }
+
+    #[test]
+    fn display_names_read_the_common_name() {
+        assert_eq!(display_name("O=Fincity,CN=Fincity Document Seal"), "Fincity Document Seal");
+        assert_eq!(display_name("O=Fincity (LOCAL TEST\\, not trusted),CN=Modlix LOCAL Document Seal CA"), "Modlix LOCAL Document Seal CA");
+        assert_eq!(display_name("O=Acme\\, Inc."), "Acme, Inc.");
+        assert_eq!(display_name("C=IN"), "C=IN");
     }
 
     #[test]
