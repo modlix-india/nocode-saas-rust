@@ -305,6 +305,13 @@ now send the two headers only when they have a value.
   `WEAK_SECRET`); nothing of the secret, not its length. Only inside a server function, only for
   the running definition's own app, the connection read as a REST step reads it (own client or
   app level, `onlyThruKIRun` honoured). No signing counterpart on purpose.
+- **D51 Word templates** (2026-11-09, Rust only, CXZump Word uploads). A template of
+  `templateType` `docx` is a builder's own Word file with Jinja tags, kept in the template's
+  `resources.docx.path` (a secured files URL). `TemplateToPdf` and the template PDF preview post the
+  file and the data to pdf-render's `/docx/render` (docxtpl in a sandbox, then LibreOffice), not the
+  HTML body; there is no text fallback for them. The file must be in the secured files of the
+  template's own client (`CORE.TEMPLATE_DOCX_FILE_INVALID`, 400); a preview, whose template the caller
+  posts, uses the signed-in caller's own client instead of the posted `clientCode`.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

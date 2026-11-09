@@ -171,6 +171,12 @@ impl TemplateToPdf {
             return Err(CoreError::msg(StatusCode::NOT_FOUND, TEMPLATE_DETAILS_MISSING, &[template_name]));
         };
         let json = serde_json::to_value(JValue::Object(doc)).map_err(|e| CoreError::unknown(e.to_string()))?;
+        // Rust only: a Word template (templateType docx) is its .docx filled by the sidecar.
+        if let Some(file) = crate::pdf_render::docx_file(&json) {
+            let file = file.map_err(|why| CoreError::coded(StatusCode::BAD_REQUEST, "CORE.TEMPLATE_DOCX_FILE_INVALID", why))?;
+            let pdf = crate::pdf_render::render_docx(file, data).await.map_err(CoreError::unknown)?;
+            return Ok(Some(pdf));
+        }
         let template = EmailTemplate::from_json(json).map_err(conn_error)?;
         // AbstractTemplateConversionService.convertTemplate: the language, the parts, the format.
         let language = email::language(&template, data).map_err(conn_error)?;
