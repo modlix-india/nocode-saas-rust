@@ -632,6 +632,19 @@
     "parameterName": "fileType",
     "variableArgument": false,
     "type": "EXPRESSION"
+   },
+   "seal": {
+    "schema": {
+     "namespace": "_",
+     "name": "seal",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false,
+     "description": "Seal the finished PDF with the platform's document signing certificate (PAdES), when this environment has one. Never fails the call: fileData.sealed says whether it was sealed."
+    },
+    "parameterName": "seal",
+    "variableArgument": false,
+    "type": "EXPRESSION"
    }
   },
   "events": {

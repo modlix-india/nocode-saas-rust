@@ -10,6 +10,11 @@
 //! A Word template (`templateType` `docx`, [`docx_file`]) is not HTML: its `.docx` (in the
 //! template's `resources.docx.path`) and the data are posted to the sidecar's `/docx/render`,
 //! which fills it and converts it with LibreOffice. There is no text fallback for those.
+//!
+//! [`seal`]: a finished PDF posted to the sidecar's `/pdf/seal`, which seals it with the platform's
+//! document signing certificate (PAdES, plus an RFC 3161 timestamp when one is set). Optional: the
+//! certificate lives only in the sidecar's environment (`PDF_SEAL_P12`); without it the sidecar
+//! answers 501 and the PDF is kept as it is.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -78,23 +83,31 @@ pub fn docx_file(template: &serde_json::Value) -> Option<Result<String, String>>
     if template.get("templateType").and_then(serde_json::Value::as_str) != Some(DOCX_TYPE) {
         return None;
     }
-    let path = template.pointer("/resources/docx/path").and_then(serde_json::Value::as_str).map(str::trim).unwrap_or("");
+    let path = template.pointer("/resources/docx/path").and_then(serde_json::Value::as_str).unwrap_or("");
+    let owner = template.get("clientCode").and_then(serde_json::Value::as_str).unwrap_or("");
+    Some(secured_file_of(path, owner))
+}
+
+/// `path` as a secured files URL of `owner`'s files (`/api/files/secured/file/<owner>/...`), or why
+/// it is not one: the sidecar reads files without asking who is calling, so every file it is
+/// handed must be checked to be the client's own.
+pub fn secured_file_of(path: &str, owner: &str) -> Result<String, String> {
+    let path = path.trim();
     if path.is_empty() {
-        return Some(Err("resources.docx.path is missing".into()));
+        return Err("the file path is missing".into());
     }
     let Some(rest) = path.trim_start_matches('/').strip_prefix(SECURED_FILES) else {
-        return Some(Err(format!("{path} is not a secured files URL")));
+        return Err(format!("{path} is not a secured files URL"));
     };
     let rest = rest.split(['?', '#']).next().unwrap_or("");
     let segments: Vec<&str> = rest.split('/').collect();
     if segments.len() < 2 || segments.iter().any(|s| s.is_empty() || *s == "." || *s == ".." || s.contains('\\')) {
-        return Some(Err(format!("{path} is not a file path")));
+        return Err(format!("{path} is not a file path"));
     }
-    let owner = template.get("clientCode").and_then(serde_json::Value::as_str).unwrap_or("");
     if owner.is_empty() || segments[0] != owner {
-        return Some(Err(format!("{path} is not in the files of {}", if owner.is_empty() { "the template's client" } else { owner })));
+        return Err(format!("{path} is not in the files of {}", if owner.is_empty() { "the template's client" } else { owner }));
     }
-    Some(Ok(format!("/{SECURED_FILES}{rest}")))
+    Ok(format!("/{SECURED_FILES}{rest}"))
 }
 
 /// A Word template's file (from [`docx_file`]) filled with `data`, as a PDF, by the sidecar.
@@ -102,6 +115,46 @@ pub async fn render_docx(file: String, data: &serde_json::Map<String, serde_json
     match RENDERER.get() {
         Some(r) => r.render_docx(file, data).await,
         None => Err(NO_DOCX_RENDERER.into()),
+    }
+}
+
+/// What [`seal`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sealed {
+    /// The sealed PDF and what the sidecar reported (`{sealed, signer, timestamped}`).
+    Yes(Vec<u8>, serde_json::Value),
+    /// No seal on this environment: no sidecar, or the sidecar has no certificate (501).
+    NotConfigured,
+}
+
+/// `pdf` sealed with the platform's certificate by the sidecar (see the module text).
+pub async fn seal(pdf: Vec<u8>) -> Result<Sealed, String> {
+    match RENDERER.get() {
+        Some(r) => r.seal(pdf).await,
+        None => Ok(Sealed::NotConfigured),
+    }
+}
+
+/// What a sidecar edit route answered (`/docx/inspect`, `/docx/prepare`, `/pdf/stamp`): the body,
+/// and the JSON in its `X-Result` header (what was done; `null` when there is none).
+pub struct EditAnswer {
+    pub body: Vec<u8>,
+    pub result: serde_json::Value,
+}
+
+/// Why an edit route did not answer: `Refused` is the sidecar's 400 (the request is wrong: a
+/// blank that is not where the mapping says, a bad field, not a Word file), `Failed` anything else.
+#[derive(Debug)]
+pub enum EditError {
+    Refused(String),
+    Failed(String),
+}
+
+/// `body` posted as JSON to the sidecar's `path` (one of the edit routes).
+pub async fn edit(path: &'static str, body: &serde_json::Value) -> Result<EditAnswer, EditError> {
+    match RENDERER.get() {
+        Some(r) => r.edit(path, body).await,
+        None => Err(EditError::Failed(NO_DOCX_RENDERER.into())),
     }
 }
 
@@ -156,6 +209,40 @@ impl PdfRenderer {
         }
     }
 
+    /// `/pdf/seal`: the PDF as the body; 200 is the sealed PDF with what was done in `X-Result`,
+    /// 501 is no certificate on this environment.
+    pub async fn seal(&self, pdf: Vec<u8>) -> Result<Sealed, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Ok(Sealed::NotConfigured) };
+        let sent = upstream
+            .send("/pdf/seal", |base| {
+                http.post(format!("{base}/pdf/seal")).header(reqwest::header::CONTENT_TYPE, "application/pdf").body(pdf.clone())
+            })
+            .await;
+        let failure = match sent {
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_IMPLEMENTED => return Ok(Sealed::NotConfigured),
+            Ok(resp) if resp.status().is_success() => {
+                let result = resp
+                    .headers()
+                    .get("x-result")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| serde_json::from_str(v).ok())
+                    .unwrap_or_else(|| serde_json::json!({"sealed": true}));
+                match resp.bytes().await {
+                    Ok(b) if b.starts_with(b"%PDF") => return Ok(Sealed::Yes(b.to_vec(), result)),
+                    Ok(_) => "the answer is not a PDF".to_string(),
+                    Err(e) => e.to_string(),
+                }
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                format!("{status}: {}", text.chars().take(200).collect::<String>())
+            }
+            Err(e) => e.to_string(),
+        };
+        Err(format!("pdf-render could not seal the PDF: {failure}"))
+    }
+
     /// `/docx/render`: the Word file and the data as JSON. No text fallback: a plain-text page is
     /// no stand-in for a builder's agreement.
     pub async fn render_docx(&self, file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
@@ -176,6 +263,30 @@ impl PdfRenderer {
             Err(e) => e.to_string(),
         };
         Err(format!("pdf-render failed on the Word template: {failure}"))
+    }
+
+    /// See [`edit`].
+    pub async fn edit(&self, path: &'static str, body: &serde_json::Value) -> Result<EditAnswer, EditError> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(EditError::Failed(NO_DOCX_RENDERER.into())) };
+        let sent = upstream.send(path, |base| http.post(format!("{base}{path}")).json(body)).await;
+        let resp = sent.map_err(|e| EditError::Failed(format!("pdf-render {path}: {e}")))?;
+        let status = resp.status();
+        let result = resp
+            .headers()
+            .get("x-result")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| serde_json::from_str(v).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let bytes = resp.bytes().await.map_err(|e| EditError::Failed(format!("pdf-render {path}: {e}")))?;
+        if status.is_success() {
+            return Ok(EditAnswer { body: bytes.to_vec(), result });
+        }
+        let text: String = String::from_utf8_lossy(&bytes).chars().take(400).collect();
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            Err(EditError::Refused(text))
+        } else {
+            Err(EditError::Failed(format!("pdf-render {path}: {status}: {text}")))
+        }
     }
 }
 
@@ -281,6 +392,7 @@ mod tests {
         for (path, client) in [
             (json!(null), "ANTER"),
             (json!("  "), "ANTER"),
+            (json!("/api/files/secured/file/ANTER/a\\b.docx"), "ANTER"),
             (json!("/api/files/static/file/ANTER/a.docx"), "ANTER"),
             (json!("https://evil/x.docx"), "ANTER"),
             (json!("/api/files/secured/file/OTHER/a.docx"), "ANTER"),
@@ -322,6 +434,38 @@ mod tests {
         assert!(e.contains("400") && e.contains("bad tag"), "{e}");
         let none = PdfRenderer::from_config(&PdfConfig::default(), None).unwrap();
         assert!(none.render_docx("/f".into(), data.as_object().unwrap()).await.unwrap_err().contains("[pdf] upstream"));
+    }
+
+    #[tokio::test]
+    async fn a_pdf_is_sealed_by_the_sidecar_or_kept_when_no_seal_is_set() {
+        let app = Router::new().route(
+            "/pdf/seal",
+            post(|h: HeaderMap, b: axum::body::Bytes| async move {
+                assert_eq!(h["content-type"], "application/pdf");
+                match &b[..] {
+                    b"%PDF none" => (StatusCode::NOT_IMPLEMENTED, HeaderMap::new(), b"seal: no certificate".to_vec()),
+                    b"%PDF bad" => (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new(), b"seal failed: KeyError".to_vec()),
+                    _ => {
+                        let mut out = HeaderMap::new();
+                        out.insert("x-result", r#"{"sealed":true,"signer":"Test Seal","timestamped":false}"#.parse().unwrap());
+                        (StatusCode::OK, out, [&b[..], b" sealed"].concat())
+                    }
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+
+        let r = renderer(&base, true);
+        let done = r.seal(b"%PDF form".to_vec()).await.unwrap();
+        assert_eq!(done, Sealed::Yes(b"%PDF form sealed".to_vec(), serde_json::json!({"sealed": true, "signer": "Test Seal", "timestamped": false})));
+        assert_eq!(r.seal(b"%PDF none".to_vec()).await.unwrap(), Sealed::NotConfigured, "501: no certificate here");
+        let e = r.seal(b"%PDF bad".to_vec()).await.unwrap_err();
+        assert!(e.contains("500") && e.contains("KeyError"), "{e}");
+        let none = PdfRenderer::from_config(&PdfConfig::default(), None).unwrap();
+        assert_eq!(none.seal(b"%PDF x".to_vec()).await.unwrap(), Sealed::NotConfigured, "no sidecar");
+        assert_eq!(seal(b"%PDF x".to_vec()).await.unwrap(), Sealed::NotConfigured, "nothing installed");
     }
 
     #[test]

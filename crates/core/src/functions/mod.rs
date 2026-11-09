@@ -4,6 +4,7 @@
 
 pub mod caller_security;
 pub mod connection_signature;
+pub mod docx;
 pub mod contact_codes;
 pub mod crypto;
 pub mod file;

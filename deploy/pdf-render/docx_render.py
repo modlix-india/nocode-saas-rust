@@ -7,6 +7,8 @@
 Filling (docxtpl, Jinja in a sandbox):
 - tags are `{{ al.unit.number }}`, `{%p if ... %}`, `{%tr for ... %}` (docxtpl's paragraph and
   table-row forms); a missing field renders as nothing, at any depth, as FreeMarker's `!` does;
+- formats: `{{ x|inr }}`, `inr0`, `words`, `num_words`, `date_dmy`, `date_long`, `date_words`
+  (docx_filters.py), and Jinja's own (`upper`, `title`);
 - `{{ image(src, 30) }}` puts an image 30 mm wide where the tag is: `src` is a `data:image/png` or
   `data:image/jpeg` URL (a drawn signature) or a files URL; an empty `src` renders as nothing;
 - the sandbox refuses attribute tricks (`''.__class__`), so a tenant's file cannot reach Python.
@@ -106,8 +108,11 @@ def fill(docx_bytes, data, policy):
         return InlineImage(tpl, io.BytesIO(raw), width=Mm(float(width_mm)),
                            height=Mm(float(height_mm)) if height_mm else None)
 
+    import docx_filters
+
     env = _Sandbox(autoescape=True, undefined=ChainableUndefined)
     env.globals["image"] = image
+    env.filters.update(docx_filters.ALL)
     try:
         tpl.render(data or {}, env)
     except TemplateError as e:
