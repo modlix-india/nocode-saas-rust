@@ -69,3 +69,11 @@ zones = ["http://localhost:8761/eureka/", "http://localhost:8762/eureka/"]
 [connections]
 # LOCAL only (owner decision 2026-10-22, AdZump v2 B2+B3): KIRun may reach local nocode-ai and a local SMTP sink.
 block_private_targets = false
+
+[pdf]
+# CoreServices.File.TemplateToPdf and the template PDF preview: the local pdf-render container
+# (docker run -d --name pdf-render --init --memory 1g -p 127.0.0.1:8120:8120
+#  -e FILES_URL=http://host.docker.internal:8103 <image of deploy/pdf-render>). Not a Lighthouse unit,
+# so a plain URL. Word templates need it; HTML falls back to the text renderer while it is down.
+upstream = ["http://127.0.0.1:8120"]
+fallback_on_error = true
