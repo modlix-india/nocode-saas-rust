@@ -149,6 +149,13 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual((done["removed"], done["paragraphsRemoved"]), (1, 1))
         self.assertNotIn("S/o", "".join(text_of(out)))
 
+    def test_remove_a_whole_paragraph(self):
+        b = self.blanks[4]
+        out, done = self.prepared([field(b, action="REMOVE", removeParagraph=True)])
+        self.assertEqual((done["removed"], done["paragraphsRemoved"]), (1, 1))
+        self.assertNotIn("Old new", "".join(text_of(out)))
+        self.assertEqual(len(text_of(out)), len(text_of(LETTER)) - 1)
+
     def test_a_sign_spot_keeps_the_line_and_adds_an_invisible_marker(self):
         out, done = self.prepared([field(self.blanks[6], action="SIGN", signer="A*")])
         self.assertEqual(done["signSpots"], ["A*"])
@@ -192,6 +199,9 @@ class FiltersTest(unittest.TestCase):
         self.assertEqual((f.inr(14280000), f.inr0("1428000"), f.inr("x")), ("1,42,80,000.00", "14,28,000", "x"))
         self.assertEqual(f.words(123456789.5), "Twelve Crore Thirty Four Lakh Fifty Six Thousand Seven Hundred Eighty Nine and Fifty Paise")
         self.assertEqual((f.num_words(1), f.num_words(2.5)), ("1 (One)", 2.5))
+        import datetime
+        self.assertEqual((f.age("1980-11-10", datetime.date(2026, 11, 9)), f.age("09/11/1980", datetime.date(2026, 11, 9)), f.age("?")), (45, 46, "?"))
+        self.assertEqual((f.pct(10), f.pct("12.50"), f.pct(100 / 3), f.pct("x")), ("10", "12.5", "33.33", "x"))
         self.assertEqual(f.date_words("2026-11-09"), "9th Day of November, Two Thousand Twenty-Six")
         self.assertEqual((f.date_dmy("2026-11-09T10:00:00"), f.date_long("9/11/2026"), f.date_dmy("soon")), ("09-11-2026", "9 November 2026", "soon"))
 
@@ -247,8 +257,13 @@ class StampTest(unittest.TestCase):
         self.assertEqual(len(r.pages), 2)
         self.assertIn("Priya Sharma", r.pages[1].extract_text())
 
+    def test_a_typed_signature_is_drawn_as_text(self):
+        out, result = pdf_stamp.stamp(self.pdf, [{"key": "A1", "text": "Rohit Sharma"}])
+        self.assertEqual(result["placed"], ["A1"])
+        self.assertIn("Rohit Sharma", PdfReader(io.BytesIO(out)).pages[0].extract_text())
+
     def test_refusals(self):
-        for stamps in ([], [{"key": "A1", "image": "https://x/y.png"}], [{"key": "ZZZZZ", "image": SIG}]):
+        for stamps in ([], [{"key": "A1", "image": "https://x/y.png"}], [{"key": "ZZZZZ", "image": SIG}], [{"key": "A1"}]):
             with self.subTest(stamps=stamps), self.assertRaises(pdf_stamp.BadStamp):
                 pdf_stamp.stamp(self.pdf, stamps)
         with self.assertRaises(pdf_stamp.BadStamp):

@@ -56,6 +56,7 @@ fn routes(state: AppState, pool: Option<RunPool>) -> Router {
         .merge(crate::data_routes::router())
         .merge(crate::connection_routes::router())
         .merge(crate::event_routes::router())
+        .merge(crate::seal_certs::router())
         // Unmapped paths and methods: Spring Security's verdict first (`crate::unmapped`).
         .method_not_allowed_fallback(crate::unmapped::exec_method_not_allowed)
         .fallback(crate::unmapped::exec_not_found)
