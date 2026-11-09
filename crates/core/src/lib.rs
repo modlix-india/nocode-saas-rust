@@ -44,6 +44,7 @@ pub mod integrations;
 pub mod java_model;
 pub mod pdf;
 pub mod pdf_render;
+pub mod seal_certs;
 pub mod platform_calls;
 pub mod repos;
 pub mod run_pool;
@@ -126,6 +127,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
     let security_calls = Arc::new(SecurityCalls::new(security_upstream.clone())?);
     let files = Arc::new(files_calls::FilesCalls::new(Upstream::from_config(&cfg.files.upstream, registry.as_ref())?)?);
     pdf_render::install(&cfg.pdf, registry.as_ref())?;
+    seal_certs::install(pool.clone(), &cfg.seal)?;
     let platform = Arc::new(make_platform_calls(cfg, registry.as_ref(), &security_upstream)?);
 
     let definitions = Arc::new(

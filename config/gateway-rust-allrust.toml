@@ -138,6 +138,11 @@ pool = "core-exec"
 
 [[routes]]
 id = "core-exec"
+prefix = "/api/core/sealCertificates"
+pool = "core-exec"
+
+[[routes]]
+id = "core-exec"
 prefix = "/api/core/events/internal"
 pool = "core-exec"
 

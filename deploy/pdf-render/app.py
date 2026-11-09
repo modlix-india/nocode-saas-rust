@@ -31,6 +31,7 @@ Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `AL
 `MAX_CONCURRENT` (2), `DOCX_CONCURRENT` (2), `DOCX_TIMEOUT_SECONDS` (90), `LOG_LEVEL` (INFO).
 """
 
+import base64
 import json
 import logging
 import os
@@ -192,6 +193,7 @@ class Handler(BaseHTTPRequestHandler):
     slots = threading.BoundedSemaphore(2)
     converter = None
     sealer = None  # pdf_seal.Sealer when PDF_SEAL_P12 is set
+    issuer = None  # pdf_seal.Issuer when PDF_SEAL_CA_P12 is set
 
     def log_message(self, fmt, *args):
         LOG.debug("%s %s", self.address_string(), fmt % args)
@@ -209,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
     def do_POST(self):
-        if self.path not in ("/render", "/docx/render", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal"):
+        if self.path not in ("/render", "/docx/render", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal", "/seal/inspect", "/seal/issue"):
             return self._send(404, b"not found")
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -221,6 +223,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._docx(self.rfile.read(length))
         if self.path == "/pdf/seal":
             return self._seal(self.rfile.read(length))
+        if self.path in ("/seal/inspect", "/seal/issue"):
+            return self._seal_cert(self.path, self.rfile.read(length))
         if self.path in ("/docx/inspect", "/docx/prepare", "/pdf/stamp"):
             return self._edit(self.path, self.rfile.read(length))
         html = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -277,21 +281,65 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, f"{path} failed: {type(e).__name__}".encode())
 
     def _seal(self, body):
-        """`/pdf/seal`: the PDF in the body sealed with the platform's certificate (pdf_seal.py), what was
-        done in `X-Result`. 501 when this environment has no certificate: the caller keeps the PDF as it is."""
-        if self.sealer is None:
-            return self._send(501, b"seal: no certificate on this environment (PDF_SEAL_P12)")
+        """`/pdf/seal`: a PDF sealed (pdf_seal.py), what was done in `X-Result`. The body is the PDF, sealed with
+        the platform's certificate (501 when this environment has none: the caller keeps the PDF as it is), or
+        JSON {pdf, p12, password} (base64 files): sealed with that client certificate."""
         import pdf_seal
 
         try:
+            if (self.headers.get("Content-Type") or "").startswith("application/json"):
+                req = json.loads(body)
+                if not isinstance(req, dict) or not all(isinstance(req.get(k), str) for k in ("pdf", "p12")):
+                    return self._send(400, b"seal: body needs pdf and p12 (base64)")
+                sealer = (self.sealer or pdf_seal.Sealer.defaults_from_env()).with_p12(
+                    base64.b64decode(req["p12"]), req.get("password") or "")
+                if isinstance(req.get("tsaUrl"), str) and req["tsaUrl"].strip():
+                    sealer.tsa_url = req["tsaUrl"].strip()
+                pdf_in = base64.b64decode(req["pdf"])
+            else:
+                if self.sealer is None:
+                    return self._send(501, b"seal: no certificate on this environment (PDF_SEAL_P12)")
+                sealer, pdf_in = self.sealer, body
             with self.slots:
-                pdf, result = self.sealer.seal(body)
-        except pdf_seal.BadPdf as e:
+                pdf, result = sealer.seal(pdf_in)
+        except (ValueError, pdf_seal.BadPdf, pdf_seal.BadCertificate) as e:
             return self._send(400, f"seal: {e}".encode())
         except Exception as e:
             LOG.exception("seal failed")
             return self._send(500, f"seal failed: {type(e).__name__}".encode())
         self._send_with(pdf, "application/pdf", result)
+
+    def _seal_cert(self, path, body):
+        """`/seal/inspect` {p12, password}: what an uploaded certificate holds (nothing secret), 400 when it
+        cannot seal. `/seal/issue` {commonName, organization, caP12?, caPassword?}: a new client certificate from
+        the platform's private CA (the core sends it from its [seal] config; else PDF_SEAL_CA_P12), {p12 (base64),
+        password, info}; 501 without a CA. JSON in and out."""
+        import pdf_seal
+
+        try:
+            req = json.loads(body)
+            if not isinstance(req, dict):
+                raise ValueError("not an object")
+            if path == "/seal/inspect":
+                if not isinstance(req.get("p12"), str):
+                    return self._send(400, b"seal: p12 (base64) is required")
+                out = pdf_seal.inspect(base64.b64decode(req["p12"]), req.get("password") or "")
+            else:
+                issuer = self.issuer
+                if isinstance(req.get("caP12"), str) and req["caP12"]:
+                    issuer = pdf_seal.Issuer.from_p12(base64.b64decode(req["caP12"]), req.get("caPassword") or "")
+                if issuer is None:
+                    return self._send(501, b"seal: no issuing CA on this environment")
+                p12, password, info = issuer.issue(str(req.get("commonName") or ""), str(req.get("organization") or ""))
+                out = {"p12": base64.b64encode(p12).decode("ascii"), "password": password, "info": info}
+        except pdf_seal.BadCertificate as e:
+            return self._send(400, f"seal: {e}".encode())
+        except ValueError:
+            return self._send(400, b"seal: body is not JSON")
+        except Exception as e:
+            LOG.exception("%s failed", path)
+            return self._send(500, f"{path} failed: {type(e).__name__}".encode())
+        self._send(200, json.dumps(out).encode(), "application/json")
 
     def _docx(self, body):
         """Word templates have their own converters (docx_render.Converter), so a long agreement
@@ -322,10 +370,11 @@ def main():
     import docx_render
 
     Handler.converter = docx_render.Converter.from_env()
-    if os.environ.get("PDF_SEAL_P12", "").strip():  # only then is pdf_seal (and pyHanko) loaded at start
-        import pdf_seal
+    if os.environ.get("PDF_SEAL_P12", "").strip() or os.environ.get("PDF_SEAL_CA_P12", "").strip():
+        import pdf_seal  # only then is pdf_seal (and pyHanko) loaded at start
 
-        Handler.sealer = pdf_seal.Sealer.from_env()  # None: no seal on this environment (/pdf/seal answers 501)
+        Handler.sealer = pdf_seal.Sealer.from_env()  # None: no platform seal here (/pdf/seal answers 501)
+        Handler.issuer = pdf_seal.Issuer.from_env()  # None: clients cannot generate a certificate here
     port = int(os.environ.get("PORT", "8120"))
     LOG.info("listening on %d (files: %s, allowed hosts: %s)", port, Handler.policy.files_url or "none", sorted(Handler.policy.allowed_hosts) or "none")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

@@ -11,7 +11,7 @@ never lost because the template had no place for it.
 The PDF is not made again: the signer signs exactly the file they were shown, and stamping takes
 milliseconds where converting a long agreement takes seconds.
 
-Request: `{"file": <PDF URL>, "stamps": [{"key", "image" (data:image/png|jpeg URL), "name", "lines"
+Request: `{"file": <PDF URL>, "stamps": [{"key", "image" (data:image/png|jpeg URL) or "text" (a typed signature), "name", "lines"
 [...], "widthMm" (default 32)}], "recordPage": bool}`. Answer: the PDF; header `X-Stamp-Result` is JSON
 `{"placed": [keys], "onRecordPage": [keys]}`.
 """
@@ -63,10 +63,15 @@ def find_spots(reader):
 
 
 def _overlay_html(width_pt, height_pt, items):
-    """One page of the given size with images at absolute places (points from the bottom left)."""
+    """One page of the given size with signatures at absolute places (points from the bottom left):
+    an image, or a typed name in a handwriting-like italic."""
     boxes = []
     for x, y, w_pt, img in items:
-        boxes.append(f'<img src="{img}" style="position:absolute;left:{x:.2f}pt;bottom:{y:.2f}pt;width:{w_pt:.2f}pt">')
+        if isinstance(img, str) and img.startswith("data:"):
+            boxes.append(f'<img src="{img}" style="position:absolute;left:{x:.2f}pt;bottom:{y:.2f}pt;width:{w_pt:.2f}pt">')
+        else:
+            boxes.append(f'<div style="position:absolute;left:{x:.2f}pt;bottom:{y:.2f}pt;width:{w_pt:.2f}pt;font-family:\'URW Chancery L\',\'Z003\',serif;'
+                         f'font-style:italic;font-size:14pt;color:#1a2b6d;white-space:nowrap;overflow:hidden">{html.escape(str(img))}</div>')
     return (f"<html><head><style>@page{{size:{width_pt:.2f}pt {height_pt:.2f}pt;margin:0}}"
             f"body{{margin:0;position:relative;width:{width_pt:.2f}pt;height:{height_pt:.2f}pt}}</style></head>"
             f"<body>{''.join(boxes)}</body></html>")
@@ -76,12 +81,13 @@ def _record_html(rows):
     cells = []
     for r in rows:
         lines = "".join(f"<div class='l'>{html.escape(str(x))}</div>" for x in r.get("lines") or [])
-        img = f"<img src='{r['image']}'>" if r.get("image") else ""
+        img = (f"<img src='{r['image']}'>" if str(r.get("image") or "").startswith("data:")
+               else f"<div class='t'>{html.escape(str(r.get('image') or ''))}</div>")
         cells.append(f"<tr><td class='i'>{img}</td><td><div class='n'>{html.escape(str(r.get('name') or r['key']))}</div>{lines}</td></tr>")
     return ("<html><head><style>@page{size:A4;margin:20mm}body{font-family:'Noto Sans',sans-serif;font-size:9.5pt;color:#111}"
             "h1{font-size:12pt;margin:0 0 6mm}table{width:100%;border-collapse:collapse}td{border-bottom:1px solid #ccc;"
             "padding:3mm 2mm;vertical-align:top}td.i{width:55mm}td.i img{max-width:50mm;max-height:22mm}.n{font-weight:bold}"
-            ".l{color:#444;font-size:8.5pt}</style></head><body><h1>Signatures</h1><table>"
+            ".l{color:#444;font-size:8.5pt}.t{font-family:'URW Chancery L','Z003',serif;font-style:italic;font-size:16pt;color:#1a2b6d}</style></head><body><h1>Signatures</h1><table>"
             + "".join(cells) + "</table></body></html>")
 
 
@@ -108,7 +114,12 @@ def stamp(pdf_bytes, stamps, record_page=False, render_html=None):
     for s in stamps:
         if not isinstance(s, dict) or not MARKER.fullmatch(f"[[sig:{s.get('key', '')}]]"):
             raise BadStamp("every stamp needs a key such as A1, A*, B or W1")
-        _check_image(s.get("image"))
+        if s.get("image"):
+            _check_image(s["image"])
+        elif str(s.get("text") or "").strip():
+            s["image"] = str(s["text"]).strip()[:80]  # a typed signature: drawn as text
+        else:
+            raise BadStamp("every stamp needs an image (a drawn signature) or a text (a typed one)")
     spots = find_spots(reader)
     per_page, placed, unplaced = {}, [], []
     applicants = sorted((s for s in stamps if re.fullmatch(r"A[0-9]+", s["key"])), key=lambda s: int(s["key"][1:]))
