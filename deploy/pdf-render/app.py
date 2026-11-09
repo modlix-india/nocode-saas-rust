@@ -18,12 +18,13 @@ network). It never fetches what a template names on its own:
   WeasyPrint leaves that resource out.
 
 Every fetch has a timeout and a size cap. Endpoints: `POST /render` (the HTML as the body,
-UTF-8) answers `application/pdf`; `GET /healthz` answers `ok`.
+UTF-8) answers `application/pdf`; `POST /docx/render` (JSON `{file, data}`: a Word template filled
+and converted by LibreOffice, see docx_render.py) answers `application/pdf`; `GET /healthz` answers `ok`.
 
 Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `ALLOWED_HOSTS`,
 `FONT_HOSTS` (fonts.googleapis.com,fonts.gstatic.com; empty turns web fonts off), `FONT_CACHE_BYTES`,
 `MAX_BODY_BYTES` (50 MiB), `FETCH_TIMEOUT_SECONDS` (10), `FETCH_MAX_BYTES` (20 MiB),
-`MAX_CONCURRENT` (2), `LOG_LEVEL` (INFO).
+`MAX_CONCURRENT` (2), `DOCX_CONCURRENT` (2), `DOCX_TIMEOUT_SECONDS` (90), `LOG_LEVEL` (INFO).
 """
 
 import logging
@@ -183,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
     policy = Policy()
     max_body = 50 * 1024 * 1024
     slots = threading.BoundedSemaphore(2)
+    converter = None
 
     def log_message(self, fmt, *args):
         LOG.debug("%s %s", self.address_string(), fmt % args)
@@ -200,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
     def do_POST(self):
-        if self.path != "/render":
+        if self.path not in ("/render", "/docx/render"):
             return self._send(404, b"not found")
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -208,6 +210,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(411, b"Content-Length required")
         if length > self.max_body:
             return self._send(413, b"body too large")
+        if self.path == "/docx/render":
+            return self._docx(self.rfile.read(length))
         html = self.rfile.read(length).decode("utf-8", errors="replace")
         if not html.strip():
             return self._send(400, b"empty body")
@@ -221,6 +225,24 @@ class Handler(BaseHTTPRequestHandler):
         LOG.info("rendered %d bytes of HTML into %d bytes of PDF in %.0f ms", length, len(pdf), (time.monotonic() - started) * 1000)
         self._send(200, pdf, "application/pdf")
 
+    def _docx(self, body):
+        """Word templates have their own converters (docx_render.Converter), so a long agreement
+        never holds up the HTML renders (receipts, cost sheets)."""
+        import docx_render
+
+        if self.converter is None:
+            Handler.converter = docx_render.Converter.from_env()
+        try:
+            pdf = docx_render.render(body, self.policy, self.converter)
+        except (docx_render.BadTemplate, Refused) as e:
+            return self._send(400, f"docx: {e}".encode())
+        except docx_render.Busy as e:
+            return self._send(504, f"docx: {e}".encode())
+        except Exception as e:
+            LOG.exception("docx render failed")
+            return self._send(500, f"docx render failed: {type(e).__name__}".encode())
+        self._send(200, pdf, "application/pdf")
+
 
 def main():
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -229,6 +251,9 @@ def main():
     Handler.policy = Policy.from_env()
     Handler.max_body = int(os.environ.get("MAX_BODY_BYTES", str(50 * 1024 * 1024)))
     Handler.slots = threading.BoundedSemaphore(int(os.environ.get("MAX_CONCURRENT", "2")))
+    import docx_render
+
+    Handler.converter = docx_render.Converter.from_env()
     port = int(os.environ.get("PORT", "8120"))
     LOG.info("listening on %d (files: %s, allowed hosts: %s)", port, Handler.policy.files_url or "none", sorted(Handler.policy.allowed_hosts) or "none")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
