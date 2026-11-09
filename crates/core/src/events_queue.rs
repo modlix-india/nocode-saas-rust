@@ -80,6 +80,9 @@ pub async fn handle(listener: &EventsListener, body: &[u8]) -> Settle {
     }
 }
 
+/// How long a failed delivery waits before it goes back on the queue.
+pub const REQUEUE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Consumes until the connection drops; then reconnects, forever.
 pub async fn consume_forever(listener: Arc<EventsListener>, uri: String, exchange: String, settings: EventsSection) {
     loop {
@@ -127,6 +130,11 @@ async fn consume(listener: Arc<EventsListener>, uri: &str, exchange: &str, setti
         let listener = listener.clone();
         tokio::spawn(async move {
             let settle = handle(&listener, &delivery.data).await;
+            if settle == Settle::Requeue {
+                // A run that failed before its action (Mongo or security briefly down) would
+                // come straight back and fail again in a tight loop; wait before handing it back.
+                tokio::time::sleep(REQUEUE_DELAY).await;
+            }
             let done = match settle {
                 Settle::Ack => delivery.acker.ack(BasicAckOptions::default()).await,
                 Settle::Drop => delivery.acker.nack(BasicNackOptions { requeue: false, ..Default::default() }).await,

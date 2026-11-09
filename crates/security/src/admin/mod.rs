@@ -16,6 +16,7 @@
 
 pub mod billing;
 pub mod clients;
+pub mod managed_changes;
 pub mod users;
 
 use std::ops::Deref;

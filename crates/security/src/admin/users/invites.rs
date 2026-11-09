@@ -586,6 +586,7 @@ impl Admin {
         // `getClientAuthenticationResponse`: the password or PIN signs the new user in. The input
         // type is the request's type here (a missing one failed above, and an OTP set no secret),
         // so Java's OTP and social-registration branches are never reached.
+        self.notify_managed_change(ca, created.client_id, crate::admin::managed_changes::Change::UserCreated, Some(created.id)).await;
         let mut auth = AuthRequest { user_id: Some(created.id), ..Default::default() };
         if pass_type == SecretType::Pin {
             auth.pin = b.input_pass();

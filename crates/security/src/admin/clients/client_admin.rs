@@ -329,6 +329,8 @@ pub async fn update(s: &AdminState, ca: &ContextAuth, entity: Row) -> AuthResult
     let uid = entity::u64_of(&updated, "id").unwrap_or(0);
     entity_changed(&s.db, None, object::CLIENT, action::UPDATE, uid, Some(uid), "Client", describe(&updated).as_deref());
     evict_client(s, Some(uid), entity::str_of(&updated, "code")).await;
+    let change = if entity::str_of(&updated, "statusCode") == Some("DELETED") { crate::admin::managed_changes::Change::Deleted } else { crate::admin::managed_changes::Change::Client };
+    s.notify_managed_change(ca, uid, change, None).await;
     Ok(updated)
 }
 
@@ -370,6 +372,9 @@ pub async fn set_active(s: &AdminState, ca: &ContextAuth, client_id: Option<u64>
     let changed = sqlx::query(sql).bind(id).execute(&s.db.pool).await?.rows_affected() > 0;
     let code = entity::by_id(&s.db, &CLIENT, id).await?.and_then(|r| entity::str_of(&r, "code").map(str::to_string));
     evict_client(s, Some(id), code.as_deref()).await;
+    if changed {
+        s.notify_managed_change(ca, id, crate::admin::managed_changes::Change::Status, None).await;
+    }
     Ok(changed)
 }
 

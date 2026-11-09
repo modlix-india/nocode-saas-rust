@@ -48,6 +48,8 @@ pub struct EventSchedulerSettings {
     /// `core.scheduler.initialDelayMs`: the wait before the first pass.
     pub initial_delay_ms: i64,
     /// How long a claimed run or one-off may go without finishing before it can be retaken.
+    /// 900 s, not Java's 300: it must outlast the 300 s function limit plus the wait in the
+    /// queue, or a slow one-off is claimed and run a second time while the first still runs.
     pub lease_seconds: i64,
     /// How far back a missed tick is still caught up.
     pub catch_up_window_minutes: i64,
@@ -80,7 +82,7 @@ impl Default for EventSchedulerSettings {
             enabled: true,
             tick_ms: 30_000,
             initial_delay_ms: 30_000,
-            lease_seconds: 300,
+            lease_seconds: 900,
             catch_up_window_minutes: 1500,
             clients_refresh_seconds: 300,
             run_retention_days: 3,
@@ -839,6 +841,30 @@ impl ScheduleStore {
         r.map(|r| r.modified_count > 0).map_err(mongo_error)
     }
 
+    /// Whether this tick's run is still RUNNING. A delivery for a run already closed is a
+    /// duplicate (RabbitMQ redelivered it after the work was done).
+    pub async fn run_is_open(&self, run_id: &str) -> Result<bool, CoreError> {
+        let found = self
+            .runs()
+            .find_one(doc! {"_id": run_id, "status": RunState::Running.name()})
+            .projection(doc! {"_id": 1})
+            .await
+            .map_err(mongo_error)?;
+        Ok(found.is_some())
+    }
+
+    /// Whether this one-off is still CLAIMED under this claim. When the lease ran out and the
+    /// one-off was claimed again, or it was closed, the older delivery is stale.
+    pub async fn one_off_claim_is_current(&self, id: &str, claim_token: &str) -> Result<bool, CoreError> {
+        let found = self
+            .events()
+            .find_one(claimed_by(id, claim_token))
+            .projection(doc! {"_id": 1})
+            .await
+            .map_err(mongo_error)?;
+        Ok(found.is_some())
+    }
+
     /// `claimDueEvent`: atomically claims the earliest due one-off (PENDING and due, or
     /// CLAIMED by an instance whose lease ran out); each claim counts as an attempt.
     pub async fn claim_due_event(&self, now: i64, owner: &str, lease: TimeDelta) -> Result<Option<ScheduledEvent>, CoreError> {
@@ -1255,14 +1281,14 @@ mod tests {
     fn settings_default_as_java_and_read_from_config() {
         let s = EventSchedulerSettings::default();
         assert!(s.enabled);
-        assert_eq!((s.tick_ms, s.lease_seconds, s.catch_up_window_minutes, s.clients_refresh_seconds), (30_000, 300, 1500, 300));
+        assert_eq!((s.tick_ms, s.lease_seconds, s.catch_up_window_minutes, s.clients_refresh_seconds), (30_000, 900, 1500, 300));
         assert_eq!((s.run_retention_days, s.concurrency, s.run_concurrency), (3, 16, 4));
         assert_eq!(s.oneoff, OneOffSettings { batch_size: 200, max_attempts: 5, backoff_base_seconds: 30, backoff_max_seconds: 3600, retention_days: 7 });
         let read: EventSchedulerSettings = serde_json::from_value(json!({"tick_ms": 1000, "oneoff": {"max_attempts": 3}})).unwrap();
         assert_eq!(read.tick_ms, 1000);
         assert_eq!(read.oneoff.max_attempts, 3);
         assert_eq!(read.oneoff.retention_days, 7);
-        assert_eq!(read.lease_seconds, 300);
+        assert_eq!(read.lease_seconds, 900);
         let mut core = crate::config::CoreConfig::default();
         assert_eq!(core.core.scheduler, EventSchedulerSettings::default());
         core.core.scheduler.oneoff.max_attempts = 0;
