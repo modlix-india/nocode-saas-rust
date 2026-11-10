@@ -7,6 +7,10 @@
 //! `connections` crate); the HTML `body` part becomes the PDF in [`crate::pdf`], which stands in
 //! for openhtmltopdf (see there for what it draws). Rust only: `fileData.sha256` is the SHA-256
 //! of the PDF bytes written.
+//!
+//! Rust only: `FileToBase64`'s `remuxVideo` (optional, false) hands a fragmented MP4 (screen and
+//! browser recordings) back rewritten as a plain MP4, streams copied, by the pdf-render sidecar
+//! ([`crate::pdf_render::remux_video`]): WhatsApp cannot read the fragmented form (Meta 131053).
 
 use std::sync::Arc;
 
@@ -59,7 +63,7 @@ const FILE_TO_BASE64: &str = "CoreServices.File.FileToBase64";
 
 /// A stored file as base64 (a data URL with `metadataRequired`), read for the caller's client.
 /// Output `result`; the `error` event when the path is blank or the files service answers
-/// nothing.
+/// nothing. Rust only: `remuxVideo` (see the module text; never a reason to fail).
 pub struct FileToBase64 {
     pub files: Arc<FilesCalls>,
 }
@@ -81,8 +85,59 @@ impl JavaFunction for FileToBase64 {
         // `CommonsUtil.nonNullValue(ca.getClientCode(), ca.getUrlClientCode())`.
         let client = req.auth.client_code().or(req.auth.url_client_code());
         match self.files.read_file_as_base64(&file_type, client, &path, Some(metadata_required)).await? {
+            Some(base64) if arg_true(args, "remuxVideo") => Ok(output("result", Value::String(remuxed_mp4(&path, base64).await))),
             Some(base64) => Ok(output("result", Value::String(base64))),
             None => Ok(event_output("error", [("result", Value::String("File cannot be converted to base64".into()))])),
+        }
+    }
+}
+
+/// A flag that is `true` (or `"true"`); anything else, or absent, is false.
+fn arg_true(args: &Map<Value>, name: &str) -> bool {
+    match args.get(name) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
+/// `FileToBase64`'s answer (`data` base64, or a `data:<type>;name:<name>;base64,` URL) for the file at
+/// `path`, with a fragmented MP4 rewritten as a plain one by the sidecar. Anything else comes back as it
+/// is: not an MP4 (`video/mp4`, else a `.mp4` / `.m4v` path), not fragmented, no sidecar, or the
+/// sidecar failing (logged): the caller then sends the file as it was stored.
+pub(crate) async fn remuxed_mp4(path: &str, data: String) -> String {
+    use base64::Engine as _;
+
+    let (head, encoded) = match data.find(";base64,") {
+        Some(i) if data.starts_with("data:") => data.split_at(i + ";base64,".len()),
+        _ => ("", data.as_str()),
+    };
+    let mp4 = if head.is_empty() {
+        let p = path.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
+        p.ends_with(".mp4") || p.ends_with(".m4v")
+    } else {
+        head.to_ascii_lowercase().starts_with("data:video/mp4;")
+    };
+    if !mp4 {
+        return data;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let Ok(bytes) = b64.decode(encoded) else { return data };
+    if !crate::pdf_render::is_fragmented_mp4(&bytes) {
+        return data;
+    }
+    match crate::pdf_render::remux_video(bytes).await {
+        Ok(crate::pdf_render::Remuxed::Yes(plain, result)) => {
+            tracing::info!(file = %path, %result, "a fragmented MP4 remuxed into a plain one");
+            format!("{head}{}", b64.encode(plain))
+        }
+        Ok(crate::pdf_render::Remuxed::NotConfigured) => {
+            tracing::warn!(file = %path, "a fragmented MP4 is sent as it is: no pdf-render sidecar here");
+            data
+        }
+        Err(e) => {
+            tracing::warn!(file = %path, error = %e, "a fragmented MP4 is sent as it is");
+            data
         }
     }
 }
@@ -422,6 +477,30 @@ mod tests {
         // Without a security context Java's chain is empty.
         assert_eq!(b.internal_execute(&a("x", false)).await.err().unwrap().text(), "Function with id CoreServices.File.FileToBase64 not found");
         assert!(b.internal_execute(&args(json!({"filePath": "x", "fileType": "static"}))).await.is_err());
+
+        // remuxVideo: not an MP4, so the answer is as it was
+        let remux = args(json!({"filePath": "a/b.png", "fileType": "static", "metadataRequired": true, "remuxVideo": true}));
+        let (_, r) = event(context::with_request(ctx(), b.internal_execute(&remux)).await);
+        assert_eq!(r["result"], json!("data:a/b.png;client=SYSTEM;meta=true"));
+    }
+
+    #[tokio::test]
+    async fn remux_video_keeps_what_it_cannot_or_need_not_change() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let (fragmented, plain) = crate::pdf_render::tests::mp4s();
+        let url = |bytes: &[u8]| format!("data:video/mp4;name:v.mp4;base64,{}", b64.encode(bytes));
+        // a plain MP4 needs nothing
+        assert_eq!(remuxed_mp4("w/v.mp4", url(&plain)).await, url(&plain));
+        assert_eq!(remuxed_mp4("w/v.mp4", b64.encode(&plain)).await, b64.encode(&plain));
+        // not video/mp4 (or not a .mp4 path without metadata): never looked at
+        let png = format!("data:image/png;name:a.png;base64,{}", b64.encode(&fragmented));
+        assert_eq!(remuxed_mp4("w/a.png", png.clone()).await, png);
+        assert_eq!(remuxed_mp4("w/a.mov", b64.encode(&fragmented)).await, b64.encode(&fragmented));
+        // fragmented, but no sidecar in this process: sent as stored
+        assert_eq!(remuxed_mp4("w/v.mp4", url(&fragmented)).await, url(&fragmented));
+        // not base64 at all
+        assert_eq!(remuxed_mp4("w/v.mp4", "data:video/mp4;name:v.mp4;base64,%%%".into()).await, "data:video/mp4;name:v.mp4;base64,%%%");
     }
 
     #[tokio::test]

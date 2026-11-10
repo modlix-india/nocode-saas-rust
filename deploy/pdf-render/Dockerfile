@@ -1,4 +1,4 @@
-# pdf-render: WeasyPrint behind a small HTTP API (see app.py). Internal only: publish no port.
+# pdf-render: WeasyPrint (and ffmpeg for /media/remux) behind a small HTTP API (see app.py). Internal only: publish no port.
 #   docker build -t pdf-render deploy/pdf-render
 #   docker run --rm -e FILES_URL=http://files-serve:8103 --network servers_default --network-alias pdf-render pdf-render
 FROM python:3.12-slim-bookworm
@@ -9,11 +9,14 @@ FROM python:3.12-slim-bookworm
 # Word templates (docx_render.py): LibreOffice Writer without its GUI, and metric-compatible stand-ins
 # for common Office fonts (URW base35: Bookman Old Style, Century Schoolbook, Palatino; Carlito:
 # Calibri; Caladea: Cambria), mapped by fonts.conf so page breaks stay close to Word's.
+# Videos (media_remux.py, /media/remux): ffmpeg and ffprobe, to rewrite a fragmented MP4 as a plain
+# one with its streams copied (WhatsApp cannot read screen recordings otherwise).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fontconfig \
         fonts-noto-core fonts-liberation2 fonts-dejavu-core fonts-inter \
         libreoffice-writer-nogui fonts-urw-base35 fonts-crosextra-carlito fonts-crosextra-caladea \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 COPY fonts.conf /etc/fonts/conf.d/30-office-aliases.conf
 RUN fc-cache -f
@@ -21,7 +24,7 @@ RUN fc-cache -f
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py docx_render.py docx_edit.py docx_filters.py pdf_stamp.py pdf_seal.py test_app.py test_docx.py test_docx_edit.py test_pdf_seal.py ./
+COPY app.py docx_render.py docx_edit.py docx_filters.py pdf_stamp.py pdf_seal.py media_remux.py test_app.py test_docx.py test_docx_edit.py test_pdf_seal.py test_media.py ./
 
 RUN useradd --system --uid 65532 --no-create-home render
 USER 65532
