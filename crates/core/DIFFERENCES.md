@@ -209,6 +209,11 @@ now send the two headers only when they have a value.
   structure (headings, emphasis, lists, tables side by side, `pre`, breaks, alignment, page
   breaks) in Helvetica / Courier on A4, characters outside WinAnsi as `?`, no images. Everything
   around it (template, language, parts, file name, the files upload, the output) is Java's.
+  Rust only: `FileToBase64` takes `remuxVideo` (false by default); with it, a fragmented MP4
+  (`video/mp4`, or a `.mp4` / `.m4v` path, whose `moov` has an `mvex` or which has a top-level
+  `moof`) is posted to the same sidecar's `/media/remux` (ffmpeg `-c copy -movflags +faststart`) and
+  the plain MP4 comes back in its place; anything else, no sidecar, or a sidecar failure (logged)
+  returns the file as stored. WhatsApp sends use it: Meta fails a fragmented MP4 with 131053.
 - **D32 the definition marker's value.** Java's message, file, e-mail, AI, notification and event
   functions compare `DefinitionFunction.CONTEXT_KEY` with `"true"`; core-exec only knows whether
   a definition is running, so "present but not true" (which core never sets) is unreachable.

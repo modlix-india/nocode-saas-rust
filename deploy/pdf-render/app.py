@@ -23,12 +23,16 @@ and converted by LibreOffice, see docx_render.py) answers `application/pdf`; `PO
 (JSON `{file}`) answers the blanks of a Word file, `POST /docx/prepare` (JSON `{file, fields,
 conditions, options}`) the Word file with field tags in place of its blanks, `POST /pdf/stamp`
 (JSON `{file, stamps}`) the PDF with signatures drawn at its markers (docx_edit.py, pdf_stamp.py;
-what was done comes back as JSON in the `X-Result` header); `GET /healthz` answers `ok`.
+what was done comes back as JSON in the `X-Result` header); `POST /media/remux` (the video as the
+body, `?transcode=1` optional) answers `video/mp4`: a fragmented MP4 (screen recordings) rewritten
+as a plain one with its streams copied, so WhatsApp can read it (media_remux.py, ffmpeg; what was
+done in `X-Result`); `GET /healthz` answers `ok`.
 
 Environment: `PORT` (8120), `FILES_URL` (empty: files URLs are refused too), `ALLOWED_HOSTS`,
 `FONT_HOSTS` (fonts.googleapis.com,fonts.gstatic.com; empty turns web fonts off), `FONT_CACHE_BYTES`,
 `MAX_BODY_BYTES` (50 MiB), `FETCH_TIMEOUT_SECONDS` (10), `FETCH_MAX_BYTES` (20 MiB),
-`MAX_CONCURRENT` (2), `DOCX_CONCURRENT` (2), `DOCX_TIMEOUT_SECONDS` (90), `LOG_LEVEL` (INFO).
+`MAX_CONCURRENT` (2), `DOCX_CONCURRENT` (2), `DOCX_TIMEOUT_SECONDS` (90), `MEDIA_CONCURRENT` (2),
+`MEDIA_TIMEOUT_SECONDS` (120), `LOG_LEVEL` (INFO).
 """
 
 import base64
@@ -191,6 +195,8 @@ class Handler(BaseHTTPRequestHandler):
     policy = Policy()
     max_body = 50 * 1024 * 1024
     slots = threading.BoundedSemaphore(2)
+    media_slots = threading.BoundedSemaphore(2)  # ffmpeg runs, apart from the PDF renders
+    media_timeout = 120.0
     converter = None
     sealer = None  # pdf_seal.Sealer when PDF_SEAL_P12 is set
     issuer = None  # pdf_seal.Issuer when PDF_SEAL_CA_P12 is set
@@ -211,6 +217,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
     def do_POST(self):
+        route = urllib.parse.urlsplit(self.path)
+        if route.path == "/media/remux":
+            return self._media(route.query)
         if self.path not in ("/render", "/docx/render", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal", "/seal/inspect", "/seal/issue"):
             return self._send(404, b"not found")
         try:
@@ -341,6 +350,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(500, f"{path} failed: {type(e).__name__}".encode())
         self._send(200, json.dumps(out).encode(), "application/json")
 
+    def _media(self, query):
+        """`/media/remux`: the video as the body; the plain MP4 back, what was done in `X-Result`. 400 when the
+        body is not a video ffmpeg can read (the caller keeps its file), 504 when ffmpeg takes too long."""
+        import media_remux
+
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            return self._send(411, b"Content-Length required")
+        if length > self.max_body:
+            return self._send(413, b"body too large")
+        body = self.rfile.read(length)
+        transcode = urllib.parse.parse_qs(query).get("transcode", [""])[0].lower() in ("1", "true", "yes")
+        started = time.monotonic()
+        try:
+            with self.media_slots:
+                out, result = media_remux.remux(body, transcode=transcode, timeout=self.media_timeout)
+        except media_remux.BadMedia as e:
+            return self._send(400, f"media: {e}".encode())
+        except media_remux.Busy as e:
+            return self._send(504, f"media: {e}".encode())
+        except Exception as e:
+            LOG.exception("media remux failed")
+            return self._send(500, f"media remux failed: {type(e).__name__}".encode())
+        LOG.info("remuxed %d bytes of video into %d bytes in %.0f ms (%s)", len(body), len(out),
+                 (time.monotonic() - started) * 1000, result)
+        self._send_with(out, "video/mp4", result)
+
     def _docx(self, body):
         """Word templates have their own converters (docx_render.Converter), so a long agreement
         never holds up the HTML renders (receipts, cost sheets)."""
@@ -367,6 +404,8 @@ def main():
     Handler.policy = Policy.from_env()
     Handler.max_body = int(os.environ.get("MAX_BODY_BYTES", str(50 * 1024 * 1024)))
     Handler.slots = threading.BoundedSemaphore(int(os.environ.get("MAX_CONCURRENT", "2")))
+    Handler.media_slots = threading.BoundedSemaphore(int(os.environ.get("MEDIA_CONCURRENT", "2")))
+    Handler.media_timeout = float(os.environ.get("MEDIA_TIMEOUT_SECONDS", "120"))
     import docx_render
 
     Handler.converter = docx_render.Converter.from_env()

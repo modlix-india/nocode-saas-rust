@@ -15,6 +15,11 @@
 //! document signing certificate (PAdES, plus an RFC 3161 timestamp when one is set). Optional: the
 //! certificate lives only in the sidecar's environment (`PDF_SEAL_P12`); without it the sidecar
 //! answers 501 and the PDF is kept as it is.
+//!
+//! [`remux_video`]: a fragmented MP4 (screen and browser recordings, [`is_fragmented_mp4`]) posted to
+//! the sidecar's `/media/remux`, which rewrites it as a plain MP4 with its streams copied (ffmpeg
+//! `-c copy -movflags +faststart`): WhatsApp reads only the `moov` sample tables, and a fragmented
+//! file lists no samples there (Meta 131053 "No video stream found").
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -227,6 +232,64 @@ pub async fn issue_cert(common_name: &str, organization: &str) -> Result<(Vec<u8
     Ok((p12, password, out.get("info").cloned().unwrap_or_default()))
 }
 
+/// What [`remux_video`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Remuxed {
+    /// The plain MP4 and what the sidecar reported (`{fragmented, video, audio, frames, ...}`).
+    Yes(Vec<u8>, serde_json::Value),
+    /// No sidecar on this environment.
+    NotConfigured,
+}
+
+/// `video` rewritten by the sidecar as a plain MP4, its streams copied (see the module text).
+pub async fn remux_video(video: Vec<u8>) -> Result<Remuxed, String> {
+    match RENDERER.get() {
+        Some(r) => r.remux_video(video).await,
+        None => Ok(Remuxed::NotConfigured),
+    }
+}
+
+/// True for a fragmented MP4 (ISO BMFF): a `moof` box at the top level, or an `mvex` box in the
+/// `moov`. Such a file keeps its frames in fragments and lists none in the `moov` sample tables.
+pub fn is_fragmented_mp4(bytes: &[u8]) -> bool {
+    if bytes.len() < 8 || &bytes[4..8] != b"ftyp" {
+        return false;
+    }
+    mp4_boxes(bytes, 0, bytes.len()).any(|(kind, body, end)| match &kind {
+        b"moof" => true,
+        b"moov" => mp4_boxes(bytes, body, end).any(|(k, _, _)| &k == b"mvex"),
+        _ => false,
+    })
+}
+
+/// The boxes between `start` and `end`: (type, start of the payload, end of the box). Stops at
+/// the first box whose size does not fit.
+fn mp4_boxes(bytes: &[u8], start: usize, end: usize) -> impl Iterator<Item = ([u8; 4], usize, usize)> + '_ {
+    let mut i = start;
+    std::iter::from_fn(move || {
+        let head = bytes.get(i..i.checked_add(8)?.min(end))?;
+        if head.len() < 8 {
+            return None;
+        }
+        let mut size = u32::from_be_bytes(head[0..4].try_into().ok()?) as u64;
+        let kind: [u8; 4] = head[4..8].try_into().ok()?;
+        let mut header = 8u64;
+        if size == 1 {
+            let large = bytes.get(i + 8..i + 16).filter(|_| i + 16 <= end)?;
+            size = u64::from_be_bytes(large.try_into().ok()?);
+            header = 16;
+        } else if size == 0 {
+            size = (end - i) as u64;
+        }
+        if size < header || (i as u64).checked_add(size)? > end as u64 {
+            return None;
+        }
+        let item = (kind, i + header as usize, i + size as usize);
+        i += size as usize;
+        Some(item)
+    })
+}
+
 const NO_DOCX_RENDERER: &str = "Word templates need the pdf-render service: [pdf] upstream is not set";
 
 async fn text(html: String) -> Result<Vec<u8>, String> {
@@ -342,6 +405,38 @@ impl PdfRenderer {
         Err(format!("pdf-render could not seal the PDF with the client's certificate: {failure}"))
     }
 
+    /// `/media/remux`: the video as the body; 200 is the plain MP4 with what was done in `X-Result`.
+    pub async fn remux_video(&self, video: Vec<u8>) -> Result<Remuxed, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Ok(Remuxed::NotConfigured) };
+        let sent = upstream
+            .send("/media/remux", |base| {
+                http.post(format!("{base}/media/remux")).header(reqwest::header::CONTENT_TYPE, "video/mp4").body(video.clone())
+            })
+            .await;
+        let failure = match sent {
+            Ok(resp) if resp.status().is_success() => {
+                let result = resp
+                    .headers()
+                    .get("x-result")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| serde_json::from_str(v).ok())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                match resp.bytes().await {
+                    Ok(b) if b.len() >= 8 && &b[4..8] == b"ftyp" && !is_fragmented_mp4(&b) => return Ok(Remuxed::Yes(b.to_vec(), result)),
+                    Ok(_) => "the answer is not a plain MP4".to_string(),
+                    Err(e) => e.to_string(),
+                }
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                format!("{status}: {}", text.chars().take(300).collect::<String>())
+            }
+            Err(e) => e.to_string(),
+        };
+        Err(format!("pdf-render could not remux the video: {failure}"))
+    }
+
     /// A JSON call to the sidecar's certificate routes.
     async fn cert_call(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, CertError> {
         let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(CertError::NotConfigured) };
@@ -409,7 +504,7 @@ impl PdfRenderer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::http::{HeaderMap, StatusCode};
@@ -495,6 +590,21 @@ mod tests {
         let pdf = renderer(&var("PDF_RENDER_URL"), false).render(html).await.unwrap();
         assert!(pdf.starts_with(b"%PDF") && !pdf.starts_with(b"%PDF-1.4"), "made by the sidecar, not the text renderer");
         std::fs::write(var("PDF_RENDER_OUT"), pdf).unwrap();
+    }
+
+    /// One local run of a real video through a real sidecar's `/media/remux`.
+    #[tokio::test]
+    #[ignore = "needs a running pdf-render with ffmpeg: PDF_RENDER_URL, REMUX_IN (a fragmented MP4), REMUX_OUT"]
+    async fn remuxes_through_a_running_sidecar() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} is not set"));
+        let video = std::fs::read(var("REMUX_IN")).unwrap();
+        assert!(is_fragmented_mp4(&video), "REMUX_IN is not a fragmented MP4");
+        let Remuxed::Yes(plain, result) = renderer(&var("PDF_RENDER_URL"), false).remux_video(video).await.unwrap() else {
+            panic!("no sidecar")
+        };
+        assert!(!is_fragmented_mp4(&plain));
+        assert!(result["frames"].as_u64().unwrap_or(0) > 0, "{result}");
+        std::fs::write(var("REMUX_OUT"), plain).unwrap();
     }
 
     #[test]
@@ -584,6 +694,78 @@ mod tests {
         let none = PdfRenderer::from_config(&PdfConfig::default(), None).unwrap();
         assert_eq!(none.seal(b"%PDF x".to_vec()).await.unwrap(), Sealed::NotConfigured, "no sidecar");
         assert_eq!(seal(b"%PDF x".to_vec()).await.unwrap(), Sealed::NotConfigured, "nothing installed");
+    }
+
+    /// An MP4 box: size, type, payload.
+    pub(crate) fn mp4_box(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        [&((payload.len() + 8) as u32).to_be_bytes()[..], kind, payload].concat()
+    }
+
+    /// A fragmented MP4 (a moov with mvex, then moof + mdat) and a plain one (moov, mdat).
+    pub(crate) fn mp4s() -> (Vec<u8>, Vec<u8>) {
+        let ftyp = mp4_box(b"ftyp", b"isomiso2");
+        let fragmented = [
+            ftyp.clone(),
+            mp4_box(b"moov", &[mp4_box(b"mvhd", &[0; 20]), mp4_box(b"trak", &[0; 8]), mp4_box(b"mvex", &[0; 8])].concat()),
+            mp4_box(b"moof", &[0; 16]),
+            mp4_box(b"mdat", &[1; 32]),
+        ]
+        .concat();
+        let plain = [ftyp, mp4_box(b"moov", &[mp4_box(b"mvhd", &[0; 20]), mp4_box(b"trak", &[0; 8])].concat()), mp4_box(b"mdat", &[1; 32])].concat();
+        (fragmented, plain)
+    }
+
+    #[test]
+    fn fragmented_mp4_is_told_from_a_plain_one() {
+        let (fragmented, plain) = mp4s();
+        assert!(is_fragmented_mp4(&fragmented));
+        assert!(!is_fragmented_mp4(&plain));
+        // a moof alone (no mvex) is enough, and so is an mvex alone
+        let moof_only = [mp4_box(b"ftyp", b"isom"), mp4_box(b"moov", &mp4_box(b"trak", &[])), mp4_box(b"moof", &[])].concat();
+        assert!(is_fragmented_mp4(&moof_only));
+        assert!(!is_fragmented_mp4(b"%PDF-1.7 not a video"));
+        assert!(!is_fragmented_mp4(&fragmented[..30]), "cut short: no complete moov");
+        // a box claiming more than the file holds stops the walk without a panic
+        let broken = [mp4_box(b"ftyp", b"isom"), vec![0xff, 0xff, 0xff, 0xff], b"moov".to_vec()].concat();
+        assert!(!is_fragmented_mp4(&broken));
+        let large = [mp4_box(b"ftyp", b"isom"), [&1u32.to_be_bytes()[..], b"moof", &24u64.to_be_bytes()[..], &[0u8; 8]].concat()].concat();
+        assert!(is_fragmented_mp4(&large), "64-bit box size");
+    }
+
+    #[tokio::test]
+    async fn the_sidecar_remuxes_a_video() {
+        let (fragmented, plain) = mp4s();
+        let answer = plain.clone();
+        let app = Router::new().route(
+            "/media/remux",
+            post(move |h: HeaderMap, b: axum::body::Bytes| {
+                let answer = answer.clone();
+                async move {
+                    assert_eq!(h["content-type"], "video/mp4");
+                    let mut out = HeaderMap::new();
+                    match &b[..] {
+                        b"text" => (StatusCode::BAD_REQUEST, out, b"media: no video stream in the file".to_vec()),
+                        b"same" => (StatusCode::OK, out, b.to_vec()),
+                        _ => {
+                            out.insert("x-result", r#"{"fragmented":true,"frames":50}"#.parse().unwrap());
+                            (StatusCode::OK, out, answer)
+                        }
+                    }
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+
+        let r = renderer(&base, false);
+        assert_eq!(r.remux_video(fragmented).await.unwrap(), Remuxed::Yes(plain, serde_json::json!({"fragmented": true, "frames": 50})));
+        let e = r.remux_video(b"text".to_vec()).await.unwrap_err();
+        assert!(e.contains("400") && e.contains("no video stream"), "{e}");
+        assert!(r.remux_video(b"same".to_vec()).await.unwrap_err().contains("not a plain MP4"));
+        let none = PdfRenderer::from_config(&PdfConfig::default(), None).unwrap();
+        assert_eq!(none.remux_video(b"x".to_vec()).await.unwrap(), Remuxed::NotConfigured, "no sidecar");
+        assert_eq!(remux_video(b"x".to_vec()).await.unwrap(), Remuxed::NotConfigured, "nothing installed");
     }
 
     #[test]
