@@ -493,6 +493,19 @@
     "parameterName": "filePath",
     "variableArgument": false,
     "type": "EXPRESSION"
+   },
+   "remuxVideo": {
+    "schema": {
+     "namespace": "_",
+     "name": "remuxVideo",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false,
+     "description": "A fragmented MP4 (screen recordings) comes back rewritten as a plain MP4 with the same picture and sound (streams copied), so WhatsApp can read it. Anything else, or a failure, comes back as stored. Rust only."
+    },
+    "parameterName": "remuxVideo",
+    "variableArgument": false,
+    "type": "EXPRESSION"
    }
   },
   "events": {

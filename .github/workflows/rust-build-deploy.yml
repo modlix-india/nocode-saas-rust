@@ -248,14 +248,14 @@ jobs:
               "$context"
           done
 
-      # pdf-render's own tests (its URL policy and real WeasyPrint renders with the image's fonts),
+      # pdf-render's own tests (its URL policy, real WeasyPrint renders with the image's fonts, ffmpeg remuxes),
       # in the image just built: a failure stops the run before anything is pushed.
       - name: Test the pdf-render image
         if: contains(format(' {0} ', steps.units.outputs.units), ' pdf-render ')
         env:
           ENV_NAME: ${{ inputs.environment }}
           TAG: ${{ github.sha }}
-        run: docker run --rm --entrypoint python "$OCIR_NAMESPACE/$ENV_NAME-pdf-render:$TAG" -m unittest -v test_app
+        run: docker run --rm --entrypoint python "$OCIR_NAMESPACE/$ENV_NAME-pdf-render:$TAG" -m unittest -v test_app test_media
 
       - name: Log in to OCIR
         if: steps.units.outputs.units != ''
