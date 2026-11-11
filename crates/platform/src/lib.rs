@@ -14,6 +14,7 @@ pub mod http;
 pub mod java;
 pub mod messages;
 pub mod meter;
+pub mod ratelimit;
 pub mod security;
 pub mod telemetry;
 pub mod upstream;

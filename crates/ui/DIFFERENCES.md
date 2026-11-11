@@ -383,6 +383,12 @@ The write path is the `overridable` crate's, so its differences hold here too
       connection's peer. An `X-Real-IP` that does not read is an unknown address.
     - The editor saves the lists as they come (they are inside `pathDefinitions`, which it
       copies whole), so nothing changed there.
+    - **Rate limit (2026-11-11).** A route that runs a function, for a caller who is not signed
+      in or any webhook run, counts against the per address limit core-exec's execute routes
+      share (`[ratelimit]`, 600 a minute; 429 `CORE.TOO_MANY_REQUESTS` with `Retry-After`;
+      `crates/core/DIFFERENCES.md`, "Per address limit on anonymous function runs"). A method
+      whose definition has a `whitelist` is exempt. The caller's address goes on to core-exec as
+      `X-Real-IP`.
 
 ## Admin purge (Rust only, 2026-10-26)
 

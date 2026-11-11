@@ -27,6 +27,9 @@ pub struct Inner {
     pub integrations: Arc<crate::integrations::Integrations>,
     /// The event run log (`EventRunService`).
     pub event_runs: Arc<crate::event_runs::EventRunService>,
+    /// `[ratelimit]` over the unit's Redis: anonymous runs of the execute routes
+    /// (`crate::ratelimit`).
+    pub ratelimit: platform::ratelimit::RateLimiter,
 }
 
 #[derive(Clone)]
