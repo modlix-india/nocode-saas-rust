@@ -17,7 +17,7 @@ use axum::Router;
 use serde_json::Value;
 
 use super::body::{self, decimal, text, ulong};
-use super::configs::BUNDLE_LIST_REFUSED;
+use super::configs::{self, BUNDLE_LIST_REFUSED};
 use super::purchase::PurchaseRequest;
 use super::settings::BillingSettings;
 use super::service::{pre_authorize, Billing, Live, APPLICATION_CREATE, INVOICE_READ, PAYMENT_CREATE, ROLE_OWNER};
@@ -248,20 +248,23 @@ bl_route!(config_create, "/billing-configs", true, |s, r, ca, cfg| {
     let rec = body::dto(&CONFIG, &r.body)?;
     pre_authorize(&ca, &[APPLICATION_CREATE])?;
     let out = live(&s, &cfg);
-    Ok(ok_or_nothing(billing(&s, &out).config_create(&ca, rec).await?.map(|c| c.to_json())))
+    Ok(ok_or_nothing(billing(&s, &out).config_create(&ca, rec).await?.map(|c| configs::masked_json(&c))))
 });
 
 bl_route_path!(configs_of_app, "/billing-configs/app/{appId}", true, |s, r, ca, cfg, app| {
     let app = to_u64(&app)?;
     let out = live(&s, &cfg);
-    Ok(list(&billing(&s, &out).configs_of_app(&ca, app).await?))
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let rows = billing(&s, &out).configs_of_app(&ca, app).await?;
+    Ok(json(&Value::Array(rows.iter().map(configs::masked_json).collect())))
 });
 
 bl_route_path!(config_read, "/billing-configs/{id}", true, |s, r, ca, cfg, id| {
     let id = to_u64(&id)?;
     let out = live(&s, &cfg);
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
     Ok(match billing(&s, &out).config_read(&ca, id).await? {
-        Some(c) => json(&c.to_json()),
+        Some(c) => json(&configs::masked_json(&c)),
         None => empty(StatusCode::NOT_FOUND),
     })
 });
@@ -270,14 +273,14 @@ bl_route_path!(config_put, "/billing-configs/{id}", true, |s, r, ca, cfg, id| {
     let entity = put_entity(&r, &CONFIG, &id)?;
     pre_authorize(&ca, &[APPLICATION_CREATE])?;
     let out = live(&s, &cfg);
-    Ok(ok_or_nothing(billing(&s, &out).config_update(&ca, &entity).await?.map(|c| c.to_json())))
+    Ok(ok_or_nothing(billing(&s, &out).config_update(&ca, &entity).await?.map(|c| configs::masked_json(&c))))
 });
 
 bl_route_path!(config_patch, "/billing-configs/{id}", true, |s, r, ca, cfg, id| {
     let id = to_u64(&id)?;
     let fields = body::object(&r.body)?;
     let out = live(&s, &cfg);
-    Ok(ok_or_nothing(billing(&s, &out).config_patch(&ca, id, &fields).await?.map(|c| c.to_json())))
+    Ok(ok_or_nothing(billing(&s, &out).config_patch(&ca, id, &fields).await?.map(|c| configs::masked_json(&c))))
 });
 
 bl_route_path!(config_delete, "/billing-configs/{id}", true, |s, r, ca, cfg, id| {

@@ -50,6 +50,47 @@ const BUNDLE_EDITABLE: [&str; 10] =
 /// The refusal of the generic bundle list.
 pub const BUNDLE_LIST_REFUSED: &str = "Listing all billing bundles is not permitted";
 
+/// PLAT-344: the gateway secrets in `paymentGatewayConfig`. They are written, never read back.
+pub const GATEWAY_SECRETS: [&str; 2] = ["keySecret", "webhookSecret"];
+
+/// What a read returns in place of a stored secret.
+pub const SECRET_MASK: &str = "********";
+
+/// A config as the API returns it: each set gateway secret replaced by [`SECRET_MASK`].
+pub fn masked_json(config: &Rec) -> Value {
+    let mut v = config.to_json();
+    if let Some(Value::Object(gw)) = v.get_mut("paymentGatewayConfig") {
+        for k in GATEWAY_SECRETS {
+            if let Some(x) = gw.get_mut(k) {
+                if x.as_str().is_some_and(|s| !s.is_empty()) {
+                    *x = Value::String(SECRET_MASK.to_string());
+                }
+            }
+        }
+    }
+    v
+}
+
+/// On a write, a secret sent back as the mask, empty, null or left out keeps the stored value.
+fn keep_stored_secrets(target: &mut Rec, stored: &Map<String, Value>) {
+    let Val::Json(Value::Object(gw)) = target.get("paymentGatewayConfig").clone() else { return };
+    let mut gw = gw;
+    for k in GATEWAY_SECRETS {
+        let sent = gw.get(k).and_then(Value::as_str).filter(|s| !s.is_empty() && *s != SECRET_MASK);
+        if sent.is_none() {
+            match stored.get(k) {
+                Some(old) => {
+                    gw.insert(k.to_string(), old.clone());
+                }
+                None => {
+                    gw.remove(k);
+                }
+            }
+        }
+    }
+    target.set("paymentGatewayConfig", Val::Json(Value::Object(gw)));
+}
+
 fn copy(target: &mut Rec, from: &Rec, props: &[&str]) {
     for p in props {
         target.set(p, from.get(p).clone());
@@ -142,7 +183,9 @@ impl Billing<'_> {
         // `updatableEntity` reads through `this.read`, the caller-visibility one.
         let Some(id) = entity.id() else { return Ok(None) };
         let Some(mut target) = self.config_read(ca, id).await? else { return Ok(None) };
+        let stored = target.map("paymentGatewayConfig");
         copy(&mut target, entity, &CONFIG_EDITABLE);
+        keep_stored_secrets(&mut target, &stored);
         let saved = self.update_row(&target).await?;
         self.evict_config(&saved).await?;
         Ok(Some(saved))

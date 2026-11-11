@@ -126,13 +126,32 @@ pub async fn run(
     let full_name = full_name(namespace, name);
     exec_limit::guard(&st.inner().config.kirun, &full_name, app_code, client_code, async {
         let repos = repositories(st, app_code, client_code).await?;
-        run_in(&repos, namespace, name, arguments).await
+        let debug = DebugTarget { service: &st.inner().debug_runs, app_code, client_code };
+        run_in_with(&repos, namespace, name, arguments, Some(debug)).await
     })
     .await?
 }
 
 /// [`run`] on the given repositories, inside the run's budget.
 pub async fn run_in(repos: &Repositories, namespace: Option<&str>, name: &str, arguments: Arguments) -> Result<Option<FunctionOutput>, CoreError> {
+    run_in_with(repos, namespace, name, arguments, None).await
+}
+
+/// Where a definition run with `x-debug` is stored ([`crate::debug_runs`]), and for which app and
+/// client it ran.
+struct DebugTarget<'a> {
+    service: &'a Arc<crate::debug_runs::FunctionDebugRunService>,
+    app_code: &'a str,
+    client_code: &'a str,
+}
+
+async fn run_in_with(
+    repos: &Repositories,
+    namespace: Option<&str>,
+    name: &str,
+    arguments: Arguments,
+    debug: Option<DebugTarget<'_>>,
+) -> Result<Option<FunctionOutput>, CoreError> {
     let Some(fun) = repos.functions.find(namespace, name).await? else {
         return Ok(None);
     };
@@ -159,6 +178,15 @@ pub async fn run_in(repos: &Repositories, namespace: Option<&str>, name: &str, a
         .set_arguments(args)
         .set_values_map(AuthoritiesTokenExtractor::new(auth.authorities().to_vec()).values_map());
 
+    // A definition run with `x-debug` by a caller who may edit functions is stored once it ends.
+    let request = context::request();
+    let debug_id = request.as_ref().and_then(|r| r.debug.clone());
+    let store_debug = debug.filter(|_| {
+        fun.as_any().is_some_and(|a| a.is::<DefinitionFunction>())
+            && crate::debug_runs::FunctionDebugRunService::wanted(&auth, debug_id.as_deref())
+    });
+    let execution_id = fep.get_execution_id().to_string();
+
     let run = fun.execute(&mut fep);
     // The steps the run failed in: collected here, or, inside an event task that collects
     // them itself, read from its frame and left there.
@@ -169,6 +197,20 @@ pub async fn run_in(repos: &Repositories, namespace: Option<&str>, name: &str, a
     } else {
         step_trace::traced(run).await
     };
+    if let (Some(d), Some(debug_id)) = (store_debug, debug_id) {
+        d.service.record(crate::debug_runs::RunInfo {
+            execution_id,
+            debug_id,
+            app_code: d.app_code.to_string(),
+            client_code: d.client_code.to_string(),
+            namespace: namespace.unwrap_or("").to_string(),
+            name: name.to_string(),
+            user_id: Some(auth.user_id()).filter(|u| *u != 0),
+            user_name: crate::debug_runs::display_name(&auth),
+            draft: request.as_ref().is_some_and(|r| r.draft),
+            failed: result.is_err(),
+        });
+    }
     match result {
         Ok(output) => Ok(Some(output)),
         Err(e) => Err(step_failure(context::raised_or_unknown(&e), &full_name(namespace, name), &traces)),

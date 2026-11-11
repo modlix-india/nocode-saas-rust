@@ -14,6 +14,7 @@
 //! | `CleanupExpiredFiles(limit=500)` | FILES_TTL_CLEANUP | files `cleanupExpired`, `applyRetention` per bucket, core `events/internal/raise`, entity-processor `whatsapp/internal/media/stampExpired` |
 //! | `CleanupTransports(service, retentionDays=90, limit=200)` | TRANSPORT_CLEANUP | ui or core `transports/internal/cleanupOlderThan` |
 //! | `CleanupEventRuns(retentionDays=90, successRetentionDays=7, staleAfterHours=6, limit=50000)` | EVENT_RUN_CLEANUP | core `eventRuns/internal/cleanupOlderThan` |
+//! | `CleanupDebugRuns(retentionDays=10, limit=50000)` | (new, no worker job) | core `functions/debugRuns/internal/cleanupOlderThan` |
 //!
 //! **The guard.** They reach internal endpoints that delete and charge, so each runs only when
 //! all of these hold, and otherwise answers 403 before reading its arguments or calling
@@ -76,6 +77,8 @@ const DEFAULT_EVENT_RUN_RETENTION_DAYS: i64 = 90;
 const DEFAULT_EVENT_RUN_SUCCESS_RETENTION_DAYS: i64 = 7;
 const DEFAULT_EVENT_RUN_STALE_AFTER_HOURS: i64 = 6;
 const DEFAULT_EVENT_RUN_LIMIT: i64 = 50_000;
+const DEFAULT_DEBUG_RUN_RETENTION_DAYS: i64 = crate::debug_runs::RETENTION_DAYS;
+const DEFAULT_DEBUG_RUN_LIMIT: i64 = 50_000;
 /// The services BILLING_RECONCILE reconciles when the call names none. The worker also
 /// reconciled entity-processor; that service retired with the switch to Rust (2026-10-18), so
 /// it is left out here and reconciled only when a caller names it.
@@ -100,10 +103,11 @@ pub enum Job {
     CleanupExpiredFiles,
     CleanupTransports,
     CleanupEventRuns,
+    CleanupDebugRuns,
 }
 
 impl Job {
-    pub const ALL: [Job; 7] = [
+    pub const ALL: [Job; 8] = [
         Job::RenewCertificates,
         Job::CleanupTokens,
         Job::Meter,
@@ -111,6 +115,7 @@ impl Job {
         Job::CleanupExpiredFiles,
         Job::CleanupTransports,
         Job::CleanupEventRuns,
+        Job::CleanupDebugRuns,
     ];
 
     pub fn name(self) -> &'static str {
@@ -122,6 +127,7 @@ impl Job {
             Job::CleanupExpiredFiles => "CleanupExpiredFiles",
             Job::CleanupTransports => "CleanupTransports",
             Job::CleanupEventRuns => "CleanupEventRuns",
+            Job::CleanupDebugRuns => "CleanupDebugRuns",
         }
     }
 
@@ -201,6 +207,15 @@ impl Job {
                     ),
                     int_param("staleAfterHours", DEFAULT_EVENT_RUN_STALE_AFTER_HOURS, "A run still RUNNING after this is closed as FAILED."),
                     int_param("limit", DEFAULT_EVENT_RUN_LIMIT, "At most this many rows deleted per run."),
+                ],
+                Schema::of_object("result"),
+            ),
+            Job::CleanupDebugRuns => (
+                "Deletes stored debug runs of server functions started longer ago than retentionDays, for \
+                 every client, at most limit rows. Outputs core's answer: runsRemoved.",
+                vec![
+                    int_param("retentionDays", DEFAULT_DEBUG_RUN_RETENTION_DAYS, "Every debug run started longer ago than this is deleted."),
+                    int_param("limit", DEFAULT_DEBUG_RUN_LIMIT, "At most this many rows deleted per run."),
                 ],
                 Schema::of_object("result"),
             ),
@@ -459,6 +474,14 @@ async fn run(job: Job, calls: &PlatformCalls, args: &Map<Value>) -> Result<Value
             tracing::info!(retention_days, success_days, stale_hours, limit, "event run log cleanup");
             let r = object_or_null(calls.cleanup_event_runs(retention_days, success_days, stale_hours, limit).await?);
             tracing::info!(result = %r, "event run log cleanup complete");
+            Ok(r)
+        }
+        Job::CleanupDebugRuns => {
+            let retention_days = int(args, "retentionDays", DEFAULT_DEBUG_RUN_RETENTION_DAYS);
+            let limit = int(args, "limit", DEFAULT_DEBUG_RUN_LIMIT);
+            tracing::info!(retention_days, limit, "debug run cleanup");
+            let r = object_or_null(calls.cleanup_debug_runs(retention_days, limit).await?);
+            tracing::info!(result = %r, "debug run cleanup complete");
             Ok(r)
         }
     }

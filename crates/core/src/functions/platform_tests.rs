@@ -266,6 +266,10 @@ async fn state(security_base: &str, calls: PlatformCalls, backend: Arc<MemBacken
             deps.security.clone(),
             true,
         )),
+        debug_runs: Arc::new(crate::debug_runs::FunctionDebugRunService::new(
+            Arc::new(crate::debug_runs::MemoryDebugRunDao::default()),
+            deps.security.clone(),
+        )),
         ratelimit: platform::ratelimit::RateLimiter::default(),
     });
     deps.integrations.attach(&state);
@@ -756,7 +760,7 @@ async fn files_cleanup_runs_every_step_and_then_fails_on_a_files_error() {
 #[tokio::test]
 async fn signatures() {
     let (_, fs) = functions().await;
-    assert_eq!(fs.len(), 7);
+    assert_eq!(fs.len(), 8);
     let names: Vec<String> = fs.iter().map(|f| f.get_signature().get_full_name()).collect();
     assert_eq!(names, Job::ALL.iter().map(|j| j.full_name()).collect::<Vec<_>>());
     let param = |f: &str, p: &str| -> Value {
@@ -798,13 +802,17 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     assert!(other.find(Some("CoreServices.Hash"), "HashData").await.unwrap().is_some());
     // The 72 Java has, SendDataNotification, Storage.GetFields, Storage.Batch / UpdateIf /
     // NextSequence, Event.GetScheduleState, Security.SendContactCode / VerifyContactCode,
-    // Connection.VerifySignature (LZT-2267) and REST.OAuth2TokenInfo (LZT-2270).
-    assert_eq!(other.filter("").await.unwrap().len(), 82);
+    // Connection.VerifySignature (LZT-2267), REST.OAuth2TokenInfo (LZT-2270) and
+    // File.DocxInspect / DocxPrepare / PdfStamp (Word templates and PDF seal).
+    assert_eq!(other.filter("").await.unwrap().len(), 85);
+    for f in ["CoreServices.File.DocxInspect", "CoreServices.File.DocxPrepare", "CoreServices.File.PdfStamp"] {
+        assert_eq!(other.filter(&f.to_lowercase()).await.unwrap(), [f]);
+    }
     assert_eq!(other.filter("senddatanotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);
     assert!(other.filter("platform").await.unwrap().is_empty());
     let mine = listed(core.clone(), "platform");
     assert!(mine.find(Some("CoreServices.Platform"), "Meter").await.unwrap().is_some());
-    assert_eq!(mine.filter("coreservices.platform").await.unwrap().len(), 7);
+    assert_eq!(mine.filter("coreservices.platform").await.unwrap().len(), 8);
     // Execution reads the repository itself.
     assert!(core.find(Some("CoreServices.Platform"), "CleanupEventRuns").await.unwrap().is_some());
 

@@ -1298,7 +1298,7 @@ mod tests {
     #[test]
     fn windows_and_backoff() {
         let mut s = EventSchedulerSettings::default();
-        assert_eq!(s.lease(), TimeDelta::seconds(300));
+        assert_eq!(s.lease(), TimeDelta::seconds(900));
         assert_eq!(s.catch_up_window(), TimeDelta::minutes(1500));
         assert_eq!(s.fresh_window(), TimeDelta::milliseconds(90_000));
         s.tick_ms = 1000;
