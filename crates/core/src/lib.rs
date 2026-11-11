@@ -46,6 +46,7 @@ pub mod pdf;
 pub mod pdf_render;
 pub mod seal_certs;
 pub mod platform_calls;
+pub mod ratelimit;
 pub mod repos;
 pub mod run_pool;
 pub mod scheduler;
@@ -188,6 +189,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         appdata: appdata.clone(),
         integrations: integrations.clone(),
         event_runs,
+        ratelimit: platform::ratelimit::RateLimiter::configured(&cfg.ratelimit, &cache),
     });
     appdata.attach(&state);
     integrations.attach(&state);

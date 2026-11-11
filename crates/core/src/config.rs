@@ -43,6 +43,9 @@ pub struct CoreConfig {
     pub seal: crate::seal_certs::SealConfig,
     /// `[anonymous]`: what callers who are not signed in may do.
     pub anonymous: AnonymousSection,
+    /// `[ratelimit]`: how many function runs a minute one address may make without signing in
+    /// (`crate::ratelimit`; enforce, 600 a minute, unless set).
+    pub ratelimit: platform::ratelimit::RateLimitConfig,
 }
 
 impl Default for CoreConfig {
@@ -68,6 +71,7 @@ impl Default for CoreConfig {
             pdf: crate::pdf_render::PdfConfig::default(),
             seal: crate::seal_certs::SealConfig::default(),
             anonymous: AnonymousSection::default(),
+            ratelimit: platform::ratelimit::RateLimitConfig::default(),
         }
     }
 }

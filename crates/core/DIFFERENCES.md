@@ -52,6 +52,39 @@ without a `clientCode` (the notification service reading its connection) was ref
 (and `platform::security::SecurityClient::context_authentication`, which the other units use)
 now send the two headers only when they have a value.
 
+## Per address limit on anonymous function runs (2026-11-11, Rust only)
+
+Java limited nothing: anyone could run any server function (stored or `CoreServices.*`) as often
+as they liked without signing in. Now a caller who is not signed in may run at most 600 a minute
+from one address; the next run that minute is refused 429 `CORE.TOO_MANY_REQUESTS` (value
+`retryAfterSeconds`) with a `Retry-After` header (`crate::ratelimit`, `platform::ratelimit`).
+
+- **Where.** core-exec's execute routes (`/api/core/function/execute/...`), for requests that
+  came through the gateway (they carry `X-Forwarded-For`), before the headers and body are
+  read; and ui-shell's URI path routes that run a function (`run_route`), for a caller who is not
+  signed in and for every webhook run, unless the method's definition has a `whitelist`. Both
+  count the same bucket (`anon`), so one address has one budget across them. ui-shell calls
+  core-exec without `X-Forwarded-For` (it sends the caller's address as `X-Real-IP`, for logs
+  and `GetAuthentication`), so its calls are not counted twice. Signed-in callers, event runs
+  and scheduled runs are never counted.
+- **The address** is `context::client_ip` (`X-Real-IP`, else the gateway's `X-Forwarded-For`
+  hop). An IPv6 caller is counted by its /64; an IPv4 address written as IPv6 is the IPv4
+  address. A caller whose address cannot be told shares the bucket `anon-noip`.
+- **Counting.** Fixed one minute windows in Redis, `cmn:rl:<bucket>:<address>:<minute>` (INCR,
+  then EXPIRE of two minutes, in one pipeline; plain EXPIRE rather than `EXPIRE NX`, which Redis
+  6 lacks). The `:` keeps the keys apart from the Java cache hashes (`cmn-<cacheName>`). Shared
+  by every core-exec and ui-shell instance.
+- **Fails open.** No Redis, a Redis error, or no answer in 250 ms: the run goes ahead, counted
+  as `outcome="failopen"` (and in `redis_errors_total`); Redis is then left alone for five
+  seconds.
+- **Metric** `core_ratelimit_total{bucket, outcome}`: `allowed`, `limited`, `reported`,
+  `exempt`, `failopen`. A warning is logged once a minute per address that reaches the limit.
+- **Config** `[ratelimit]` of core-exec (and ui-shell, the same keys): `mode` = `enforce`
+  (default) | `report` (count and log, refuse nothing) | `off`; `anonymous_per_minute` = 600;
+  `[ratelimit.buckets]` per bucket limits (`anon`, `anon-noip`; `0` is no limit); `exempt_ips`
+  = addresses or CIDR ranges never limited (empty). Defaults are in code; no config file needs
+  the section.
+
 ## D: this unit
 
 - **D1 number representation** (`D1-number-repr`). Mostly gone since 2026-10-17: kirun-rust's

@@ -773,6 +773,16 @@ pub async fn offline_state_with(
     security_base: &str,
     integrations: Option<Arc<crate::integrations::Integrations>>,
 ) -> crate::state::AppState {
+    offline_state_limited(appdata, security_base, integrations, platform::ratelimit::RateLimiter::default()).await
+}
+
+/// [`offline_state_with`] with the given `[ratelimit]` limiter (off in the others).
+pub async fn offline_state_limited(
+    appdata: Arc<crate::storage::service::AppDataService>,
+    security_base: &str,
+    integrations: Option<Arc<crate::integrations::Integrations>>,
+    ratelimit: platform::ratelimit::RateLimiter,
+) -> crate::state::AppState {
     use platform::upstream::Upstream;
     let cache = platform::cache::CacheService::new("cmn", "evictionChannel", None).expect("cache");
     let mongo = mongodb::Client::with_uri_str("mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=300&connectTimeoutMS=300")
@@ -806,6 +816,7 @@ pub async fn offline_state_with(
             deps.security.clone(),
             true,
         )),
+        ratelimit,
     });
     deps.integrations.attach(&state);
     state
