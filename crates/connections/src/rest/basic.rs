@@ -197,8 +197,7 @@ pub async fn call(svc: &Connections, conn: &Connection, request: RestRequest, fi
     let uri = spring_uri::build_request_uri(&applied.url, mode, &query, &request.path_parameters)?;
 
     let method = request.method.clone();
-    let no_body = request.payload.is_none() && (method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("DELETE"));
-    if no_body {
+    if sends_no_body(&method, request.payload.as_ref()) {
         let out = OutboundRequest { method, uri, headers: headers.lines(), body: None };
         return exchange(svc, out, applied.timeout, file_download).await.map(Some);
     }
@@ -239,6 +238,29 @@ pub async fn call(svc: &Connections, conn: &Connection, request: RestRequest, fi
     match exchange(svc, out, applied.timeout, file_download).await {
         Ok(r) => Ok(Some(r)),
         Err(_) => Ok(Some(url_not_found())),
+    }
+}
+
+/// Whether the request goes out with no body (and so no `Content-Type` of ours). Java skipped
+/// the body only for a GET or DELETE with no payload argument at all; a `CallRequest` step that
+/// leaves `payload` unset hands over a JSON null, and Java then sent `{}` as
+/// `application/json`, which strict hosts refuse on a GET (Exotel recordings answered 403,
+/// LZT-2319). Here GET, HEAD, DELETE and OPTIONS send nothing when the payload is absent or
+/// empty: null, `{}`, `[]` or a blank string. A non-empty payload still goes out on any method
+/// (DIFFERENCES.md #39). Headers the step or the connection give are sent as they are.
+pub fn sends_no_body(method: &str, payload: Option<&Value>) -> bool {
+    let bodiless = ["GET", "HEAD", "DELETE", "OPTIONS"].iter().any(|m| method.eq_ignore_ascii_case(m));
+    bodiless && is_empty_payload(payload)
+}
+
+/// An absent payload, or one with nothing in it.
+fn is_empty_payload(payload: Option<&Value>) -> bool {
+    match payload {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(m)) => m.is_empty(),
+        Some(Value::Array(a)) => a.is_empty(),
+        Some(Value::String(s)) => s.trim().is_empty(),
+        Some(_) => false,
     }
 }
 
@@ -397,6 +419,23 @@ mod tests {
         h.set("X", "1");
         h.set("x", "2");
         assert_eq!(h.lines(), vec![("Authorization".into(), "a".into()), ("Authorization".into(), "b".into()), ("x".into(), "2".into())]);
+    }
+
+    #[test]
+    fn bodiless_methods_drop_an_empty_payload() {
+        for m in ["GET", "get", "HEAD", "DELETE", "delete", "OPTIONS"] {
+            for p in [None, Some(json!(null)), Some(json!({})), Some(json!([])), Some(json!("")), Some(json!("  "))] {
+                assert!(sends_no_body(m, p.as_ref()), "{m} {p:?}");
+            }
+            for p in [json!({"id": 1}), json!([1]), json!("x"), json!(0), json!(false)] {
+                assert!(!sends_no_body(m, Some(&p)), "{m} {p}");
+            }
+        }
+        for m in ["POST", "PUT", "PATCH"] {
+            for p in [None, Some(json!(null)), Some(json!({}))] {
+                assert!(!sends_no_body(m, p.as_ref()), "{m} {p:?}");
+            }
+        }
     }
 
     #[test]

@@ -317,6 +317,12 @@ now send the two headers only when they have a value.
   HTML body; there is no text fallback for them. The file must be in the secured files of the
   template's own client (`CORE.TEMPLATE_DOCX_FILE_INVALID`, 400); a preview, whose template the caller
   posts, uses the signed-in caller's own client instead of the posted `clientCode`.
+- **D52 `CoreServices.REST.CallRequest` with no payload on a GET, HEAD, DELETE or OPTIONS**
+  (2026-11-11, fixed on purpose, LZT-2319). An unset `payload` reaches the call as a JSON null,
+  and Java sent it as a `{}` JSON body; Exotel refused such GETs with 403. Now an absent or empty
+  payload (null, `{}`, `[]`, blank) on those methods sends no body and no `Content-Type` of ours,
+  as `GetRequest` and `DeleteRequest` already did. A non-empty payload still goes out. Rules in
+  crates/connections/DIFFERENCES.md (39).
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

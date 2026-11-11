@@ -305,6 +305,17 @@ Everything in those runs is the same except what is listed here.
     is logged and ignored, and the URL client code goes as before. Data notifications follow
     the same rule; the notification service does not read their client.
 
+39. **GET, HEAD, DELETE and OPTIONS send no empty body** (2026-11-11, fixed on purpose,
+    LZT-2319). Java skipped the body only for a GET or DELETE whose payload argument was
+    missing altogether. A `CallRequest` step that leaves `payload` unset hands over a JSON null,
+    so Java (and this crate until now) sent `{}` with `Content-Type: application/json` on a GET.
+    Strict hosts refuse a GET with a body: Exotel's recording downloads answered 403.
+    `basic::sends_no_body` now sends no body, and adds no `Content-Type`, for GET, HEAD, DELETE
+    and OPTIONS when the payload is absent, null, `{}`, `[]` or a blank string. A payload with
+    something in it still goes out on any method (a DELETE with `{"id": 1}` sends it, as does a
+    GET, as in Java); POST, PUT and PATCH are unchanged (no payload still sends `{}`); and a
+    `Content-Type` the step's headers or the connection's `defaultHeaders` give is still sent.
+
 ## Error codes (2026-10-17)
 
 Every `GenericException` this crate raises (`ConnError::Generic`) carries the core catalogue's

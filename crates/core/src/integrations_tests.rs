@@ -160,7 +160,16 @@ async fn outside() -> (String, Arc<Mutex<Vec<String>>>) {
     let s1 = seen.clone();
     let s2 = seen.clone();
     let s3 = seen.clone();
+    let s4 = seen.clone();
     let router = Router::new()
+        .route("/rest/echo", axum::routing::any(move |m: axum::http::Method, h: HeaderMap, body: String| {
+            let s = s4.clone();
+            async move {
+                let ct = h.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("-").to_string();
+                s.lock().push(format!("echo {m} ct={ct} body={body}"));
+                ([("content-type", "application/json")], r#"{"ok":1}"#)
+            }
+        }))
         .route("/rest/ok", get(|h: HeaderMap| async move {
             let auth = h.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
             ([("content-type", "application/json"), ("x-a", "1")], json!({"a": 1, "auth": auth}).to_string())
@@ -449,6 +458,48 @@ async fn rest_requests() {
     assert_eq!(connections::rest::call::EVENT_RUNNER_AUTHORITY, crate::events::EVENT_RUNNER_AUTHORITY);
     for name in ["PutRequest", "PatchRequest", "DeleteRequest"] {
         assert_eq!(find(&fns, name).get_signature().get_namespace(), "CoreServices.REST");
+    }
+}
+
+/// LZT-2319: a `CallRequest` GET, HEAD or DELETE that leaves `payload` unset (or empty) sends
+/// no body and no content type of ours, as `GetRequest` and `DeleteRequest` do; a payload that
+/// says something still goes out, and a POST without one still sends `{}`.
+#[tokio::test]
+async fn bodiless_methods_send_no_empty_payload() {
+    let s = setup().await;
+    let fns = all(&s.integrations, crate::testing::MemoryCatalog::with(Vec::new()));
+    s.docs.add_connection(json!({"name": "rest", "appCode": "leadzumptwo", "clientCode": "FIN", "connectionType": "REST_API",
+                                 "connectionSubType": "REST_API_BASIC", "connectionDetails": {"baseUrl": s.target, "userName": "u", "password": "p"}}));
+    let call = find(&fns, "CallRequest");
+    let echo = |args: Value| {
+        let call = call.clone();
+        let seen = s.seen.clone();
+        async move {
+            let r = run(call.as_ref(), args, fin(), true, true).await.unwrap();
+            assert_eq!(r["statusCode"], 200);
+            seen.lock().iter().rev().find(|l| l.starts_with("echo ")).cloned().unwrap()
+        }
+    };
+    let base = json!({"connectionName": "rest", "url": "/rest/echo"});
+    let with = |extra: Value| {
+        let mut a = base.clone();
+        for (k, v) in extra.as_object().unwrap() {
+            a[k] = v.clone();
+        }
+        a
+    };
+    assert_eq!(echo(with(json!({"methodName": "GET"}))).await, "echo GET ct=- body=");
+    assert_eq!(echo(with(json!({"methodName": "GET", "payload": null}))).await, "echo GET ct=- body=");
+    assert_eq!(echo(with(json!({"methodName": "GET", "payload": {}}))).await, "echo GET ct=- body=");
+    assert_eq!(echo(with(json!({"methodName": "DELETE"}))).await, "echo DELETE ct=- body=");
+    assert_eq!(echo(with(json!({"methodName": "DELETE", "payload": {}}))).await, "echo DELETE ct=- body=");
+    assert_eq!(echo(with(json!({"methodName": "DELETE", "payload": {"id": 1}}))).await, "echo DELETE ct=application/json body={\"id\":1}");
+    assert_eq!(echo(with(json!({"methodName": "POST"}))).await, "echo POST ct=application/json body={}");
+    for name in ["GetRequest", "DeleteRequest"] {
+        let f = find(&fns, name);
+        run(f.as_ref(), base.clone(), fin(), true, true).await.unwrap();
+        let last = s.seen.lock().iter().rev().find(|l| l.starts_with("echo ")).cloned().unwrap();
+        assert!(last.ends_with(" ct=- body="), "{name}: {last}");
     }
 }
 
