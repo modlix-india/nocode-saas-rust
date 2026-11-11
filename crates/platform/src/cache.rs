@@ -105,6 +105,28 @@ struct Inner {
     ttl: Duration,
     budget_bytes: u64,
     max_entries: u64,
+    /// The connection the window counters ([`CacheService::incr_window`]) reuse: they run on
+    /// every anonymous function call, so they do not open one each time.
+    counter: tokio::sync::Mutex<Option<redis::aio::MultiplexedConnection>>,
+    /// Unix milliseconds before which the counters do not try Redis again, after one failed.
+    counter_paused_until: AtomicU64,
+}
+
+/// How long one counter call may take before the caller goes on without it.
+const COUNTER_TIMEOUT: Duration = Duration::from_millis(250);
+/// How long the counters leave Redis alone after a call failed or timed out, so a Redis that is
+/// down costs each request nothing rather than a timeout.
+const COUNTER_PAUSE: Duration = Duration::from_secs(5);
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or_default()
+}
+
+/// The Redis key of `key`'s counter in the window holding `now_secs`: `<prefix>:<key>:<window
+/// number>`. The `:` keeps it apart from the Java cache hashes (`<prefix>-<cacheName>`), which
+/// `evictAllCaches` walks and deletes.
+pub fn window_key(prefix: &str, key: &str, window_secs: u64, now_secs: u64) -> String {
+    format!("{prefix}:{key}:{}", now_secs / window_secs.max(1))
 }
 
 /// A weighed family's budget when the caller sets none (`[redis] cache_budget_mb`'s default).
@@ -199,6 +221,8 @@ impl CacheService {
                 ttl,
                 budget_bytes,
                 max_entries,
+                counter: tokio::sync::Mutex::new(None),
+                counter_paused_until: AtomicU64::new(0),
             }),
         })
     }
@@ -459,6 +483,56 @@ impl CacheService {
                 false
             }
         }
+    }
+
+    /// Adds one to `key`'s counter for the current fixed window of `window_secs` and answers the
+    /// count so far in that window, shared by every instance on the same Redis. `None` when there
+    /// is no Redis, it failed, or it did not answer within 250 ms: the caller then goes on
+    /// without the count (a failure is counted in `redis_errors_total`, and Redis is left alone
+    /// for five seconds).
+    pub async fn incr_window(&self, key: &str, window_secs: u64) -> Option<u64> {
+        self.incr_window_at(key, window_secs, unix_millis() / 1000).await
+    }
+
+    /// [`CacheService::incr_window`] at `now_secs` (Unix seconds).
+    ///
+    /// INCR and EXPIRE go in one pipeline. The key carries the window's number, so it is never
+    /// reused and the expiry only clears it away: a plain EXPIRE of two windows on every call
+    /// does what `EXPIRE NX` would, and works on Redis 6 (the local stack's), where NX does not.
+    pub async fn incr_window_at(&self, key: &str, window_secs: u64, now_secs: u64) -> Option<u64> {
+        let client = self.inner.redis.as_ref()?;
+        if unix_millis() < self.inner.counter_paused_until.load(Ordering::Relaxed) {
+            return None;
+        }
+        let window = window_secs.max(1);
+        let full = window_key(&self.inner.prefix, key, window, now_secs);
+        let mut pipe = redis::pipe();
+        pipe.cmd("INCR").arg(&full).cmd("EXPIRE").arg(&full).arg(window * 2).ignore();
+        let run = async {
+            let mut conn = self.counter_connection(client).await.map_err(|e| ("connect", e.to_string()))?;
+            let r: redis::RedisResult<(u64,)> = pipe.query_async(&mut conn).await;
+            r.map(|(n,)| n).map_err(|e| ("command", e.to_string()))
+        };
+        let failed = match tokio::time::timeout(COUNTER_TIMEOUT, run).await {
+            Ok(Ok(n)) => return Some(n),
+            Ok(Err(failed)) => failed,
+            Err(_) => ("timeout", format!("no answer in {} ms", COUNTER_TIMEOUT.as_millis())),
+        };
+        crate::meter::redis_error(failed.0);
+        tracing::warn!(key = full, error = failed.1, "redis counter unavailable, going on without it");
+        *self.inner.counter.lock().await = None;
+        self.inner.counter_paused_until.store(unix_millis() + COUNTER_PAUSE.as_millis() as u64, Ordering::Relaxed);
+        None
+    }
+
+    async fn counter_connection(&self, client: &redis::Client) -> redis::RedisResult<redis::aio::MultiplexedConnection> {
+        let mut slot = self.inner.counter.lock().await;
+        if let Some(c) = slot.as_ref() {
+            return Ok(c.clone());
+        }
+        let c = client.get_multiplexed_async_connection().await?;
+        *slot = Some(c.clone());
+        Ok(c)
     }
 
     /// redis-rs 0.27 answers a SUBSCRIBE that Redis refused (`NOAUTH` when the URL carries no
@@ -1090,6 +1164,27 @@ mod tests {
         assert_eq!(s(CACHE_FAMILY_LIMIT, &fam("bytes")), Some(DEFAULT_BUDGET_BYTES as f64));
         assert!(s(CACHE_FAMILY_USED, &fam("bytes")).is_some_and(|b| b >= 100.0));
     }
+
+    #[test]
+    fn window_keys_carry_the_window_number() {
+        assert_eq!(window_key("cmn", "rl:anon:1.2.3.4", 60, 119), "cmn:rl:anon:1.2.3.4:1");
+        assert_eq!(window_key("cmn", "rl:anon:1.2.3.4", 60, 120), "cmn:rl:anon:1.2.3.4:2");
+        assert_eq!(window_key("cmn", "k", 0, 7), "cmn:k:7", "a zero window is one second");
+        assert!(!window_key("cmn", "k", 60, 0).starts_with("cmn-"), "never a Java cache hash name");
+    }
+
+    #[test]
+    fn window_counter_fails_open_and_pauses() {
+        let ((), text) = crate::meter::capture_async(async {
+            let none = CacheService::new("cmn", "evictionChannel", None).unwrap();
+            assert_eq!(none.incr_window("rl:anon:1.2.3.4", 60).await, None, "no redis: no count");
+            let bad = CacheService::new("cmn", "evictionChannel", Some("redis://127.0.0.1:1")).unwrap();
+            assert_eq!(bad.incr_window("rl:anon:1.2.3.4", 60).await, None);
+            // Paused after the failure: no second connect.
+            assert_eq!(bad.incr_window("rl:anon:1.2.3.4", 60).await, None);
+        });
+        assert_eq!(crate::meter::sample(&text, crate::meter::REDIS_ERRORS, &[("operation", "connect")]), Some(1.0), "{text}");
+    }
 }
 
 #[cfg(test)]
@@ -1200,5 +1295,24 @@ mod live {
         let mut stream = pubsub.on_message();
         let msg = tokio::time::timeout(Duration::from_secs(5), stream.next()).await;
         eprintln!("received: {:?}", msg.map(|m| m.map(|m| m.get_payload::<String>())));
+    }
+
+    /// `MODLIX__REDIS__URL=... cargo test -p platform -- --ignored live_window_counter`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_window_counter() {
+        let Ok(url) = std::env::var("MODLIX__REDIS__URL") else { return };
+        let svc = CacheService::new("rusttest", "evictionChannel", Some(&url)).unwrap();
+        let key = format!("rl:test:{}", std::process::id());
+        let now = 1_000_000_020;
+        assert_eq!(svc.incr_window_at(&key, 60, now).await, Some(1));
+        assert_eq!(svc.incr_window_at(&key, 60, now + 1).await, Some(2));
+        let other = CacheService::new("rusttest", "evictionChannel", Some(&url)).unwrap();
+        assert_eq!(other.incr_window_at(&key, 60, now + 2).await, Some(3), "one count across instances");
+        assert_eq!(svc.incr_window_at(&key, 60, now + 60).await, Some(1), "a new window starts again");
+        let client = redis::Client::open(normalize_redis_url(&url).as_str()).unwrap();
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let ttl: i64 = redis::cmd("TTL").arg(window_key("rusttest", &key, 60, now)).query_async(&mut conn).await.unwrap();
+        assert!(ttl > 0 && ttl <= 120, "{ttl}");
     }
 }

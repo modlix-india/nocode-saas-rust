@@ -61,6 +61,17 @@ pub fn register() {
     ONCE.call_once(|| platform::messages::register("ui", "en", EN));
 }
 
+/// core's catalogue (`crates/core/messages/en.toml`), registered under core's name as appdata
+/// and connections do: ui-shell answers `CORE.TOO_MANY_REQUESTS` for the runs it limits, in
+/// core's words.
+pub const CORE_EN: &str = include_str!("../../core/messages/en.toml");
+
+/// Adds core's catalogue to the process (once).
+pub fn register_core() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| platform::messages::register("core", "en", CORE_EN));
+}
+
 /// The whole ui bundle (`messages_en.properties`), coded `DEF.*` first, then `UI.*`: what the
 /// editor's definition services raise with.
 pub fn messages() -> Messages {
@@ -201,6 +212,20 @@ mod tests {
         assert_eq!((v["message"].as_str(), v["debugMessage"].as_str()), (Some("Please sign in to continue."), Some("[forbidden_execution] Authorization Authorities.Logged_IN is required")));
         let v = body(literal("UI.PERSONALIZATION_NOT_OBJECT", StatusCode::BAD_REQUEST, "Personalization must be an object").into()).await;
         assert_eq!(v["debugMessage"], "Personalization must be an object");
+    }
+
+    /// ui-shell's rate limit refusal reads in core's words (core's catalogue registered here).
+    #[tokio::test]
+    async fn the_rate_limit_refusal_is_cores() {
+        register_core();
+        let mut r = crate::respond::error_response(platform::ratelimit::refusal(30, 600).into());
+        platform::ratelimit::retry_after(&mut r, 30);
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(r.headers()["retry-after"], "30");
+        let v: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 100_000).await.unwrap()).unwrap();
+        assert_eq!(v["code"], "CORE.TOO_MANY_REQUESTS");
+        assert_eq!(v["message"], "Too many requests to run functions without signing in, from your network. Try again in 30 seconds.");
+        assert_eq!(v["params"]["retryAfterSeconds"], "30");
     }
 
     #[tokio::test]

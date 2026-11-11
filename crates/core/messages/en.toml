@@ -57,6 +57,14 @@ java_text = "Function execution timed out : $. Please try again later."
 when = "A stored function runs longer than the time core allows one run."
 audience = "anyone"
 
+[CORE.TOO_MANY_REQUESTS]
+status = 429
+params = ["retryAfterSeconds"]
+text = "Too many requests to run functions without signing in, from your network.[ Try again in {retryAfterSeconds} seconds.]"
+action = "Wait a minute and try again, or sign in."
+when = "A caller who is not signed in runs more server functions in a minute from one address than [ratelimit] anonymous_per_minute (600 unless set): core-exec's execute routes through the gateway and ui-shell's URI path routes share one count per address, in Redis. A Retry-After header says when the minute turns. Rust only."
+audience = "anyone"
+
 [CORE.EXECUTION_TIME_LIMIT]
 status = 422
 params = ["function", "seconds"]

@@ -23,6 +23,9 @@ pub struct ShellConfig {
     pub core: CoreConfig,
     /// Rust only: the discovery files' settings (`crate::aeo`).
     pub aeo: AeoConfig,
+    /// Rust only: `[ratelimit]`, the per address limit on function runs for callers who are not
+    /// signed in, shared with core-exec (`platform::ratelimit`; enforce, 600 a minute, unless set).
+    pub ratelimit: platform::ratelimit::RateLimitConfig,
 }
 
 impl Default for ShellConfig {
@@ -38,6 +41,7 @@ impl Default for ShellConfig {
             shell: ShellSection::default(),
             core: CoreConfig::default(),
             aeo: AeoConfig::default(),
+            ratelimit: platform::ratelimit::RateLimitConfig::default(),
         }
     }
 }
@@ -132,5 +136,6 @@ mod tests {
         assert_eq!(c.shell.ssr_channel, "ssr:cache:invalidation");
         assert_eq!(c.core.upstream.entries(), vec!["lighthouse:CORE".to_string()]);
         assert_eq!(c.engine_config().server.port, 8106);
+        assert_eq!(c.ratelimit, platform::ratelimit::RateLimitConfig::default(), "the same limit as core-exec's");
     }
 }

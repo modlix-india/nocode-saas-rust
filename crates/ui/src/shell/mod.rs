@@ -87,6 +87,7 @@ pub async fn run() -> Result<()> {
         aeo: cache.family_weighed(|v: &std::sync::Arc<discovery::AeoFile>| v.heap_bytes()),
         entrypoints,
         redis,
+        ratelimit: platform::ratelimit::RateLimiter::configured(&cfg.ratelimit, &cache),
     });
     cache.spawn_eviction_listener();
 

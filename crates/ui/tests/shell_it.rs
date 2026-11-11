@@ -126,6 +126,11 @@ fn security_extra(calls: Arc<Calls>) -> Router {
 }
 
 /// The core service: `execute/{ns}/{name}` answers by the function name.
+/// ` | ip=<X-Real-IP>` when the call carried one (ui-shell sends the caller's address on).
+fn real_ip(h: &HeaderMap) -> String {
+    h.get("x-real-ip").and_then(|v| v.to_str().ok()).map(|ip| format!(" | ip={ip}")).unwrap_or_default()
+}
+
 fn fake_core(calls: Arc<Calls>) -> Router {
     async fn execute(
         State(calls): State<Arc<Calls>>,
@@ -148,7 +153,7 @@ fn fake_core(calls: Arc<Calls>) -> Router {
             hv("x-debug"),
             hv("content-type"),
             String::from_utf8_lossy(&body)
-        ));
+        ) + &real_ip(&h));
         match name.as_str() {
             "echo" => {
                 let arg = if body.is_empty() { serde_json::json!(uri.query().unwrap_or("")) } else { serde_json::from_slice(&body).unwrap() };
@@ -176,7 +181,7 @@ fn fake_core(calls: Arc<Calls>) -> Router {
             hv("clientcode"),
             hv("x-draft"),
             String::from_utf8_lossy(&body)
-        ));
+        ) + &real_ip(&h));
         let args: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let out = |result: serde_json::Value| axum::Json(serde_json::json!([{"name": "output", "result": result}])).into_response();
         match name.as_str() {
@@ -305,6 +310,9 @@ async fn shell_with(redis: Option<redis::Client>, prefix_channel: Option<(&str, 
     } else {
         env.state.clone()
     };
+    // Counted in memory: these tests need no Redis.
+    let counter: Arc<dyn platform::ratelimit::WindowCounter> = Arc::new(platform::ratelimit::MemoryCounter::default());
+    let ratelimit = platform::ratelimit::RateLimiter::new(&cfg.ratelimit, Some(counter));
     let state = ShellState::new(ShellInner {
         ui: ui_state,
         cfg,
@@ -317,6 +325,7 @@ async fn shell_with(redis: Option<redis::Client>, prefix_channel: Option<(&str, 
         aeo: cache.family(),
         entrypoints: vec!["app.js".into()],
         redis,
+        ratelimit,
     });
     Some(Shell { router: router(state.clone()), env, calls, state })
 }
@@ -734,6 +743,7 @@ async fn uri_path_routes_run_kirun_functions_on_core() {
         aeo: s.state.inner().aeo.clone(),
         entrypoints: vec![],
         redis: None,
+        ratelimit: s.state.inner().ratelimit.clone(),
     });
     let down = Shell { router: router(state_down.clone()), env: s.env, calls: s.calls, state: state_down };
     assert_eq!(down.call(gw("/api/route/x?q=1")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -885,6 +895,47 @@ async fn address_lists_guard_uri_path_routes() {
     let fine = s.call(gw("/api/guarded").header("X-Real-IP", "192.0.2.1")).await;
     assert_eq!(fine.status, StatusCode::OK, "{}", fine.text());
     assert!(calls_matching(&s, "GET ns.echo").len() == 1);
+    s.done().await;
+}
+
+#[tokio::test]
+#[ignore = "needs the local MongoDB (MODLIX__MONGO__URI)"]
+async fn anonymous_runs_are_limited_per_address() {
+    let Some(s) = shell_with(None, None, |c| c.ratelimit.anonymous_per_minute = 2).await else { return };
+    seed(&s).await;
+    let from = |path: &str, ip: &str| gw(path).header("X-Real-IP", ip);
+    let runs = || calls_matching(&s, "GET ns.echo").len();
+
+    // Two runs a minute from one address, the caller's address sent on to core as X-Real-IP.
+    for _ in 0..2 {
+        let ok = s.call(from("/api/guarded", "192.0.2.1")).await;
+        assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    }
+    assert!(s.calls.last().ends_with(" | ip=192.0.2.1"), "{}", s.calls.last());
+    let before = runs();
+    let limited = s.call(from("/api/guarded", "192.0.2.1")).await;
+    assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS, "{}", limited.text());
+    let retry: u64 = limited.header("retry-after").unwrap().parse().unwrap();
+    assert!((1..=60).contains(&retry));
+    assert_eq!(limited.coded().0, "CORE.TOO_MANY_REQUESTS");
+    assert!(limited.text().contains(&format!("Try again in {retry} seconds")), "{}", limited.text());
+    assert_eq!(runs(), before, "the refused call never reached core");
+
+    // One budget per address across routes: a webhook route without a whitelist counts too.
+    let hook = s.call(from("/api/hook/guarded?x=1", "192.0.2.1")).await;
+    assert_eq!(hook.status, StatusCode::TOO_MANY_REQUESTS, "{}", hook.text());
+    // Another address has its own.
+    assert_eq!(s.call(from("/api/guarded", "192.0.2.2")).await.status, StatusCode::OK);
+    // Signed in: never counted.
+    let signed_in = s.call(from("/api/guarded", "192.0.2.1").user("SYSTEM", "Authorities.Logged_IN")).await;
+    assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.text());
+    // A whitelisted route (POST of /api/hook/guarded) is exempt.
+    for _ in 0..4 {
+        let r = gw("/api/hook/guarded").method("POST").header("Content-Type", "application/json").header("X-Real-IP", "203.0.113.5").body(r#"{"a":1}"#);
+        let ok = s.call(r).await;
+        assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    }
+    assert!(s.calls.last().starts_with("WEBHOOK hooks.echo") && s.calls.last().ends_with(" | ip=203.0.113.5"), "{}", s.calls.last());
     s.done().await;
 }
 
