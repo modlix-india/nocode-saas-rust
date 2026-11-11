@@ -71,6 +71,8 @@ pub struct ShellInner {
     pub entrypoints: Vec<String>,
     /// For the SSR invalidation channel and the `KEYS` walk of `evictAllCaches`.
     pub redis: Option<redis::Client>,
+    /// `[ratelimit]` over the unit's Redis: anonymous runs of the URI path routes.
+    pub ratelimit: platform::ratelimit::RateLimiter,
 }
 
 impl ShellState {
@@ -495,7 +497,8 @@ async fn run_route(
     };
     // The definition's whitelist and blacklist (Rust only), for every kind of route.
     let route_name = str_field(uri_path, "name").unwrap_or("");
-    ipfilter::check(def, route_name, &req.method, ipfilter::caller_ip(h, input.peer))?;
+    let ip = ipfilter::caller_ip(h, input.peer);
+    let whitelisted = ipfilter::check_listed(def, route_name, &req.method, ip)?;
     match str_field(def, "uriType") {
         Some("KIRUN_FUNCTION") => {}
         Some(_) => return Ok(None),
@@ -515,6 +518,11 @@ async fn run_route(
     if req.method != "GET" && !body_method {
         return Ok(None);
     }
+    // A webhook runs as the client's webhook user whoever calls, so it is counted whatever the
+    // caller sent; a whitelisted route only takes calls from the addresses it names.
+    if (is_webhook || !caller.authenticated()) && !whitelisted {
+        limit_anonymous(st, ip).await?;
+    }
     let mut call = CoreCall {
         route: CoreRoute::Execute,
         namespace: str_field(fx, "namespace").unwrap_or("null"),
@@ -526,6 +534,7 @@ async fn run_route(
         client_code: client,
         debug: header(h, "x-debug"),
         draft: caller.draft,
+        client_ip: ip,
     };
     let content_type = if req.method == "GET" { "text/plain;charset=UTF-8" } else { "application/json;charset=UTF-8" };
     let text = if is_webhook {
@@ -592,7 +601,8 @@ async fn forward_webhook(st: &ShellState, hop: &Hop<'_>, args: &G, fw: webhook::
         return Ok(not_routed());
     };
     let route_name = str_field(uri_path, "name").unwrap_or("");
-    ipfilter::check(def, route_name, &freq.method, ipfilter::caller_ip(hop.h, hop.peer))?;
+    let ip = ipfilter::caller_ip(hop.h, hop.peer);
+    ipfilter::check(def, route_name, &freq.method, ip)?;
     let (Some("KIRUN_FUNCTION"), Some(fx)) = (str_field(def, "uriType"), map_field(def, "kiRunFxDefinition")) else {
         return Ok(not_routed());
     };
@@ -607,6 +617,7 @@ async fn forward_webhook(st: &ShellState, hop: &Hop<'_>, args: &G, fw: webhook::
         client_code: &fw.client,
         debug: header(hop.h, "x-debug"),
         draft: hop.caller.draft,
+        client_ip: ip,
     };
     let json = gson::to_string(&uripath::with_mapped_params(Some(args), &freq, str_field(uri_path, "pathString"), fx));
     let text = execute_function(st, &call, None, Some(json)).await?;
@@ -643,6 +654,26 @@ struct CoreCall<'a> {
     client_code: &'a str,
     debug: Option<&'a str>,
     draft: bool,
+    /// The caller's address, sent on as `X-Real-IP` (never `X-Forwarded-For`, which would make
+    /// core-exec count the call again: it is counted here).
+    client_ip: Option<IpAddr>,
+}
+
+/// `[ratelimit]` (Rust only): a run for a caller who is not signed in (or any webhook run) is
+/// counted per address in the bucket core-exec's execute routes count (`anon`), so one address
+/// has one budget across both. Over it: 429 `CORE.TOO_MANY_REQUESTS` with `Retry-After`.
+async fn limit_anonymous(st: &ShellState, ip: Option<IpAddr>) -> Result<(), Fail> {
+    use platform::ratelimit::{refusal, retry_after, Verdict, ANON};
+    let shown = ip.map(|i| i.to_string()).unwrap_or_default();
+    match st.inner.ratelimit.check(ANON, &shown).await {
+        Verdict::Allow => Ok(()),
+        Verdict::Limited { retry_after_secs, limit } => {
+            crate::catalogue::register_core();
+            let mut resp = crate::respond::error_response(refusal(retry_after_secs, limit).into());
+            retry_after(&mut resp, retry_after_secs);
+            Err(Fail(resp))
+        }
+    }
 }
 
 /// A value placed in a URL path, as Feign expands a `@PathVariable`.
@@ -693,6 +724,9 @@ async fn execute_function(st: &ShellState, c: &CoreCall<'_>, query: Option<&str>
     }
     if c.draft {
         rb = rb.header("x-draft", "true");
+    }
+    if let Some(ip) = c.client_ip {
+        rb = rb.header("X-Real-IP", ip.to_string());
     }
     let resp = rb.send().await.map_err(|e| unknown(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e}")))?;
     let status = resp.status();

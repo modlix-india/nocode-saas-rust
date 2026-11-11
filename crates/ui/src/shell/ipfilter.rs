@@ -174,11 +174,17 @@ pub fn decide(whitelist: &List, blacklist: &List, ip: Option<IpAddr>) -> Result<
 
 /// The path definition's lists against the caller: `Ok` to run the route, else the 403.
 pub fn check(def: &JMap, route: &str, method: &str, ip: Option<IpAddr>) -> Result<(), AppError> {
+    check_listed(def, route, method, ip).map(|_| ())
+}
+
+/// [`check`], answering whether the definition has a whitelist (which the caller then is on):
+/// such a route is exempt from `[ratelimit]`.
+pub fn check_listed(def: &JMap, route: &str, method: &str, ip: Option<IpAddr>) -> Result<bool, AppError> {
     let white = List::read(def.get("whitelist"), &format!("{route} {method} whitelist"));
     let black = List::read(def.get("blacklist"), &format!("{route} {method} blacklist"));
     let shown = ip.map(|i| i.to_string()).unwrap_or_default();
     let (code, java_text) = match decide(&white, &black, ip) {
-        Ok(()) => return Ok(()),
+        Ok(()) => return Ok(white.named),
         Err(Refusal::Blocked) => ("UI.URI_PATH_ADDRESS_BLOCKED", format!("Address {shown} is on the blacklist of {route} {method}")),
         Err(Refusal::NotAllowed) => {
             ("UI.URI_PATH_ADDRESS_NOT_ALLOWED", format!("Address {shown} is not on the whitelist of {route} {method}"))
@@ -323,5 +329,21 @@ mod tests {
         assert_eq!(p, vec![("address".to_string(), "10.2.3.4".to_string())]);
         let (c, _, p) = code(check(&def(serde_json::json!("10.0.0.1"), serde_json::json!(null)), "/api/x", "GET", None).unwrap_err());
         assert_eq!((c.as_str(), p.is_empty()), ("UI.URI_PATH_ADDRESS_NOT_ALLOWED", true));
+    }
+
+    /// A whitelisted method is exempt from `[ratelimit]`: `check_listed` says so for a caller on
+    /// the list, and not for an open method or one with only a blacklist.
+    #[test]
+    fn a_whitelist_is_reported_for_the_rate_limit() {
+        let def = |v: serde_json::Value| match overridable::json::parse(v.to_string().as_bytes()).unwrap() {
+            JValue::Object(m) => m,
+            _ => unreachable!(),
+        };
+        let on = Some(ip("203.0.113.5"));
+        assert_eq!(check_listed(&def(serde_json::json!({"whitelist": ["203.0.113.0/24"]})), "/h", "POST", on).ok(), Some(true));
+        assert_eq!(check_listed(&def(serde_json::json!({"whitelist": "203.0.113.5"})), "/h", "POST", on).ok(), Some(true));
+        assert_eq!(check_listed(&def(serde_json::json!({})), "/h", "POST", on).ok(), Some(false));
+        assert_eq!(check_listed(&def(serde_json::json!({"whitelist": [""], "blacklist": ["10.0.0.0/8"]})), "/h", "POST", on).ok(), Some(false));
+        assert!(check_listed(&def(serde_json::json!({"whitelist": ["198.51.100.0/24"]})), "/h", "POST", on).is_err(), "off the list: refused");
     }
 }

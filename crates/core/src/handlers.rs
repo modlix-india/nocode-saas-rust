@@ -158,8 +158,14 @@ enum Input {
 
 /// The order Spring takes things in: the security filter, the `@RequestHeader`s, the
 /// `@RequestBody` (an absent body is refused), then the method (name split, body parse).
+///
+/// Before all of it but the caller, `[ratelimit]` (Rust only, `crate::ratelimit`): a caller who
+/// is not signed in, through the gateway, gets 429 over the per address limit.
 async fn run_execute(st: AppState, h: HeaderMap, path: Result<(String, String), String>, input: Input) -> Result<Response, CoreError> {
     let ctx = request_context(&st, &h).await?;
+    if let Err(limited) = crate::ratelimit::check_execute(&st.inner().ratelimit, &h, &ctx).await {
+        return Ok(limited.into_response());
+    }
     let (app_code, client_code) = required_headers(&h)?;
     if let Input::Body(b) = &input {
         if b.is_empty() {
