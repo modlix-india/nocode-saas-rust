@@ -347,6 +347,9 @@ impl JavaFunction for GetUserAdminEmails {
     async fn run(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
         let app = string_arg(args, "appCode")?;
         let client = string_arg(args, "clientCode")?;
+        // PLAT-553: only from inside a server function, never the direct execute route (which
+        // is open to anyone, anonymous included).
+        definition_context_authentication("GetUserAdminEmails")?;
         let result = self.0.user_admin_emails(&client, &app).await?.unwrap_or_else(|| json!({"emails": [], "addApp": false}));
         let add_app = match result.get("addApp") {
             None => false,
@@ -382,6 +385,8 @@ impl JavaFunction for GetOwnersEmails {
     async fn run(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
         let app = string_arg(args, "appCode")?;
         let client = string_arg(args, "clientCode")?;
+        // PLAT-553: as GetUserAdminEmails.
+        definition_context_authentication("GetOwnersEmails")?;
         let result = self.0.owner_emails(&client, &app).await?.unwrap_or_else(|| json!({"emails": []}));
         Ok(output_map([("ownerEmails", emails_of(&result))]))
     }

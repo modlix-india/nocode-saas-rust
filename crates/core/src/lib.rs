@@ -31,6 +31,7 @@ pub mod editor;
 pub mod error;
 pub mod event_routes;
 pub mod event_runs;
+pub mod debug_runs;
 pub mod event_scheduler;
 pub mod events;
 pub mod events_queue;
@@ -164,6 +165,10 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         security_calls.clone(),
         cfg.core.event_runs.enabled,
     ));
+    let debug_runs = Arc::new(debug_runs::FunctionDebugRunService::new(
+        Arc::new(debug_runs::MySqlDebugRunDao::new(pool.clone())),
+        security_calls.clone(),
+    ));
     let deps = repos::core_functions::Deps {
         security: security_calls.clone(),
         storage: appdata.clone(),
@@ -189,6 +194,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         appdata: appdata.clone(),
         integrations: integrations.clone(),
         event_runs,
+        debug_runs,
         ratelimit: platform::ratelimit::RateLimiter::configured(&cfg.ratelimit, &cache),
     });
     appdata.attach(&state);
