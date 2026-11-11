@@ -85,6 +85,14 @@ from one address; the next run that minute is refused 429 `CORE.TOO_MANY_REQUEST
   = addresses or CIDR ranges never limited (empty). Defaults are in code; no config file needs
   the section.
 
+## `CoreServices.Security.GetClient` returns `createdAt` (2026-11-11, LZT-1823)
+
+Java wrote the client without its creation time, so no server function could tell how old an
+org is. The client (and every client nested in it: owners' client, managing client) now carries
+`createdAt`, security's value as epoch seconds (UTC), right after `id`; it is left out when
+security sends none. LeadZumpV2 reads it to pick the deal duplicate check default for orgs
+created from 2026-11-12 (IST). Every other field is unchanged.
+
 ## D: this unit
 
 - **D1 number representation** (`D1-number-repr`). Mostly gone since 2026-10-17: kirun-rust's

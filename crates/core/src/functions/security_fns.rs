@@ -79,6 +79,9 @@ impl Dto {
         match self {
             Dto::Client => &[
                 ("id", "id", BigInt),
+                // Not in Java's DTO output: added so server functions can read when an org was
+                // created (epoch seconds, UTC; LZT-1823). See DIFFERENCES.md.
+                ("createdAt", "createdAt", BigInt),
                 ("createdBy", "createdBy", BigInt),
                 ("updatedBy", "updatedBy", BigInt),
                 ("code", "code", Str),

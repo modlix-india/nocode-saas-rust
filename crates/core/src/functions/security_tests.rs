@@ -476,14 +476,14 @@ async fn managed_by_client_and_emails() {
         "GET",
         "/api/security/clients/internal/getClientByCode",
         200,
-        r#"{"code":"FIN","id":7,"name":"Fin","tokenValidityMinutes":"30","totalUsers":4,"unknown":1,"activeUsers":4,
+        r#"{"code":"FIN","id":7,"createdAt":1685441269,"name":"Fin","tokenValidityMinutes":"30","totalUsers":4,"unknown":1,"activeUsers":4,
             "owners":[{"id":110,"profiles":[{"id":1,"name":"P","arrangement":{"a":null,"b":1}}],"client":{"id":7}}],
             "apps":[{"id":3,"appCode":"x","template":true}],"createdByUser":{"id":1}}"#,
     );
     let r = run(get_client.as_ref(), json!({"idOrCode": "FIN"}), fin(), true, true).await.unwrap();
     assert_eq!(
         r["client"],
-        json!({"id": 7, "code": "FIN", "name": "Fin", "tokenValidityMinutes": 30, "activeUsers": 4, "inactiveUsers": 0, "deletedUsers": 0,
+        json!({"id": 7, "createdAt": 1685441269, "code": "FIN", "name": "Fin", "tokenValidityMinutes": 30, "activeUsers": 4, "inactiveUsers": 0, "deletedUsers": 0,
                "lockedUsers": 0, "passwordExpiredUsers": 0,
                "owners": [{"id": 110, "profiles": [{"id": 1, "name": "P", "defaultProfile": false, "arrangement": {"b": 1}}],
                            "client": {"id": 7, "tokenValidityMinutes": 0, "activeUsers": 0, "inactiveUsers": 0, "deletedUsers": 0, "lockedUsers": 0, "passwordExpiredUsers": 0}}],
