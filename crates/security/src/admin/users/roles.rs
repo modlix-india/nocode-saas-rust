@@ -121,6 +121,10 @@ impl Admin {
             return Err(refuse(StatusCode::NOT_FOUND, "object_not_found", &[ROLE_NAME, &r.id.to_string()]));
         }
         let mut existing = self.role_read(ca, r.id).await?;
+        // PLAT-291: the read by id has no client filter, so check the manage rule here.
+        if !self.can_manage_role(ca, &existing).await? {
+            return Err(refuse(StatusCode::FORBIDDEN, "forbidden_update", &[ROLE_NAME]));
+        }
         existing.short_name = r.short_name.clone();
         existing.description = r.description.clone();
         existing.name = r.name.clone();
@@ -137,6 +141,9 @@ impl Admin {
             return Err(refuse(StatusCode::NOT_FOUND, "object_not_found", &[ROLE_NAME, &id.to_string()]));
         }
         let mut r = self.role_read(ca, id).await?;
+        if !self.can_manage_role(ca, &r).await? {
+            return Err(refuse(StatusCode::FORBIDDEN, "forbidden_update", &[ROLE_NAME]));
+        }
         patch_role(&mut r, fields)?;
         let updated = self.role_update(ca, &r).await?;
         entity_changed(&self.db, None, object::ROLE, action::UPDATE, updated.id, updated.client_id, CLASS, updated.name.as_deref());
@@ -146,8 +153,11 @@ impl Admin {
     /// `RoleV2Service.delete`.
     pub async fn role_delete(&self, ca: &ContextAuth, id: u64) -> AuthResult<()> {
         pre_authorize(ca, &["Authorities.Role_DELETE"])?;
-        self.role_read(ca, id).await?;
         let existing = self.role_read(ca, id).await?;
+        // PLAT-291: as role_update.
+        if !self.can_manage_role(ca, &existing).await? {
+            return Err(refuse(StatusCode::FORBIDDEN, "forbidden_delete", &[ROLE_NAME]));
+        }
         match self.db.delete_role(id).await {
             Ok(_) => {}
             Err(sqlx::Error::Database(_)) => return Err(refuse(StatusCode::FORBIDDEN, "delete_role_error", &[])),
@@ -472,6 +482,16 @@ mod live {
         assert!(both.iter().any(|r| r.id == r1.id) && both.iter().any(|r| r.id == 70), "{:?}", both.iter().map(|r| r.id).collect::<Vec<_>>());
         let e = fx.user(m, "e").await;
         let below = fx.as_user(&e, "ZZRUM", auth);
+        // PLAT-291: ZZRUM's caller holds Role_UPDATE/DELETE but does not manage ZZRUL.
+        let renamed = Role { id: r1.id, name: Some(format!("zz hijack {run}")), ..Default::default() };
+        assert_eq!(s.role_update(&below, &renamed).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+        assert_eq!(s.role_patch(&below, r1.id, json!({"name": "x"}).as_object().unwrap()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+        assert_eq!(s.role_delete(&below, r1.id).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+        assert_eq!(s.role_read(&sys, r1.id).await.unwrap().name, r1.name);
+        // The client's own caller, and its managing client's, still may.
+        let kept = Role { id: r1.id, name: r1.name.clone(), description: Some("d".into()), ..Default::default() };
+        assert_eq!(s.role_update(&own, &kept).await.unwrap().description.as_deref(), Some("d"));
+        assert!(s.role_patch(&own, in_m.id, json!({"description": "m"}).as_object().unwrap()).await.is_ok());
         s.role_delete(&sys, in_m.id).await.unwrap();
         let profiles_only = s.assignable_roles(&below, "appbuilder").await.unwrap();
         assert!(!profiles_only.is_empty());

@@ -816,6 +816,10 @@ pub async fn offline_state_limited(
             deps.security.clone(),
             true,
         )),
+        debug_runs: Arc::new(crate::debug_runs::FunctionDebugRunService::new(
+            Arc::new(crate::debug_runs::MemoryDebugRunDao::default()),
+            deps.security.clone(),
+        )),
         ratelimit,
     });
     deps.integrations.attach(&state);

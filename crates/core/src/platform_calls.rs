@@ -259,6 +259,13 @@ impl PlatformCalls {
         as_object(v, MAP_OF_INTEGERS)
     }
 
+    /// `debugRuns cleanupOlderThan(retentionDays, limit)`: `runsRemoved`.
+    pub async fn cleanup_debug_runs(&self, retention_days: i64, limit: i64) -> Result<Option<Map<String, Value>>, CoreError> {
+        let q = [("retentionDays", retention_days.to_string()), ("limit", limit.to_string())];
+        let v = self.post(Service::Core, "/api/core/functions/debugRuns/internal/cleanupOlderThan", &q, None).await?;
+        as_object(v, MAP_OF_INTEGERS)
+    }
+
     /// `cleanupTransports(retentionDays, limit)` of ui or core: `transportsRemoved`,
     /// `versionsRemoved`.
     pub async fn cleanup_transports(&self, service: Service, retention_days: i64, limit: i64) -> Result<Option<Map<String, Value>>, CoreError> {
