@@ -48,7 +48,11 @@ ok "rules hold for sql/ as it is"
 # --- 2. The archive rules against a base: a scratch git repository with sql/ committed -----------------
 repo="$WORK/repo"
 mkdir -p "$repo" && cp -R "$ROOT/sql" "$repo/sql"
-rm "$repo/sql/core/V8__"*.sql  # a gap, so V8 can come back as a new file numbered below the base's V9
+# The probes are numbered from core's highest version H, so a new migration never breaks this test:
+# H-1 is removed to leave a gap (it comes back as a new file below the base's H), H+1 is a new file.
+H=$(find "$repo/sql/core" -maxdepth 1 -name 'V*__*.sql' | sed -E 's#.*/V([0-9]+)__.*#\1#' | sort -n | tail -1)
+GAP=$((H - 1)) NEXT=$((H + 1))
+rm "$repo/sql/core/V${GAP}__"*.sql  # a gap, so V$GAP can come back as a new file numbered below the base's V$H
 git -C "$repo" init -q && git -C "$repo" add sql
 git -C "$repo" -c user.name=ci -c user.email=ci@localhost commit -qm base
 rules_at() { (cd "$repo" && "$CI_SQL" rules HEAD 2>&1); }
@@ -75,24 +79,24 @@ rm "$repo/sql/multi/V1__Initial script.sql"
 expect_refused "a removed file the base has" "never edit, rename or remove it"
 reset_repo
 
-echo 'CREATE TABLE `core_ci_probe` (`ID` INT PRIMARY KEY);' > "$repo/sql/core/V10__Ci probe.sql"
-expect_refused "a new file without its rollback" "no rollback, add sql/rollback/core/V10__Ci probe.sql"
+echo 'CREATE TABLE `core_ci_probe` (`ID` INT PRIMARY KEY);' > "$repo/sql/core/V${NEXT}__Ci probe.sql"
+expect_refused "a new file without its rollback" "no rollback, add sql/rollback/core/V${NEXT}__Ci probe.sql"
 mkdir -p "$repo/sql/rollback/core"
-echo 'DROP TABLE IF EXISTS `core_ci_probe`;' > "$repo/sql/rollback/core/V10__Ci probe.sql"
+echo 'DROP TABLE IF EXISTS `core_ci_probe`;' > "$repo/sql/rollback/core/V${NEXT}__Ci probe.sql"
 rules_at >/dev/null || die "rules: refused a new file with its rollback: $(rules_at)"
 ok "rules accept a new file with its rollback"
 reset_repo
 
-echo 'SELECT 1;' > "$repo/sql/core/V8__Late.sql"
-mkdir -p "$repo/sql/rollback/core" && echo 'SELECT 1;' > "$repo/sql/rollback/core/V8__Late.sql"
-expect_refused "a new file numbered below the base's highest" "V8 is not above V9"
+echo 'SELECT 1;' > "$repo/sql/core/V${GAP}__Late.sql"
+mkdir -p "$repo/sql/rollback/core" && echo 'SELECT 1;' > "$repo/sql/rollback/core/V${GAP}__Late.sql"
+expect_refused "a new file numbered below the base's highest" "V$GAP is not above V$H"
 reset_repo
 
-echo 'SELECT 1;' > "$repo/sql/core/V9__Twice.sql"
-expect_refused "two files of one version" "more than one file for V9"
+echo 'SELECT 1;' > "$repo/sql/core/V${H}__Twice.sql"
+expect_refused "two files of one version" "more than one file for V$H"
 reset_repo
 
-echo 'SELECT 1;' > "$repo/sql/core/v10_lower case.sql"
+echo 'SELECT 1;' > "$repo/sql/core/v${NEXT}_lower case.sql"
 expect_refused "a file not named V<n>__<description>.sql" "not named V<n>__<description>.sql"
 reset_repo
 
