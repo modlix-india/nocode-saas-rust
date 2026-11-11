@@ -257,3 +257,32 @@ impl Billing<'_> {
         self.store.delete(&BUNDLE, id).await
     }
 }
+
+#[cfg(test)]
+mod secret_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn config(gw: Value) -> Rec {
+        Rec::new(&CONFIG).with("paymentGatewayConfig", Val::Json(gw))
+    }
+
+    #[test]
+    fn reads_mask_the_gateway_secrets() {
+        let c = config(json!({"keyId": "rzp_k", "keySecret": "s1", "webhookSecret": "s2"}));
+        let gw = masked_json(&c)["paymentGatewayConfig"].clone();
+        assert_eq!(gw, json!({"keyId": "rzp_k", "keySecret": SECRET_MASK, "webhookSecret": SECRET_MASK}));
+    }
+
+    #[test]
+    fn writes_keep_stored_secrets_unless_a_new_one_is_sent() {
+        let stored = json!({"keySecret": "old1", "webhookSecret": "old2"}).as_object().unwrap().clone();
+        let mut t = config(json!({"keyId": "k", "keySecret": SECRET_MASK}));
+        keep_stored_secrets(&mut t, &stored);
+        assert_eq!(t.map("paymentGatewayConfig"), json!({"keyId": "k", "keySecret": "old1", "webhookSecret": "old2"}).as_object().unwrap().clone());
+        let mut t = config(json!({"keySecret": "new1", "webhookSecret": ""}));
+        keep_stored_secrets(&mut t, &stored);
+        assert_eq!(t.map("paymentGatewayConfig"), json!({"keySecret": "new1", "webhookSecret": "old2"}).as_object().unwrap().clone());
+    }
+}

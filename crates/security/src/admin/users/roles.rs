@@ -488,10 +488,11 @@ mod live {
         assert_eq!(s.role_patch(&below, r1.id, json!({"name": "x"}).as_object().unwrap()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
         assert_eq!(s.role_delete(&below, r1.id).await.unwrap_err().status(), StatusCode::FORBIDDEN);
         assert_eq!(s.role_read(&sys, r1.id).await.unwrap().name, r1.name);
-        // The client's own caller, and its managing client's, still may.
+        // The client's own caller still may; ZZRUM's role stays out of reach as for sub-roles.
         let kept = Role { id: r1.id, name: r1.name.clone(), description: Some("d".into()), ..Default::default() };
         assert_eq!(s.role_update(&own, &kept).await.unwrap().description.as_deref(), Some("d"));
-        assert!(s.role_patch(&own, in_m.id, json!({"description": "m"}).as_object().unwrap()).await.is_ok());
+        assert_eq!(s.role_patch(&own, in_m.id, json!({"description": "m"}).as_object().unwrap()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+        assert!(s.role_patch(&sys, in_m.id, json!({"description": "m"}).as_object().unwrap()).await.is_ok());
         s.role_delete(&sys, in_m.id).await.unwrap();
         let profiles_only = s.assignable_roles(&below, "appbuilder").await.unwrap();
         assert!(!profiles_only.is_empty());
