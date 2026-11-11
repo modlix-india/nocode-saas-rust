@@ -55,7 +55,9 @@ fn tokenize(s: &str) -> Vec<Tok> {
         if word.is_empty() {
             return;
         }
-        out.push(match word.as_str() {
+        // KIRun reads the connectives in any case (`AND`, `Or`); `&&` / `||` are not KIRun
+        // operators, so they stay words and leave the expression unparsed, which refuses.
+        out.push(match word.to_ascii_lowercase().as_str() {
             "and" => Tok::And,
             "or" => Tok::Or,
             "not" => Tok::Not,
@@ -96,6 +98,9 @@ fn tokenize(s: &str) -> Vec<Tok> {
 struct Parser<'a> {
     toks: Vec<Tok>,
     pos: usize,
+    /// Set when an operator has no operand (an unclosed parenthesis at the very end still
+    /// evaluates, as before); a malformed permission refuses.
+    bad: bool,
     authorities: &'a [String],
 }
 
@@ -147,6 +152,7 @@ impl Parser<'_> {
                 self.value(&w)
             }
             _ => {
+                self.bad = true;
                 self.pos += 1;
                 Val::Null
             }
@@ -188,9 +194,11 @@ pub fn has_authority(permission: Option<&str>, authorities: &[String]) -> bool {
     if authorities.is_empty() {
         return false;
     }
-    let mut parser = Parser { toks: tokenize(p), pos: 0, authorities };
+    let mut parser = Parser { toks: tokenize(p), pos: 0, bad: false, authorities };
     let v = parser.or();
-    v == Val::Bool(true)
+    // PLAT-290: tokens left over (`A AND B` before case folding, `A & B`, `A) and B`, two values
+    // with no operator) used to end the parse with the first operand as the answer. Refuse.
+    !parser.bad && parser.pos == parser.toks.len() && v == Val::Bool(true)
 }
 
 #[cfg(test)]
@@ -321,6 +329,18 @@ mod tests {
         assert!(has_authority(Some("not (Authorities.Y or false)"), &a));
         assert!(has_authority(Some("(Authorities.X"), &a), "an unclosed parenthesis still evaluates");
         assert!(!has_authority(Some("and"), &a), "an operator with nothing to apply to");
+        // PLAT-290: leftover tokens refuse; connectives are case-insensitive.
+        let only_a = auth(&["Authorities.A"]);
+        let both = auth(&["Authorities.A", "Authorities.B"]);
+        for e in ["Authorities.A AND Authorities.B", "Authorities.A & Authorities.B",
+                  "Authorities.A && Authorities.B", "Authorities.A) and Authorities.B",
+                  "Authorities.A Authorities.B", "Authorities.A and", "Authorities.A and )"] {
+            assert!(!has_authority(Some(e), &only_a), "{e}");
+        }
+        assert!(has_authority(Some("Authorities.A AND Authorities.B"), &both));
+        assert!(has_authority(Some("Authorities.B OR Authorities.A"), &only_a));
+        assert!(has_authority(Some("Authorities.A And NOT Authorities.B"), &only_a));
+        assert!(!has_authority(Some("Authorities.A & Authorities.B"), &both), "& is not an operator");
         assert!(!has_authority(Some("2.x"), &a));
         assert_eq!(literal("2.x"), Val::Str("2.x".into()));
         assert_eq!(literal("12"), Val::Num(12.0));

@@ -91,6 +91,18 @@ fn boolean(args: &KMap<Value>, name: &str) -> bool {
 
 // --- CoreServices.REST -------------------------------------------------------------------------
 
+/// PLAT-604: the execute route is open, so outside a definition a `CoreServices.REST.*` call
+/// would let an anonymous caller use the host client's stored connection credentials. Inside a
+/// definition the definition decides; a direct call needs a signed-in caller (the page editor's
+/// section list calls `GetRequest` directly while signed in).
+fn require_signed_in_outside_definition(full: &str) -> Result<(), CoreError> {
+    if context::in_kirun() || context::request().is_some_and(|r| r.auth.is_authenticated()) {
+        return Ok(());
+    }
+    Err(super::support::forbidden("COMMON.SIGN_IN_REQUIRED", format!("{full} needs a signed-in caller outside a server function"))
+        .param("function", full.to_string()))
+}
+
 pub struct CallRequest {
     full: &'static str,
     /// Empty for `CallRequest`, which takes the method as an argument.
@@ -137,6 +149,7 @@ impl JavaFunction for CallRequest {
             file_type: file("fileType")?,
             file_override: download && boolean(args, "fileOverride"),
         };
+        require_signed_in_outside_definition(self.full)?;
         let downloads = self.integrations.downloads.as_deref().map(|d| d as &dyn call::DownloadSink);
         let events = call::call(&self.integrations.connections, &caller(), &call_args, downloads).await.map_err(core_error)?;
         match events {

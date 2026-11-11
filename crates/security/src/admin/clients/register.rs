@@ -797,7 +797,9 @@ async fn registration_events(s: &AdminState, info: &RequestInfo, ca: &ContextAut
     let mut user_data = base.clone();
     user_data.push(("user".into(), user_json(user, &UserExtras::default())));
     user_data.push(("token".into(), Value::from(token)));
-    user_data.push(("passwordUsed".into(), Value::from(password)));
+    // MDX-185: the chosen password is never put on the event (it was mailed in clear text and
+    // travelled through RabbitMQ and the event logs). The `None` check above stays for parity.
+    let _ = password;
     let event = |name: &str, data: Vec<(String, Value)>| EventMessage {
         event_name: name.into(),
         client_code: ca.logged_in_from_client_code.clone(),

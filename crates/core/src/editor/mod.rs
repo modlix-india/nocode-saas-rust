@@ -424,7 +424,10 @@ pub fn assemble(cfg: &CoreConfig, exec: &crate::Exec) -> Result<(Arc<CoreEditor>
     let callers: Arc<dyn CallerSource> = Arc::new(caller::EditorCallers { inner: Arc::new(SecurityCallers { security, server_port: cfg.server.port }) });
     let st = state(store, exec.cache.clone(), callers, parts);
     let resolver: Arc<dyn caller::Resolver> = Arc::new(StateResolver { callers: security_callers, state: exec.state.clone() });
-    let router = routes::with_layers(routes::router(st.clone()).merge(crate::event_routes::router().with_state(exec.state.clone())), resolver);
+    let router = routes::with_layers(routes::router(st.clone())
+        .merge(crate::event_routes::router().with_state(exec.state.clone()))
+        // `/api/core/functions/**` reaches core-editor at the gateway: the stored debug runs are served here.
+        .merge(crate::debug_runs::router().with_state(exec.state.clone())), resolver);
     Ok((st, router, recovery))
 }
 

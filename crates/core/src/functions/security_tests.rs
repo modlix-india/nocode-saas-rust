@@ -495,30 +495,34 @@ async fn managed_by_client_and_emails() {
     assert_eq!(status(&run(get_client.as_ref(), json!({"idOrCode": 12345}), fin(), true, true).await), StatusCode::NOT_FOUND);
     assert_eq!(status(&run(get_client.as_ref(), json!({"idOrCode": "FIN"}), fin(), false, true).await), StatusCode::INTERNAL_SERVER_ERROR);
 
-    // GetUserAdminEmails / GetOwnersEmails: no definition gate, the codes as headers.
+    // GetUserAdminEmails / GetOwnersEmails: server functions only (PLAT-553), the codes as headers.
     let admin = find(&fns, "GetUserAdminEmails");
     let owners = find(&fns, "GetOwnersEmails");
+    for f in [&admin, &owners] {
+        let r = run(f.as_ref(), json!({"appCode": "appbuilder", "clientCode": "SYSTEM"}), fin(), false, true).await;
+        assert_eq!(status(&r), StatusCode::FORBIDDEN);
+    }
     w.answer("GET", "/api/security/users/internal/adminEmails", 200, r#"{"emails":["a@x.com"],"addApp":true}"#);
-    let r = run(admin.as_ref(), json!({"appCode": "leadzumptwo", "clientCode": "FIN"}), fin(), false, true).await.unwrap();
+    let r = run(admin.as_ref(), json!({"appCode": "leadzumptwo", "clientCode": "FIN"}), fin(), true, true).await.unwrap();
     assert_eq!((r["adminEmails"].clone(), r["addApp"].clone()), (json!(["a@x.com"]), json!(true)));
     let call = w.last("/api/security/users/internal/adminEmails");
     assert_eq!(call.headers.get("clientCode").unwrap(), "FIN");
     assert_eq!(call.headers.get("appCode").unwrap(), "leadzumptwo");
     w.answer("GET", "/api/security/users/internal/adminEmails", 200, "");
-    let r = run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await.unwrap();
+    let r = run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await.unwrap();
     assert_eq!((r["adminEmails"].clone(), r["addApp"].clone()), (json!([]), json!(false)));
     w.answer("GET", "/api/security/users/internal/adminEmails", 200, r#"{"addApp":null}"#);
-    assert_eq!(status(&run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status(&run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await), StatusCode::INTERNAL_SERVER_ERROR);
     w.answer("GET", "/api/security/users/internal/adminEmails", 200, r#"{"addApp":"yes"}"#);
-    assert_eq!(status(&run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status(&run(admin.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await), StatusCode::INTERNAL_SERVER_ERROR);
     w.answer("GET", "/api/security/users/internal/ownerEmails", 200, r#"{"emails":["o@x.com",null]}"#);
-    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await.unwrap();
+    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await.unwrap();
     assert_eq!(r["ownerEmails"], json!(["o@x.com", null]));
     w.answer("GET", "/api/security/users/internal/ownerEmails", 200, "");
-    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await.unwrap();
+    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await.unwrap();
     assert_eq!(r["ownerEmails"], json!([]));
     w.answer("GET", "/api/security/users/internal/ownerEmails", 500, r#"{"message":"down"}"#);
-    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), false, true).await;
+    let r = run(owners.as_ref(), json!({"appCode": "a", "clientCode": "b"}), fin(), true, true).await;
     assert_eq!((status(&r), message(&r)), (StatusCode::INTERNAL_SERVER_ERROR, "down".into()));
 }
 
