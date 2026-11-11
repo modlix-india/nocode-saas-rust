@@ -449,6 +449,23 @@ impl Admin {
         });
         Ok(out.into_iter().map(|(_, v)| v).collect())
     }
+
+    /// Filters a `findUserClients` list to the entries whose `userId` has a profile assigned
+    /// in `app_code` (direct assignment only, no default-profile fallback). An unknown app
+    /// leaves the list as it was.
+    pub async fn keep_clients_with_app_profile(&self, list: Vec<Value>, app_code: &str) -> AuthResult<Vec<Value>> {
+        let Some(app) = self.dir().store.app_by_code(app_code).await? else {
+            return Ok(list);
+        };
+        let mut kept = Vec::with_capacity(list.len());
+        for v in list {
+            let Some(user_id) = v.get("userId").and_then(Value::as_u64) else { continue };
+            if self.dir().store.has_assigned_profile(user_id, app.id).await? {
+                kept.push(v);
+            }
+        }
+        Ok(kept)
+    }
 }
 
 macro_rules! r {
@@ -497,8 +514,17 @@ r!(user_clients, "/users/findUserClients", false, |s, r, ca| {
             _ => return Err(crate::web::type_mismatch()),
         },
     };
-    let app_code = if app_level { r.info.header("appCode") } else { None };
+    // `withProfile=true` (opt-in, LZT-1994): keep only the clients where that user holds a
+    // profile of the request's app, so the sign-in picker lists the organisations the person
+    // can actually use. Without it the old list is returned unchanged.
+    let with_profile = matches!(r.params.get("withProfile").map(|v| v.trim().to_lowercase()).as_deref(), Some("true" | "on" | "yes" | "1"));
+    let header_app = r.info.header("appCode");
+    let app_code = if app_level { header_app.clone() } else { None };
     let list = s.find_user_clients(&body, app_code, r.info.header("clientCode")).await?;
+    let list = match (with_profile, header_app) {
+        (true, Some(app)) => s.keep_clients_with_app_profile(list, &app).await?,
+        _ => list,
+    };
     Ok(json(&Value::Array(list)))
 });
 
