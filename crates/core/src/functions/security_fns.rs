@@ -2,7 +2,7 @@
 //! (`makeSecurityFunctions`): `IsBeingManagedByCode`, `IsBeingManagedById`, `GetClient`,
 //! `GetUserAdminEmails`, `GetOwnersEmails`, `GetUserSubOrg`, `GetManagedClientIds`,
 //! `GetUsersForDistribution`, `GetUsersByIds`, `GetClientsByIds`, `GetClientUsersPage` and
-//! `GetClientsDenorm`.
+//! `GetClientsDenorm`, and the Rust-only `GetUserManager`.
 //!
 //! Security's answers are read into Java's DTOs (`Client`, `User`, `EntityProcessorUser`,
 //! `ClientDenormData`) and written back with Gson, so what a function hands out is the DTO's
@@ -48,6 +48,7 @@ pub fn all(security: &Arc<SecurityCalls>) -> Vec<Arc<dyn Function>> {
         Java::function(GetClientsByIds(s())),
         Java::function(GetClientUsersPage(s())),
         Java::function(GetClientsDenorm(s())),
+        Java::function(GetUserManager(s())),
     ]
 }
 
@@ -589,6 +590,91 @@ impl GetUsersForDistribution {
         } else {
             Err(forbidden("CORE.CLIENT_NOT_RELATED", format!("Client {cc} is not related to the current user's client")).param("client", &cc))
         }
+    }
+}
+
+// --- GetUserManager (Rust only) -------------------------------------------------------------
+
+/// How far up the reporting line `GetUserManager` walks past managers who are not active.
+const MANAGER_HOPS: usize = 10;
+
+/// `CoreServices.Security.GetUserManager(userId, clientCode, skipInactive)`: the reporting
+/// manager (`security_user.REPORTING_TO`) of a user of the caller's client, for server functions
+/// that must tell a person's manager even when they run without a signed-in user (an event
+/// runner, a webhook, an anonymous intake).
+///
+/// The client is chosen as `GetUsersForDistribution` chooses it: the caller's own client, or a
+/// related one named in `clientCode`. The user and every manager on the way must belong to that
+/// client; anyone else is never read out (the answer is "no manager", not an error, so a caller
+/// cannot probe other tenants' user ids). With `skipInactive` (the default) a manager who is not
+/// ACTIVE is passed over for their own manager, up to [`MANAGER_HOPS`] steps, never in a loop.
+///
+/// Output: `found`, `managerId` (0 when none) and `manager` (`GetUsersByIds`' user fields, `{}`
+/// when none).
+pub struct GetUserManager(Arc<SecurityCalls>);
+
+#[async_trait]
+impl JavaFunction for GetUserManager {
+    fn full_name(&self) -> &'static str {
+        "CoreServices.Security.GetUserManager"
+    }
+
+    async fn run(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
+        // A deal without an owner hands in null, blank or 0: nobody, not an error.
+        let user_id = id_of("userId", args.get("userId"))?;
+        let client_code = match args.get("clientCode") {
+            None | Some(Value::Null) => None,
+            Some(_) => Some(arg_string(args, "clientCode")?),
+        };
+        let skip_inactive = match args.get("skipInactive") {
+            None | Some(Value::Null) => true,
+            v => flag(v),
+        };
+        let ca = definition_context_authentication("GetUserManager")?;
+        let target = GetUsersForDistribution(self.0.clone()).target_client_code(&ca, client_code).await?;
+        let manager = match target {
+            Some(code) => match user_id {
+                Some(id) => self.manager(&code, id, skip_inactive).await?,
+                None => None,
+            },
+            _ => None,
+        };
+        Ok(manager_output(manager.as_ref()))
+    }
+}
+
+impl GetUserManager {
+    async fn manager(&self, client_code: &str, user_id: Id, skip_inactive: bool) -> Result<Option<Value>, CoreError> {
+        let Some(client_id) = self.0.client_by_code(client_code).await?.as_ref().and_then(|c| id_field(c, "id")) else { return Ok(None) };
+        let in_client = |u: &Value| id_field(u, "clientId") == Some(client_id);
+        let Some(user) = self.0.user_internal(user_id).await?.filter(in_client) else { return Ok(None) };
+        let mut seen = vec![user_id];
+        let mut next = id_field(&user, "reportingTo");
+        for _ in 0..MANAGER_HOPS {
+            let Some(id) = next.filter(|id| *id != 0 && !seen.contains(id)) else { return Ok(None) };
+            seen.push(id);
+            let Some(m) = self.0.user_internal(id).await?.filter(in_client) else { return Ok(None) };
+            if !skip_inactive || is_active(&m) {
+                return Ok(Some(m));
+            }
+            next = id_field(&m, "reportingTo");
+        }
+        Ok(None)
+    }
+}
+
+fn is_active(user: &Value) -> bool {
+    str_field(user, "statusCode").is_some_and(|s| s.eq_ignore_ascii_case("ACTIVE"))
+}
+
+fn manager_output(manager: Option<&Value>) -> FunctionOutput {
+    match manager {
+        Some(m) => output_map([
+            ("found", Value::Bool(true)),
+            ("managerId", Value::from(id_field(m, "id").unwrap_or_default())),
+            ("manager", user_json(m)),
+        ]),
+        None => output_map([("found", Value::Bool(false)), ("managerId", Value::from(0)), ("manager", json!({}))]),
     }
 }
 

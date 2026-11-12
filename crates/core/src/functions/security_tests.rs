@@ -373,6 +373,100 @@ async fn client_users_page() {
     assert_eq!(status(&r), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
+// --- GetUserManager (Rust only) -------------------------------------------------------------
+
+/// Users as security's `/users/internal/{id}` answers them: FIN(7) 110 -> 111; 112 -> 113
+/// (INACTIVE) -> 111; 114 -> 115 (INACTIVE) -> 114, a loop; 116 -> 600 (OTHER); 117 none;
+/// BP1(90) 500 -> 501.
+fn manager_world(w: &World) {
+    let users = [
+        (110, 7, Some(111), "ACTIVE"),
+        (111, 7, None, "ACTIVE"),
+        (112, 7, Some(113), "ACTIVE"),
+        (113, 7, Some(111), "INACTIVE"),
+        (114, 7, Some(115), "ACTIVE"),
+        (115, 7, Some(114), "INACTIVE"),
+        (116, 7, Some(600), "ACTIVE"),
+        (117, 7, None, "ACTIVE"),
+        (500, 90, Some(501), "ACTIVE"),
+        (501, 90, None, "ACTIVE"),
+        (600, 55, Some(601), "ACTIVE"),
+        (601, 55, None, "ACTIVE"),
+    ];
+    for (id, client, reporting, status) in users {
+        let body = json!({"id": id, "clientId": client, "reportingTo": reporting, "statusCode": status,
+                          "firstName": format!("U{id}"), "emailId": format!("u{id}@x.test"), "designationId": 3});
+        w.answer("GET", &format!("/api/security/users/internal/{id}"), 200, &body.to_string());
+    }
+}
+
+#[tokio::test]
+async fn user_manager() {
+    let (w, fns) = world().await;
+    manager_world(&w);
+    let f = find(&fns, "GetUserManager");
+    assert_eq!(f.get_signature().get_full_name(), "CoreServices.Security.GetUserManager");
+    let none = json!({"found": false, "managerId": 0, "manager": {}});
+    let got = |r: &serde_json::Map<String, Value>| (r["found"].clone(), r["managerId"].clone());
+
+    // A signed-in user of FIN, and FIN's event runner (anonymous) alike.
+    for caller in [fin(), anonymous(7, "FIN")] {
+        let r = run(f.as_ref(), json!({"userId": 110}), caller, true, true).await.unwrap();
+        assert_eq!(got(&r), (json!(true), json!(111)));
+        assert_eq!(r["manager"], json!({"id": 111, "clientId": 7, "emailId": "u111@x.test", "firstName": "U111", "statusCode": "ACTIVE"}));
+    }
+    let r = run(f.as_ref(), json!({"userId": "110", "clientCode": "FIN"}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(got(&r), (json!(true), json!(111)));
+
+    // An inactive manager is passed over unless asked not to; a loop ends with nobody.
+    let r = run(f.as_ref(), json!({"userId": 112}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(got(&r), (json!(true), json!(111)));
+    let r = run(f.as_ref(), json!({"userId": 112, "skipInactive": false}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(got(&r), (json!(true), json!(113)));
+    let r = run(f.as_ref(), json!({"userId": 114}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+
+    // Nobody: no manager, an unknown user, no owner (0, null, blank).
+    for id in [json!(117), json!(999), json!(0), Value::Null, json!("")] {
+        let r = run(f.as_ref(), json!({"userId": id}), anonymous(7, "FIN"), true, true).await.unwrap();
+        assert_eq!(serde_json::Value::Object(r), none, "{id}");
+    }
+
+    // Other tenants never leak: another client's user is not read out, nor a manager outside
+    // the client, and their manager is never fetched.
+    let before = w.count("/api/security/users/internal/601");
+    let r = run(f.as_ref(), json!({"userId": 600}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+    assert_eq!(w.count("/api/security/users/internal/601"), before);
+    let r = run(f.as_ref(), json!({"userId": 116}), fin(), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+    let r = run(f.as_ref(), json!({"userId": 110}), anonymous(55, "OTHER"), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+
+    // Naming a client: a related one, as GetUsersForDistribution allows; never an unrelated one.
+    w.set_manages_code(|m, c| m == "FIN" && c == "BP1");
+    let r = run(f.as_ref(), json!({"userId": 500}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+    let r = run(f.as_ref(), json!({"userId": 500, "clientCode": "BP1"}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(got(&r), (json!(true), json!(501)));
+    for caller in [anonymous(7, "FIN"), fin()] {
+        let r = run(f.as_ref(), json!({"userId": 600, "clientCode": "OTHER"}), caller, true, true).await;
+        assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "Client OTHER is not related to the current user's client".into()));
+    }
+    let r = run(f.as_ref(), json!({"userId": 110, "clientCode": "SYSTEM"}), anonymous(7, "FIN"), true, true).await;
+    assert_eq!(status(&r), StatusCode::FORBIDDEN);
+
+    // Arguments and where it may run.
+    let r = run(f.as_ref(), json!({}), fin(), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+    assert_eq!(status(&run(f.as_ref(), json!({"userId": "abc"}), fin(), true, true).await), StatusCode::BAD_REQUEST);
+    let r = run(f.as_ref(), json!({"userId": 110}), fin(), false, true).await;
+    assert_eq!(
+        (status(&r), message(&r)),
+        (StatusCode::FORBIDDEN, "CoreServices.Security.GetUserManager can only be called from a server function".into())
+    );
+}
+
 // --- GetUsersForDistributionTest -------------------------------------------------------------
 
 #[tokio::test]
@@ -989,6 +1083,7 @@ async fn registered_in_java_order() {
         "SetClientManagers", "MigrateClientManagers", "LogClientActivity", "QueryClientActivities", "GetAppProfiles", "GetClient",
         "IsBeingManagedByCode", "IsBeingManagedById", "GetUserAdminEmails", "GetOwnersEmails", "GetUserSubOrg",
         "GetManagedClientIds", "GetUsersForDistribution", "GetUsersByIds", "GetClientsByIds", "GetClientUsersPage", "GetClientsDenorm",
+        "GetUserManager",
     ] {
         assert!(core.find(Some("CoreServices.Security"), name).await.unwrap().is_some(), "{name}");
     }

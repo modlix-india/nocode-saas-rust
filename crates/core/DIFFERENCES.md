@@ -364,6 +364,16 @@ created from 2026-11-12 (IST). Every other field is unchanged.
   payload (null, `{}`, `[]`, blank) on those methods sends no body and no `Content-Type` of ours,
   as `GetRequest` and `DeleteRequest` already did. A non-empty payload still goes out. Rules in
   crates/connections/DIFFERENCES.md (39).
+- **D53 `CoreServices.Security.GetUserManager`** (2026-11-12, Rust only, LZT-2411). A user's
+  reporting manager (`security_user.REPORTING_TO`), for server functions that must reach a
+  person's manager without a signed-in user (an event runner, a webhook, an anonymous intake).
+  `userId`, `clientCode` (optional) and `skipInactive` (true by default). The client is chosen as
+  `GetUsersForDistribution` chooses it: the caller's own, or a related one named in `clientCode`
+  (an unrelated one is refused, 403). The user and every manager on the way must belong to that
+  client, otherwise the answer is "no manager", never another tenant's user. With `skipInactive`
+  a manager who is not ACTIVE is passed over for their own manager, at most 10 steps, never in a
+  loop. Answers `found`, `managerId` (0 when none) and `manager` (`GetUsersByIds`' user fields,
+  `{}` when none). A null, blank or 0 `userId` is "no manager". Only inside a server function.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
