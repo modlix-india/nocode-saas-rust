@@ -803,8 +803,9 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     // The 72 Java has, SendDataNotification, Storage.GetFields, Storage.Batch / UpdateIf /
     // NextSequence, Event.GetScheduleState, Security.SendContactCode / VerifyContactCode,
     // Connection.VerifySignature (LZT-2267), REST.OAuth2TokenInfo (LZT-2270) and
-    // File.DocxInspect / DocxPrepare / PdfStamp (Word templates and PDF seal).
-    assert_eq!(other.filter("").await.unwrap().len(), 85);
+    // File.DocxInspect / DocxPrepare / PdfStamp (Word templates and PDF seal) and
+    // Security.GetUserManager (LZT-2411).
+    assert_eq!(other.filter("").await.unwrap().len(), 86);
     for f in ["CoreServices.File.DocxInspect", "CoreServices.File.DocxPrepare", "CoreServices.File.PdfStamp"] {
         assert_eq!(other.filter(&f.to_lowercase()).await.unwrap(), [f]);
     }

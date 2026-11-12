@@ -4301,6 +4301,76 @@
    }
   }
  },
+ "CoreServices.Security.GetUserManager": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUserManager",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING",
+      "NULL"
+     ]
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "skipInactive": {
+    "schema": {
+     "namespace": "_",
+     "name": "skipInactive",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": true
+    },
+    "parameterName": "skipInactive",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "found": {
+      "namespace": "_",
+      "name": "found",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "managerId": {
+      "namespace": "_",
+      "name": "managerId",
+      "version": 1,
+      "type": "LONG"
+     },
+     "manager": {
+      "namespace": "_",
+      "name": "manager",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
  "CoreServices.Security.IsBeingManagedByCode": {
   "namespace": "CoreServices.Security",
   "name": "IsBeingManagedByCode",
