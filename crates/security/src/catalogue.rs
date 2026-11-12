@@ -49,7 +49,7 @@ mod tests {
             .lines()
             .filter_map(|l| l.trim().strip_prefix('"').and_then(|r| r.split_once("\" => r#\"")).map(|(k, _)| k))
             .collect();
-        assert_eq!(keys.len(), 124);
+        assert_eq!(keys.len(), 125);
         for k in keys {
             let code = format!("SEC.{}", k.to_ascii_uppercase());
             assert_eq!(c.code_for_java(NS, k), Some(code.as_str()), "{k}");
