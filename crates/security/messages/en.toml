@@ -608,6 +608,15 @@ java = "user_app_request_mandatory_request_id"
 when = "Not raised by the Rust units (kept for the Java bundle's mapping)."
 audience = "signed-in"
 
+[SEC.USER_APP_REQUEST_REASON_TOO_LONG]
+status = 400
+params = ["max"]
+text = "The reason is too long[: use at most {max} characters]."
+action = "Shorten the reason and reject the request again."
+java = "user_app_request_reason_too_long"
+when = "Rejecting an access request with a reason longer than 500 characters."
+audience = "signed-in"
+
 [SEC.NO_PROFILE_ASSIGNED_TO_USER]
 status = 403
 text = "You don't have access to this app: no profile is assigned to you."

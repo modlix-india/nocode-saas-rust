@@ -118,6 +118,7 @@ pub fn template(key: &str) -> &'static str {
         "user_app_request_accept_incorrect_data" => r#"Request Id and Profile Id are mandatory to accept user request."#,
         "user_app_request_incorrect_status" => r#"User Request is not in the PENDING state."#,
         "user_app_request_mandatory_request_id" => r#"User Request Id is mandatory."#,
+        "user_app_request_reason_too_long" => r#"The reason can be at most $ characters long."#,
         "forbidden_write_application_access" => r#"User don't have write access to the application."#,
         "plan_conflict_plan_already_exists" => r#"Plan with the same apps already exists for the client."#,
         "plan_default_plan_must_have_one_app" => r#"Default plan must have one app."#,
