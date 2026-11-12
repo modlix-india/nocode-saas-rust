@@ -565,3 +565,18 @@ column `REJECT_REASON` (V89); more than 500 characters is a 400
 A request read back carries `rejectReason`.
 Tests: `admin::users::invites::tests::reject_reasons`, `admin::users::invites::tests::decision_event_data`,
 `admin::users::invites::live::invites_and_requests`.
+
+## A new access request raises USER_REQUEST_CREATED for its approvers (2026-11-12, ACCESS-REQ-MAILS)
+
+Java's `createRequest` raised nothing, so the people who decide requests heard about a new one only
+if a page sent a mail itself. After the request is saved, security now raises `USER_REQUEST_CREATED`
+for the request's app and client. Data: `requestId`, `appCode`, `appName`, `requestClientCode`,
+`requestClientName`, `firstName` (the e-mail when there is no first name), `lastName`, `emailId`,
+`phoneNumber`, `userName` (the requester's display name), `urlPrefix` (the invite link lookup for
+the request's client) and `approverEmails`: the addresses `users/internal/adminEmails` answers for
+the app and client (users whose profile in the app holds `User_CREATE` or the Owner role, else the
+client's owners), each once, never the requester's own, joined with `;` so a template's
+`toExpression` can use it. With nobody to tell the event is not raised. Security resolves all of it,
+so nothing depends on the requester (a signed-in user without access) reaching anything. A failed
+publish is logged and the request is still made.
+Tests: `admin::users::invites::tests::request_created_data`, `admin::users::invites::live::invites_and_requests`.
