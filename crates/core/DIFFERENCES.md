@@ -369,7 +369,8 @@ created from 2026-11-12 (IST). Every other field is unchanged.
   person's manager without a signed-in user (an event runner, a webhook, an anonymous intake).
   `userId`, `clientCode` (optional) and `skipInactive` (true by default). The client is chosen as
   `GetUsersForDistribution` chooses it: the caller's own, or a related one named in `clientCode`
-  (an unrelated one is refused, 403). The user and every manager on the way must belong to that
+  (an unrelated one answers "no manager" rather than 403: a refusal raised inside a scheduled run
+  cannot be caught by the calling definition and would fail the run). The user and every manager on the way must belong to that
   client, otherwise the answer is "no manager", never another tenant's user. With `skipInactive`
   a manager who is not ACTIVE is passed over for their own manager, at most 10 steps, never in a
   loop. Answers `found`, `managerId` (0 when none) and `manager` (`GetUsersByIds`' user fields,

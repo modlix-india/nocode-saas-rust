@@ -604,9 +604,10 @@ const MANAGER_HOPS: usize = 10;
 /// runner, a webhook, an anonymous intake).
 ///
 /// The client is chosen as `GetUsersForDistribution` chooses it: the caller's own client, or a
-/// related one named in `clientCode`. The user and every manager on the way must belong to that
-/// client; anyone else is never read out (the answer is "no manager", not an error, so a caller
-/// cannot probe other tenants' user ids). With `skipInactive` (the default) a manager who is not
+/// related one named in `clientCode`; an unrelated `clientCode` answers "no manager" (not 403, so a
+/// scheduled run that names one does not fail). The user and every manager on the way must belong
+/// to that client; anyone else is never read out (the answer is "no manager", not an error, so a
+/// caller cannot probe other tenants' user ids). With `skipInactive` (the default) a manager who is not
 /// ACTIVE is passed over for their own manager, up to [`MANAGER_HOPS`] steps, never in a loop.
 ///
 /// Output: `found`, `managerId` (0 when none) and `manager` (`GetUsersByIds`' user fields, `{}`
@@ -631,7 +632,15 @@ impl JavaFunction for GetUserManager {
             v => flag(v),
         };
         let ca = definition_context_authentication("GetUserManager")?;
-        let target = GetUsersForDistribution(self.0.clone()).target_client_code(&ca, client_code).await?;
+        // The client is chosen as GetUsersForDistribution chooses it, but an unrelated one answers
+        // "no manager" rather than 403: a refusal raised inside a scheduled run cannot be caught by
+        // the calling definition and would fail the whole run (LZT-2411 escalations). Nothing of
+        // another tenant is read either way.
+        let target = match GetUsersForDistribution(self.0.clone()).target_client_code(&ca, client_code).await {
+            Ok(t) => t,
+            Err(e) if e.status() == axum::http::StatusCode::FORBIDDEN => None,
+            Err(e) => return Err(e),
+        };
         let manager = match target {
             Some(code) => match user_id {
                 Some(id) => self.manager(&code, id, skip_inactive).await?,
