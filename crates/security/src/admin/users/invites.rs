@@ -55,6 +55,8 @@ fn first_non_blank<'a>(values: &[Option<&'a str>]) -> String {
     values.iter().flatten().find(|v| !v.trim().is_empty() && **v != PLACEHOLDER).map(|v| v.to_string()).unwrap_or_default()
 }
 
+/// Raised when an access request is made, for the app's mail to the people who can decide it.
+pub const USER_REQUEST_CREATED: &str = "USER_REQUEST_CREATED";
 /// Raised when an access request is approved, for the app's mail to the requester.
 pub const USER_REQUEST_APPROVED: &str = "USER_REQUEST_APPROVED";
 /// Raised when an access request is rejected, with the reason when one was given.
@@ -113,6 +115,32 @@ struct DecidedFacts {
     requester: Option<User>,
     url_prefix: String,
     decided_by: String,
+}
+
+/// The approvers' addresses as one `;` separated string (what a template's `toExpression`
+/// splits): each address once, ignoring case, and never the requester's own.
+fn approver_list(emails: &[String], requester_email: &str) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    for e in emails.iter().map(|e| e.trim()).filter(|e| !e.is_empty() && *e != PLACEHOLDER) {
+        let low = e.to_lowercase();
+        if low != requester_email.trim().to_lowercase() && !seen.iter().any(|s| s.to_lowercase() == low) {
+            seen.push(e.to_string());
+        }
+    }
+    seen.join(";")
+}
+
+/// The data of `USER_REQUEST_CREATED`: the person fields as the decision events have them, the
+/// requester's display name (`userName`, which the request mails greet with), the client's name,
+/// and `approverEmails`.
+fn created_data(f: &DecidedFacts, client_name: &str, approver_emails: &str) -> Vec<(String, Value)> {
+    let mut data = decided_data(f, &Decision::Approved { profile_name: String::new() });
+    data.retain(|(k, _)| k != "profileName" && k != "decidedBy");
+    let user_name = f.requester.as_ref().map(display_name).unwrap_or_default();
+    data.push(("userName".into(), Value::from(user_name)));
+    data.push(("requestClientName".into(), Value::from(client_name.to_string())));
+    data.push(("approverEmails".into(), Value::from(approver_emails.to_string())));
+    data
 }
 
 /// The data of `USER_REQUEST_APPROVED` / `USER_REQUEST_REJECTED`, in the shape `USER_INVITED`
@@ -797,6 +825,7 @@ impl Admin {
         };
         let id = self.db.entity_insert(&REQUEST, &access_request_values(&r)).await?;
         let created = self.db.request_row(id).await?.ok_or_else(|| AuthError::internal("request not found"))?;
+        self.raise_request_created(ca, &created, &app, &client).await;
         Ok(request_json(&created, &RequestNames::default()))
     }
 
@@ -847,6 +876,53 @@ impl Admin {
         .await;
         result.unwrap_or_else(|e| {
             tracing::error!(error = %e, request = ?r.request_id, event = event_name, "could not raise the request decision event");
+            false
+        })
+    }
+
+    /// `USER_REQUEST_CREATED` for the request's app and client, so that app's event actions can
+    /// tell the people who decide requests that one is waiting. The approvers are what
+    /// `users/internal/adminEmails` answers (the client's users whose profile in the app holds
+    /// `User_CREATE` or the Owner role, else the client's owners). Not raised when there is
+    /// nobody to tell. Security resolves everything, so nothing depends on the requester having
+    /// access to the app. A failure is logged and the request stands.
+    async fn raise_request_created(&self, ca: &ContextAuth, r: &AccessRequest, app: &crate::model::App, client: &crate::model::Client) -> bool {
+        let result: AuthResult<bool> = async {
+            let client_code = client.code.clone().unwrap_or_default();
+            let requester = match r.user_id {
+                Some(u) => self.db.user_row(u).await?,
+                None => None,
+            };
+            let requester_email = requester.as_ref().and_then(|u| u.email_id()).unwrap_or_default();
+            let found = self.admin_emails(Some(&app.app_code), Some(&client_code)).await?;
+            let emails: Vec<String> = found.get("emails").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            let approvers = approver_list(&emails, &requester_email);
+            if approvers.is_empty() {
+                tracing::info!(request = ?r.request_id, app = %app.app_code, client = %client_code, "nobody to tell about the access request: no USER_REQUEST_CREATED");
+                return Ok(false);
+            }
+            let facts = DecidedFacts {
+                request_id: r.request_id.clone().unwrap_or_default(),
+                app_code: app.app_code.clone(),
+                app_name: app.app_name.clone().unwrap_or_default(),
+                request_client_code: client_code.clone(),
+                requester,
+                url_prefix: self.invite_url_prefix(&app.app_code, client.id()).await?,
+                decided_by: String::new(),
+            };
+            let event = EventMessage {
+                event_name: USER_REQUEST_CREATED.into(),
+                client_code: Some(client_code.clone()).filter(|c| !c.is_empty()).or_else(|| ca.logged_in_from_client_code.clone()),
+                app_code: Some(app.app_code.clone()),
+                x_debug: None,
+                draft: false,
+                data: created_data(&facts, client.name.as_deref().unwrap_or_default(), &approvers),
+            };
+            self.events.publish(&event).await
+        }
+        .await;
+        result.unwrap_or_else(|e| {
+            tracing::error!(error = %e, request = ?r.request_id, "could not raise USER_REQUEST_CREATED");
             false
         })
     }
@@ -1103,6 +1179,29 @@ mod tests {
         assert_eq!((get(&none, "reason"), get(&none, "reasonHtml"), get(&none, "appName")), (Some(json!("")), Some(json!("")), Some(json!("a"))));
     }
 
+    /// The approvers of a new request: each address once (ignoring case), never the
+    /// requester's own, joined for a template's `toExpression`; the created event's data adds
+    /// the requester's display name, the client's name and that list, and has no decision fields.
+    #[test]
+    fn request_created_data() {
+        let emails = ["a@x.test".to_string(), " A@X.test ".into(), "".into(), "NONE".into(), "me@x.test".into(), "b@x.test".into()];
+        assert_eq!(approver_list(&emails, "ME@x.test"), "a@x.test;b@x.test");
+        assert_eq!(approver_list(&["me@x.test".to_string()], "me@x.test"), "");
+        let get = |d: &[(String, Value)], k: &str| d.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        let facts = DecidedFacts {
+            request_id: "7".into(),
+            app_code: "leadzumptwo".into(),
+            requester: Some(User { first_name: Some("Pat".into()), last_name: Some("Lee".into()), email_id: Some("p@x.test".into()), ..Default::default() }),
+            ..Default::default()
+        };
+        let d = created_data(&facts, "Acme", "a@x.test;b@x.test");
+        assert_eq!(get(&d, "userName"), Some(json!("Pat Lee")));
+        assert_eq!(get(&d, "requestClientName"), Some(json!("Acme")));
+        assert_eq!(get(&d, "approverEmails"), Some(json!("a@x.test;b@x.test")));
+        assert_eq!(get(&d, "emailId"), Some(json!("p@x.test")));
+        assert_eq!((get(&d, "profileName"), get(&d, "decidedBy"), get(&d, "reason")), (None, None, None));
+    }
+
     /// RS3 and RS4: the invited client's URL when it has one, else the app owner's, else the
     /// app's platform address.
     #[test]
@@ -1345,6 +1444,24 @@ mod live {
         assert_eq!((st, v), (StatusCode::OK, json!(true)));
         let stored = s.db.request_by_request_id(&r4).await.unwrap().unwrap();
         assert_eq!((stored.status.as_deref(), stored.reject_reason), (Some("REJECTED"), None));
+        // A new request tells the people who can decide it (USER_REQUEST_CREATED, for the
+        // request's client), never the requester, and only when there is someone to tell.
+        rec.0.lock().unwrap().clear();
+        let r5 = rs.request_create(&ca, Some("leadzump")).await.unwrap()["requestId"].as_str().unwrap().to_string();
+        let found = s.admin_emails(Some("leadzump"), Some("ZZRUL")).await.unwrap();
+        let emails: Vec<String> = found["emails"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let expected = approver_list(&emails, b.email_id.as_deref().unwrap_or_default());
+        let raised = rec.0.lock().unwrap().pop();
+        if expected.is_empty() {
+            assert!(raised.is_none(), "nobody to tell: {raised:?}");
+        } else {
+            let e = raised.expect("USER_REQUEST_CREATED");
+            assert_eq!((e.event_name.as_str(), e.app_code.as_deref(), e.client_code.as_deref()), (USER_REQUEST_CREATED, Some("leadzump"), Some("ZZRUL")));
+            assert_eq!(data(&e, "approverEmails"), json!(expected));
+            assert_eq!(data(&e, "requestId"), json!(r5));
+            assert!(!expected.to_lowercase().contains(&b.email_id.clone().unwrap_or_default().to_lowercase()));
+        }
+        assert!(s.request_reject(&from_sys, &r5, None).await.unwrap());
         ca.user.string_authorities = Some(vec!["Authorities.Logged_IN".into()]);
         let (st, msg) = err(s.request_create(&ca, Some("appbuilder")).await);
         assert_eq!(st, StatusCode::BAD_REQUEST, "already has a profile of appbuilder: {msg}");
