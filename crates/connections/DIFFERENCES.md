@@ -316,6 +316,17 @@ Everything in those runs is the same except what is listed here.
     GET, as in Java); POST, PUT and PATCH are unchanged (no payload still sends `{}`); and a
     `Content-Type` the step's headers or the connection's `defaultHeaders` give is still sent.
 
+40. **`application/octet-stream` sends one base64 file as the raw body** (2026-11-12, Rust only,
+    LZT-2418). Java could send a file only inside a multipart body; with any other non-JSON type
+    it answered 400 "Url not found with the given connection" without calling. Meta's resumable
+    upload (`POST upload:<session>` with `file_offset: 0`, used for WhatsApp template header
+    samples and profile photos) takes the file as the whole body, so a multipart body was stored
+    as the file and the template was refused ("The type of file is not supported"). Now, when the
+    request's `Content-Type` is `application/octet-stream` and the payload is an object with
+    exactly one value, a `data:<type>;name:<file>;base64,...` or `data:<type>;base64,...` string,
+    the decoded bytes are the body (`body::binary_body`; bad base64 is `CORE.BASE64_INVALID`).
+    Any other payload with that type still answers "Url not found" as before.
+
 ## Error codes (2026-10-17)
 
 Every `GenericException` this crate raises (`ConnError::Generic`) carries the core catalogue's

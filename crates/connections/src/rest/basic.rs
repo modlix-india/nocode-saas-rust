@@ -221,6 +221,16 @@ pub async fn call(svc: &Connections, conn: &Connection, request: RestRequest, fi
         return exchange(svc, out, applied.timeout, file_download).await.map(Some);
     }
 
+    // Rust only (DIFFERENCES.md #40): one base64 data URL sent as the raw body. Any other
+    // payload with this type answers "Url not found" as before.
+    if let Some(ct) = content_type.as_ref().filter(|ct| ct.is_compatible_with(&media_type::application_octet_stream())) {
+        if let Some(bytes) = request.payload.as_ref().and_then(body::binary_body) {
+            headers.set("Content-Type", &ct.to_header());
+            let out = OutboundRequest { method, uri, headers: headers.lines(), body: Some(bytes?) };
+            return exchange(svc, out, applied.timeout, file_download).await.map(Some);
+        }
+    }
+
     let payload = request.payload.as_ref().ok_or_else(npe_payload)?;
     if !payload.is_null() && !payload.is_object() {
         return Err(ConnError::other(format!("Not a JSON Object: {}", json::gson_element(payload))));
