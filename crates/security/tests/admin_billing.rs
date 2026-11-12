@@ -871,7 +871,9 @@ async fn mark_paid_and_emit_persists_and_raises_invoice_generated() {
     assert_eq!((e.event_name.as_str(), e.app_code.as_deref(), e.client_code.as_deref()), ("INVOICE_GENERATED", Some("crm"), Some("BUS")));
     let data: HashMap<String, Value> = e.data.iter().cloned().collect();
     assert_eq!(data["invoiceNumber"], "INV/2026-27/10/1");
-    assert_eq!(data.len(), 24);
+    assert_eq!(data.len(), 25);
+    // LZT-2003: no paid payment with a webhook yet, so no billing e-mail.
+    assert_eq!(data["billingEmail"], "");
     // An events outage fails the call, as in Java.
     let mut w2 = world();
     w2.events = Arc::new(RecordingEvents { fail: true, ..Default::default() });
