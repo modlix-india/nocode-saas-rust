@@ -120,13 +120,14 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 93);
+        assert_eq!(core.names().len(), 94);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
-        // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence and Event.GetScheduleState.
+        // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
+        // Security.GetUserManager (LZT-2411).
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[86..],
+            core.names()[87..],
             [
                 "CoreServices.Security.SendContactCode",
                 "CoreServices.Security.VerifyContactCode",
@@ -139,7 +140,7 @@ mod tests {
             "the contact codes, the connection signature check, the token info, then the Word template functions, come last"
         );
         assert_eq!(
-            core.names()[78..86],
+            core.names()[79..87],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",
