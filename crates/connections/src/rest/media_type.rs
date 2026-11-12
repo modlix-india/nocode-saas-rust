@@ -167,6 +167,10 @@ pub fn multipart_form_data() -> MediaType {
     MediaType::new("multipart", "form-data")
 }
 
+pub fn application_octet_stream() -> MediaType {
+    MediaType::new("application", "octet-stream")
+}
+
 pub fn application_form_urlencoded() -> MediaType {
     MediaType::new("application", "x-www-form-urlencoded")
 }

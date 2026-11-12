@@ -49,6 +49,14 @@ pub fn method_by_invoice(payments: &[Rec]) -> HashMap<u64, String> {
     out
 }
 
+/// LZT-2003: the e-mail the buyer paid with (the Bill to address the checkout is prefilled
+/// with), as the payment's Razorpay webhook carries it; `None` when the payment has none.
+pub fn billing_email(payment: &Rec) -> Option<String> {
+    let response = payment.map("response");
+    let email = response.get("webhook")?.get("payload")?.get("payment")?.get("entity")?.get("email")?;
+    email.as_str().map(str::trim).filter(|e| !e.is_empty()).map(str::to_string)
+}
+
 /// `pickPayment`: the PAID payment, else the last one.
 pub fn pick_payment(payments: &[Rec]) -> Option<&Rec> {
     payments.iter().find(|p| p.str("status") == Some("PAID")).or(payments.last())
@@ -207,6 +215,8 @@ impl Billing<'_> {
             ("paymentMethod", Value::from(payment.map(|p| captured_method(p).or_else(|| gateway.clone()).unwrap_or_default()).unwrap_or_default())),
             ("paymentGateway", Value::from(gateway.clone().unwrap_or_default())),
             ("paidOn", Value::from(payment.and_then(|p| p.ts("paidAt")).map(|t| t.date().to_string()).unwrap_or_default())),
+            // LZT-2003: the invoice mail goes to this address (and the client's owners).
+            ("billingEmail", Value::from(payment.and_then(billing_email).unwrap_or_default())),
         ];
         let data = hash_map_order_str(fields.iter().map(|(k, _)| *k))
             .into_iter()
@@ -287,6 +297,17 @@ mod tests {
             .with("status", Val::Str(status.into()))
             .with("response", Val::Json(response))
             .with("gateway", Val::Str("RAZORPAY".into()))
+    }
+
+    #[test]
+    fn billing_email_comes_from_the_payment_webhook() {
+        let paid = |r: serde_json::Value| Rec::new(&PAYMENT).with("response", Val::Json(r));
+        let hook = json!({"webhook": {"payload": {"payment": {"entity": {"email": " buyer+1@x.com "}}}}});
+        assert_eq!(billing_email(&paid(hook)).as_deref(), Some("buyer+1@x.com"));
+        assert_eq!(billing_email(&paid(json!({"webhook": {"payload": {"payment": {"entity": {"email": ""}}}}}))), None);
+        assert_eq!(billing_email(&paid(json!({"webhook": {"payload": {"payment": {"entity": {"email": null}}}}}))), None);
+        assert_eq!(billing_email(&paid(json!({"init": {}, "captured": {"method": "card"}}))), None);
+        assert_eq!(billing_email(&Rec::new(&PAYMENT)), None);
     }
 
     #[test]

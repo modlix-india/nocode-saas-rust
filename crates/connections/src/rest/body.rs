@@ -106,6 +106,29 @@ fn form_part(key: &str, value: &str) -> Result<Part, ConnError> {
     Ok(Part::Text { name: key.into(), value: value.into() })
 }
 
+/// The raw body of an `application/octet-stream` request (Rust only, DIFFERENCES.md #40): the
+/// payload's one value, a `data:<type>;name:<file>;base64,...` or `data:<type>;base64,...`
+/// string, decoded. `None` when the payload is not an object with exactly one such value, so the
+/// caller answers as before. Meta's resumable upload (`POST upload:<id>`) takes the file as the
+/// whole body; a multipart body is stored as the file itself.
+pub fn binary_body(payload: &Value) -> Option<Result<Vec<u8>, ConnError>> {
+    let Value::Object(m) = payload else { return None };
+    if m.len() != 1 {
+        return None;
+    }
+    let s = m.values().next()?.as_str()?;
+    if !s.starts_with("data:") {
+        return None;
+    }
+    let comma = s.find(";base64,")?;
+    let b64 = &s[comma + ";base64,".len()..];
+    Some(
+        base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .map_err(|_| ConnError::coded(http::StatusCode::BAD_REQUEST, "CORE.BASE64_INVALID", "Not a base64 encoded string")),
+    )
+}
+
 /// `String.split(";")`: trailing empty strings dropped.
 fn java_split_semicolon(s: &str) -> Vec<&str> {
     let mut v: Vec<&str> = s.split(';').collect();
@@ -185,6 +208,17 @@ mod tests {
         .unwrap();
         assert_eq!(body, "From=%2B918012345678&f=1.5&t=true&z=&o=%7B%22a%22%3A%22b%22%7D&l=%5B1%2C%22x%22%5D&e=");
         assert!(form_body(&json!("not an object")).is_empty());
+    }
+
+    #[test]
+    fn binary_body_from_one_data_url() {
+        assert_eq!(binary_body(&json!({"file": "data:image/jpeg;name:a.jpg;base64,aGk="})).unwrap().unwrap(), b"hi");
+        assert_eq!(binary_body(&json!({"file": "data:application/pdf;base64,aGk="})).unwrap().unwrap(), b"hi");
+        assert!(binary_body(&json!({"file": "data:image/png;base64,!!"})).unwrap().is_err());
+        assert!(binary_body(&json!({"file": "hi"})).is_none());
+        assert!(binary_body(&json!({"file": "data:image/png;base64,aGk=", "x": "y"})).is_none());
+        assert!(binary_body(&json!({})).is_none());
+        assert!(binary_body(&json!("data:image/png;base64,aGk=")).is_none());
     }
 
     #[test]
