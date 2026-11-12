@@ -545,3 +545,23 @@ a switched-off owner (one that bounces, say) gets no owner mail.
 Tests: `admin::billing::invoices::tests::buyer_email_skips_deleted_users_and_empty_addresses`,
 `tests/admin_billing.rs` (`fixed_bundle_adds_gst_on_top_and_snapshots_the_invoice`,
 `mark_paid_and_emit_persists_and_raises_invoice_generated`), `tests/live_internal.rs`.
+
+## Access request decisions raise events and keep a reject reason (2026-11-12, ACCESS-REQ-MAILS)
+
+Java's `acceptRequest` / `rejectRequest` raised nothing, so the requester never heard back. After
+the status is saved, approving now raises `USER_REQUEST_APPROVED` and rejecting raises
+`USER_REQUEST_REJECTED`, as `USER_INVITED` is raised: for the request's app and the client the
+decider signed in from. Data: `requestId`, `appCode`, `appName`, `requestClientCode`, `firstName`
+(the e-mail when the requester has no first name), `lastName`, `emailId`, `phoneNumber`,
+`urlPrefix` (the same lookup as the invite link, for the request's client), `decidedBy`, plus
+`profileName` on approval and `reason` / `reasonHtml` (HTML-escaped) on rejection. Each app mails
+through its own event actions; an app without them logs an unhandled event. A failed publish is
+logged and the decision still succeeds.
+
+`POST /users/rejectRequest/{requestId}` takes an optional `{"reason": "..."}` body. No body, a
+`null` body and a blank reason all mean no reason; the reason is trimmed and kept in the new
+column `REJECT_REASON` (V89); more than 500 characters is a 400
+(`SEC.USER_APP_REQUEST_REASON_TOO_LONG`, Java bundle key `user_app_request_reason_too_long`, new).
+A request read back carries `rejectReason`.
+Tests: `admin::users::invites::tests::reject_reasons`, `admin::users::invites::tests::decision_event_data`,
+`admin::users::invites::live::invites_and_requests`.
