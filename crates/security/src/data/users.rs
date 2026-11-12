@@ -133,11 +133,13 @@ impl Db {
         Ok(out)
     }
 
-    /// `UserDAO.getEmailsOfUsers`.
+    /// `UserDAO.getEmailsOfUsers`. LZT-2003 (Rust only): INACTIVE users are left out as well as
+    /// DELETED ones, so a switched-off owner gets no owner mail (its one caller is
+    /// `GetOwnersEmails`).
     pub async fn emails_of_users(&self, user_ids: &[u64]) -> AuthResult<Vec<String>> {
         let mut qb: QueryBuilder<MySql> = QueryBuilder::new("SELECT EMAIL_ID FROM security_user WHERE ");
         push_in_u64(&mut qb, "ID", user_ids);
-        qb.push(" AND EMAIL_ID IS NOT NULL AND EMAIL_ID <> 'NONE' AND STATUS_CODE <> 'DELETED'");
+        qb.push(" AND EMAIL_ID IS NOT NULL AND EMAIL_ID <> 'NONE' AND STATUS_CODE NOT IN ('DELETED', 'INACTIVE')");
         let rows = qb.build().fetch_all(&self.pool).await?;
         rows.iter().map(|r| Ok(r.try_get::<String, _>(0)?)).collect()
     }
