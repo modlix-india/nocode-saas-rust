@@ -449,12 +449,16 @@ async fn user_manager() {
     assert_eq!(serde_json::Value::Object(r), none);
     let r = run(f.as_ref(), json!({"userId": 500, "clientCode": "BP1"}), anonymous(7, "FIN"), true, true).await.unwrap();
     assert_eq!(got(&r), (json!(true), json!(501)));
+    // An unrelated client is "no manager", never an error (a scheduled run could not catch one),
+    // and its users are never read.
+    let before = w.count("/api/security/users/internal/");
     for caller in [anonymous(7, "FIN"), fin()] {
-        let r = run(f.as_ref(), json!({"userId": 600, "clientCode": "OTHER"}), caller, true, true).await;
-        assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "Client OTHER is not related to the current user's client".into()));
+        let r = run(f.as_ref(), json!({"userId": 600, "clientCode": "OTHER"}), caller, true, true).await.unwrap();
+        assert_eq!(serde_json::Value::Object(r), none);
     }
-    let r = run(f.as_ref(), json!({"userId": 110, "clientCode": "SYSTEM"}), anonymous(7, "FIN"), true, true).await;
-    assert_eq!(status(&r), StatusCode::FORBIDDEN);
+    let r = run(f.as_ref(), json!({"userId": 110, "clientCode": "SYSTEM"}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(serde_json::Value::Object(r), none);
+    assert_eq!(w.count("/api/security/users/internal/"), before);
 
     // Arguments and where it may run.
     let r = run(f.as_ref(), json!({}), fin(), true, true).await.unwrap();
