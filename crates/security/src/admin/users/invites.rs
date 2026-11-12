@@ -55,6 +55,94 @@ fn first_non_blank<'a>(values: &[Option<&'a str>]) -> String {
     values.iter().flatten().find(|v| !v.trim().is_empty() && **v != PLACEHOLDER).map(|v| v.to_string()).unwrap_or_default()
 }
 
+/// Raised when an access request is approved, for the app's mail to the requester.
+pub const USER_REQUEST_APPROVED: &str = "USER_REQUEST_APPROVED";
+/// Raised when an access request is rejected, with the reason when one was given.
+pub const USER_REQUEST_REJECTED: &str = "USER_REQUEST_REJECTED";
+/// `REJECT_REASON VARCHAR(500)` (V89).
+pub const REJECT_REASON_MAX: usize = 500;
+
+/// The reason text made safe to place inside an HTML mail template.
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// The optional `{"reason": "..."}` body of `rejectRequest`: no body (or `null`) and a blank
+/// reason both mean none; the reason is trimmed, and more than 500 characters is a 400.
+fn reject_reason_from_body(bytes: &[u8]) -> AuthResult<Option<String>> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let reason = match crate::handlers::body::<Value>(bytes)? {
+        Value::Null => None,
+        Value::Object(m) => Fields(&m).string("reason")?,
+        _ => return Err(unreadable()),
+    };
+    let reason = reason.map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
+    if reason.as_ref().is_some_and(|r| r.chars().count() > REJECT_REASON_MAX) {
+        return Err(AuthError::msg(StatusCode::BAD_REQUEST, "user_app_request_reason_too_long", &[&REJECT_REASON_MAX.to_string()]));
+    }
+    Ok(reason)
+}
+
+/// How a request was decided, with what the mail for that decision needs.
+#[derive(Debug, Clone)]
+enum Decision {
+    Approved { profile_name: String },
+    Rejected { reason: Option<String> },
+}
+
+/// What the decision event says about the request and its requester.
+#[derive(Debug, Clone, Default)]
+struct DecidedFacts {
+    request_id: String,
+    app_code: String,
+    app_name: String,
+    request_client_code: String,
+    requester: Option<User>,
+    url_prefix: String,
+    decided_by: String,
+}
+
+/// The data of `USER_REQUEST_APPROVED` / `USER_REQUEST_REJECTED`, in the shape `USER_INVITED`
+/// uses for the same person fields: `firstName` falls back to the e-mail.
+fn decided_data(f: &DecidedFacts, d: &Decision) -> Vec<(String, Value)> {
+    let u = f.requester.as_ref();
+    let email = first_non_blank(&[u.and_then(|u| u.email_id.as_deref())]);
+    let mut data = vec![
+        ("requestId".into(), Value::from(f.request_id.clone())),
+        ("appCode".into(), Value::from(f.app_code.clone())),
+        ("appName".into(), Value::from(first_non_blank(&[Some(f.app_name.as_str()), Some(f.app_code.as_str())]))),
+        ("requestClientCode".into(), Value::from(f.request_client_code.clone())),
+        ("firstName".into(), Value::from(first_non_blank(&[u.and_then(|u| u.first_name.as_deref()), Some(email.as_str())]))),
+        ("lastName".into(), Value::from(first_non_blank(&[u.and_then(|u| u.last_name.as_deref())]))),
+        ("emailId".into(), Value::from(email.clone())),
+        ("phoneNumber".into(), Value::from(first_non_blank(&[u.and_then(|u| u.phone_number.as_deref())]))),
+        ("urlPrefix".into(), Value::from(f.url_prefix.clone())),
+        ("decidedBy".into(), Value::from(f.decided_by.clone())),
+    ];
+    match d {
+        Decision::Approved { profile_name } => data.push(("profileName".into(), Value::from(profile_name.clone()))),
+        Decision::Rejected { reason } => {
+            let reason = reason.clone().unwrap_or_default();
+            data.push(("reasonHtml".into(), Value::from(html_escape(&reason))));
+            data.push(("reason".into(), Value::from(reason)));
+        }
+    }
+    data
+}
+
 /// The display names `fillDetails` adds to an invite.
 #[derive(Debug, Clone, Default)]
 struct InviteNames {
@@ -136,6 +224,7 @@ fn request_json(a: &AccessRequest, n: &RequestNames) -> Value {
         .put("userId", opt(a.user_id))
         .put("appId", opt(a.app_id))
         .put("status", opt(a.status.clone()))
+        .put("rejectReason", opt(a.reject_reason.clone()))
         .put("requesterName", opt(rn))
         .put("requesterUserName", opt(ru))
         .put("requesterEmail", opt(re))
@@ -711,13 +800,64 @@ impl Admin {
         Ok(request_json(&created, &RequestNames::default()))
     }
 
+    /// `USER_REQUEST_APPROVED` / `USER_REQUEST_REJECTED` for the request's app, so that app's event
+    /// actions can mail the requester (modelled on `raise_invited`). Raised for the client the
+    /// decider signed in from, as `USER_INVITED` is. A failure is logged and the decision stands.
+    async fn raise_request_decided(&self, ca: &ContextAuth, r: &AccessRequest, d: &Decision) -> bool {
+        let event_name = match d {
+            Decision::Approved { .. } => USER_REQUEST_APPROVED,
+            Decision::Rejected { .. } => USER_REQUEST_REJECTED,
+        };
+        let result: AuthResult<bool> = async {
+            let Some(app) = (match r.app_id {
+                Some(a) => self.dir().store.app_by_id(a).await?,
+                None => None,
+            }) else {
+                tracing::warn!(request = ?r.request_id, event = event_name, "request without a known app: no decision event");
+                return Ok(false);
+            };
+            let client_id = r.client_id.unwrap_or_default();
+            let request_client_code = match self.dir().client(client_id).await? {
+                Some(c) => c.code.clone().unwrap_or_default(),
+                None => String::new(),
+            };
+            let requester = match r.user_id {
+                Some(u) => self.db.user_row(u).await?,
+                None => None,
+            };
+            let facts = DecidedFacts {
+                request_id: r.request_id.clone().unwrap_or_default(),
+                app_code: app.app_code.clone(),
+                app_name: app.app_name.clone().unwrap_or_default(),
+                request_client_code,
+                requester,
+                url_prefix: self.invite_url_prefix(&app.app_code, client_id).await?,
+                decided_by: first_non_blank(&[ca.user.first_name.as_deref(), ca.user.email_id.as_deref()]),
+            };
+            let event = EventMessage {
+                event_name: event_name.into(),
+                client_code: ca.logged_in_from_client_code.clone(),
+                app_code: Some(app.app_code.clone()),
+                x_debug: None,
+                draft: false,
+                data: decided_data(&facts, d),
+            };
+            self.events.publish(&event).await
+        }
+        .await;
+        result.unwrap_or_else(|e| {
+            tracing::error!(error = %e, request = ?r.request_id, event = event_name, "could not raise the request decision event");
+            false
+        })
+    }
+
     /// `super.update(request.setStatus(...))`: the row as given, `UPDATED_BY` the caller.
-    async fn request_decide(&self, ca: &ContextAuth, mut r: AccessRequest, status: &str) -> AuthResult<()> {
+    async fn request_decide(&self, ca: &ContextAuth, mut r: AccessRequest, status: &str) -> AuthResult<AccessRequest> {
         r.status = Some(status.into());
         r.updated_by = Some(ca.user.id());
         r.updated_at = None;
         self.db.entity_update(&REQUEST, r.id, &access_request_values(&r)).await?;
-        Ok(())
+        Ok(r)
     }
 
     /// `acceptRequest`.
@@ -744,18 +884,21 @@ impl Admin {
         if self.db.add_profile_to_user(r.user_id.unwrap_or_default(), pid).await?.is_none() {
             return Err(forbidden("forbidden_update", &["User Request"]));
         }
-        self.request_decide(ca, r, "APPROVED").await?;
+        let decided = self.request_decide(ca, r, "APPROVED").await?;
+        self.raise_request_decided(ca, &decided, &Decision::Approved { profile_name: profile.name.clone().unwrap_or_default() }).await;
         Ok(true)
     }
 
-    /// `rejectRequest`.
-    pub async fn request_reject(&self, ca: &ContextAuth, request_id: &str) -> AuthResult<bool> {
+    /// `rejectRequest`, with the optional reason (kept on the request and sent in the mail).
+    pub async fn request_reject(&self, ca: &ContextAuth, request_id: &str, reason: Option<String>) -> AuthResult<bool> {
         pre_authorize(ca, &["Authorities.User_CREATE"])?;
-        let r = self.entitled_request(ca, request_id).await?;
+        let mut r = self.entitled_request(ca, request_id).await?;
         if r.status.as_deref() != Some("PENDING") {
             return Err(AuthError::msg(StatusCode::BAD_REQUEST, "user_app_request_incorrect_status", &[]));
         }
-        self.request_decide(ca, r, "REJECTED").await?;
+        r.reject_reason = reason.clone();
+        let decided = self.request_decide(ca, r, "REJECTED").await?;
+        self.raise_request_decided(ca, &decided, &Decision::Rejected { reason }).await;
         Ok(true)
     }
 
@@ -850,7 +993,8 @@ r!(request_accept, "/users/acceptRequest", true, |s, r, ca| {
 });
 
 rp!(request_reject, "/users/rejectRequest/{requestId}", true, |s, r, ca, rid| {
-    Ok(json(&Value::Bool(s.request_reject(&ca, &rid).await?)))
+    let reason = reject_reason_from_body(&r.body)?;
+    Ok(json(&Value::Bool(s.request_reject(&ca, &rid, reason).await?)))
 });
 
 rp!(request_user, "/users/requestUser/{requestId}", true, |s, r, ca, rid| {
@@ -904,6 +1048,59 @@ mod tests {
         assert_eq!(v["clientName"], "C");
         let a = AccessRequest { id: 1, status: Some("PENDING".into()), ..Default::default() };
         assert_eq!(request_json(&a, &RequestNames::default()), json!({"id": 1, "status": "PENDING"}));
+        let a = AccessRequest { id: 1, status: Some("REJECTED".into()), reject_reason: Some("why".into()), ..Default::default() };
+        assert_eq!(request_json(&a, &RequestNames::default()), json!({"id": 1, "status": "REJECTED", "rejectReason": "why"}));
+    }
+
+    /// The optional reject body: none, blank and null are no reason; the text is trimmed; more
+    /// than 500 characters, or a body that is not an object, is a 400.
+    #[test]
+    fn reject_reasons() {
+        assert_eq!(reject_reason_from_body(b"").unwrap(), None);
+        assert_eq!(reject_reason_from_body(b"  \n").unwrap(), None);
+        assert_eq!(reject_reason_from_body(b"null").unwrap(), None);
+        assert_eq!(reject_reason_from_body(b"{}").unwrap(), None);
+        assert_eq!(reject_reason_from_body(br#"{"reason": null}"#).unwrap(), None);
+        assert_eq!(reject_reason_from_body(br#"{"reason": "   "}"#).unwrap(), None);
+        assert_eq!(reject_reason_from_body(br#"{"reason": "  Not a customer  "}"#).unwrap().as_deref(), Some("Not a customer"));
+        let at_max = json!({"reason": "\u{e9}".repeat(REJECT_REASON_MAX)}).to_string();
+        assert_eq!(reject_reason_from_body(at_max.as_bytes()).unwrap().map(|r| r.chars().count()), Some(REJECT_REASON_MAX), "characters, not bytes");
+        let over = json!({"reason": "x".repeat(REJECT_REASON_MAX + 1)}).to_string();
+        let e = reject_reason_from_body(over.as_bytes()).unwrap_err();
+        assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "The reason can be at most 500 characters long.".to_string()));
+        assert_eq!(reject_reason_from_body(b"[1]").unwrap_err().status(), StatusCode::BAD_REQUEST);
+        assert_eq!(reject_reason_from_body(b"{").unwrap_err().status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// The decision events' data: the person's fields as `USER_INVITED` has them (first name
+    /// falls back to the e-mail), the profile on approval, the reason and its escaped copy on
+    /// rejection.
+    #[test]
+    fn decision_event_data() {
+        let get = |d: &[(String, Value)], k: &str| d.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        let facts = DecidedFacts {
+            request_id: "42".into(),
+            app_code: "leadzumptwo".into(),
+            app_name: "LeadZump".into(),
+            request_client_code: "ZZC".into(),
+            requester: Some(User { email_id: Some("p@example.invalid".into()), phone_number: Some("NONE".into()), ..Default::default() }),
+            url_prefix: "https://x.example.test".into(),
+            decided_by: "Admin".into(),
+        };
+        let ok = decided_data(&facts, &Decision::Approved { profile_name: "Sales".into() });
+        assert_eq!(get(&ok, "firstName"), Some(json!("p@example.invalid")));
+        assert_eq!(get(&ok, "phoneNumber"), Some(json!("")));
+        assert_eq!(get(&ok, "profileName"), Some(json!("Sales")));
+        assert_eq!(get(&ok, "reason"), None);
+        for k in ["requestId", "appCode", "appName", "requestClientCode", "lastName", "emailId", "urlPrefix", "decidedBy"] {
+            assert!(get(&ok, k).is_some(), "{k}");
+        }
+        let no = decided_data(&facts, &Decision::Rejected { reason: Some("<b>Tom & \"Jerry's\"</b>".into()) });
+        assert_eq!(get(&no, "reason"), Some(json!("<b>Tom & \"Jerry's\"</b>")));
+        assert_eq!(get(&no, "reasonHtml"), Some(json!("&lt;b&gt;Tom &amp; &quot;Jerry&#39;s&quot;&lt;/b&gt;")));
+        assert_eq!(get(&no, "profileName"), None);
+        let none = decided_data(&DecidedFacts { app_code: "a".into(), ..Default::default() }, &Decision::Rejected { reason: None });
+        assert_eq!((get(&none, "reason"), get(&none, "reasonHtml"), get(&none, "appName")), (Some(json!("")), Some(json!("")), Some(json!("a"))));
     }
 
     /// RS3 and RS4: the invited client's URL when it has one, else the app owner's, else the
@@ -1105,10 +1302,49 @@ mod live {
         assert_eq!(err(s.request_accept(&below, Some(&rid1), Some(p1)).await).0, StatusCode::FORBIDDEN, "not ZZRUM's");
         assert_eq!(err(s.request_accept(&sys, Some(&rid2), Some(p1)).await).0, StatusCode::FORBIDDEN, "another app's profile");
         assert_eq!(err(s.request_accept(&sys, Some(&rid1), Some(p2)).await).0, StatusCode::FORBIDDEN, "restricted to p1");
-        assert!(s.request_accept(&sys, Some(&rid1), Some(p1)).await.unwrap());
-        assert_eq!(err(s.request_accept(&sys, Some(&rid1), Some(p1)).await).0, StatusCode::BAD_REQUEST, "decided");
-        assert!(s.request_reject(&sys, &rid2).await.unwrap());
-        assert_eq!(err(s.request_reject(&sys, &rid2).await).0, StatusCode::BAD_REQUEST);
+        // The decisions raise USER_REQUEST_APPROVED / USER_REQUEST_REJECTED for the request's app;
+        // refused decisions raise nothing.
+        let rec = Arc::new(Recorded::default());
+        let rs = Admin { internal: s.internal.clone(), events: rec.clone(), files: s.files.clone(), hosting: s.hosting.clone() };
+        let mut from_sys = sys.clone();
+        from_sys.logged_in_from_client_code = Some("SYSTEM".into());
+        assert!(rs.request_accept(&from_sys, Some(&rid1), Some(p1)).await.unwrap());
+        assert_eq!(err(rs.request_accept(&from_sys, Some(&rid1), Some(p1)).await).0, StatusCode::BAD_REQUEST, "decided");
+        let approved = rec.0.lock().unwrap().pop().expect("USER_REQUEST_APPROVED");
+        assert!(rec.0.lock().unwrap().is_empty(), "a refused decision raises nothing");
+        let data = |e: &EventMessage, k: &str| e.data.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or(Value::Null);
+        assert_eq!((approved.event_name.as_str(), approved.app_code.as_deref(), approved.client_code.as_deref()), (USER_REQUEST_APPROVED, Some("appbuilder"), Some("SYSTEM")));
+        assert_eq!(data(&approved, "requestId"), json!(rid1));
+        assert_eq!(data(&approved, "requestClientCode"), json!("ZZRUL"));
+        assert_eq!(data(&approved, "emailId"), json!(b.email_id.clone().unwrap_or_default()));
+        assert_eq!(data(&approved, "profileName"), json!(format!("zz p1 {run}")));
+        assert!(data(&approved, "urlPrefix").as_str().is_some_and(|u| u.starts_with("http")), "{approved:?}");
+        let reason = "<i>Not a customer</i> & no contract".to_string();
+        assert!(rs.request_reject(&from_sys, &rid2, Some(reason.clone())).await.unwrap());
+        assert_eq!(err(rs.request_reject(&from_sys, &rid2, None).await).0, StatusCode::BAD_REQUEST);
+        let rejected = rec.0.lock().unwrap().pop().expect("USER_REQUEST_REJECTED");
+        assert_eq!((rejected.event_name.as_str(), rejected.app_code.as_deref()), (USER_REQUEST_REJECTED, Some("leadzump")));
+        assert_eq!(data(&rejected, "reason"), json!(reason));
+        assert_eq!(data(&rejected, "reasonHtml"), json!("&lt;i&gt;Not a customer&lt;/i&gt; &amp; no contract"));
+        let stored = s.db.request_by_request_id(&rid2).await.unwrap().unwrap();
+        assert_eq!((stored.status.as_deref(), stored.reject_reason.as_deref()), (Some("REJECTED"), Some(reason.as_str())));
+        assert_eq!(s.db.request_by_request_id(&rid1).await.unwrap().unwrap().reject_reason, None);
+        // A publish that fails leaves the decision made.
+        let r3 = s.request_create(&ca, Some("leadzump")).await.unwrap()["requestId"].as_str().unwrap().to_string();
+        let failing = Admin { internal: s.internal.clone(), events: Arc::new(Failing), files: s.files.clone(), hosting: s.hosting.clone() };
+        assert!(failing.request_reject(&from_sys, &r3, None).await.unwrap());
+        assert_eq!(s.db.request_by_request_id(&r3).await.unwrap().unwrap().status.as_deref(), Some("REJECTED"));
+        // Through the route: an empty body still rejects; a reason over 500 characters is a 400
+        // that leaves the request pending.
+        let h = [("authorization", basic_142()), ("clientcode", "SYSTEM".to_string()), ("appcode", "leadzump".to_string())];
+        let r4 = s.request_create(&ca, Some("leadzump")).await.unwrap()["requestId"].as_str().unwrap().to_string();
+        let (st, v) = fx.http_with("POST", &format!("/users/rejectRequest/{r4}"), &h, Some(json!({"reason": "x".repeat(REJECT_REASON_MAX + 1)}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert_eq!(s.db.request_by_request_id(&r4).await.unwrap().unwrap().status.as_deref(), Some("PENDING"));
+        let (st, v) = fx.http_with("POST", &format!("/users/rejectRequest/{r4}"), &h, None).await;
+        assert_eq!((st, v), (StatusCode::OK, json!(true)));
+        let stored = s.db.request_by_request_id(&r4).await.unwrap().unwrap();
+        assert_eq!((stored.status.as_deref(), stored.reject_reason), (Some("REJECTED"), None));
         ca.user.string_authorities = Some(vec!["Authorities.Logged_IN".into()]);
         let (st, msg) = err(s.request_create(&ca, Some("appbuilder")).await);
         assert_eq!(st, StatusCode::BAD_REQUEST, "already has a profile of appbuilder: {msg}");
@@ -1117,17 +1353,31 @@ mod live {
         fx.finish().await;
     }
 
-    /// Keeps the `urlPrefix` of every `USER_INVITED` it is handed.
+    /// Keeps every event it is handed.
     #[derive(Default)]
-    struct Recorded(std::sync::Mutex<Vec<String>>);
+    struct Recorded(std::sync::Mutex<Vec<EventMessage>>);
 
     #[async_trait::async_trait]
     impl crate::events::EventSink for Recorded {
         async fn publish(&self, e: &EventMessage) -> AuthResult<bool> {
-            let prefix = e.data.iter().find(|(k, _)| k == "urlPrefix").and_then(|(_, v)| v.as_str()).unwrap_or("<none>");
-            self.0.lock().unwrap().push(prefix.to_string());
+            self.0.lock().unwrap().push(e.clone());
             Ok(true)
         }
+    }
+
+    /// Fails every publish, as a broken RabbitMQ would.
+    struct Failing;
+
+    #[async_trait::async_trait]
+    impl crate::events::EventSink for Failing {
+        async fn publish(&self, _: &EventMessage) -> AuthResult<bool> {
+            Err(AuthError::internal("no broker"))
+        }
+    }
+
+    /// The `urlPrefix` of an event (`<none>` without one).
+    fn url_prefix(e: &EventMessage) -> String {
+        e.data.iter().find(|(k, _)| k == "urlPrefix").and_then(|(_, v)| v.as_str()).unwrap_or("<none>").to_string()
     }
 
     /// RS3 and RS4: the invite mail's `urlPrefix` on a scratch app of SYSTEM, for an invite into
@@ -1192,7 +1442,7 @@ mod live {
         assert!(expected.starts_with("https://"), "{expected}");
         let (st, v) = fx.http_with("POST", "/users/invite", &h, Some(json!({"clientId": m, "emailId": format!("zzrl{}u1@example.invalid", fx.run)}))).await;
         assert_eq!(st, StatusCode::OK, "{v}");
-        assert_eq!(rec.0.lock().unwrap().pop(), Some(expected));
+        assert_eq!(rec.0.lock().unwrap().pop().map(|e| url_prefix(&e)), Some(expected));
         fx.finish().await;
     }
 
