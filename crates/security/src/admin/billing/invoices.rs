@@ -57,6 +57,13 @@ pub fn billing_email(payment: &Rec) -> Option<String> {
     email.as_str().map(str::trim).filter(|e| !e.is_empty()).map(str::to_string)
 }
 
+/// LZT-2003: the e-mail of the user who started the purchase (the invoice's `createdBy`);
+/// `None` for a deleted user or one without a usable address.
+pub fn buyer_email(user: Option<&crate::model::User>) -> Option<String> {
+    let u = user.filter(|u| u.status_code != "DELETED")?;
+    u.email_id.as_deref().map(str::trim).filter(|e| !e.is_empty() && *e != "NONE").map(str::to_string)
+}
+
 /// `pickPayment`: the PAID payment, else the last one.
 pub fn pick_payment(payments: &[Rec]) -> Option<&Rec> {
     payments.iter().find(|p| p.str("status") == Some("PAID")).or(payments.last())
@@ -187,6 +194,11 @@ impl Billing<'_> {
             None => vec![],
         };
         let payment = pick_payment(&payments);
+        // A failed lookup only leaves `buyerEmail` empty: it must not hold up the payment.
+        let buyer = match inv.u64("createdBy") {
+            Some(u) => self.dir().user(u).await.ok().flatten(),
+            None => None,
+        };
         let num = |p: &str| inv.dec(p).map(|d| d.to_json()).unwrap_or(Value::Null);
         let text = |p: &str| opt(inv.str(p).map(str::to_string));
         let gateway = payment.and_then(|p| p.str("gateway")).map(gateway_label);
@@ -215,8 +227,10 @@ impl Billing<'_> {
             ("paymentMethod", Value::from(payment.map(|p| captured_method(p).or_else(|| gateway.clone()).unwrap_or_default()).unwrap_or_default())),
             ("paymentGateway", Value::from(gateway.clone().unwrap_or_default())),
             ("paidOn", Value::from(payment.and_then(|p| p.ts("paidAt")).map(|t| t.date().to_string()).unwrap_or_default())),
-            // LZT-2003: the invoice mail goes to this address (and the client's owners).
+            // LZT-2003: the invoice mail goes to this address (the owners only when it is empty).
             ("billingEmail", Value::from(payment.and_then(billing_email).unwrap_or_default())),
+            // LZT-2003: and to the user who made the purchase, when that is someone else.
+            ("buyerEmail", Value::from(buyer_email(buyer.as_deref()).unwrap_or_default())),
         ];
         let data = hash_map_order_str(fields.iter().map(|(k, _)| *k))
             .into_iter()
@@ -308,6 +322,22 @@ mod tests {
         assert_eq!(billing_email(&paid(json!({"webhook": {"payload": {"payment": {"entity": {"email": null}}}}}))), None);
         assert_eq!(billing_email(&paid(json!({"init": {}, "captured": {"method": "card"}}))), None);
         assert_eq!(billing_email(&Rec::new(&PAYMENT)), None);
+    }
+
+    #[test]
+    fn buyer_email_skips_deleted_users_and_empty_addresses() {
+        let user = |status: &str, email: Option<&str>| crate::model::User {
+            status_code: status.into(),
+            email_id: email.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(buyer_email(Some(&user("ACTIVE", Some(" buyer@x.com ")))).as_deref(), Some("buyer@x.com"));
+        assert_eq!(buyer_email(Some(&user("INACTIVE", Some("buyer@x.com")))).as_deref(), Some("buyer@x.com"));
+        assert_eq!(buyer_email(Some(&user("DELETED", Some("buyer@x.com")))), None);
+        assert_eq!(buyer_email(Some(&user("ACTIVE", Some("NONE")))), None);
+        assert_eq!(buyer_email(Some(&user("ACTIVE", Some("")))), None);
+        assert_eq!(buyer_email(Some(&user("ACTIVE", None))), None);
+        assert_eq!(buyer_email(None), None);
     }
 
     #[test]
