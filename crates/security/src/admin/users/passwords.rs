@@ -451,21 +451,35 @@ impl Admin {
     }
 
     /// Filters a `findUserClients` list to the entries whose `userId` has a profile assigned
-    /// in `app_code` (direct assignment only, no default-profile fallback). An unknown app
-    /// leaves the list as it was.
+    /// in `app_code` (direct assignment only, no default-profile fallback) or is an Owner of
+    /// that client (the `Owner` role through a profile, a direct role or a sub-role, as
+    /// `owner_user_ids` reads it; LZT-1994, 2026-11-11). An unknown app leaves the list as it was.
     pub async fn keep_clients_with_app_profile(&self, list: Vec<Value>, app_code: &str) -> AuthResult<Vec<Value>> {
         let Some(app) = self.dir().store.app_by_code(app_code).await? else {
             return Ok(list);
         };
-        let mut kept = Vec::with_capacity(list.len());
-        for v in list {
-            let Some(user_id) = v.get("userId").and_then(Value::as_u64) else { continue };
-            if self.dir().store.has_assigned_profile(user_id, app.id).await? {
-                kept.push(v);
+        let ids: Vec<u64> = list.iter().filter_map(picker_user_id).collect();
+        let owners = self.dir().store.owner_user_ids(&ids).await?;
+        let mut profiled = Vec::new();
+        for id in ids.iter().filter(|i| !owners.contains(i)) {
+            if self.dir().store.has_assigned_profile(*id, app.id).await? {
+                profiled.push(*id);
             }
         }
-        Ok(kept)
+        Ok(keep_profiled_or_owner(list, &owners, &profiled))
     }
+}
+
+fn picker_user_id(v: &Value) -> Option<u64> {
+    v.get("userId").and_then(Value::as_u64)
+}
+
+/// The picker entries kept by `withProfile=true`: the user holds a profile of the app, or is an
+/// Owner of that client. An entry without a `userId` is dropped; the order is kept.
+fn keep_profiled_or_owner(list: Vec<Value>, owners: &[u64], profiled: &[u64]) -> Vec<Value> {
+    list.into_iter()
+        .filter(|v| picker_user_id(v).is_some_and(|id| owners.contains(&id) || profiled.contains(&id)))
+        .collect()
 }
 
 macro_rules! r {
@@ -515,8 +529,8 @@ r!(user_clients, "/users/findUserClients", false, |s, r, ca| {
         },
     };
     // `withProfile=true` (opt-in, LZT-1994): keep only the clients where that user holds a
-    // profile of the request's app, so the sign-in picker lists the organisations the person
-    // can actually use. Without it the old list is returned unchanged.
+    // profile of the request's app or is the Owner, so the sign-in picker lists the
+    // organisations the person can actually use. Without it the old list is returned unchanged.
     let with_profile = matches!(r.params.get("withProfile").map(|v| v.trim().to_lowercase()).as_deref(), Some("true" | "on" | "yes" | "1"));
     let header_app = r.info.header("appCode");
     let app_code = if app_level { header_app.clone() } else { None };
@@ -562,6 +576,22 @@ mod tests {
         assert_eq!(compare_ignore_case("abc", "ABD"), std::cmp::Ordering::Less);
         assert_eq!(compare_ignore_case("Ab", "aB"), std::cmp::Ordering::Equal);
         assert_eq!(compare_ignore_case("a", "ab"), std::cmp::Ordering::Less);
+    }
+
+    /// LZT-1994 (2026-11-11): `withProfile=true` keeps an org when the user holds a profile of
+    /// the app there OR is its Owner; the rest go, in order, and an entry without a user id too.
+    #[test]
+    fn with_profile_keeps_profiled_or_owner() {
+        let entry = |id: u64, name: &str| json!({"userId": id, "client": {"name": name}});
+        let list = vec![entry(1, "FIN"), entry(2, "FIN2"), entry(3, "INTERN"), entry(4, "SYSTEM"), json!({"client": {"name": "x"}})];
+        let names = |l: Vec<Value>| l.iter().map(|v| v["client"]["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        // FIN: a profile; FIN2: Owner without a profile; SYSTEM: both; INTERN: neither.
+        assert_eq!(names(keep_profiled_or_owner(list.clone(), &[2, 4], &[1, 4])), ["FIN", "FIN2", "SYSTEM"]);
+        // Profile only (the earlier rule) and Owner only.
+        assert_eq!(names(keep_profiled_or_owner(list.clone(), &[], &[1])), ["FIN"]);
+        assert_eq!(names(keep_profiled_or_owner(list.clone(), &[3], &[])), ["INTERN"]);
+        assert!(keep_profiled_or_owner(list, &[], &[]).is_empty());
+        assert_eq!(picker_user_id(&json!({"userId": "7"})), None);
     }
 }
 
