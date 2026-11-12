@@ -255,8 +255,9 @@ impl Billing<'_> {
     }
 
     /// `buildInvoice` + `invoiceService.create`: the PENDING invoice, seller and buyer
-    /// snapshotted, numbered for the seller's financial year.
-    async fn create_invoice(&self, buyer: &Client, bundle: &Rec, config: &Rec, requested: Option<Dec>) -> AuthResult<Option<Rec>> {
+    /// snapshotted, numbered for the seller's financial year. LZT-2003: `CREATED_BY` holds the
+    /// user who started the purchase, so the invoice events can name the buyer (`buyerEmail`).
+    async fn create_invoice(&self, by: Option<u64>, buyer: &Client, bundle: &Rec, config: &Rec, requested: Option<Dec>) -> AuthResult<Option<Rec>> {
         let p = price(bundle, config, requested)?;
         let app = config.u64("appId");
         let profile = match app {
@@ -270,6 +271,7 @@ impl Billing<'_> {
         let buyer_name = profile.str("legalName").filter(|n| !n.trim().is_empty()).map(str::to_string).or_else(|| buyer.name.clone());
         let opt_str = |v: Option<String>| v.map(Val::Str).unwrap_or(Val::Null);
         let invoice = Rec::new(&INVOICE)
+            .with("createdBy", by.map(Val::Id).unwrap_or(Val::Null))
             .with("invoiceNumber", Val::Str(number))
             .with("invoiceDate", Val::Ts(self.now_utc()))
             .with("status", Val::Str("PENDING".into()))
@@ -389,7 +391,7 @@ impl Billing<'_> {
     async fn start_purchase(&self, ca: &ContextAuth, req: &PurchaseRequest) -> AuthResult<Option<(std::sync::Arc<Client>, Rec, Rec)>> {
         let Some(buyer) = self.resolve_buyer(ca, req.client_id).await? else { return Ok(None) };
         let (bundle, config) = self.bundle_and_config(req.bundle_id).await?;
-        let Some(invoice) = self.create_invoice(&buyer, &bundle, &config, req.tokens).await? else { return Ok(None) };
+        let Some(invoice) = self.create_invoice(ca.user.id, &buyer, &bundle, &config, req.tokens).await? else { return Ok(None) };
         Ok(Some((buyer, config, invoice)))
     }
 

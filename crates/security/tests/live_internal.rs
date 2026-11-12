@@ -716,6 +716,11 @@ async fn user_dao_reads() {
     let distinct: std::collections::HashSet<_> = roots.iter().collect();
     assert_eq!(distinct.len(), roots.len());
     assert!(db.emails_of_users(&[]).await.unwrap().is_empty());
+    // LZT-2003: INACTIVE and DELETED users give no e-mail; an ACTIVE one with an address does.
+    let off = l.ids("SELECT ID FROM security_user WHERE STATUS_CODE IN ('INACTIVE', 'DELETED') AND EMAIL_ID IS NOT NULL LIMIT 5").await;
+    assert!(db.emails_of_users(&off).await.unwrap().is_empty() || off.is_empty());
+    let on = l.ids("SELECT ID FROM security_user WHERE STATUS_CODE = 'ACTIVE' AND EMAIL_ID IS NOT NULL AND EMAIL_ID <> 'NONE' LIMIT 1").await;
+    assert_eq!(db.emails_of_users(&on).await.unwrap().len(), on.len());
     assert!(db.user_ids_of_client(u64::MAX, false).await.unwrap().is_empty());
     assert!(!db.user_ids_of_client(1, true).await.unwrap().is_empty());
 }

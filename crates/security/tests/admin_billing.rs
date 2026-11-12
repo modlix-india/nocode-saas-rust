@@ -461,6 +461,8 @@ async fn fixed_bundle_adds_gst_on_top_and_snapshots_the_invoice() {
     let inv = invoices(&w).pop().unwrap();
     assert_eq!(r["invoiceId"], json!(inv.id().unwrap()));
     assert_eq!(inv.str("status"), Some("PENDING"));
+    // LZT-2003: the purchasing user is kept as the invoice's creator.
+    assert_eq!(inv.u64("createdBy"), Some(77));
     assert_eq!((inv.u64("sellerClientId"), inv.u64("clientId")), (Some(C_CLIENT), Some(M_CLIENT)));
     // No saved profile: the client's name.
     assert_eq!(inv.str("buyerLegalName"), Some("BUS name"));
@@ -871,9 +873,20 @@ async fn mark_paid_and_emit_persists_and_raises_invoice_generated() {
     assert_eq!((e.event_name.as_str(), e.app_code.as_deref(), e.client_code.as_deref()), ("INVOICE_GENERATED", Some("crm"), Some("BUS")));
     let data: HashMap<String, Value> = e.data.iter().cloned().collect();
     assert_eq!(data["invoiceNumber"], "INV/2026-27/10/1");
-    assert_eq!(data.len(), 25);
-    // LZT-2003: no paid payment with a webhook yet, so no billing e-mail.
+    assert_eq!(data.len(), 26);
+    // LZT-2003: no paid payment with a webhook yet, so no billing e-mail; no creator, no buyer.
     assert_eq!(data["billingEmail"], "");
+    assert_eq!(data["buyerEmail"], "");
+    // LZT-2003: the user who started the purchase (CREATED_BY) is named as the buyer, on the
+    // generated and the failed event alike; an unknown user leaves it empty.
+    for (by, name, want) in [(Some(10), "INVOICE_GENERATED", "owner@example.com"), (Some(15), "INVOICE_PAYMENT_FAILED", ""), (Some(4040), "X", "")] {
+        let w3 = world();
+        let inv = invoice(INVOICE_ID, C_CLIENT, M_CLIENT, APP, "PAID").with("createdBy", by.map(Val::Id).unwrap_or(Val::Null));
+        w3.billing().raise_invoice_event(&system(), &inv, name).await.unwrap();
+        let e = w3.events.events.lock().unwrap()[0].clone();
+        let data: HashMap<String, Value> = e.data.iter().cloned().collect();
+        assert_eq!((e.event_name.as_str(), data["buyerEmail"].as_str()), (name, Some(want)));
+    }
     // An events outage fails the call, as in Java.
     let mut w2 = world();
     w2.events = Arc::new(RecordingEvents { fail: true, ..Default::default() });

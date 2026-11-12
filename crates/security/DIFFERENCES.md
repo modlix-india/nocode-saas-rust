@@ -529,3 +529,19 @@ every lookup for an empty `clientCode`, which hid a missing header on every envi
 one and broke production, which had none. `register::valid_client_code` numbers such a name under
 `CLNT` instead (`CLNT`, then `CLNT1`, `CLNT2`...). `client_code_prefix` itself keeps Java's answer.
 Tests: `admin::clients::register::tests::code_prefixes`.
+
+## Invoice events name the buyer; owner mails skip inactive users (2026-11-12, LZT-2003)
+
+A purchase (`purchase`, `purchaseWithOrder`) now stores the user who started it in the invoice's
+`CREATED_BY` (Java left it NULL). `INVOICE_GENERATED` and `INVOICE_PAYMENT_FAILED` carry that
+user's e-mail as `buyerEmail` next to `billingEmail` (the address typed at Razorpay checkout); it
+is empty for invoices made before this change, for a deleted user and when the lookup fails, which
+never holds up the payment. The leadzumptwo success mail goes to `billingEmail` plus `buyerEmail`
+when that differs, and to the owners only when `billingEmail` is empty.
+
+`UserDAO.getEmailsOfUsers` (its one caller is `internal/ownerEmails`, the core function
+`CoreServices.Security.GetOwnersEmails`) now leaves out INACTIVE users as well as DELETED ones, so
+a switched-off owner (one that bounces, say) gets no owner mail.
+Tests: `admin::billing::invoices::tests::buyer_email_skips_deleted_users_and_empty_addresses`,
+`tests/admin_billing.rs` (`fixed_bundle_adds_gst_on_top_and_snapshots_the_invoice`,
+`mark_paid_and_emit_persists_and_raises_invoice_generated`), `tests/live_internal.rs`.
