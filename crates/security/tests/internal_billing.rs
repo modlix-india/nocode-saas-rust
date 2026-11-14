@@ -1074,6 +1074,22 @@ async fn the_plans_model_list_refuses_other_models() {
     assert!(w.internal.is_ai_allowed("crm", "BUS").await.unwrap());
 }
 
+/// Before its first use a client has no wallet; the gate judges by the default plan it will land
+/// on (found on dev 2026-11-14: a new Free client was allowed a premium model once).
+#[tokio::test]
+async fn a_client_without_a_wallet_is_judged_by_the_default_plan() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.plans.push(Plan { ai_models: vec!["deepseek".into()], is_default: true, ..plan(30, "free", "Free") });
+    }
+    let v = w.internal.allowed("crm", "BUS", None, Some("claude-opus-5-5"), None).await.unwrap();
+    assert_eq!(v, json!({"allowed": false, "reason": "The plan does not include this AI model"}));
+    assert_eq!(w.internal.allowed("crm", "BUS", None, Some("deepseek-chat"), None).await.unwrap()["allowed"], true);
+    assert!(w.b().wallets.is_empty(), "the gate never creates a wallet");
+}
+
 #[tokio::test]
 async fn ai_allowed_only_blocks_an_active_billed_suspended_wallet() {
     let w = world();
