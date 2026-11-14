@@ -566,7 +566,7 @@ mod tests {
             "userName", "username", "mail.smtp.host", "mail.smtp.auth", "baseUrl", "tokenUrl", "tokenKey", "refreshTokenKey",
             "expireAtKey", "refreshExpireAtKey", "tokenDetails", "tokenConnection", "authTokenFunctionName", "headerPrefix",
             "authHeaderPrefix", "autherization", "client_id", "clientId", "accountSid", "callerId", "metaAppId", "grantType",
-            "keyId", "fromAddress", "url", "useDefaultConnection", "",
+            "keyId", "fromAddress", "fromName", "replyTo", "url", "useDefaultConnection", "",
         ] {
             assert!(!is_secret_key(k), "{k} is not a credential");
         }
