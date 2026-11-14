@@ -81,6 +81,10 @@ impl CoreFunctions {
         functions.extend(crate::functions::oauth2_token_info::all(&deps.integrations));
         // Rust only: Word templates' blanks and tags, and signatures stamped onto a PDF (pdf-render).
         functions.extend(crate::functions::docx::all(&deps.security, &deps.files));
+        // Rust only: an app records what it bills for, undoes it, asks whether it is allowed.
+        functions.extend(crate::functions::billing::all(&deps.security));
+        // Rust only: a text message from a company's SMS template through its own provider.
+        functions.extend(crate::functions::messaging::all(&deps.integrations));
         let mut map = HashMap::new();
         let mut names = Vec::new();
         for f in functions {
@@ -120,7 +124,7 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 95);
+        assert_eq!(core.names().len(), 99);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
@@ -135,9 +139,13 @@ mod tests {
                 "CoreServices.REST.OAuth2TokenInfo",
                 "CoreServices.File.DocxInspect",
                 "CoreServices.File.DocxPrepare",
-                "CoreServices.File.PdfStamp"
+                "CoreServices.File.PdfStamp",
+                "CoreServices.Billing.RecordUsage",
+                "CoreServices.Billing.ReverseUsage",
+                "CoreServices.Billing.Allowed",
+                "CoreServices.Messaging.SendSms"
             ],
-            "the contact codes, the connection signature check, the token info, then the Word template functions, come last"
+            "the contact codes, the connection signature check, the token info, the Word template functions, billing, then SendSms, come last"
         );
         assert_eq!(
             core.names()[80..88],

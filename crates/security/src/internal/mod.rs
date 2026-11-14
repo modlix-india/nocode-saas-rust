@@ -6,6 +6,7 @@
 
 pub mod apps;
 pub mod billing;
+pub mod billing_cycle;
 pub mod clients;
 pub mod contact;
 pub mod routes;

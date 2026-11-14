@@ -5204,5 +5204,197 @@
     }
    }
   }
+ },
+ "CoreServices.Billing.RecordUsage": {
+  "namespace": "CoreServices.Billing",
+  "name": "RecordUsage",
+  "parameters": {
+   "meterKey": {
+    "schema": {
+     "namespace": "_",
+     "name": "meterKey",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "meterKey",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "quantity": {
+    "schema": {
+     "namespace": "_",
+     "name": "quantity",
+     "version": 1,
+     "type": "DOUBLE",
+     "defaultValue": 1
+    },
+    "parameterName": "quantity",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "figures": {
+    "schema": {
+     "namespace": "_",
+     "name": "figures",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "figures",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "reference": {
+    "schema": {
+     "namespace": "_",
+     "name": "reference",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "reference",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "recorded": {
+      "namespace": "_",
+      "name": "recorded",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "overLimit": {
+      "namespace": "_",
+      "name": "overLimit",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "charged": {
+      "namespace": "_",
+      "name": "charged",
+      "version": 1,
+      "type": "DOUBLE"
+     },
+     "suspended": {
+      "namespace": "_",
+      "name": "suspended",
+      "version": 1,
+      "type": "BOOLEAN"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Billing.ReverseUsage": {
+  "namespace": "CoreServices.Billing",
+  "name": "ReverseUsage",
+  "parameters": {
+   "meterKey": {
+    "schema": {
+     "namespace": "_",
+     "name": "meterKey",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "meterKey",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "reference": {
+    "schema": {
+     "namespace": "_",
+     "name": "reference",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "reference",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "reversed": {
+      "namespace": "_",
+      "name": "reversed",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "reason": {
+      "namespace": "_",
+      "name": "reason",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Billing.Allowed": {
+  "namespace": "CoreServices.Billing",
+  "name": "Allowed",
+  "parameters": {
+   "meterKey": {
+    "schema": {
+     "namespace": "_",
+     "name": "meterKey",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "meterKey",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "model": {
+    "schema": {
+     "namespace": "_",
+     "name": "model",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "model",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "count": {
+    "schema": {
+     "namespace": "_",
+     "name": "count",
+     "version": 1,
+     "type": "DOUBLE",
+     "defaultValue": -1
+    },
+    "parameterName": "count",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "allowed": {
+      "namespace": "_",
+      "name": "allowed",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "reason": {
+      "namespace": "_",
+      "name": "reason",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
  }
 }

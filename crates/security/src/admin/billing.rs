@@ -2,6 +2,7 @@
 //! webhook), invoices, wallets (piece 3 of security-admin, see SPLIT.md).
 //!
 //! - [`configs`]: `AppBillingConfigService`, `AppBillingBundleService`;
+//! - [`meters`]: a config's meters and plans, subscribing to a plan, the platform AI rates;
 //! - [`invoices`]: `InvoiceService`, `BillingProfileService`;
 //! - [`purchase`]: `BundlePurchaseService`, `RazorpayPaymentService` (quote, order, webhook);
 //! - [`wallets`]: `WalletService`'s owner views, credits and adjustments;
@@ -15,6 +16,7 @@
 pub mod body;
 pub mod configs;
 pub mod invoices;
+pub mod meters;
 pub mod money;
 pub mod purchase;
 mod routes;
