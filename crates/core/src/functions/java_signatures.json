@@ -4371,6 +4371,55 @@
    }
   }
  },
+ "CoreServices.Security.GetUsersWithAuthority": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUsersWithAuthority",
+  "parameters": {
+   "authority": {
+    "schema": {
+     "namespace": "_",
+     "name": "authority",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "authority",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "users": {
+      "namespace": "_",
+      "name": "users",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "user",
+       "version": 1,
+       "type": "OBJECT"
+      }
+     }
+    }
+   }
+  }
+ },
  "CoreServices.Security.IsBeingManagedByCode": {
   "namespace": "CoreServices.Security",
   "name": "IsBeingManagedByCode",
