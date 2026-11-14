@@ -643,3 +643,63 @@ async fn sendgrid_posts_cc_and_bcc_in_the_personalization() {
     let req = log.lock()[1].clone();
     assert!(req.contains(r#"{"personalizations":[{"to":[{"email":"ann@example.com"}]}],"#), "{req}");
 }
+
+/// CXZ-1847: the connection's `fromName` and `replyTo` reach the message; a bad reply-to is left
+/// out and the mail still goes; without them the message is as before.
+#[tokio::test]
+async fn smtp_sender_name_and_reply_to_from_the_connection() {
+    let s = StubSmtp::start(vec![]).await;
+    let named = {
+        let mut c = smtp_connection(s.port, json!({}));
+        let d = c.connection_details.as_mut().unwrap();
+        d.insert("fromName".into(), json!("Valmark Homes"));
+        d.insert("replyTo".into(), json!("cvcrm@valmark.in"));
+        c.name = Some("named".into());
+        c
+    };
+    let mut bad = named.clone();
+    bad.name = Some("bad".into());
+    bad.connection_details.as_mut().unwrap().insert("replyTo".into(), json!("not an address"));
+    let store = Store(vec![smtp_connection(s.port, json!({})), named, bad]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: "http://127.0.0.1:1", block_private_targets: false };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let none = (&Default::default(), &Default::default());
+
+    assert_eq!(email::send_email_function(&ctx, &caller(), "", "", Some("named"), "welcome", None, &d, none.0, none.1).await.unwrap(), Some(true));
+    let msg = s.accepted.lock()[0].clone();
+    assert!(msg.contains("From: \"Valmark Homes\" <noreply@example.com>") || msg.contains("From: Valmark Homes <noreply@example.com>"), "{msg}");
+    assert!(msg.contains("Reply-To: cvcrm@valmark.in"), "{msg}");
+
+    assert_eq!(email::send_email_function(&ctx, &caller(), "", "", Some("bad"), "welcome", None, &d, none.0, none.1).await.unwrap(), Some(true));
+    let msg = s.accepted.lock()[1].clone();
+    assert!(msg.contains("Valmark Homes"), "{msg}");
+    assert!(!msg.contains("Reply-To"), "{msg}");
+
+    assert_eq!(email::send_email_function(&ctx, &caller(), "", "", Some("mail"), "welcome", None, &d, none.0, none.1).await.unwrap(), Some(true));
+    let msg = s.accepted.lock()[2].clone();
+    assert!(msg.contains("From: noreply@example.com"), "{msg}");
+    assert!(!msg.contains("Reply-To"), "{msg}");
+    // The envelope sender stays the bare address.
+    let p = email::processed_email(&store.0[1], &[], &welcome(), &d).unwrap();
+    assert_eq!((p.from.as_str(), p.from_name.as_deref(), p.reply_to.as_deref()), ("noreply@example.com", Some("Valmark Homes"), Some("cvcrm@valmark.in")));
+}
+
+#[tokio::test]
+async fn sendgrid_posts_sender_name_and_reply_to_from_the_connection() {
+    let (port, log) = fake_sendgrid(202).await;
+    let sg = Connection::from_json(json!({"name": "sg", "clientCode": "SYSTEM", "connectionType": "MAIL", "connectionSubType": "SENDGRID",
+        "connectionDetails": {"apiKey": "SG.key", "fromAddress": "noreply@example.com", "fromName": "Valmark", "replyTo": "cvcrm@valmark.in"}})).unwrap();
+    let store = Store(vec![sg]);
+    let templates = Templates(vec![welcome()]);
+    let http = HttpClient { block_private_targets: false };
+    let url = format!("http://127.0.0.1:{port}/v3/mail/send");
+    let ctx = EmailContext { connections: &store, templates: &templates, http: &http, sendgrid_url: &url, block_private_targets: false };
+    let d = data(json!({"email": "ann@example.com", "name": "Ann", "vip": false}));
+    let sent = email::send_email_function(&ctx, &caller(), "", "", Some("sg"), "welcome", None, &d, &Default::default(), &Default::default()).await.unwrap();
+    assert_eq!(sent, Some(true));
+    let req = log.lock()[0].clone();
+    assert!(req.contains(r#""from":{"email":"noreply@example.com","name":"Valmark"}"#), "{req}");
+    assert!(req.contains(r#""reply_to":{"email":"cvcrm@valmark.in"}"#), "{req}");
+}
