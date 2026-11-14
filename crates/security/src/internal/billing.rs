@@ -289,7 +289,7 @@ impl Internal {
         let Some((wallet, created)) = self.billing.create_wallet(client_id, app_id).await? else { return Ok(None) };
         if created {
             if let Some(c) = config {
-                if let Some(plan) = self.billing.plans_of_config(c.id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE") {
+                if let Some(plan) = self.default_plan(c.id).await? {
                     let today = self.auth.clock.local().date();
                     self.put_on_plan(ca, &wallet, c, &plan, today, false).await?;
                     return self.billing.wallet_by_id(wallet.id).await;
@@ -318,6 +318,11 @@ impl Internal {
             .await?;
         }
         Ok(wp)
+    }
+
+    /// The config's default plan (where a new client starts), if it has an ACTIVE one.
+    pub async fn default_plan(&self, config_id: u64) -> AuthResult<Option<Plan>> {
+        Ok(self.billing.plans_of_config(config_id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE"))
     }
 
     /// The wallet's current plan.
@@ -686,18 +691,24 @@ impl Internal {
         let meter = meters
             .iter()
             .find(|m| m.status == "ACTIVE" && (m.key == key || (meter_key.is_none() && m.source == "AI_TOKENS")));
-        let Some(wallet) = self.billing.wallet(client.id(), app.id).await? else { return Ok(yes()) };
-        let plan = self.plan_of(&wallet).await?;
+        // No wallet yet (the client's first use): judge by the plan it will land on, the config's
+        // default plan, so a new Free client cannot use a premium model or pass a cap once.
+        let wallet = self.billing.wallet(client.id(), app.id).await?;
+        let plan = match wallet.as_ref() {
+            Some(w) => self.plan_of(w).await?,
+            None => self.default_plan(config.id).await?,
+        };
         if let (Some(p), Some(model)) = (plan.as_ref(), model) {
             if !p.allows_model(model) {
                 return Ok(allowed_json(false, Some("The plan does not include this AI model")));
             }
         }
+        let suspended = wallet.as_ref().is_some_and(Wallet::suspended);
         let Some(meter) = meter else {
             // AI with no AI meter on the config: only a suspended wallet stops it.
-            return Ok(if meter_key.is_none() && wallet.suspended() { allowed_json(false, Some("The wallet is suspended")) } else { yes() });
+            return Ok(if meter_key.is_none() && suspended { allowed_json(false, Some("The wallet is suspended")) } else { yes() });
         };
-        if !meter.invoiced() && wallet.suspended() {
+        if !meter.invoiced() && suspended {
             return Ok(allowed_json(false, Some("The wallet is suspended")));
         }
         let t = terms(meter, plan.as_ref());
@@ -712,7 +723,16 @@ impl Internal {
                     }
                 }
             } else {
-                self.month_usage(meter, &wallet, client.id(), &app.app_code, self.auth.clock.local().date()).await?
+                match wallet.as_ref() {
+                    Some(w) => self.month_usage(meter, w, client.id(), &app.app_code, self.auth.clock.local().date()).await?,
+                    // Event meters on the invoice count by client, wallet or not; credit meters need one.
+                    None if meter.invoiced() => {
+                        let today = self.auth.clock.local().date();
+                        let p = self.billing.period_usage(meter.id, client.id(), month_start(today), month_end(today) + Duration::days(1)).await?;
+                        p.events.sub(p.reversals).max(Dec::ZERO)
+                    }
+                    None => Dec::ZERO,
+                }
             };
             if used.cmp_value(&cap) != std::cmp::Ordering::Less {
                 return Ok(allowed_json(false, Some("The plan's limit is reached")));
