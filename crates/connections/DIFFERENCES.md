@@ -327,6 +327,16 @@ Everything in those runs is the same except what is listed here.
     the decoded bytes are the body (`body::binary_body`; bad base64 is `CORE.BASE64_INVALID`).
     Any other payload with that type still answers "Url not found" as before.
 
+41. **A MAIL connection may name the sender and a reply-to** (2026-11-13, Rust only, CXZ-1847).
+    Two optional `connectionDetails` keys: `fromName` and `replyTo`. When `fromName` is set the
+    `From` header is `fromName <fromAddress>` (by SMTP; SendGrid gets `from.name`), unless the
+    from address already carries a name (a template's `fromExpression`); line breaks in it are
+    made spaces. When `replyTo` is one address (`a@x.com` or `Name <a@x.com>`) the mail gets a
+    `Reply-To` header (SendGrid: `reply_to`); one that is not an address is logged and left out,
+    and the mail still goes. The envelope sender stays the bare address. Without the keys the
+    mail is exactly as before. `SendEmail`, the event email action and the notification service
+    all read them from the connection. Neither key is a credential, so both show on GET.
+
 ## Error codes (2026-10-17)
 
 Every `GenericException` this crate raises (`ConnError::Generic`) carries the core catalogue's

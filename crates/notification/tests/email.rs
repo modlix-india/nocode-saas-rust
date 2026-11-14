@@ -176,3 +176,26 @@ async fn unknown_sub_types_have_no_service() {
         assert!(svc.send_email(&u, &m, &welcome(), &payload()).await.is_err());
     }
 }
+
+/// CXZ-1847: the MAIL connection's `fromName` and `replyTo` reach the mail, by SMTP and SendGrid.
+#[tokio::test]
+async fn sender_name_and_reply_to_from_the_connection() {
+    let s = StubSmtp::start(vec![]).await;
+    let svc = service("http://127.0.0.1:1");
+    let named = smtp(s.port, json!({"fromName": "Valmark", "replyTo": "cvcrm@valmark.in"}));
+    assert!(svc.send_email(&user(Some("ann@x.test")), &named, &welcome(), &payload()).await.unwrap());
+    let msg = s.messages.lock()[0].clone();
+    assert!(msg.contains("From: Valmark <noreply@modlix.test>"), "{msg}");
+    assert!(msg.contains("Reply-To: cvcrm@valmark.in"), "{msg}");
+    assert_eq!(*s.recipients.lock(), ["ann@x.test"]);
+
+    let (sg, base) = Fake::start().await;
+    sg.answer("POST", "/v3/mail/send", Answer::status(200, "ok"));
+    let svc = service(&format!("{base}/v3/mail/send"));
+    let details = json!({"apiKey": "SG.test", "fromAddress": "noreply@modlix.test", "fromName": "Valmark", "replyTo": "bad address"});
+    let mail = MailConnection { connection_sub_type: Some("SENDGRID".into()), connection_details: Some(details.as_object().unwrap().clone()) };
+    assert!(svc.send_email(&user(Some("ann@x.test")), &mail, &welcome(), &payload()).await.unwrap());
+    let body = sg.calls_to("/v3/mail/send")[0].json();
+    assert_eq!(body["from"], json!({"email": "noreply@modlix.test", "name": "Valmark"}));
+    assert!(body.get("reply_to").is_none(), "a reply-to that is not an address is left out: {body}");
+}

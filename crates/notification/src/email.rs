@@ -110,6 +110,9 @@ impl EmailService {
         let details = ProcessedEmail {
             to: vec![email.to_string()],
             from,
+            // CXZ-1847: the MAIL connection's sender name and reply-to, when it gives them.
+            from_name: connections::email::sender_name(Some(details)),
+            reply_to: connections::email::reply_to(Some(details)),
             subject: t.get("subject").cloned().unwrap_or_default(),
             body,
             ..Default::default()
@@ -135,12 +138,16 @@ impl EmailService {
         let to = user.email_id.clone().ok_or_else(|| anyhow!("Map.of: the recipient's email is null"))?;
         let subject = t.get("subject").cloned().ok_or_else(|| anyhow!("Map.of: the subject is null"))?;
         let body = t.get("body").cloned().ok_or_else(|| anyhow!("Map.of: the body is null"))?;
-        let payload = json!({
+        let mut payload = json!({
             "personalizations": [{"to": [{"email": to}]}],
-            "from": {"email": from},
+            "from": connections::email::sendgrid_from(&from, connections::email::sender_name(Some(details)).as_deref()),
             "subject": subject,
             "content": [{"type": "text/html", "value": body}],
         });
+        // CXZ-1847: the MAIL connection's reply-to, when it gives one.
+        if let Some(r) = connections::email::sendgrid_reply_to(connections::email::reply_to(Some(details)).as_deref()) {
+            payload["reply_to"] = r;
+        }
         let rb = self
             .http
             .post(&self.sendgrid_url)

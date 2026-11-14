@@ -74,6 +74,10 @@ pub struct ProcessedEmail {
     pub cc: Vec<String>,
     pub bcc: Vec<String>,
     pub from: String,
+    /// The connection's `fromName` (CXZ-1847): the name shown with `from` when `from` has none.
+    pub from_name: Option<String>,
+    /// The connection's `replyTo` (CXZ-1847), already checked to be one mailbox.
+    pub reply_to: Option<String>,
     pub subject: String,
     pub body: String,
     pub attachments: Vec<EmailAttachment>,
@@ -140,6 +144,38 @@ pub fn from_address(conn: &Connection, tmpl: &EmailTemplate, data: &Map<String, 
     }
 }
 
+/// The MAIL connection's optional `fromName` (CXZ-1847): text only, line breaks and other
+/// control characters made spaces, trimmed; blank or not text is none (the mail goes as before).
+pub fn sender_name(details: Option<&Map<String, Value>>) -> Option<String> {
+    let raw = details?.get("fromName")?.as_str()?;
+    let clean: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!clean.is_empty()).then_some(clean)
+}
+
+/// The MAIL connection's optional `replyTo` (CXZ-1847): one address (`a@x.com` or
+/// `Name <a@x.com>`). Blank is none; one that does not parse is left out with a warning and the
+/// mail still goes, without a `Reply-To`.
+pub fn reply_to(details: Option<&Map<String, Value>>) -> Option<String> {
+    let raw = details?.get("replyTo")?.as_str().map(java::trim).filter(|s| !s.is_empty())?;
+    match raw.parse::<Mailbox>() {
+        Ok(_) => Some(raw.to_string()),
+        Err(e) => {
+            tracing::warn!("Reply-to address of the mail connection is ignored : {raw} {e}");
+            None
+        }
+    }
+}
+
+/// The `From` mailbox: the connection's sender name is added only when the address has no name
+/// of its own (a template's `fromExpression` may give one).
+fn from_mailbox(from: Mailbox, from_name: Option<&str>) -> Mailbox {
+    match (from.name.as_deref(), from_name) {
+        (None, Some(n)) => Mailbox::new(Some(n.to_string()), from.email),
+        _ => from,
+    }
+}
+
 /// The language when neither the expression nor the template's default gives one.
 pub const DEFAULT_LANGUAGE: &str = "en";
 
@@ -201,7 +237,15 @@ pub fn processed_email(
     let lang = language(tmpl, data)?;
     let parts = processed_parts(lang.as_deref(), tmpl, data)?;
     let part = |k: &str| parts.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    Ok(ProcessedEmail { to, from, subject: part("subject"), body: part("body"), ..Default::default() })
+    Ok(ProcessedEmail {
+        to,
+        from,
+        from_name: sender_name(conn.details()),
+        reply_to: reply_to(conn.details()),
+        subject: part("subject"),
+        body: part("body"),
+        ..Default::default()
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -569,11 +613,14 @@ fn smtp_code(e: &lettre::transport::smtp::Error) -> Option<u16> {
     e.status().and_then(|c| c.to_string().parse().ok())
 }
 
-/// The message JavaMail builds: `From`, `To`, `Cc`, `Subject`, an HTML body. With attachments
-/// it is `multipart/mixed`: the HTML body, then each attachment. The `bcc` mailboxes are only
-/// recipients of the envelope: lettre leaves the `Bcc` header out of the message.
+/// The message JavaMail builds: `From`, `To`, `Cc`, `Subject`, an HTML body, and `Reply-To`
+/// when the connection gives one. With attachments it is `multipart/mixed`: the HTML body, then
+/// each attachment. The `bcc` mailboxes are only recipients of the envelope: lettre leaves the
+/// `Bcc` header out of the message.
+#[allow(clippy::too_many_arguments)]
 fn build_message(
     from: &Mailbox,
+    reply_to: Option<&Mailbox>,
     to: &[Mailbox],
     copies: (&[Mailbox], &[Mailbox]),
     subject: &str,
@@ -581,6 +628,9 @@ fn build_message(
     attachments: &[EmailAttachment],
 ) -> ConnResult<Vec<u8>> {
     let mut b = lettre::Message::builder().from(from.clone());
+    if let Some(r) = reply_to {
+        b = b.reply_to(r.clone());
+    }
     for t in to {
         b = b.to(t.clone());
     }
@@ -627,6 +677,9 @@ pub async fn smtp_send(conn: &Connection, details: &ProcessedEmail, block_privat
     let props = SmtpProps::from_props(&props);
 
     let from: Mailbox = details.from.parse().map_err(|e: lettre::address::AddressError| mail_error(&e.to_string()))?;
+    let from = from_mailbox(from, details.from_name.as_deref());
+    // Checked when the connection was read; one that still does not parse is left out.
+    let reply_to: Option<Mailbox> = details.reply_to.as_deref().and_then(|r| r.parse().ok());
     let to: Vec<Mailbox> = details
         .to
         .iter()
@@ -652,7 +705,7 @@ pub async fn smtp_send(conn: &Connection, details: &ProcessedEmail, block_privat
     } else {
         None
     };
-    let message = build_message(&from, &to, (&cc, &bcc), &details.subject, &details.body, &details.attachments)?;
+    let message = build_message(&from, reply_to.as_ref(), &to, (&cc, &bcc), &details.subject, &details.body, &details.attachments)?;
     // One message, so each copy goes once whatever the number of `to` addresses.
     let copies: Vec<Mailbox> = cc.into_iter().chain(bcc).collect();
     match deliver(&props, targets.as_deref(), &user, &password, &from, &to, &copies, &message).await {
@@ -760,8 +813,31 @@ async fn deliver(
 // ---------------------------------------------------------------------------------------------
 // SendGrid
 
+/// SendGrid's `{"email", "name"}` for an address that may carry a name (`Name <a@x.com>`).
+fn sendgrid_mailbox(m: &Mailbox) -> Value {
+    match &m.name {
+        Some(n) => json!({"email": m.email.to_string(), "name": n}),
+        None => json!({"email": m.email.to_string()}),
+    }
+}
+
+/// SendGrid's `from`: `{"email": from}` as Java sends it, with `name` when the connection gives
+/// a sender name and `from` is one plain address.
+pub fn sendgrid_from(from: &str, from_name: Option<&str>) -> Value {
+    match (from_name, from.parse::<Mailbox>()) {
+        (Some(n), Ok(m)) if m.name.is_none() => sendgrid_mailbox(&from_mailbox(m, Some(n))),
+        _ => json!({"email": from}),
+    }
+}
+
+/// SendGrid's `reply_to` for the connection's reply-to, none when there is none.
+pub fn sendgrid_reply_to(reply_to: Option<&str>) -> Option<Value> {
+    reply_to.and_then(|r| r.parse::<Mailbox>().ok()).map(|m| sendgrid_mailbox(&m))
+}
+
 /// `getSendGridBody`, with `cc` and `bcc` in the personalization and `attachments` (base64)
-/// when there are any.
+/// when there are any. The connection's sender name goes as `from.name` when `from` is one plain
+/// address, and its reply-to as `reply_to`; without them the body is Java's.
 pub fn sendgrid_body(details: &ProcessedEmail) -> Value {
     let emails = |list: &[String]| list.iter().map(|e| json!({"email": e})).collect::<Vec<_>>();
     let mut personalization = json!({"to": emails(&details.to)});
@@ -777,6 +853,10 @@ pub fn sendgrid_body(details: &ProcessedEmail) -> Value {
         "subject": details.subject,
         "content": [{"type": "text/html", "value": details.body}],
     });
+    body["from"] = sendgrid_from(&details.from, details.from_name.as_deref());
+    if let Some(r) = sendgrid_reply_to(details.reply_to.as_deref()) {
+        body["reply_to"] = r;
+    }
     if !details.attachments.is_empty() {
         body["attachments"] = details
             .attachments
@@ -1091,13 +1171,75 @@ mod tests {
         let from: Mailbox = "f@x.com".parse().unwrap();
         let to: Vec<Mailbox> = vec!["a@x.com".parse().unwrap()];
         let a = EmailAttachment { name: "r.pdf".into(), content_type: "application/pdf".into(), bytes: vec![0, 1, 2, 255] };
-        let m = String::from_utf8(build_message(&from, &to, (&[], &[]), "S", "<p>B</p>", &[a]).unwrap()).unwrap();
+        let m = String::from_utf8(build_message(&from, None, &to, (&[], &[]), "S", "<p>B</p>", &[a]).unwrap()).unwrap();
         assert!(m.contains("Content-Type: multipart/mixed"), "{m}");
         assert!(m.contains("Content-Type: text/html"), "{m}");
         assert!(m.contains("Content-Disposition: attachment; filename=\"r.pdf\""), "{m}");
         assert!(m.contains("Content-Type: application/pdf"), "{m}");
         assert!(m.contains("AAEC/w=="), "{m}");
-        let plain = String::from_utf8(build_message(&from, &to, (&[], &[]), "S", "<p>B</p>", &[]).unwrap()).unwrap();
+        let plain = String::from_utf8(build_message(&from, None, &to, (&[], &[]), "S", "<p>B</p>", &[]).unwrap()).unwrap();
         assert!(!plain.contains("multipart"), "{plain}");
+        assert!(!plain.contains("Reply-To"), "{plain}");
+    }
+
+    fn cd(v: Value) -> Map<String, Value> {
+        v.as_object().cloned().unwrap()
+    }
+
+    #[test]
+    fn sender_name_from_the_connection() {
+        assert_eq!(sender_name(Some(&cd(json!({"fromName": "  Valmark  "})))).as_deref(), Some("Valmark"));
+        // Line breaks never reach a header.
+        assert_eq!(sender_name(Some(&cd(json!({"fromName": "Val\r\nBcc: x@y.com"})))).as_deref(), Some("Val Bcc: x@y.com"));
+        for empty in [json!({}), json!({"fromName": ""}), json!({"fromName": "  "}), json!({"fromName": null}), json!({"fromName": 5})] {
+            assert_eq!(sender_name(Some(&cd(empty.clone()))), None, "{empty}");
+        }
+        assert_eq!(sender_name(None), None);
+    }
+
+    #[test]
+    fn reply_to_from_the_connection() {
+        assert_eq!(reply_to(Some(&cd(json!({"replyTo": " cvcrm@valmark.in "})))).as_deref(), Some("cvcrm@valmark.in"));
+        assert_eq!(reply_to(Some(&cd(json!({"replyTo": "Sales <s@x.com>"})))).as_deref(), Some("Sales <s@x.com>"));
+        // Not an address, or more than one: left out, the mail still goes.
+        for bad in ["not an address", "a@x.com, b@x.com", "a@", "a@x.com\r\nBcc: c@y.com"] {
+            assert_eq!(reply_to(Some(&cd(json!({"replyTo": bad})))), None, "{bad}");
+        }
+        assert_eq!(reply_to(Some(&cd(json!({"replyTo": ""})))), None);
+        assert_eq!(reply_to(None), None);
+    }
+
+    #[test]
+    fn from_name_only_when_the_address_has_none() {
+        let plain: Mailbox = "f@x.com".parse().unwrap();
+        assert_eq!(from_mailbox(plain.clone(), Some("Valmark")).to_string(), "Valmark <f@x.com>");
+        assert_eq!(from_mailbox(plain.clone(), None).to_string(), "f@x.com");
+        let named: Mailbox = "Own <f@x.com>".parse().unwrap();
+        assert_eq!(from_mailbox(named, Some("Valmark")).to_string(), "Own <f@x.com>");
+    }
+
+    #[test]
+    fn message_with_sender_name_and_reply_to() {
+        let from = from_mailbox("f@x.com".parse().unwrap(), Some("Valmark Homes"));
+        let to: Vec<Mailbox> = vec!["a@x.com".parse().unwrap()];
+        let r: Mailbox = "cvcrm@valmark.in".parse().unwrap();
+        let m = String::from_utf8(build_message(&from, Some(&r), &to, (&[], &[]), "S", "<p>B</p>", &[]).unwrap()).unwrap();
+        assert!(m.contains("From: \"Valmark Homes\" <f@x.com>") || m.contains("From: Valmark Homes <f@x.com>"), "{m}");
+        assert!(m.contains("Reply-To: cvcrm@valmark.in"), "{m}");
+    }
+
+    #[test]
+    fn sendgrid_body_with_sender_name_and_reply_to() {
+        let base = ProcessedEmail { to: vec!["a@x.com".into()], from: "f@x.com".into(), subject: "s".into(), body: "b".into(), ..Default::default() };
+        let plain = sendgrid_body(&base);
+        assert_eq!(plain["from"], json!({"email": "f@x.com"}));
+        assert!(plain.get("reply_to").is_none());
+        let d = ProcessedEmail { from_name: Some("Valmark".into()), reply_to: Some("Sales <s@x.com>".into()), ..base.clone() };
+        let b = sendgrid_body(&d);
+        assert_eq!(b["from"], json!({"email": "f@x.com", "name": "Valmark"}));
+        assert_eq!(b["reply_to"], json!({"email": "s@x.com", "name": "Sales"}));
+        // A from that already names itself is sent as before.
+        let own = ProcessedEmail { from: "Own <f@x.com>".into(), from_name: Some("Valmark".into()), ..base };
+        assert_eq!(sendgrid_body(&own)["from"], json!({"email": "Own <f@x.com>"}));
     }
 }
