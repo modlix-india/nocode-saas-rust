@@ -84,6 +84,20 @@ impl Dec {
         Dec { unscaled: q, scale: 0 }
     }
 
+    /// The quotient truncated towards zero at `scale` decimals (`divide(divisor, scale, DOWN)`).
+    pub fn div_down_scaled(self, divisor: i128, scale: u32) -> Dec {
+        if divisor == 0 {
+            return Dec { unscaled: 0, scale };
+        }
+        let at_scale = if self.scale <= scale { self.rescaled(scale) } else { self.unscaled / 10i128.pow(self.scale - scale) };
+        Dec { unscaled: at_scale / divisor, scale }
+    }
+
+    /// The value truncated towards zero at `scale` decimals.
+    pub fn round_down(self, scale: u32) -> Dec {
+        self.div_down_scaled(1, scale)
+    }
+
     /// `signum()`.
     pub fn signum(self) -> i32 {
         self.unscaled.signum() as i32

@@ -12,6 +12,9 @@
 
 use std::sync::Arc;
 
+#[path = "common/billing_recs.rs"]
+mod billing_recs;
+
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
@@ -22,7 +25,14 @@ use security::admin::billing::purchase::PurchaseRequest;
 use security::admin::billing::service::{Billing, Outside};
 use security::condition::Cond;
 use security::config::AuthConfig;
-use security::data::billing_admin::{sql, AdminBillingStore, Find, Rec, Schema, Val, BUNDLE, CONFIG, INVOICE, PAYMENT, PROFILE, TXN, WALLET};
+use billing_recs::{cfg_of, meter_of, plan_of, wallet_plan_of, wallet_rule};
+use chrono::{NaiveDate, NaiveDateTime};
+use security::data::billing::{
+    sql as wallet_sql, AiRate, BillingConfig, BillingStore, Instruction, Lot, Meter, NewLot, PeriodUsage, Plan, Txn, Usage, Wallet, WalletPlan,
+};
+use security::data::billing_admin::{
+    sql, AdminBillingStore, Find, Rec, Schema, Val, BUNDLE, CONFIG, INVOICE, METER, PAYMENT, PLAN, PROFILE, TXN, WALLET, WALLET_PLAN,
+};
 use security::data::clients::Rows;
 use security::decimal::Dec;
 use security::errors::{AuthError, AuthResult};
@@ -157,6 +167,211 @@ impl AdminBillingStore for TxStore {
     }
 }
 
+fn tx_conn<'a>(g: &'a mut tokio::sync::MutexGuard<'_, Option<Transaction<'static, MySql>>>) -> AuthResult<&'a mut sqlx::MySqlConnection> {
+    Ok(&mut **g.as_mut().ok_or_else(|| AuthError::internal("rolled back"))?)
+}
+
+/// security-internal's billing store inside the same transaction, so a credit, a lot or a plan
+/// the engine writes is rolled back with the rest. (`Db`'s own debit and credit open a
+/// transaction of their own, which MySQL would take as a commit of an outer `BEGIN`.)
+#[async_trait]
+impl BillingStore for TxStore {
+    async fn config_by_app_client(&self, app_id: u64, client_id: u64) -> AuthResult<Option<BillingConfig>> {
+        let f = Find { not_deleted: true, first: true, ..Find::eq(vec![("APP_ID", Val::Id(app_id)), ("CLIENT_ID", Val::Id(client_id))]) };
+        Ok(on_tx!(self, |c| sql::find(c, &CONFIG, &f))?.first().map(cfg_of))
+    }
+    async fn config_by_id(&self, id: u64) -> AuthResult<Option<BillingConfig>> {
+        Ok(on_tx!(self, |c| sql::by_id(c, &CONFIG, id))?.as_ref().map(cfg_of))
+    }
+    async fn config_by_codes(&self, app_code: &str, client_code: &str) -> AuthResult<Option<BillingConfig>> {
+        let id: Option<u64> = {
+            let mut g = self.tx.lock().await;
+            sqlx::query_scalar(
+                "SELECT c.ID FROM security_app_billing_config c JOIN security_app a ON a.ID = c.APP_ID JOIN security_client cl ON cl.ID = c.CLIENT_ID \
+                 WHERE a.APP_CODE = ? AND cl.CODE = ? AND c.STATUS = 'ACTIVE' LIMIT 1",
+            )
+            .bind(app_code)
+            .bind(client_code)
+            .fetch_optional(tx_conn(&mut g)?)
+            .await?
+        };
+        match id {
+            Some(id) => self.config_by_id(id).await,
+            None => Ok(None),
+        }
+    }
+    async fn active_configs(&self) -> AuthResult<Vec<BillingConfig>> {
+        let f = Find::eq(vec![("STATUS", Val::Str("ACTIVE".into()))]);
+        Ok(on_tx!(self, |c| sql::find(c, &CONFIG, &f))?.iter().map(cfg_of).collect())
+    }
+    async fn meters_of_config(&self, config_id: u64) -> AuthResult<Vec<Meter>> {
+        let f = Find { not_deleted: true, order_by: Some("DISPLAY_ORDER"), ..Find::eq(vec![("BILLING_CONFIG_ID", Val::Id(config_id))]) };
+        Ok(on_tx!(self, |c| sql::find(c, &METER, &f))?.iter().map(meter_of).collect())
+    }
+    async fn meter_by_id(&self, id: u64) -> AuthResult<Option<Meter>> {
+        Ok(on_tx!(self, |c| sql::by_id(c, &METER, id))?.as_ref().map(meter_of))
+    }
+    async fn charge_instructions(&self, _source: &str) -> AuthResult<Vec<Instruction>> {
+        Ok(vec![])
+    }
+    async fn plan_by_id(&self, id: u64) -> AuthResult<Option<Plan>> {
+        Ok(on_tx!(self, |c| sql::by_id(c, &PLAN, id))?.as_ref().map(plan_of))
+    }
+    async fn plans_of_config(&self, config_id: u64) -> AuthResult<Vec<Plan>> {
+        let f = Find { not_deleted: true, order_by: Some("DISPLAY_ORDER"), ..Find::eq(vec![("BILLING_CONFIG_ID", Val::Id(config_id))]) };
+        Ok(on_tx!(self, |c| sql::find(c, &PLAN, &f))?.iter().map(plan_of).collect())
+    }
+    async fn wallet_plan(&self, wallet_id: u64) -> AuthResult<Option<WalletPlan>> {
+        let f = Find { order_by: Some("ID"), ..Find::eq(vec![("WALLET_ID", Val::Id(wallet_id)), ("STATUS", Val::Str("ACTIVE".into()))]) };
+        Ok(on_tx!(self, |c| sql::find(c, &WALLET_PLAN, &f))?.last().map(wallet_plan_of))
+    }
+    async fn wallet_plans_due(&self, day: NaiveDate) -> AuthResult<Vec<WalletPlan>> {
+        let f = Find::eq(vec![("STATUS", Val::Str("ACTIVE".into()))]);
+        Ok(on_tx!(self, |c| sql::find(c, &WALLET_PLAN, &f))?.iter().map(wallet_plan_of).filter(|w| w.period_end <= day).collect())
+    }
+    async fn start_wallet_plan(&self, wallet_id: u64, plan_id: u64, start: NaiveDate, end: NaiveDate) -> AuthResult<u64> {
+        let mut g = self.tx.lock().await;
+        let c = tx_conn(&mut g)?;
+        sqlx::query("UPDATE security_wallet_plan SET STATUS = 'ENDED' WHERE WALLET_ID = ? AND STATUS = 'ACTIVE'").bind(wallet_id).execute(&mut *c).await?;
+        let r = sqlx::query("INSERT INTO security_wallet_plan (WALLET_ID, PLAN_ID, PERIOD_START, PERIOD_END, STATUS, AUTO_RENEW) VALUES (?, ?, ?, ?, 'ACTIVE', 1)")
+            .bind(wallet_id)
+            .bind(plan_id)
+            .bind(start)
+            .bind(end)
+            .execute(&mut *c)
+            .await?;
+        Ok(r.last_insert_id())
+    }
+    async fn set_wallet_plan(&self, wp: &WalletPlan) -> AuthResult<u64> {
+        let mut g = self.tx.lock().await;
+        let r = sqlx::query("UPDATE security_wallet_plan SET PLAN_ID = ?, PERIOD_START = ?, PERIOD_END = ?, STATUS = ?, AUTO_RENEW = ?, NEXT_PLAN_ID = ? WHERE ID = ?")
+            .bind(wp.plan_id)
+            .bind(wp.period_start)
+            .bind(wp.period_end)
+            .bind(&wp.status)
+            .bind(i8::from(wp.auto_renew))
+            .bind(wp.next_plan_id)
+            .bind(wp.id)
+            .execute(tx_conn(&mut g)?)
+            .await?;
+        Ok(r.rows_affected())
+    }
+    async fn wallet(&self, client_id: u64, app_id: u64) -> AuthResult<Option<Wallet>> {
+        on_tx!(self, |c| wallet_sql::wallet(c, client_id, app_id))
+    }
+    async fn wallet_by_id(&self, id: u64) -> AuthResult<Option<Wallet>> {
+        Ok(on_tx!(self, |c| sql::by_id(c, &WALLET, id))?.as_ref().map(wallet_rule))
+    }
+    async fn create_wallet(&self, client_id: u64, app_id: u64) -> AuthResult<Option<(Wallet, bool)>> {
+        let mut g = self.tx.lock().await;
+        let c = tx_conn(&mut g)?;
+        let created = wallet_sql::create_seeded_wallet(&mut *c, client_id, app_id, Dec::ZERO).await?;
+        Ok(wallet_sql::wallet(&mut *c, client_id, app_id).await?.map(|w| (w, created)))
+    }
+    async fn debit(&self, t: &Txn) -> AuthResult<bool> {
+        on_tx!(self, |c| wallet_sql::debit_with_lots(c, t))
+    }
+    async fn credit(&self, t: &Txn, lot: &NewLot) -> AuthResult<bool> {
+        on_tx!(self, |c| wallet_sql::credit_with_lot(c, t, lot))
+    }
+    async fn record_txn(&self, t: &Txn) -> AuthResult<bool> {
+        on_tx!(self, |c| wallet_sql::record_txn(c, t))
+    }
+    async fn open_lots(&self, wallet_id: u64) -> AuthResult<Vec<Lot>> {
+        on_tx!(self, |c| wallet_sql::open_lots(c, wallet_id))
+    }
+    async fn set_status(&self, wallet_id: u64, status: &str) -> AuthResult<u64> {
+        on_tx!(self, |c| wallet_sql::set_status(c, wallet_id, status))
+    }
+    async fn set_low_balance_notified(&self, wallet_id: u64, notified: bool) -> AuthResult<u64> {
+        on_tx!(self, |c| wallet_sql::set_low_balance_notified(c, wallet_id, notified))
+    }
+    async fn sum_quantity_between(&self, wallet_id: u64, action_key: &str, from: NaiveDate, to: NaiveDate) -> AuthResult<Dec> {
+        on_tx!(self, |c| wallet_sql::sum_between(c, "QUANTITY", wallet_id, action_key, from, to))
+    }
+    async fn sum_tokens_between(&self, wallet_id: u64, action_key: &str, from: NaiveDate, to: NaiveDate) -> AuthResult<Dec> {
+        on_tx!(self, |c| wallet_sql::sum_between(c, "TOKENS", wallet_id, action_key, from, to))
+    }
+    async fn charged_windows(&self, wallet_id: u64, action_key: &str, date: NaiveDate) -> AuthResult<Vec<i16>> {
+        on_tx!(self, |c| wallet_sql::charged_windows(c, wallet_id, action_key, date))
+    }
+    async fn record_usage(&self, u: &Usage) -> AuthResult<bool> {
+        on_tx!(self, |c| wallet_sql::record_usage(c, u))
+    }
+    async fn count_apps(&self, client_id: u64, app_type: &str, _active_only: bool) -> AuthResult<i64> {
+        AdminBillingStore::count_apps(self, client_id, app_type).await
+    }
+    async fn count_users_with_profile(&self, _client_id: u64, _app_id: u64, _profile_ids: &[u64]) -> AuthResult<i64> {
+        Ok(0)
+    }
+    async fn setting(&self, name: &str) -> AuthResult<Option<String>> {
+        let mut g = self.tx.lock().await;
+        Ok(sqlx::query_scalar("SELECT VALUE FROM security_billing_setting WHERE NAME = ?").bind(name).fetch_optional(tx_conn(&mut g)?).await?)
+    }
+    async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
+        let mut g = self.tx.lock().await;
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_invoice WHERE CLIENT_ID = ? AND APP_ID = ? AND STATUS = 'OVERDUE'")
+            .bind(client_id)
+            .bind(app_id)
+            .fetch_one(tx_conn(&mut g)?)
+            .await?;
+        Ok(n > 0)
+    }
+    async fn buyer_profile(&self, client_id: u64, app_id: u64) -> AuthResult<Option<Rec>> {
+        let f = Find { first: true, ..Find::eq(vec![("CLIENT_ID", Val::Id(client_id)), ("APP_ID", Val::Id(app_id))]) };
+        Ok(on_tx!(self, |c| sql::find(c, &PROFILE, &f))?.into_iter().next())
+    }
+    // Not reached by these tests (the daily cycle, usage and AI pricing run in internal_billing.rs):
+    // they answer empty rather than touch any row outside the transaction.
+    async fn expired_lots(&self, _now: NaiveDateTime) -> AuthResult<Vec<Lot>> {
+        Ok(vec![])
+    }
+    async fn lots_expiring(&self, _from: NaiveDateTime, _to: NaiveDateTime) -> AuthResult<Vec<Lot>> {
+        Ok(vec![])
+    }
+    async fn expire_lot(&self, _lot: &Lot, _t: &Txn) -> AuthResult<bool> {
+        Ok(false)
+    }
+    async fn txn_by_key(&self, _wallet_id: u64, _key: &str) -> AuthResult<Option<(Txn, NaiveDateTime)>> {
+        Ok(None)
+    }
+    async fn usage_by_reference(&self, _meter_id: u64, _client_id: u64, _reference: &str) -> AuthResult<Option<(Usage, NaiveDateTime)>> {
+        Ok(None)
+    }
+    async fn period_usage(&self, _meter_id: u64, _client_id: u64, _from: NaiveDate, _to: NaiveDate) -> AuthResult<PeriodUsage> {
+        Ok(PeriodUsage::default())
+    }
+    async fn mark_invoiced(&self, _client_id: u64, _app_id: u64, _from: NaiveDate, _to: NaiveDate, _invoice_id: u64) -> AuthResult<u64> {
+        Ok(0)
+    }
+    async fn clients_with_usage(&self, _config_id: u64, _before: NaiveDate) -> AuthResult<Vec<u64>> {
+        Ok(vec![])
+    }
+    async fn ai_rates(&self) -> AuthResult<Vec<AiRate>> {
+        Ok(vec![])
+    }
+    async fn insert_monthly_invoice(&self, _invoice: &Rec, _lines: &[Rec], _fin_year: &str) -> AuthResult<Option<Rec>> {
+        Ok(None)
+    }
+    async fn invoices_past_due(&self, _day: NaiveDate) -> AuthResult<Vec<Rec>> {
+        Ok(vec![])
+    }
+    async fn set_invoice_status(&self, _invoice_id: u64, _status: &str) -> AuthResult<u64> {
+        Ok(0)
+    }
+    async fn earliest_unbilled(&self, _client_id: u64, _app_id: u64) -> AuthResult<Option<NaiveDate>> {
+        Ok(None)
+    }
+    async fn gauge_month_units(&self, _meter_id: u64, _client_id: u64, _from: NaiveDate, _to: NaiveDate, _free: Dec) -> AuthResult<Dec> {
+        Ok(Dec::ZERO)
+    }
+}
+
+/// security-internal over the rolled-back store.
+fn tx_internal(l: &Live, store: &Arc<TxStore>) -> Internal {
+    Internal { auth: l.internal.auth.clone(), db: l.internal.db.clone(), billing: store.clone(), wallet_events: l.internal.wallet_events.clone() }
+}
+
 #[derive(Default)]
 struct Recorded {
     events: std::sync::Mutex<Vec<EventMessage>>,
@@ -214,9 +429,10 @@ async fn a_purchase_end_to_end_in_a_rolled_back_transaction() {
         return;
     };
     let (seller, app): (u64, u64) = (ids.get(0), ids.get(1));
-    let store = TxStore::begin(&l.pool).await;
+    let store = Arc::new(TxStore::begin(&l.pool).await);
+    let internal = tx_internal(&l, &store);
     let rec = Recorded::default();
-    let b = Billing { internal: &l.internal, store: &store, events: &rec, outside: &rec };
+    let b = Billing { internal: &internal, store: store.as_ref(), events: &rec, outside: &rec };
     let ca = system();
     let run = async {
         // The scratch client may edit the scratch app (inside the transaction only).
@@ -235,7 +451,7 @@ async fn a_purchase_end_to_end_in_a_rolled_back_transaction() {
             .with("paymentGatewayConfig", Val::Json(json!({"keyId": "rzp_test_live", "keySecret": "x", "webhookSecret": "live-secret"})));
         let config = b.config_create(&ca, cfg).await.unwrap().unwrap();
         let config_id = config.id().unwrap();
-        assert_eq!((config.dec("gstPercentage").unwrap().to_string(), config.dec("appRentPerMonth").unwrap().to_string()), ("18.00".into(), "0.0000".into()));
+        assert_eq!((config.dec("gstPercentage").unwrap().to_string(), config.str("suspendMode"), config.int("invoiceDay")), ("18.00".into(), Some("AI_AND_BANNER"), Some(1)));
         assert!(config.ts("createdAt").is_some() && config.u64("createdBy").is_none());
         let put = Rec::new(&CONFIG)
             .with("id", Val::Id(config_id))
@@ -320,11 +536,13 @@ async fn a_purchase_end_to_end_in_a_rolled_back_transaction() {
         assert_eq!((pay.str("status"), pay.str("gatewayPaymentId")), (Some("PAID"), Some("pay_livetest")));
         assert_eq!(pay.map("response")["captured"], json!({"amount": 118.0, "currency": "INR", "fee": 2.36, "method": "upi", "status": "captured", "tax": 0.36}));
         assert_eq!(pay.map("response")["webhook"]["payload"]["payment"]["entity"]["amount"], json!(11800.0));
-        // The wallet: seeded with one token, then the 1000 purchased; a replay credits nothing.
+        // The wallet: a new one at zero, then the 1000 purchased as a lot; a replay credits nothing.
         let wallet = b.wallet_of(1, app).await.unwrap().unwrap();
-        assert_eq!(wallet.dec("balance").unwrap().to_string(), "1001.0000");
+        assert_eq!(wallet.dec("balance").unwrap().to_string(), "1000.000000");
+        let lots = BillingStore::open_lots(store.as_ref(), wallet.id().unwrap()).await.unwrap();
+        assert_eq!((lots.len(), lots[0].source.as_str(), lots[0].tokens_left.to_string()), (1, "PURCHASE", "1000.000000".to_string()));
         b.webhook(&ContextAuth::default(), &body, Some(&sig)).await.unwrap();
-        assert_eq!(b.wallet_of(1, app).await.unwrap().unwrap().dec("balance").unwrap().to_string(), "1001.0000");
+        assert_eq!(b.wallet_of(1, app).await.unwrap().unwrap().dec("balance").unwrap().to_string(), "1000.000000");
         assert_eq!(rec.events.lock().unwrap().iter().filter(|e| e.event_name == "INVOICE_GENERATED").count(), 1);
 
         // The reads after it.
@@ -341,7 +559,7 @@ async fn a_purchase_end_to_end_in_a_rolled_back_transaction() {
         // The buyer's (SYSTEM's) own hierarchy has no config for the app: no threshold.
         let status = b.display_status(&ca, Some("coreedparity")).await.unwrap();
         assert_eq!((status["status"].as_str(), status.get("threshold")), (Some("ACTIVE"), None));
-        assert_eq!(security::jackson::pretty(&status["balance"]), "1001.0000");
+        assert_eq!(security::jackson::pretty(&status["balance"]), "1000.000000");
         let docs = b.invoice_documents(&ca, invoice_id).await.unwrap().unwrap();
         assert!(docs["invoiceUrl"].as_str().unwrap().starts_with("api/files/secured/downloadFileByKey/"));
 
@@ -387,24 +605,28 @@ async fn wallet_credits_in_a_rolled_back_transaction() {
     .unwrap();
     let Some(free) = free else { return };
     let (client, app): (u64, u64) = (free.get(0), free.get(1));
-    let store = TxStore::begin(&l.pool).await;
+    let store = Arc::new(TxStore::begin(&l.pool).await);
+    let internal = tx_internal(&l, &store);
     let rec = Recorded::default();
-    let b = Billing { internal: &l.internal, store: &store, events: &rec, outside: &rec };
+    let b = Billing { internal: &internal, store: store.as_ref(), events: &rec, outside: &rec };
     let run = async {
-        let w = b.wallet_or_create(client, app).await?.unwrap();
-        assert_eq!((w.dec("balance").unwrap().to_string(), w.str("status"), w.int("lowBalanceNotified"), w.int("version")), ("1.0000".into(), Some("ACTIVE"), Some(0), Some(0)));
-        assert_eq!(b.wallet_or_create(client, app).await?.unwrap().id(), w.id(), "a second seed finds the first");
+        let w = b.wallet_or_create(&system(), client, app).await?.unwrap();
+        assert_eq!((w.dec("balance").unwrap().to_string(), w.str("status"), w.int("lowBalanceNotified"), w.int("version")), ("0.000000".into(), Some("ACTIVE"), Some(0), Some(0)));
+        assert_eq!(b.wallet_or_create(&system(), client, app).await?.unwrap().id(), w.id(), "a second create finds the first");
         let id = w.id().unwrap();
         store.set_wallet_status(id, "SUSPENDED").await?;
-        store.set_low_balance_notified(id, true).await?;
+        AdminBillingStore::set_low_balance_notified(store.as_ref(), id, true).await?;
         // An owner of SYSTEM adjusting a managed client's wallet (SYSTEM owns the app).
         let mut parent = system();
         parent.client_type_code = Some("BUS".into());
         let r = b.adjust(&parent, id, d("5"), "live test").await?;
         assert!(r.charged);
-        assert_eq!(r.balance_after.to_string(), "6.0000");
+        assert_eq!(r.balance_after.to_string(), "5.000000");
         let after = b.wallet_of(client, app).await?.unwrap();
-        assert_eq!((after.dec("balance").unwrap().to_string(), after.str("status"), after.int("lowBalanceNotified")), ("6.0000".into(), Some("ACTIVE"), Some(0)));
+        assert_eq!((after.dec("balance").unwrap().to_string(), after.str("status"), after.int("lowBalanceNotified")), ("5.000000".into(), Some("ACTIVE"), Some(0)));
+        // The adjustment is an ADJUST lot.
+        let lots = BillingStore::open_lots(store.as_ref(), id).await?;
+        assert_eq!((lots.len(), lots[0].source.as_str()), (1, "ADJUST"));
         // A ledger row's idempotency key is unique per wallet.
         let txn = Rec::new(&TXN)
             .with("walletId", Val::Id(id))
@@ -415,8 +637,8 @@ async fn wallet_credits_in_a_rolled_back_transaction() {
             .with("reason", Val::Str("x".into()))
             .with("chargeDate", Val::Date(chrono::NaiveDate::from_ymd_opt(2026, 6, 15).unwrap()))
             .with("windowIndex", Val::Int(4));
-        assert!(store.record_txn(&txn).await?);
-        assert!(!store.record_txn(&txn).await?);
+        assert!(AdminBillingStore::record_txn(store.as_ref(), &txn).await?);
+        assert!(!AdminBillingStore::record_txn(store.as_ref(), &txn).await?);
         let page = store.txn_page(id, &Pageable::of(0, 10, vec![Order::new("id", true)])).await?;
         assert_eq!(page.total, Some(2));
         let row = page.rows.iter().find(|r| r.str("idempotencyKey") == Some("live:once")).unwrap();
@@ -428,7 +650,10 @@ async fn wallet_credits_in_a_rolled_back_transaction() {
     let outcome = run.await;
     store.rollback().await;
     outcome.unwrap();
-    let left: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM security_wallet WHERE CLIENT_ID = {client} AND APP_ID = {app}"))
+    let left: i64 = sqlx::query_scalar(&format!(
+        "SELECT (SELECT COUNT(*) FROM security_wallet WHERE CLIENT_ID = {client} AND APP_ID = {app}) + \
+         (SELECT COUNT(*) FROM security_wallet_transaction WHERE IDEMPOTENCY_KEY = 'live:once')"
+    ))
         .fetch_one(&l.pool)
         .await
         .unwrap();
@@ -520,8 +745,14 @@ async fn read_routes_over_the_local_tables() {
 
 /// The write routes on the real tables: one connection, `BEGIN` before and `ROLLBACK` after, so
 /// every statement the routes (and the caller's context) make runs inside that transaction and
-/// none survives. The purchase reaches the seller's missing gateway keys and stops there; the
-/// documents reach the unconfigured files upstream and stop there: nothing leaves the process.
+/// none survives. The purchase reaches the seller's missing gateway keys and stops there: nothing
+/// leaves the process.
+///
+/// No route here credits or debits a wallet: those statements now run in a transaction of their
+/// own (`BEGIN`), which MySQL takes as a COMMIT of this session's open transaction, so the rows
+/// would survive the ROLLBACK. The paid webhook, `/wallets/credit` and the adjustment are covered
+/// over the rolled-back store above (`a_purchase_end_to_end_in_a_rolled_back_transaction`,
+/// `wallet_credits_in_a_rolled_back_transaction`).
 #[tokio::test]
 async fn write_routes_inside_one_rolled_back_session() {
     let (Ok(_), Ok(password), Ok(key)) =
@@ -616,58 +847,11 @@ async fn write_routes_inside_one_rolled_back_session() {
         let invoice: u64 = sqlx::query_scalar(&format!("SELECT MAX(ID) FROM security_invoice WHERE SELLER_CLIENT_ID = {seller}")).fetch_one(&pool).await.unwrap();
         let (s, v) = call("POST", "/billing/repay".into(), Some(json!({"invoiceId": invoice})), vec![]).await;
         assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
-        // Pay it through the webhook: a PENDING payment for the invoice, the event signed.
-        sqlx::query(&format!(
-            "INSERT INTO security_payment (INVOICE_ID, CLIENT_ID, GATEWAY_ORDER_ID, AMOUNT, STATUS) VALUES ({invoice}, 1, 'order_route_livetest', 118, 'PENDING')"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-        let body = json!({"event": "payment.captured", "payload": {"payment": {"entity": {"id": "pay_route", "order_id": "order_route_livetest", "amount": 11800}}}}).to_string();
-        let mut mac = Hmac::<Sha256>::new_from_slice(b"route-secret").unwrap();
-        mac.update(body.as_bytes());
-        let sig: String = mac.finalize().into_bytes().iter().map(|x| format!("{x:02x}")).collect();
-        let req = Request::builder()
-            .method("POST")
-            .uri(format!("{P}/billing/razorpay/webhook"))
-            .header("host", "localhost:8001")
-            .header("clientCode", "SYSTEM")
-            .header("X-Razorpay-Signature", sig)
-            .body(Body::from(body))
-            .unwrap();
-        let resp = security::admin::router(admin.clone()).oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let (s, v) = call("GET", format!("/invoices/{invoice}"), None, vec![]).await;
-        assert_eq!((s, v["status"].as_str(), v["paymentReference"].as_str()), (StatusCode::OK, Some("PAID"), Some("pay_route")));
-        let (s, v) = call("GET", format!("/invoices/{invoice}/documents"), None, vec![]).await;
-        assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
-        let (s, v) = call("GET", "/wallets".into(), None, vec![]).await;
-        assert_eq!((s, v["balance"].as_f64()), (StatusCode::OK, Some(1001.0)));
-        let (s, v) = call("GET", "/wallets/transactions?size=5".into(), None, vec![]).await;
-        assert_eq!((s, v["totalElements"].as_i64()), (StatusCode::OK, Some(1)));
-        // Credit a scratch client's wallet, look it up, adjust it.
-        let (s, v) = call("POST", "/wallets/credit".into(), Some(json!({"appCode": "coreedparity", "urlClientCode": "SYSTEM", "clientCode": "ZZPAR11", "tokens": 10, "reason": "route test"})), vec![]).await;
-        assert_eq!((s, v["balanceAfter"].as_f64()), (StatusCode::OK, Some(11.0)));
-        let (s, w) = call("GET", "/wallets/lookup?appCode=coreedparity&urlClientCode=SYSTEM&clientCode=ZZPAR11".into(), None, vec![]).await;
-        assert_eq!(s, StatusCode::OK);
-        // Off by default: Java's "Type mismatch."; served with `[billing] serve_wallet_adjust`.
-        let adjust = format!("/wallets/{}/adjust?tokens=-2&reason=route", w["id"]);
-        let (s, v) = call("POST", adjust.clone(), None, vec![]).await;
-        assert_eq!((s, v["debugMessage"].as_str()), (StatusCode::BAD_REQUEST, Some("400 BAD_REQUEST \"Type mismatch.\"")));
-        let on = security::admin::billing::settings::BillingSettings { serve_wallet_adjust: true, ..Default::default() };
-        let req = Request::builder()
-            .method("POST")
-            .uri(format!("{P}{adjust}"))
-            .header("host", "localhost:8001")
-            .header("clientCode", "SYSTEM")
-            .header("appCode", "coreedparity")
-            .header("authorization", bearer.clone())
-            .body(Body::empty())
-            .unwrap();
-        let resp = security::admin::billing::router_with(on).with_state(admin.clone()).oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let v: Value = serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
-        assert_eq!(v["balanceAfter"].as_f64(), Some(9.0));
+        // The wallet routes only read here.
+        let (s, v) = call("GET", "/wallets/plan".into(), None, vec![]).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let (s, v) = call("GET", "/wallets/status".into(), None, vec![]).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
         // The buyer's profile.
         let (s, v) = call("PUT", "/billing-profile".into(), Some(json!({"legalName": "Route Buyer"})), vec![]).await;
         assert_eq!((s, v["legalName"].as_str()), (StatusCode::OK, Some("Route Buyer")));

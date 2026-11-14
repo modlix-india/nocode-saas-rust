@@ -2,6 +2,7 @@
 //! request context so far. Each keeps the Java signature exactly (namespace, name, parameter
 //! names and schemas, events), since stored definitions call them by name.
 
+pub mod billing;
 pub mod caller_security;
 pub mod connection_signature;
 pub mod docx;
@@ -12,6 +13,7 @@ pub mod oauth2_token_info;
 pub mod hash;
 pub mod integration_fns;
 pub mod java_sig;
+pub mod messaging;
 pub mod platform;
 pub mod schedule;
 pub mod message;
@@ -23,6 +25,8 @@ pub mod support;
 
 #[cfg(test)]
 mod contact_codes_tests;
+#[cfg(test)]
+mod messaging_tests;
 #[cfg(test)]
 mod platform_tests;
 #[cfg(test)]

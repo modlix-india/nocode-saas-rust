@@ -227,9 +227,24 @@ impl DataStores for LiveData {
         self.engine(conn.as_ref())?.drop_draft_database(conn.as_ref(), app, client).await.map_err(|e| e.to_string())
     }
 
+    /// Rows in the client's data of the app, on both engines: Mongo's estimate as before (live and
+    /// draft, version collections left out), plus the MySQL live database's table rows (version
+    /// tables included). The app's APP_DATA connection serves its engine, the default server the
+    /// other (MySQL storages need no connection). A rough count: storage rows are a cap against
+    /// abuse, not a fine-grained price.
     async fn estimated_row_count(&self, app: &str, client: &str) -> i64 {
+        use appdata::model::ConnectionSubType as Sub;
+        if app.trim().is_empty() || client.trim().is_empty() {
+            return 0;
+        }
         let conn = self.conn(app, client).await.ok().flatten();
-        self.mongo.estimated_row_count(conn.as_ref(), app, client).await
+        let mysql_conn = conn.as_ref().is_some_and(|c| matches!(c.connection_sub_type, Some(Sub::MySql)));
+        let (mongo_conn, sql_conn) = if mysql_conn { (None, conn.as_ref()) } else { (conn.as_ref(), None) };
+        let mut total = self.mongo.estimated_row_count(mongo_conn, app, client).await;
+        if let Ok(db) = appdata::mysql::service::database_name(client, app, false) {
+            total += appdata::engine::AppDataEngine::database_rows(self.mysql.as_ref(), sql_conn, &db).await.unwrap_or(0);
+        }
+        total
     }
 
     async fn tenant_databases(&self) -> (Vec<purge::TenantDb>, Vec<String>) {
