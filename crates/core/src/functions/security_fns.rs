@@ -2,7 +2,7 @@
 //! (`makeSecurityFunctions`): `IsBeingManagedByCode`, `IsBeingManagedById`, `GetClient`,
 //! `GetUserAdminEmails`, `GetOwnersEmails`, `GetUserSubOrg`, `GetManagedClientIds`,
 //! `GetUsersForDistribution`, `GetUsersByIds`, `GetClientsByIds`, `GetClientUsersPage` and
-//! `GetClientsDenorm`, and the Rust-only `GetUserManager`.
+//! `GetClientsDenorm`, and the Rust-only `GetUserManager` and `GetUsersWithAuthority`.
 //!
 //! Security's answers are read into Java's DTOs (`Client`, `User`, `EntityProcessorUser`,
 //! `ClientDenormData`) and written back with Gson, so what a function hands out is the DTO's
@@ -49,6 +49,7 @@ pub fn all(security: &Arc<SecurityCalls>) -> Vec<Arc<dyn Function>> {
         Java::function(GetClientUsersPage(s())),
         Java::function(GetClientsDenorm(s())),
         Java::function(GetUserManager(s())),
+        Java::function(GetUsersWithAuthority(s())),
     ]
 }
 
@@ -670,6 +671,92 @@ impl GetUserManager {
         }
         Ok(None)
     }
+}
+
+// --- GetUsersWithAuthority (Rust only) -------------------------------------------------------
+
+/// `CoreServices.Security.GetUsersWithAuthority(authority, clientCode)`: the ACTIVE users of the
+/// caller's client whose authorities in the URL app meet `authority` (one authority such as
+/// `Authorities.CXZUMP.ROLE_Payment_APPROVE`, or an authority expression as `HasAuthority` reads
+/// it), however they hold it (a profile, a role in a profile, a direct role). For server functions
+/// that must reach the people who can act on something, also in a run without a signed-in user
+/// (a scheduled outbox drain, an event runner) (CXZ-1852).
+///
+/// The client is chosen as `GetUsersForDistribution` chooses it; an unrelated `clientCode` answers
+/// no users rather than 403, as `GetUserManager` does, so a scheduled run is not failed by it. A
+/// blank `authority` is refused (security would read it as "no filter", everyone).
+///
+/// Output: `users`, `[{id, emailId, firstName, lastName}]` by id, fields without a value left
+/// out.
+pub struct GetUsersWithAuthority(Arc<SecurityCalls>);
+
+#[async_trait]
+impl JavaFunction for GetUsersWithAuthority {
+    fn full_name(&self) -> &'static str {
+        "CoreServices.Security.GetUsersWithAuthority"
+    }
+
+    async fn run(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
+        let authority = match args.get("authority") {
+            None | Some(Value::Null) => String::new(),
+            Some(_) => arg_string(args, "authority")?,
+        };
+        let authority = authority.trim().to_string();
+        if authority.is_empty() {
+            return Err(required_argument("authority"));
+        }
+        let client_code = match args.get("clientCode") {
+            None | Some(Value::Null) => None,
+            Some(_) => Some(arg_string(args, "clientCode")?),
+        };
+        let ca = definition_context_authentication("GetUsersWithAuthority")?;
+        let target = match GetUsersForDistribution(self.0.clone()).target_client_code(&ca, client_code).await {
+            Ok(t) => t,
+            Err(e) if e.status() == axum::http::StatusCode::FORBIDDEN => None,
+            Err(e) => return Err(e),
+        };
+        let users = match (target.as_deref(), ca.url_app_code()) {
+            (Some(code), Some(app)) => self.users(code, app, &authority).await?,
+            _ => Vec::new(),
+        };
+        Ok(output_map([("users", Value::Array(users))]))
+    }
+}
+
+impl GetUsersWithAuthority {
+    async fn users(&self, client_code: &str, app_code: &str, authority: &str) -> Result<Vec<Value>, CoreError> {
+        let holders = self.0.users_with_authority(client_code, app_code, authority).await?.unwrap_or_default();
+        // The holders' client, as security answered it: the full records read next must be of it.
+        let pairs: Vec<(Id, Option<Id>)> = holders.iter().filter_map(|u| id_field(u, "id").map(|id| (id, id_field(u, "clientId")))).collect();
+        let ids: Vec<Id> = pairs.iter().map(|(id, _)| *id).collect::<BTreeSet<_>>().into_iter().collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let records = self.0.users_internal_batch(&ids).await?.unwrap_or_default();
+        let mut picked: Vec<(Id, Value)> = records
+            .iter()
+            .filter(|u| is_active(u))
+            .filter_map(|u| {
+                let id = id_field(u, "id")?;
+                let client = pairs.iter().find(|(i, _)| *i == id)?.1;
+                (client.is_none() || client == id_field(u, "clientId")).then(|| (id, authority_user_json(u, id)))
+            })
+            .collect();
+        picked.sort_by_key(|(id, _)| *id);
+        picked.dedup_by_key(|(id, _)| *id);
+        Ok(picked.into_iter().map(|(_, v)| v).collect())
+    }
+}
+
+fn authority_user_json(u: &Value, id: Id) -> Value {
+    let mut o = Map::new();
+    o.insert("id".into(), Value::from(id));
+    for f in ["emailId", "firstName", "lastName"] {
+        if let Some(s) = str_field(u, f).filter(|s| !(f == "emailId" && s.eq_ignore_ascii_case("NONE"))) {
+            o.insert(f.into(), Value::String(s));
+        }
+    }
+    Value::Object(o)
 }
 
 fn is_active(user: &Value) -> bool {

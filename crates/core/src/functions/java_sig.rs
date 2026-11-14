@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn every_signature_reads_back_to_what_java_answers() {
-        assert_eq!(names().len(), 54);
+        assert_eq!(names().len(), 55);
         for name in names() {
             let back = gson_signature(&signature(name).to_json(), false);
             assert_eq!(canon(&back, None), canon(json(name), None), "{name}");
