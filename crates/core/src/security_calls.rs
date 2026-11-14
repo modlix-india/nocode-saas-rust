@@ -288,6 +288,14 @@ impl SecurityCalls {
         as_list(self.post_value("/api/security/users/internal/processor", &[], &body).await?)
     }
 
+    /// Rust only: `POST /users/internal/notification` with `filterAuthorization`, the users of the
+    /// client with a profile in the app whose authorities there meet `authority` (`{id, clientId,
+    /// emailId}` each, every status).
+    pub async fn users_with_authority(&self, client_code: &str, app_code: &str, authority: &str) -> Result<Option<Vec<Value>>, CoreError> {
+        let body = json!({"clientCode": client_code, "appCode": app_code, "filterAuthorization": authority});
+        as_list(self.post_value("/api/security/users/internal/notification", &[], &body).await?)
+    }
+
     /// `readUserPageFilterInternal(query, {})`: a Spring `Page` of `User`.
     pub async fn read_user_page(&self, query: &Value) -> Result<Option<Value>, CoreError> {
         self.post_value("/api/security/users/internal/query", &[], query).await
