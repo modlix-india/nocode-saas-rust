@@ -920,6 +920,15 @@ audience = "system admins"
 
 # ---- Billing ----
 
+[SEC.BILLING_INVALID]
+status = 400
+params = ["reason"]
+text = "This billing setting can't be saved[: {reason}]"
+action = "Correct it and save again."
+java_text = "$"
+when = "A billing config, meter or plan whose fields do not hold together (Rust only, V90)."
+audience = "signed-in"
+
 [SEC.BUNDLE_LIST_FORBIDDEN]
 status = 403
 text = "Billing bundles can't be listed all at once."

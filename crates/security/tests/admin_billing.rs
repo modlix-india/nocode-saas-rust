@@ -10,19 +10,27 @@
 //! the app URL) are answered in process. No payment API is called and no real row is touched.
 
 mod common;
+#[path = "common/billing_recs.rs"]
+mod billing_recs;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
+use billing_recs::{cfg_of, lot_of, meter_of, plan_of, txn_rec, wallet_plan_of, wallet_plan_rec, wallet_rule};
 use common::{app, client, harness, Harness, RecordingEvents};
 use hmac::{Hmac, Mac};
 use security::admin::billing::purchase::PurchaseRequest;
 use security::admin::billing::service::{Billing, Outside};
 use security::condition::{Cond, Op};
-use security::data::billing_admin::{AdminBillingStore, Find, Rec, Schema, Val, BUNDLE, CONFIG, INVOICE, PAYMENT, PROFILE, TXN, WALLET};
+use security::data::billing::{
+    sql as wallet_sql, AiRate, BillingConfig, BillingStore, Instruction, Lot, Meter, NewLot, PeriodUsage, Plan, Txn, Usage, Wallet, WalletPlan,
+};
+use security::data::billing_admin::{
+    AdminBillingStore, Find, Rec, Schema, Val, AI_RATE, BUNDLE, CONFIG, INVOICE, LOT, METER, PAYMENT, PLAN, PROFILE, TXN, WALLET, WALLET_PLAN,
+};
 use security::data::clients::Rows;
 use security::data::Db;
 use security::decimal::Dec;
@@ -45,6 +53,7 @@ struct Books {
     write: Vec<(u64, u64)>,
     app_counts: HashMap<(u64, &'static str), i64>,
     user_counts: HashMap<(u64, u64), i64>,
+    settings: HashMap<String, String>,
     last_invoice_cond: Option<Cond>,
     last_party: Option<Option<u64>>,
     fail_insert: bool,
@@ -305,6 +314,243 @@ impl FakeBooks {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The same rows as security-internal's billing store: the engine (wallets, lots, plans) and the
+// admin views read and write one set of books.
+
+impl FakeBooks {
+    fn txn_used(&self, t: &Txn) -> bool {
+        self.all(&TXN).iter().any(|x| x.u64("walletId") == Some(t.wallet_id) && x.str("idempotencyKey") == Some(t.idempotency_key.as_str()))
+    }
+
+    fn open_lots_of(&self, wallet_id: u64) -> Vec<Lot> {
+        let mut v: Vec<Lot> = self.all(&LOT).iter().map(lot_of).filter(|l| l.wallet_id == wallet_id && l.tokens_left.signum() > 0).collect();
+        v.sort_by_key(|l| (l.expires_at.is_none(), l.expires_at, l.id));
+        v
+    }
+
+    fn set_lot_left(&self, id: u64, left: Dec) {
+        let mut b = self.b.lock().unwrap();
+        if let Some(l) = b.rows.get_mut(LOT.table).and_then(|r| r.iter_mut().find(|l| l.id() == Some(id))) {
+            l.set("tokensLeft", Val::Dec(left));
+        }
+    }
+
+    fn ledger_sum(&self, prop: &str, wallet_id: u64, action_key: &str, from: NaiveDate, to: NaiveDate) -> Dec {
+        self.all(&TXN)
+            .iter()
+            .filter(|t| t.u64("walletId") == Some(wallet_id) && t.str("type") == Some("DEBIT") && t.str("actionKey") == Some(action_key))
+            .filter(|t| t.date_of("chargeDate").is_some_and(|d| d >= from && d <= to))
+            .fold(Dec::ZERO, |a, t| a.add(t.dec(prop).unwrap_or(Dec::ZERO)))
+    }
+}
+
+#[async_trait]
+impl BillingStore for FakeBooks {
+    async fn config_by_app_client(&self, app_id: u64, client_id: u64) -> AuthResult<Option<BillingConfig>> {
+        let rows = self.all(&CONFIG);
+        Ok(rows.iter().find(|r| r.u64("appId") == Some(app_id) && r.u64("clientId") == Some(client_id) && r.str("status") != Some("DELETED")).map(cfg_of))
+    }
+    async fn config_by_id(&self, id: u64) -> AuthResult<Option<BillingConfig>> {
+        Ok(self.one(&CONFIG, id).as_ref().map(cfg_of))
+    }
+    async fn config_by_codes(&self, _app_code: &str, _client_code: &str) -> AuthResult<Option<BillingConfig>> {
+        Ok(None)
+    }
+    async fn active_configs(&self) -> AuthResult<Vec<BillingConfig>> {
+        Ok(self.all(&CONFIG).iter().filter(|r| r.str("status") == Some("ACTIVE")).map(cfg_of).collect())
+    }
+    async fn meters_of_config(&self, config_id: u64) -> AuthResult<Vec<Meter>> {
+        let mut v: Vec<Meter> = self.all(&METER).iter().map(meter_of).filter(|m| m.config_id == config_id && m.status != "DELETED").collect();
+        v.sort_by_key(|m| (m.display_order, m.id));
+        Ok(v)
+    }
+    async fn meter_by_id(&self, id: u64) -> AuthResult<Option<Meter>> {
+        Ok(self.one(&METER, id).as_ref().map(meter_of))
+    }
+    async fn charge_instructions(&self, _source: &str) -> AuthResult<Vec<Instruction>> {
+        Ok(vec![])
+    }
+    async fn plan_by_id(&self, id: u64) -> AuthResult<Option<Plan>> {
+        Ok(self.one(&PLAN, id).as_ref().map(plan_of))
+    }
+    async fn plans_of_config(&self, config_id: u64) -> AuthResult<Vec<Plan>> {
+        Ok(self.all(&PLAN).iter().map(plan_of).filter(|p| p.config_id == config_id && p.status != "DELETED").collect())
+    }
+    async fn wallet_plan(&self, wallet_id: u64) -> AuthResult<Option<WalletPlan>> {
+        Ok(self.all(&WALLET_PLAN).iter().map(wallet_plan_of).filter(|w| w.wallet_id == wallet_id && w.status == "ACTIVE").max_by_key(|w| w.id))
+    }
+    async fn wallet_plans_due(&self, day: NaiveDate) -> AuthResult<Vec<WalletPlan>> {
+        Ok(self.all(&WALLET_PLAN).iter().map(wallet_plan_of).filter(|w| w.status == "ACTIVE" && w.period_end <= day).collect())
+    }
+    async fn start_wallet_plan(&self, wallet_id: u64, plan_id: u64, start: NaiveDate, end: NaiveDate) -> AuthResult<u64> {
+        for wp in self.all(&WALLET_PLAN).iter().map(wallet_plan_of).filter(|w| w.wallet_id == wallet_id && w.status == "ACTIVE") {
+            AdminBillingStore::update(self, &wallet_plan_rec(&WalletPlan { status: "ENDED".into(), ..wp })).await?;
+        }
+        let wp = WalletPlan { id: 0, wallet_id, plan_id, period_start: start, period_end: end, status: "ACTIVE".into(), auto_renew: true, next_plan_id: None };
+        Ok(self.put(wallet_plan_rec(&wp).with("id", Val::Null)).id().unwrap_or(0))
+    }
+    async fn set_wallet_plan(&self, wp: &WalletPlan) -> AuthResult<u64> {
+        AdminBillingStore::update(self, &wallet_plan_rec(wp)).await
+    }
+    async fn wallet(&self, client_id: u64, app_id: u64) -> AuthResult<Option<Wallet>> {
+        Ok(self.all(&WALLET).iter().find(|w| w.u64("clientId") == Some(client_id) && w.u64("appId") == Some(app_id)).map(wallet_rule))
+    }
+    async fn wallet_by_id(&self, id: u64) -> AuthResult<Option<Wallet>> {
+        Ok(self.one(&WALLET, id).as_ref().map(wallet_rule))
+    }
+    async fn create_wallet(&self, client_id: u64, app_id: u64) -> AuthResult<Option<(Wallet, bool)>> {
+        if let Some(w) = BillingStore::wallet(self, client_id, app_id).await? {
+            return Ok(Some((w, false)));
+        }
+        let rec = self.seed_wallet(client_id, app_id, Dec::ZERO).await?.unwrap();
+        Ok(Some((wallet_rule(&rec), true)))
+    }
+    async fn debit(&self, t: &Txn) -> AuthResult<bool> {
+        if self.txn_used(t) {
+            return Ok(false);
+        }
+        self.put(txn_rec(t));
+        self.mutate_wallet(t.wallet_id, |w| {
+            let b = w.dec("balance").unwrap_or(Dec::ZERO).sub(t.tokens);
+            w.set("balance", Val::Dec(b));
+        })?;
+        for (id, left) in wallet_sql::draw(&self.open_lots_of(t.wallet_id), t.tokens) {
+            self.set_lot_left(id, left);
+        }
+        Ok(true)
+    }
+    async fn credit(&self, t: &Txn, lot: &NewLot) -> AuthResult<bool> {
+        if self.txn_used(t) {
+            return Ok(false);
+        }
+        let before = self.one(&WALLET, t.wallet_id).and_then(|w| w.dec("balance")).unwrap_or(Dec::ZERO);
+        self.put(txn_rec(t));
+        self.credit_balance(t.wallet_id, t.tokens).await?;
+        let kept = t.tokens.sub(Dec::ZERO.sub(before).max(Dec::ZERO));
+        if kept.signum() > 0 {
+            self.put(
+                Rec::new(&LOT)
+                    .with("walletId", Val::Id(t.wallet_id))
+                    .with("source", Val::Str(lot.source.into()))
+                    .with("referenceType", lot.reference_type.clone().map(Val::Str).unwrap_or(Val::Null))
+                    .with("referenceId", lot.reference_id.map(Val::Id).unwrap_or(Val::Null))
+                    .with("tokensAdded", Val::Dec(kept))
+                    .with("tokensLeft", Val::Dec(kept))
+                    .with("addedAt", Val::Ts(NaiveDateTime::default()))
+                    .with("expiresAt", lot.expires_at.map(Val::Ts).unwrap_or(Val::Null)),
+            );
+        }
+        Ok(true)
+    }
+    async fn record_txn(&self, t: &Txn) -> AuthResult<bool> {
+        AdminBillingStore::record_txn(self, &txn_rec(t)).await
+    }
+    async fn expired_lots(&self, now: NaiveDateTime) -> AuthResult<Vec<Lot>> {
+        Ok(self.all(&LOT).iter().map(lot_of).filter(|l| l.tokens_left.signum() > 0 && l.expires_at.is_some_and(|e| e <= now)).collect())
+    }
+    async fn lots_expiring(&self, from: NaiveDateTime, to: NaiveDateTime) -> AuthResult<Vec<Lot>> {
+        Ok(self.all(&LOT).iter().map(lot_of).filter(|l| l.tokens_left.signum() > 0 && l.expires_at.is_some_and(|e| e > from && e <= to)).collect())
+    }
+    async fn open_lots(&self, wallet_id: u64) -> AuthResult<Vec<Lot>> {
+        Ok(self.open_lots_of(wallet_id))
+    }
+    async fn expire_lot(&self, lot: &Lot, t: &Txn) -> AuthResult<bool> {
+        if self.txn_used(t) {
+            return Ok(false);
+        }
+        self.put(txn_rec(t));
+        self.credit_balance(lot.wallet_id, Dec::ZERO.sub(t.tokens)).await?;
+        self.set_lot_left(lot.id, Dec::ZERO);
+        Ok(true)
+    }
+    async fn set_status(&self, wallet_id: u64, status: &str) -> AuthResult<u64> {
+        self.set_wallet_status(wallet_id, status).await
+    }
+    async fn set_low_balance_notified(&self, wallet_id: u64, notified: bool) -> AuthResult<u64> {
+        AdminBillingStore::set_low_balance_notified(self, wallet_id, notified).await
+    }
+    async fn sum_quantity_between(&self, wallet_id: u64, action_key: &str, from: NaiveDate, to: NaiveDate) -> AuthResult<Dec> {
+        Ok(self.ledger_sum("quantity", wallet_id, action_key, from, to))
+    }
+    async fn sum_tokens_between(&self, wallet_id: u64, action_key: &str, from: NaiveDate, to: NaiveDate) -> AuthResult<Dec> {
+        Ok(self.ledger_sum("tokens", wallet_id, action_key, from, to))
+    }
+    async fn charged_windows(&self, wallet_id: u64, action_key: &str, date: NaiveDate) -> AuthResult<Vec<i16>> {
+        Ok(self
+            .all(&TXN)
+            .iter()
+            .filter(|t| t.u64("walletId") == Some(wallet_id) && t.str("actionKey") == Some(action_key) && t.date_of("chargeDate") == Some(date))
+            .filter_map(|t| t.int("windowIndex").map(|w| w as i16))
+            .collect())
+    }
+    // The admin services never reach the ledger lookups, usage records or AI rates.
+    async fn txn_by_key(&self, _wallet_id: u64, _key: &str) -> AuthResult<Option<(Txn, NaiveDateTime)>> {
+        Ok(None)
+    }
+    async fn record_usage(&self, _u: &Usage) -> AuthResult<bool> {
+        Ok(false)
+    }
+    async fn usage_by_reference(&self, _meter_id: u64, _client_id: u64, _reference: &str) -> AuthResult<Option<(Usage, NaiveDateTime)>> {
+        Ok(None)
+    }
+    async fn period_usage(&self, _meter_id: u64, _client_id: u64, _from: NaiveDate, _to: NaiveDate) -> AuthResult<PeriodUsage> {
+        Ok(PeriodUsage::default())
+    }
+    async fn mark_invoiced(&self, _client_id: u64, _app_id: u64, _from: NaiveDate, _to: NaiveDate, _invoice_id: u64) -> AuthResult<u64> {
+        Ok(0)
+    }
+    async fn clients_with_usage(&self, _config_id: u64, _before: NaiveDate) -> AuthResult<Vec<u64>> {
+        Ok(vec![])
+    }
+    async fn count_apps(&self, client_id: u64, app_type: &str, _active_only: bool) -> AuthResult<i64> {
+        AdminBillingStore::count_apps(self, client_id, app_type).await
+    }
+    async fn count_users_with_profile(&self, client_id: u64, app_id: u64, _profile_ids: &[u64]) -> AuthResult<i64> {
+        AdminBillingStore::count_users_with_profile(self, client_id, app_id).await
+    }
+    async fn ai_rates(&self) -> AuthResult<Vec<AiRate>> {
+        Ok(vec![])
+    }
+    async fn setting(&self, name: &str) -> AuthResult<Option<String>> {
+        Ok(self.b.lock().unwrap().settings.get(name).cloned())
+    }
+    async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
+        Ok(self.all(&INVOICE).iter().any(|i| i.u64("clientId") == Some(client_id) && i.u64("appId") == Some(app_id) && i.str("status") == Some("OVERDUE")))
+    }
+    async fn buyer_profile(&self, client_id: u64, app_id: u64) -> AuthResult<Option<Rec>> {
+        Ok(self.all(&PROFILE).into_iter().find(|p| p.u64("clientId") == Some(client_id) && p.u64("appId") == Some(app_id)))
+    }
+    async fn insert_monthly_invoice(&self, invoice: &Rec, lines: &[Rec], fin_year: &str) -> AuthResult<Option<Rec>> {
+        if self.all(&INVOICE).iter().any(|i| i.str("periodKey").is_some() && i.str("periodKey") == invoice.str("periodKey")) {
+            return Ok(None);
+        }
+        let number = self.next_invoice_number(invoice.u64("sellerClientId").unwrap_or(0), fin_year).await?;
+        let saved = self.put(invoice.clone().with("invoiceNumber", Val::Str(number)));
+        for l in lines {
+            self.put(l.clone().with("invoiceId", Val::Id(saved.id().unwrap_or(0))));
+        }
+        Ok(Some(saved))
+    }
+    async fn invoices_past_due(&self, day: NaiveDate) -> AuthResult<Vec<Rec>> {
+        Ok(self
+            .all(&INVOICE)
+            .into_iter()
+            .filter(|i| i.str("status") == Some("PENDING") && i.str("kind") == Some("MONTHLY") && i.date_of("dueDate").is_some_and(|d| d < day))
+            .collect())
+    }
+    async fn set_invoice_status(&self, invoice_id: u64, status: &str) -> AuthResult<u64> {
+        let Some(i) = self.one(&INVOICE, invoice_id) else { return Ok(0) };
+        AdminBillingStore::update(self, &i.with("status", Val::Str(status.into()))).await
+    }
+    async fn earliest_unbilled(&self, _client_id: u64, _app_id: u64) -> AuthResult<Option<NaiveDate>> {
+        Ok(None)
+    }
+    async fn gauge_month_units(&self, _meter_id: u64, _client_id: u64, _from: NaiveDate, _to: NaiveDate, _free: Dec) -> AuthResult<Dec> {
+        Ok(Dec::ZERO)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // The outside calls, answered in process
 
 #[derive(Default)]
@@ -357,7 +603,7 @@ const SECRET: &str = "whsec_test_123";
 
 struct World {
     _h: Harness,
-    books: FakeBooks,
+    books: Arc<FakeBooks>,
     outside: FakeOutside,
     events: Arc<RecordingEvents>,
     internal: Internal,
@@ -365,7 +611,7 @@ struct World {
 
 impl World {
     fn billing(&self) -> Billing<'_> {
-        Billing { internal: &self.internal, store: &self.books, events: self.events.as_ref(), outside: &self.outside }
+        Billing { internal: &self.internal, store: self.books.as_ref(), events: self.events.as_ref(), outside: &self.outside }
     }
 }
 
@@ -380,10 +626,12 @@ fn world() -> World {
         .acquire_timeout(std::time::Duration::from_millis(300))
         .connect_lazy("mysql://nobody:nothing@127.0.0.1:1/security")
         .unwrap();
-    let db = Db::new(pool);
     let events = Arc::new(RecordingEvents::default());
-    let internal = Internal { auth: h.auth.clone(), db: db.clone(), billing: Arc::new(db), wallet_events: events.clone() };
-    World { _h: h, books: FakeBooks::default(), outside: FakeOutside::default(), events, internal }
+    // security-internal's billing store is the same in-memory books: a credit or a plan lands in
+    // the rows the admin views read.
+    let books = Arc::new(FakeBooks::default());
+    let internal = Internal { auth: h.auth.clone(), db: Db::new(pool), billing: books.clone(), wallet_events: events.clone() };
+    World { _h: h, books, outside: FakeOutside::default(), events, internal }
 }
 
 fn d(s: &str) -> Dec {
@@ -601,6 +849,13 @@ async fn repay_only_the_callers_pending_or_failed_invoice() {
     let r = b.repay(&sys, Some(2)).await.unwrap().unwrap();
     assert_eq!(r["prefillName"], "BUS name");
     assert_eq!(r["amount"], 1180);
+    // A monthly invoice (no bundle), OVERDUE: paid through its seller's config.
+    w.books.put(inv("OVERDUE", 4).with("bundleId", Val::Null).with("kind", Val::Str("MONTHLY".into())));
+    let r = b.repay(&buyer(), Some(4)).await.unwrap().unwrap();
+    assert_eq!((r["invoiceId"].as_u64(), r["amount"].as_i64(), r["keyId"].as_str()), (Some(4), Some(1180), Some("rzp_test_key")));
+    // One from a seller without a config.
+    w.books.put(inv("PENDING", 5).with("bundleId", Val::Null).with("sellerClientId", Val::Id(STRANGER)));
+    assert_eq!(b.repay(&buyer(), Some(5)).await.unwrap_err().message(), "Required params {billing config} for $ not found");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -661,12 +916,14 @@ async fn a_verified_paid_webhook_credits_the_wallet_and_emits_the_invoice() {
     let inv = w.books.one(&INVOICE, INVOICE_ID).unwrap();
     assert_eq!((inv.str("status"), inv.str("paymentReference"), inv.str("gateway")), (Some("PAID"), Some("pay_xyz"), Some("RAZORPAY")));
     assert!(inv.ts("paidAt").is_some());
-    // Seeded with one token, then the 1000 purchased.
+    // A new wallet starts at zero, then the 1000 purchased, as a PURCHASE lot.
     let wallet = wallet_of(&w).unwrap();
-    assert_eq!(wallet.dec("balance").unwrap().to_string(), "1001");
+    assert_eq!(wallet.dec("balance").unwrap().to_string(), "1000");
     let txn = w.books.all(&TXN).pop().unwrap();
     assert_eq!((txn.str("type"), txn.str("idempotencyKey"), txn.str("referenceType")), (Some("CREDIT"), Some("payment:pay_xyz"), Some("INVOICE")));
-    assert_eq!((txn.u64("referenceId"), txn.str("reason")), (Some(INVOICE_ID), Some("Token purchase INV/1")));
+    assert_eq!((txn.u64("referenceId"), txn.str("reason")), (Some(INVOICE_ID), Some("Credit purchase INV/1")));
+    let lots = w.books.all(&LOT);
+    assert_eq!((lots.len(), lots[0].str("source"), lots[0].u64("referenceId")), (1, Some("PURCHASE"), Some(INVOICE_ID)));
     let events = w.events.events.lock().unwrap().clone();
     assert_eq!(events.len(), 1);
     assert_eq!((events[0].event_name.as_str(), events[0].client_code.as_deref(), events[0].app_code.as_deref()), ("INVOICE_GENERATED", Some("BUS"), Some("crm")));
@@ -683,7 +940,7 @@ async fn a_verified_paid_webhook_credits_the_wallet_and_emits_the_invoice() {
     assert_eq!(w.outside.urls.lock().unwrap().clone(), vec![C_CLIENT]);
     // A replay is a no-op: the payment is PAID already.
     w.billing().webhook(&ContextAuth::default(), &body, Some(&sign(&body))).await.unwrap();
-    assert_eq!(wallet_of(&w).unwrap().dec("balance").unwrap().to_string(), "1001");
+    assert_eq!(wallet_of(&w).unwrap().dec("balance").unwrap().to_string(), "1000");
     assert_eq!(w.events.events.lock().unwrap().len(), 1);
 }
 
@@ -945,9 +1202,20 @@ async fn configs_are_created_and_changed_by_who_may_manage_them() {
     assert_eq!(e.status(), StatusCode::FORBIDDEN);
     // Update copies the editable fields only.
     let id = saved.id().unwrap();
-    let put = Rec::new(&CONFIG).with("id", Val::Id(id)).with("clientId", Val::Id(1)).with("freeApps", Val::Dec(d("2"))).with("status", Val::Str("INACTIVE".into()));
+    let put = Rec::new(&CONFIG)
+        .with("id", Val::Id(id))
+        .with("clientId", Val::Id(1))
+        .with("invoiceDay", Val::Int(5))
+        .with("suspendMode", Val::Str("AI_ONLY".into()))
+        .with("status", Val::Str("INACTIVE".into()));
     let updated = b.config_update(&buyer(), &put).await.unwrap().unwrap();
-    assert_eq!((updated.u64("clientId"), updated.dec("freeApps").map(|x| x.to_string())), (Some(M_CLIENT), Some("2".into())));
+    assert_eq!((updated.u64("clientId"), updated.int("invoiceDay"), updated.str("suspendMode")), (Some(M_CLIENT), Some(5), Some("AI_ONLY")));
+    // The fields must hold together: an invoice day past the 28th, BLOCK_APP without a target.
+    let bad = put.clone().with("invoiceDay", Val::Int(29));
+    assert_eq!(b.config_update(&buyer(), &bad).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    let bad = put.clone().with("suspendMode", Val::Str("BLOCK_APP".into()));
+    assert_eq!(b.config_update(&buyer(), &bad).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.config_create(&buyer(), new_config(M_CLIENT).with("invoiceDueDays", Val::Int(-1))).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
     // PATCH: through the declared setters; a stranger cannot even see it.
     let fields: Map<String, Value> = serde_json::from_value(json!({"sellerAddress": "X", "id": 1, "appId": 1})).unwrap();
     let patched = b.config_patch(&buyer(), id, &fields).await.unwrap().unwrap();
@@ -1073,7 +1341,7 @@ async fn status_of(w: &World) -> Value {
 #[tokio::test]
 async fn display_statuses() {
     let w = world();
-    assert_eq!(status_of(&w).await, json!({"status": "ACTIVE"}));
+    assert_eq!(status_of(&w).await, json!({"status": "ACTIVE", "overdue": false}));
     assert_eq!(w.billing().display_status(&buyer(), Some("nope")).await.unwrap(), json!({"status": "ACTIVE"}));
     w.books.put(wallet("50", "SUSPENDED", 0));
     assert_eq!(status_of(&w).await["status"], "SUSPENDED");
@@ -1087,6 +1355,8 @@ async fn display_statuses() {
     w.books.put(config_rec("18").with("lowBalanceThreshold", Val::Dec(d("10"))));
     let s = status_of(&w).await;
     assert_eq!((s["status"].as_str(), security::jackson::pretty(&s["threshold"])), (Some("LOW"), "500".into()));
+    // The governing config's suspension mode, for the shell's banner.
+    assert_eq!((s["suspendMode"].as_str(), s["overdue"].as_bool()), (Some("AI_AND_BANNER"), Some(false)));
     // The config's threshold, through the hierarchy (BUS's config is SYSTEM's).
     let w = world();
     w.books.put(wallet("100", "ACTIVE", 0));
@@ -1101,6 +1371,11 @@ async fn display_statuses() {
     let s = status_of(&w).await;
     assert_eq!((s["status"].as_str(), s.get("threshold")), (Some("ACTIVE"), None));
     assert_eq!(security::jackson::pretty(&s["balance"]), "5");
+    // An unpaid monthly invoice past its due date.
+    w.books.put(invoice(1, C_CLIENT, M_CLIENT, APP, "OVERDUE"));
+    assert_eq!(status_of(&w).await["overdue"], true);
+    w.books.put(config_rec("18").with("suspendMode", Val::Str("BLOCK_APP".into())));
+    assert_eq!(status_of(&w).await["suspendMode"], "BLOCK_APP");
 }
 
 #[tokio::test]
@@ -1119,20 +1394,60 @@ async fn ledger_and_plan_are_the_callers_own() {
     let v = b.my_transactions(&buyer(), Some("crm"), &page).await.unwrap();
     assert_eq!((v["totalElements"].as_i64(), v["content"][0]["id"].as_u64()), (Some(3), Some(3)));
     assert_eq!(b.my_transactions(&buyer(), Some("nope"), &page).await.unwrap()["totalElements"], 0);
-    w.books.put(config_rec("18").with("siteRentPerMonth", Val::Dec(d("1000"))).with("lowBalanceThreshold", Val::Dec(d("100"))));
+    w.books.put(config_rec("18").with("lowBalanceThreshold", Val::Dec(d("100"))));
+    w.books.put(meter_rec(CONFIG_ID, "sites", "SITES", "1000", "1").with("displayOrder", Val::Int(1)));
+    w.books.put(meter_rec(CONFIG_ID, "leads", "EVENT", "2", "100").with("kind", Val::Str("COUNTER".into())).with("rateUnit", Val::Str("EACH".into())).with("displayOrder", Val::Int(2)));
+    w.books.put(meter_rec(CONFIG_ID, "gone", "USERS", "1", "0").with("status", Val::Str("DELETED".into())));
+    let starter = plan_rec(CONFIG_ID, "starter", "Starter").with("isDefault", Val::Int(1)).with("meterOverrides", Val::Json(json!({"sites": {"free": 2, "hardCap": true}})));
+    let starter = w.books.put(starter);
+    w.books.put(plan_rec(CONFIG_ID, "pro", "Pro").with("priceAmount", Val::Dec(d("5000"))));
+    w.books.put(wallet_plan_rec(&WalletPlan {
+        id: 0,
+        wallet_id: WALLET_ID,
+        plan_id: starter.id().unwrap(),
+        period_start: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+        period_end: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+        status: "ACTIVE".into(),
+        auto_renew: true,
+        next_plan_id: None,
+    })
+    .with("id", Val::Null));
     w.books.b.lock().unwrap().app_counts.insert((M_CLIENT, "SITE"), 4);
     let plan = b.plan_usage(&buyer(), Some("crm")).await.unwrap();
-    assert_eq!(plan["dimensions"][0]["currentUsage"], 4);
+    // The old pages' shape: one row a meter, under the plan's terms (numbers as jackson prints them).
+    let num = |v: &Value| security::jackson::pretty(v);
+    let dim = &plan["dimensions"][0];
+    assert_eq!((dim["actionKey"].as_str(), num(&dim["currentUsage"]), num(&dim["freeAllowance"]), num(&dim["tokensPerUnit"])), (Some("crm.sites"), "4".into(), "2".into(), "1000".into()));
+    assert_eq!(plan["dimensions"].as_array().unwrap().len(), 2, "a DELETED meter is not shown");
+    let m = &plan["meters"];
+    assert_eq!((m[0]["meterKey"].as_str(), num(&m[0]["hardCap"]), num(&m[0]["used"])), (Some("sites"), "2".into(), "4".into()));
+    assert_eq!((m[1]["meterKey"].as_str(), m[1]["hardCap"].is_null(), num(&m[1]["used"])), (Some("leads"), true, "0".into()));
+    assert_eq!((plan["plan"]["code"].as_str(), plan["plan"]["periodEnd"].as_str()), (Some("starter"), Some("2026-11-01")));
+    let plans: Vec<(&str, bool)> = plan["plans"].as_array().unwrap().iter().map(|p| (p["code"].as_str().unwrap(), p["current"].as_bool().unwrap())).collect();
+    assert_eq!(plans, [("starter", true), ("pro", false)]);
+    assert_eq!(plan["plans"][0]["limits"][0]["hardCap"], true);
+    // No lots: the empty list is left out, as Jackson's NON_EMPTY does.
+    assert_eq!((plan["currency"].as_str(), plan["walletStatus"].as_str(), plan["credits"].as_array().map_or(0, Vec::len)), (Some("INR"), Some("ACTIVE"), 0));
     assert_eq!(b.plan_usage(&buyer(), Some("nope")).await.unwrap(), json!({}));
 }
 
 #[tokio::test]
-async fn get_or_create_seeds_one_token() {
+async fn a_new_wallet_starts_at_zero_or_on_the_default_plan() {
     let w = world();
-    let made = w.billing().wallet_or_create(M_CLIENT, APP).await.unwrap().unwrap();
-    assert_eq!((made.dec("balance").map(|x| x.to_string()), made.str("status")), (Some("1".into()), Some("ACTIVE")));
-    let again = w.billing().wallet_or_create(M_CLIENT, APP).await.unwrap().unwrap();
+    let made = w.billing().wallet_or_create(&system(), M_CLIENT, APP).await.unwrap().unwrap();
+    assert_eq!((made.dec("balance").map(|x| x.to_string()), made.str("status")), (Some("0".into()), Some("ACTIVE")));
+    let again = w.billing().wallet_or_create(&system(), M_CLIENT, APP).await.unwrap().unwrap();
     assert_eq!(again.id(), made.id());
+    // The governing config's default plan, with its one-time credits.
+    let w = world();
+    w.books.put(config_rec("18"));
+    let free = w.books.put(plan_rec(CONFIG_ID, "free", "Free").with("isDefault", Val::Int(1)).with("includedTokens", Val::Dec(d("25"))).with("includedTokensRecurring", Val::Int(0)));
+    let made = w.billing().wallet_or_create(&system(), M_CLIENT, APP).await.unwrap().unwrap();
+    assert_eq!(made.dec("balance").map(|x| x.to_string()), Some("25".into()));
+    let wp = w.books.all(&WALLET_PLAN).pop().unwrap();
+    assert_eq!((wp.u64("walletId"), wp.u64("planId"), wp.str("status")), (made.id(), free.id(), Some("ACTIVE")));
+    let lot = w.books.all(&LOT).pop().unwrap();
+    assert_eq!((lot.str("source"), lot.ts("expiresAt")), (Some("PLAN"), None));
 }
 
 #[tokio::test]
@@ -1145,19 +1460,24 @@ async fn credit_from_payment_reactivates_a_suspended_wallet() {
         .with("tokensPurchased", Val::Dec(d("100")))
         .with("paymentReference", Val::Str("pay_1".into()))
         .with("invoiceNumber", Val::Str("INV/1".into()));
-    let r = w.billing().credit_from_payment(&inv).await.unwrap().unwrap();
+    let r = w.billing().credit_from_payment(&system(), &inv).await.unwrap().unwrap();
     assert!(r.charged);
     assert_eq!(r.balance_after.to_string(), "95");
+    // The debt is paid first: only 95 becomes a lot.
+    assert_eq!(w.books.all(&LOT).pop().unwrap().dec("tokensLeft").map(|x| x.to_string()), Some("95".into()));
     let after = w.books.one(&WALLET, WALLET_ID).unwrap();
     assert_eq!((after.str("status"), after.int("lowBalanceNotified")), (Some("ACTIVE"), Some(0)));
     // The same payment again: not credited twice.
-    let r = w.billing().credit_from_payment(&inv).await.unwrap().unwrap();
+    let r = w.billing().credit_from_payment(&system(), &inv).await.unwrap().unwrap();
     assert!(!r.charged);
     assert_eq!(r.balance_after.to_string(), "95");
-    assert!(w.billing().credit_from_payment(&Rec::new(&INVOICE)).await.unwrap().is_none());
+    assert!(w.billing().credit_from_payment(&system(), &Rec::new(&INVOICE)).await.unwrap().is_none());
+    // A paid monthly invoice buys no credits.
+    let monthly = inv.clone().with("kind", Val::Str("MONTHLY".into())).with("paymentReference", Val::Str("pay_m".into()));
+    assert!(w.billing().credit_from_payment(&system(), &monthly).await.unwrap().is_none());
     // Tokens missing: BigDecimal.add(null).
     let none = inv.with("tokensPurchased", Val::Null).with("paymentReference", Val::Str("pay_2".into()));
-    assert!(w.billing().credit_from_payment(&none).await.unwrap_err().to_string().contains("augend"));
+    assert!(w.billing().credit_from_payment(&system(), &none).await.unwrap_err().to_string().contains("augend"));
 }
 
 #[tokio::test]
@@ -1174,7 +1494,7 @@ async fn adjustments_by_a_managing_owner_only() {
     let r = b.adjust(&parent, WALLET_ID, d("5"), "goodwill").await.unwrap();
     assert!(r.charged);
     let txn = w.books.all(&TXN).pop().unwrap();
-    assert_eq!((txn.str("type"), txn.str("referenceType"), txn.str("reason"), txn.u64("createdBy")), (Some("ADJUST"), Some("ADJUST"), Some("goodwill"), Some(77)));
+    assert_eq!((txn.str("type"), txn.str("referenceType"), txn.str("reason")), (Some("ADJUST"), Some("ADJUST"), Some("goodwill")));
     assert!(txn.str("idempotencyKey").unwrap().starts_with("adjust:"));
     assert_eq!(w.books.one(&WALLET, WALLET_ID).unwrap().str("status"), Some("ACTIVE"));
     assert_eq!(b.adjust(&parent, 1, d("5"), "x").await.unwrap_err().message(), "Wallet with id 1 not found");
@@ -1188,8 +1508,11 @@ async fn admin_credits_and_lookups() {
     // SYSTEM: no checks; the wallet is made when absent.
     assert!(b.lookup_wallet(&system(), Some("crm"), Some("SYSTEM"), Some("BUS")).await.unwrap().is_none());
     let r = b.credit_tokens(&system(), Some("crm"), Some("SYSTEM"), Some("BUS"), one, Some("grant")).await.unwrap().unwrap();
-    assert_eq!(r.balance_after.to_string(), "11");
-    assert_eq!(b.lookup_wallet(&system(), Some("crm"), Some("SYSTEM"), Some("BUS")).await.unwrap().unwrap().dec("balance").unwrap().to_string(), "11");
+    assert_eq!(r.balance_after.to_string(), "10");
+    assert_eq!(b.lookup_wallet(&system(), Some("crm"), Some("SYSTEM"), Some("BUS")).await.unwrap().unwrap().dec("balance").unwrap().to_string(), "10");
+    // A grant is a GRANT lot that lasts the default validity (12 months).
+    let lot = w.books.all(&LOT).pop().unwrap();
+    assert_eq!((lot.str("source"), lot.ts("expiresAt").map(|t| t.date().to_string())), (Some("GRANT"), Some("2027-10-15".into())));
     // Unknown codes, then each of the owner's checks.
     for (app, url, cl, msg) in [
         ("nope", "SYSTEM", "BUS", "the application"),
@@ -1209,6 +1532,191 @@ async fn admin_credits_and_lookups() {
     assert_eq!(e.message(), "Permission/Role manage the wallet's client is required to use this operation");
     assert!(b.lookup_wallet(&owner, Some("crm"), Some("BUS"), Some("CUST")).await.unwrap().is_none());
     assert!(b.credit_tokens(&owner, None, Some("BUS"), Some("CUST"), one, None).await.is_err());
+}
+
+fn meter_rec(config: u64, key: &str, source: &str, rate: &str, free: &str) -> Rec {
+    let mut label = key.to_string();
+    label[..1].make_ascii_uppercase();
+    Rec::new(&METER)
+        .with("billingConfigId", Val::Id(config))
+        .with("meterKey", Val::Str(key.into()))
+        .with("label", Val::Str(label))
+        .with("source", Val::Str(source.into()))
+        .with("kind", Val::Str("GAUGE".into()))
+        .with("rate", Val::Dec(d(rate)))
+        .with("rateUnit", Val::Str("MONTH".into()))
+        .with("freeQuantity", Val::Dec(d(free)))
+        .with("chargeMode", Val::Str("TOKENS".into()))
+        .with("refundPolicy", Val::Str("NONE".into()))
+        .with("displayOrder", Val::Int(0))
+        .with("status", Val::Str("ACTIVE".into()))
+}
+
+fn plan_rec(config: u64, code: &str, label: &str) -> Rec {
+    Rec::new(&PLAN)
+        .with("billingConfigId", Val::Id(config))
+        .with("code", Val::Str(code.into()))
+        .with("label", Val::Str(label.into()))
+        .with("isDefault", Val::Int(0))
+        .with("status", Val::Str("ACTIVE".into()))
+}
+
+/// The suspected regression: a credit made through `credit_wallet` no longer records who made
+/// it. Before the rebuild an owner's adjustment kept the acting user (77) and a paid purchase the
+/// purchasing user (the invoice's createdBy) in the ledger's CREATED_BY; `credit_wallet` ignores
+/// its `ca` and builds the `Txn` with `created_by: None`.
+#[tokio::test]
+async fn credits_keep_who_made_them() {
+    let w = world();
+    w.books.put(wallet("10", "ACTIVE", 0));
+    w.books.grant(APP, C_CLIENT);
+    let parent = ca(C_CLIENT, "BUS", &["Authorities.ROLE_Owner"]);
+    w.billing().adjust(&parent, WALLET_ID, d("5"), "goodwill").await.unwrap();
+    assert_eq!(w.books.all(&TXN).pop().unwrap().u64("createdBy"), Some(77));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Meters, plans, subscribing, AI rates
+
+/// BUS's own config (60) for crm, which BUS may edit.
+fn sellers_world() -> World {
+    let w = world();
+    w.books.grant(APP, M_CLIENT);
+    w.books.put(new_config(M_CLIENT).with("id", Val::Id(60)).with("status", Val::Str("ACTIVE".into())));
+    w
+}
+
+#[tokio::test]
+async fn meters_are_managed_by_who_manages_the_config_and_hold_together() {
+    let w = sellers_world();
+    let b = w.billing();
+    let users = meter_rec(60, "users", "USERS", "1000", "5").with("kind", Val::Null).with("chargeMode", Val::Null).with("status", Val::Null);
+    let saved = b.meter_create(&buyer(), users).await.unwrap().unwrap();
+    // The defaults: the kind follows the source; TOKENS; ACTIVE.
+    assert_eq!((saved.str("kind"), saved.str("chargeMode"), saved.str("status")), (Some("GAUGE"), Some("TOKENS"), Some("ACTIVE")));
+    let leads = meter_rec(60, "leads.created", "EVENT", "2", "100").with("kind", Val::Null).with("rateUnit", Val::Str("EACH".into()));
+    assert_eq!(b.meter_create(&buyer(), leads).await.unwrap().unwrap().str("kind"), Some("COUNTER"));
+    // Refused: a stranger; a counted meter not priced by the month; a second AI meter; a second files meter of the client.
+    assert_eq!(b.meter_create(&stranger(), meter_rec(60, "x", "USERS", "1", "0")).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    let e = b.meter_create(&buyer(), meter_rec(60, "x", "USERS", "1", "0").with("rateUnit", Val::Str("EACH".into()))).await.unwrap_err();
+    assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "A counted meter is priced per unit per month (MONTH).".into()));
+    let ai = || meter_rec(60, "ai.tokens", "AI_TOKENS", "2", "0").with("kind", Val::Str("COUNTER".into())).with("rateUnit", Val::Str("MARKUP".into()));
+    b.meter_create(&buyer(), ai()).await.unwrap();
+    assert_eq!(b.meter_create(&buyer(), ai().with("meterKey", Val::Str("ai2".into()))).await.unwrap_err().message(), "A config has one AI meter.");
+    w.books.put(new_config(M_CLIENT).with("id", Val::Id(61)).with("appId", Val::Id(1)));
+    b.meter_create(&buyer(), meter_rec(60, "files", "FILES_GB", "10", "1")).await.unwrap();
+    w.books.grant(1, M_CLIENT);
+    let e = b.meter_create(&buyer(), meter_rec(61, "files", "FILES_GB", "10", "1")).await.unwrap_err();
+    assert!(e.message().starts_with("Files are counted per client"), "{}", e.message());
+    // The list, the update (editable fields only), the soft delete.
+    let keys: Vec<String> = b.meters_of(&buyer(), 60).await.unwrap().iter().map(|m| m.str("meterKey").unwrap().to_string()).collect();
+    assert_eq!(keys, ["users", "leads.created", "ai.tokens", "files"]);
+    assert_eq!(b.meters_of(&stranger(), 60).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    let id = saved.id().unwrap();
+    let put = saved.clone().with("rate", Val::Dec(d("1200"))).with("billingConfigId", Val::Id(1));
+    let updated = b.meter_update(&buyer(), &put).await.unwrap();
+    assert_eq!((updated.dec("rate").map(|x| x.to_string()), updated.u64("billingConfigId")), (Some("1200".into()), Some(60)));
+    assert_eq!(b.meter_update(&buyer(), &put.clone().with("kind", Val::Str("COUNTER".into()))).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.meter_delete(&buyer(), id).await.unwrap(), 1);
+    assert_eq!(w.books.one(&METER, id).unwrap().str("status"), Some("DELETED"));
+    assert_eq!(b.meters_of(&buyer(), 60).await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn plans_keep_one_default_per_config() {
+    let w = sellers_world();
+    let b = w.billing();
+    let free = b.plan_create(&buyer(), plan_rec(60, "free", "Free").with("isDefault", Val::Int(1))).await.unwrap().unwrap();
+    // The config's currency when none is given.
+    assert_eq!(free.str("currency"), Some("INR"));
+    let pro = b.plan_create(&buyer(), plan_rec(60, "pro", "Pro").with("isDefault", Val::Int(1))).await.unwrap().unwrap();
+    assert_eq!(w.books.one(&PLAN, free.id().unwrap()).unwrap().int("isDefault"), Some(0));
+    assert_eq!(w.books.one(&PLAN, pro.id().unwrap()).unwrap().int("isDefault"), Some(1));
+    let e = b.plan_create(&buyer(), plan_rec(60, "bad", "Bad").with("meterOverrides", Val::Json(json!({"users": 2})))).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.plan_create(&buyer(), plan_rec(60, " ", "Blank")).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.plan_create(&stranger(), plan_rec(60, "s", "S")).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    let updated = b.plan_update(&buyer(), &pro.clone().with("priceAmount", Val::Dec(d("4999")))).await.unwrap();
+    assert_eq!(updated.dec("priceAmount").map(|x| x.to_string()), Some("4999".into()));
+    // Deleting a plan clears its default.
+    assert_eq!(b.plan_delete(&buyer(), pro.id().unwrap()).await.unwrap(), 1);
+    let gone = w.books.one(&PLAN, pro.id().unwrap()).unwrap();
+    assert_eq!((gone.str("status"), gone.int("isDefault")), (Some("DELETED"), Some(0)));
+    assert_eq!(b.plans_of(&buyer(), 60).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_buyer_subscribes_to_a_wallet_plan_it_can_pay_and_cancels_it() {
+    let w = world();
+    w.books.put(config_rec("18"));
+    let pro = w.books.put(plan_rec(CONFIG_ID, "pro", "Pro").with("paymentMode", Val::Str("WALLET".into())).with("priceTokens", Val::Dec(d("100"))));
+    let pro_id = pro.id().unwrap();
+    let b = w.billing();
+    // A new wallet (at zero) cannot pay for it.
+    let e = b.subscribe(&buyer(), pro_id).await.unwrap_err();
+    assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "Not enough credits for this plan: add credits first.".into()));
+    assert!(w.books.all(&WALLET_PLAN).is_empty());
+    // With credits: paid from the wallet, the period starts today.
+    let wallet_id = wallet_of(&w).unwrap().id().unwrap();
+    w.books.credit_balance(wallet_id, d("150")).await.unwrap();
+    let v = b.subscribe(&buyer(), pro_id).await.unwrap();
+    assert_eq!((v["planId"].as_u64(), v["invoice"].is_null()), (Some(pro_id), true));
+    let wp = w.books.all(&WALLET_PLAN).pop().unwrap();
+    assert_eq!((wp.u64("planId"), wp.date_of("periodStart"), wp.date_of("periodEnd")), (Some(pro_id), NaiveDate::from_ymd_opt(2026, 10, 15), NaiveDate::from_ymd_opt(2026, 11, 15)));
+    assert_eq!(wallet_of(&w).unwrap().dec("balance").map(|x| x.to_string()), Some("50".into()));
+    let fee = w.books.all(&TXN).pop().unwrap();
+    assert_eq!((fee.str("type"), fee.str("idempotencyKey")), (Some("DEBIT"), Some(format!("plan-fee:{pro_id}:{wallet_id}:2026-10-15").as_str())));
+    // Again: unchanged, not paid twice.
+    assert_eq!(b.subscribe(&buyer(), pro_id).await.unwrap()["unchanged"], true);
+    assert_eq!(wallet_of(&w).unwrap().dec("balance").map(|x| x.to_string()), Some("50".into()));
+    // Cancelling: no renewal, the period still ends when it ends.
+    let v = b.cancel_plan(&buyer(), Some("crm"), None).await.unwrap();
+    assert_eq!(v["endsOn"], "2026-11-15");
+    assert_eq!(w.books.all(&WALLET_PLAN).pop().unwrap().int("autoRenew"), Some(0));
+    // The next plan must be one of the same config's.
+    let other = w.books.put(plan_rec(999, "x", "X"));
+    assert_eq!(b.cancel_plan(&buyer(), Some("crm"), other.id()).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.cancel_plan(&stranger(), Some("crm"), None).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_plan_is_offered_only_to_the_clients_its_config_governs() {
+    let w = world();
+    w.books.put(config_rec("18"));
+    // BUS's own config sells to CUST, not to BUS.
+    w.books.put(new_config(M_CLIENT).with("id", Val::Id(60)).with("status", Val::Str("ACTIVE".into())));
+    let own = w.books.put(plan_rec(60, "own", "Own").with("paymentMode", Val::Str("WALLET".into())));
+    let e = w.billing().subscribe(&buyer(), own.id().unwrap()).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::FORBIDDEN);
+    // A plan that is not offered; one that does not exist.
+    let off = w.books.put(plan_rec(CONFIG_ID, "off", "Off").with("status", Val::Str("INACTIVE".into())));
+    assert_eq!(w.billing().subscribe(&buyer(), off.id().unwrap()).await.unwrap_err().message(), "This plan is not offered.");
+    assert_eq!(w.billing().subscribe(&buyer(), 4242).await.unwrap_err().status(), StatusCode::NOT_FOUND);
+    // A free WALLET plan of the governing config needs no credits.
+    let free = w.books.put(plan_rec(CONFIG_ID, "free", "Free").with("paymentMode", Val::Str("WALLET".into())));
+    assert_eq!(w.billing().subscribe(&buyer(), free.id().unwrap()).await.unwrap()["planId"], json!(free.id().unwrap()));
+}
+
+#[tokio::test]
+async fn ai_rates_and_settings_are_for_system_only() {
+    let w = world();
+    let b = w.billing();
+    let rate = Rec::new(&AI_RATE).with("modelPattern", Val::Str("  DeepSeek ".into())).with("outputPerM", Val::Dec(d("1.2")));
+    assert_eq!(b.ai_rate_create(&buyer(), rate.clone()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    let saved = b.ai_rate_create(&system(), rate).await.unwrap().unwrap();
+    assert_eq!(saved.str("modelPattern"), Some("deepseek"));
+    assert_eq!(b.ai_rate_create(&system(), Rec::new(&AI_RATE)).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    let updated = b.ai_rate_update(&system(), &saved.clone().with("modelPattern", Val::Str("DeepSeek-V4".into()))).await.unwrap();
+    assert_eq!(updated.str("modelPattern"), Some("deepseek-v4"));
+    assert_eq!(b.ai_rates_list(&system()).await.unwrap().len(), 1);
+    assert_eq!(b.ai_rates_list(&buyer()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    assert_eq!(b.ai_rate_delete(&system(), saved.id().unwrap()).await.unwrap(), 1);
+    // Settings: read through security-internal's store; an unknown or bad one is refused before any write.
+    w.books.b.lock().unwrap().settings.insert("AI_FX_RATE".into(), "90".into());
+    assert_eq!(b.settings_read(&system()).await.unwrap(), json!({"AI_FX_RATE": "90"}));
+    assert_eq!(b.settings_read(&buyer()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+    assert_eq!(b.setting_write(&system(), "NOPE", "1").await.unwrap_err().message(), "Unknown billing setting.");
+    assert_eq!(b.setting_write(&system(), "AI_FX_RATE", "-1").await.unwrap_err().message(), "The value is a positive number.");
 }
 
 // ---------------------------------------------------------------------------------------------

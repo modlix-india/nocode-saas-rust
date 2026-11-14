@@ -804,8 +804,9 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     // NextSequence, Event.GetScheduleState, Security.SendContactCode / VerifyContactCode,
     // Connection.VerifySignature (LZT-2267), REST.OAuth2TokenInfo (LZT-2270) and
     // File.DocxInspect / DocxPrepare / PdfStamp (Word templates and PDF seal) and
-    // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852).
-    assert_eq!(other.filter("").await.unwrap().len(), 87);
+    // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852), Billing.RecordUsage /
+    // ReverseUsage / Allowed and Messaging.SendSms.
+    assert_eq!(other.filter("").await.unwrap().len(), 91);
     for f in ["CoreServices.File.DocxInspect", "CoreServices.File.DocxPrepare", "CoreServices.File.PdfStamp"] {
         assert_eq!(other.filter(&f.to_lowercase()).await.unwrap(), [f]);
     }
