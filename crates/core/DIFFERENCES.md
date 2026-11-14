@@ -375,6 +375,17 @@ created from 2026-11-12 (IST). Every other field is unchanged.
   a manager who is not ACTIVE is passed over for their own manager, at most 10 steps, never in a
   loop. Answers `found`, `managerId` (0 when none) and `manager` (`GetUsersByIds`' user fields,
   `{}` when none). A null, blank or 0 `userId` is "no manager". Only inside a server function.
+- **D54 `CoreServices.Security.GetUsersWithAuthority`** (2026-11-14, Rust only, CXZ-1852). The
+  ACTIVE users of a client whose authorities in the URL app meet `authority` (for example
+  `Authorities.CXZUMP.ROLE_Payment_APPROVE`; held through any profile or role), for server
+  functions that must tell the people who can act on something, also in a run without a
+  signed-in user (a scheduled outbox drain). `authority` (required: blank is 400, since security
+  reads a blank filter as everyone) and `clientCode` (optional). The client is chosen as
+  `GetUsersForDistribution` chooses it; an unrelated one answers no users rather than 403, as
+  `GetUserManager` does. Security-internal `POST /users/internal/notification` with
+  `filterAuthorization` names the holders, `POST /users/internal/batch` reads them; only ACTIVE
+  users of that client are kept. Answers `users`, `[{id, emailId, firstName, lastName}]` by id
+  (fields without a value, and an `emailId` of `NONE`, left out). Only inside a server function.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

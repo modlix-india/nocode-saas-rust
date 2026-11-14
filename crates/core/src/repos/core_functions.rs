@@ -120,14 +120,14 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 94);
+        assert_eq!(core.names().len(), 95);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has, SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
-        // Security.GetUserManager (LZT-2411).
+        // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852).
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[87..],
+            core.names()[88..],
             [
                 "CoreServices.Security.SendContactCode",
                 "CoreServices.Security.VerifyContactCode",
@@ -140,7 +140,7 @@ mod tests {
             "the contact codes, the connection signature check, the token info, then the Word template functions, come last"
         );
         assert_eq!(
-            core.names()[79..87],
+            core.names()[80..88],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",
@@ -152,7 +152,7 @@ mod tests {
                 "CoreServices.Platform.CleanupDebugRuns",
             ]
         );
-        assert!(core.names()[..74].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
+        assert!(core.names()[..75].iter().all(|n| !n.starts_with("CoreServices.Platform.")));
         let notification: Vec<&String> = core.names().iter().filter(|n| n.starts_with("CoreServices.Notification.")).collect();
         assert_eq!(notification, ["CoreServices.Notification.SendNotification", "CoreServices.Notification.SendDataNotification"]);
         assert_eq!(core.filter("SendDataNotification").await.unwrap(), ["CoreServices.Notification.SendDataNotification"]);

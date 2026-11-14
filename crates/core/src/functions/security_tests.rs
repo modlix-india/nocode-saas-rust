@@ -545,6 +545,66 @@ async fn users_for_distribution() {
     assert_eq!(params["clientCode"].get_schema().get_default_value(), Some(&json!("")));
 }
 
+// --- GetUsersWithAuthority (Rust only, CXZ-1852) -----------------------------------------------
+
+#[tokio::test]
+async fn users_with_authority() {
+    let (w, fns) = world().await;
+    let f = find(&fns, "GetUsersWithAuthority");
+    assert_eq!(f.get_signature().get_full_name(), "CoreServices.Security.GetUsersWithAuthority");
+    let params = f.get_signature().get_parameters();
+    assert_eq!(params["clientCode"].get_schema().get_default_value(), Some(&json!("")));
+    assert_eq!(params["authority"].get_schema().get_default_value(), Some(&json!("")));
+
+    let note = "/api/security/users/internal/notification";
+    let batch = "/api/security/users/internal/batch";
+    // Holders as security answers them (any status); 9 claims client 55 (not the batch's 7).
+    w.answer("POST", note, 200, r#"[{"id":3,"clientId":7,"emailId":"c@x.test"},{"id":1,"clientId":7,"emailId":"a@x.test"},
+        {"id":2,"clientId":7,"emailId":"b@x.test"},{"id":"1","clientId":7},{"id":9,"clientId":55},{"clientId":7}]"#);
+    w.answer("POST", batch, 200, r#"[{"id":1,"clientId":7,"emailId":"a@x.test","firstName":"Ann","lastName":"One","statusCode":"ACTIVE","phoneNumber":"1"},
+        {"id":2,"clientId":7,"emailId":"b@x.test","firstName":"Bo","statusCode":"INACTIVE"},
+        {"id":3,"clientId":7,"emailId":"NONE","firstName":"Cy","lastName":null,"statusCode":"active"},
+        {"id":9,"clientId":7,"emailId":"z@x.test","statusCode":"ACTIVE"}]"#);
+    w.set_manages_code(|m, c| m == "FIN" && c == "BP1");
+
+    let r = run(f.as_ref(), json!({"authority": " Authorities.CXZUMP.ROLE_Payment_APPROVE "}), fin(), true, true).await.unwrap();
+    assert_eq!(
+        r["users"],
+        json!([{"id": 1, "emailId": "a@x.test", "firstName": "Ann", "lastName": "One"}, {"id": 3, "firstName": "Cy"}]),
+        "ACTIVE only, by id, once each, never a user of another client"
+    );
+    let body: Value = serde_json::from_str(&w.last(note).body).unwrap();
+    assert_eq!(body, json!({"clientCode": "FIN", "appCode": "leadzumptwo", "filterAuthorization": "Authorities.CXZUMP.ROLE_Payment_APPROVE"}));
+    assert_eq!(w.last(batch).body, "[1,2,3,9]");
+
+    // A scheduled run (not signed in) reads its own client the same way.
+    let r = run(f.as_ref(), json!({"authority": "Authorities.X", "clientCode": ""}), anonymous(7, "FIN"), true, true).await.unwrap();
+    assert_eq!(r["users"].as_array().unwrap().len(), 2);
+    // A managed client may be named; an unrelated one (or SYSTEM) answers no users without asking.
+    run(f.as_ref(), json!({"authority": "Authorities.X", "clientCode": "BP1"}), fin(), true, true).await.unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&w.last(note).body).unwrap()["clientCode"], "BP1");
+    let n = w.count(note);
+    for cc in ["OTHER", "SYSTEM"] {
+        let r = run(f.as_ref(), json!({"authority": "Authorities.X", "clientCode": cc}), anonymous(7, "FIN"), true, true).await.unwrap();
+        assert_eq!(r["users"], json!([]), "{cc}");
+    }
+    assert_eq!(w.count(note), n);
+
+    // No holders: the users are not read.
+    w.answer("POST", note, 200, "[]");
+    let b = w.count(batch);
+    let r = run(f.as_ref(), json!({"authority": "Authorities.None"}), fin(), true, true).await.unwrap();
+    assert_eq!(r["users"], json!([]));
+    assert_eq!(w.count(batch), b);
+
+    // A blank authority would be everyone: refused. Outside a definition: refused.
+    for a in [json!({}), json!({"authority": "  "}), json!({"authority": ""})] {
+        assert_eq!(status(&run(f.as_ref(), a, fin(), true, true).await), StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(status(&run(f.as_ref(), json!({"authority": "Authorities.X"}), fin(), false, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(w.count(note), n + 1);
+}
+
 // --- IsBeingManagedBy*, GetClient, the e-mail lists -------------------------------------------
 
 #[tokio::test]
@@ -1087,7 +1147,7 @@ async fn registered_in_java_order() {
         "SetClientManagers", "MigrateClientManagers", "LogClientActivity", "QueryClientActivities", "GetAppProfiles", "GetClient",
         "IsBeingManagedByCode", "IsBeingManagedById", "GetUserAdminEmails", "GetOwnersEmails", "GetUserSubOrg",
         "GetManagedClientIds", "GetUsersForDistribution", "GetUsersByIds", "GetClientsByIds", "GetClientUsersPage", "GetClientsDenorm",
-        "GetUserManager",
+        "GetUserManager", "GetUsersWithAuthority",
     ] {
         assert!(core.find(Some("CoreServices.Security"), name).await.unwrap().is_some(), "{name}");
     }
