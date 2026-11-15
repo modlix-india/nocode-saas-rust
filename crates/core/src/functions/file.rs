@@ -346,12 +346,17 @@ impl JavaFunction for TemplateToPdf {
     }
 }
 
-/// `makeFileFunctions`: FileToBase64, then TemplateToPdf.
+/// `makeFileFunctions`: FileToBase64, then TemplateToPdf; then the Rust-only CreateSecuredKey and
+/// SaveSecuredFile.
 pub fn all(deps: &Deps) -> Vec<Arc<dyn kirun::function::Function>> {
     vec![
         Java::function(FileToBase64 { files: deps.files.clone() }),
         Java::function(TemplateToPdf { templates: deps.defs.clone(), files: deps.files.clone() }),
     ]
+    .into_iter()
+    // Rust only (HRMS): a secured file of the caller's client opened or written by a server function.
+    .chain(super::secured_file::all(&deps.files))
+    .collect()
 }
 
 #[cfg(test)]
@@ -650,7 +655,7 @@ mod tests {
         deps.files = f.files.clone();
         let all = all(&deps);
         let names: Vec<String> = all.iter().map(|x| x.get_signature().get_full_name()).collect();
-        assert_eq!(names, ["CoreServices.File.FileToBase64", "CoreServices.File.TemplateToPdf"]);
+        assert_eq!(names, ["CoreServices.File.FileToBase64", "CoreServices.File.TemplateToPdf", "CoreServices.File.CreateSecuredKey", "CoreServices.File.SaveSecuredFile"]);
         let fep = |a: Map<Value>| {
             FunctionExecutionParameters::new(Arc::new(KIRunFunctionRepository::new()), Arc::new(KIRunSchemaRepository::new())).set_arguments(a)
         };
