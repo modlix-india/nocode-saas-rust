@@ -514,6 +514,11 @@ impl BillingStore for FakeBooks {
     async fn setting(&self, name: &str) -> AuthResult<Option<String>> {
         Ok(self.b.lock().unwrap().settings.get(name).cloned())
     }
+    async fn settings_all(&self) -> AuthResult<Vec<(String, String)>> {
+        let mut all: Vec<(String, String)> = self.b.lock().unwrap().settings.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        all.sort();
+        Ok(all)
+    }
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
         Ok(self.all(&INVOICE).iter().any(|i| i.u64("clientId") == Some(client_id) && i.u64("appId") == Some(app_id) && i.str("status") == Some("OVERDUE")))
     }
@@ -1179,7 +1184,12 @@ async fn the_buyers_own_profile_is_read_and_upserted() {
 // AppBillingConfigService / AppBillingBundleService
 
 fn new_config(client: u64) -> Rec {
-    Rec::new(&CONFIG).with("clientId", Val::Id(client)).with("appId", Val::Id(APP)).with("status", Val::Str("INACTIVE".into())).with("createdBy", Val::Id(9))
+    Rec::new(&CONFIG)
+        .with("clientId", Val::Id(client))
+        .with("appId", Val::Id(APP))
+        .with("status", Val::Str("INACTIVE".into()))
+        .with("currency", Val::Str("INR".into()))
+        .with("createdBy", Val::Id(9))
 }
 
 #[tokio::test]
@@ -1601,6 +1611,7 @@ async fn meters_are_managed_by_who_manages_the_config_and_hold_together() {
     let e = b.meter_create(&buyer(), meter_rec(60, "x", "USERS", "1", "0").with("rateUnit", Val::Str("EACH".into()))).await.unwrap_err();
     assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "A counted meter is priced per unit per month (MONTH).".into()));
     let ai = || meter_rec(60, "ai.tokens", "AI_TOKENS", "2", "0").with("kind", Val::Str("COUNTER".into())).with("rateUnit", Val::Str("MARKUP".into()));
+    w.books.b.lock().unwrap().settings.insert("AI_FX_RATE.INR".into(), "94".into());
     b.meter_create(&buyer(), ai()).await.unwrap();
     assert_eq!(b.meter_create(&buyer(), ai().with("meterKey", Val::Str("ai2".into()))).await.unwrap_err().message(), "A config has one AI meter.");
     w.books.put(new_config(M_CLIENT).with("id", Val::Id(61)).with("appId", Val::Id(1)));
@@ -1643,6 +1654,42 @@ async fn plans_keep_one_default_per_config() {
     let gone = w.books.one(&PLAN, pro.id().unwrap()).unwrap();
     assert_eq!((gone.str("status"), gone.int("isDefault")), (Some("DELETED"), Some(0)));
     assert_eq!(b.plans_of(&buyer(), 60).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn each_app_bills_in_its_own_currency() {
+    let w = sellers_world();
+    let b = w.billing();
+    // A config names its currency: a three-letter code, kept upper case; none at all is refused.
+    let e = b.config_create(&buyer(), new_config(M_CLIENT).with("currency", Val::Null)).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(b.config_create(&buyer(), new_config(M_CLIENT).with("currency", Val::Str("rupees".into()))).await.unwrap_err().status(), StatusCode::BAD_REQUEST);
+    let usd = b.config_create(&buyer(), new_config(M_CLIENT).with("currency", Val::Str(" usd ".into()))).await.unwrap().unwrap();
+    assert_eq!(usd.str("currency"), Some("USD"));
+    // Plans and bundles are priced in the config's currency, whatever the request says.
+    let plan = b.plan_create(&buyer(), plan_rec(60, "pro", "Pro").with("currency", Val::Str("EUR".into()))).await.unwrap().unwrap();
+    assert_eq!(plan.str("currency"), Some("INR"));
+    let bundle = b.bundle_create(&buyer(), bundle_rec("FIXED").with("id", Val::Null).with("billingConfigId", Val::Id(60)).with("currency", Val::Str("USD".into()))).await.unwrap().unwrap();
+    assert_eq!(bundle.str("currency"), Some("INR"));
+    assert_eq!(b.plan_update(&buyer(), &plan.clone().with("currency", Val::Str("USD".into()))).await.unwrap().str("currency"), Some("INR"));
+    // AI is priced in dollars: an AI meter needs a rate for the config's currency (INR here).
+    let ai = || meter_rec(60, "ai.tokens", "AI_TOKENS", "2", "0").with("kind", Val::Str("COUNTER".into())).with("rateUnit", Val::Str("MARKUP".into()));
+    let e = b.meter_create(&buyer(), ai()).await.unwrap_err();
+    assert!(e.message().contains("AI_FX_RATE.INR"), "{}", e.message());
+    w.books.b.lock().unwrap().settings.insert("AI_FX_RATE.INR".into(), "94".into());
+    b.meter_create(&buyer(), ai()).await.unwrap();
+    // A currency change: refused for AI while the new currency has no rate; else plans and bundles follow it.
+    let cfg = w.books.one(&CONFIG, 60).unwrap();
+    let e = b.config_update(&buyer(), &cfg.clone().with("currency", Val::Str("EUR".into()))).await.unwrap_err();
+    assert!(e.message().contains("AI_FX_RATE.EUR"), "{}", e.message());
+    assert_eq!(w.books.one(&PLAN, plan.id().unwrap()).unwrap().str("currency"), Some("INR"));
+    let moved = b.config_update(&buyer(), &cfg.clone().with("currency", Val::Str("USD".into()))).await.unwrap().unwrap();
+    assert_eq!(moved.str("currency"), Some("USD"));
+    assert_eq!(w.books.one(&PLAN, plan.id().unwrap()).unwrap().str("currency"), Some("USD"));
+    assert_eq!(w.books.one(&BUNDLE, bundle.id().unwrap()).unwrap().str("currency"), Some("USD"));
+    // An update that leaves the currency out keeps it.
+    let kept = b.config_update(&buyer(), &cfg.clone().with("currency", Val::Null)).await.unwrap().unwrap();
+    assert_eq!(kept.str("currency"), Some("USD"));
 }
 
 #[tokio::test]
@@ -1712,11 +1759,18 @@ async fn ai_rates_and_settings_are_for_system_only() {
     assert_eq!(b.ai_rates_list(&buyer()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
     assert_eq!(b.ai_rate_delete(&system(), saved.id().unwrap()).await.unwrap(), 1);
     // Settings: read through security-internal's store; an unknown or bad one is refused before any write.
+    // One exchange rate per currency; the bare rupee rate V90 seeded reads as AI_FX_RATE.INR.
     w.books.b.lock().unwrap().settings.insert("AI_FX_RATE".into(), "90".into());
-    assert_eq!(b.settings_read(&system()).await.unwrap(), json!({"AI_FX_RATE": "90"}));
+    w.books.b.lock().unwrap().settings.insert("AI_FX_RATE.EUR".into(), "0.9".into());
+    assert_eq!(b.settings_read(&system()).await.unwrap(), json!({"AI_FX_RATE.EUR": "0.9", "AI_FX_RATE.INR": "90"}));
+    w.books.b.lock().unwrap().settings.insert("AI_FX_RATE.INR".into(), "94".into());
+    assert_eq!(b.settings_read(&system()).await.unwrap(), json!({"AI_FX_RATE.EUR": "0.9", "AI_FX_RATE.INR": "94"}));
     assert_eq!(b.settings_read(&buyer()).await.unwrap_err().status(), StatusCode::FORBIDDEN);
-    assert_eq!(b.setting_write(&system(), "NOPE", "1").await.unwrap_err().message(), "Unknown billing setting.");
-    assert_eq!(b.setting_write(&system(), "AI_FX_RATE", "-1").await.unwrap_err().message(), "The value is a positive number.");
+    for bad in ["NOPE", "AI_FX_RATE", "AI_FX_RATE.USD", "AI_FX_RATE.EURO", "AI_FX_RATE.E1"] {
+        assert!(b.setting_write(&system(), bad, "1").await.unwrap_err().message().starts_with("Unknown billing setting"), "{bad}");
+    }
+    assert_eq!(b.setting_write(&system(), "AI_FX_RATE.GBP", "-1").await.unwrap_err().message(), "The value is a positive number.");
+    assert_eq!(b.setting_delete(&buyer(), "AI_FX_RATE.EUR").await.unwrap_err().status(), StatusCode::FORBIDDEN);
 }
 
 // ---------------------------------------------------------------------------------------------

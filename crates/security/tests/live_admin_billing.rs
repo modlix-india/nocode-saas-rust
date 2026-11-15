@@ -308,6 +308,10 @@ impl BillingStore for TxStore {
         let mut g = self.tx.lock().await;
         Ok(sqlx::query_scalar("SELECT VALUE FROM security_billing_setting WHERE NAME = ?").bind(name).fetch_optional(tx_conn(&mut g)?).await?)
     }
+    async fn settings_all(&self) -> AuthResult<Vec<(String, String)>> {
+        let mut g = self.tx.lock().await;
+        Ok(sqlx::query_as("SELECT NAME, VALUE FROM security_billing_setting ORDER BY NAME").fetch_all(tx_conn(&mut g)?).await?)
+    }
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
         let mut g = self.tx.lock().await;
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_invoice WHERE CLIENT_ID = ? AND APP_ID = ? AND STATUS = 'OVERDUE'")
