@@ -101,6 +101,7 @@ pub async fn transform(cx: &mut Ctx, kind: Kind, req: Request) -> AppResult<Resp
     if !has_write_access(&cx.st, cx.ca(), &rp, &cc, kind).await.app()? {
         return Err(forbidden_path(kind, &rp));
     }
+    super::resources::require_write_target(cx, kind, &rp, &format!("{rp}/{file_name}"), &cc).await?;
 
     let source = match &part {
         Some(p) => bytes_of(&p.file.path).await?,

@@ -30,6 +30,7 @@ pub mod manage;
 pub mod model;
 pub mod options;
 pub mod paths;
+pub mod protected;
 pub mod retention;
 pub mod spring;
 pub mod state;

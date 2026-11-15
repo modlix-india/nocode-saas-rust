@@ -226,6 +226,44 @@ impl Dao {
         Ok(any == 0)
     }
 
+    /// The PATHs of the rules for this user or one of their authorities that cover `path` (and,
+    /// to write, grant writing): the same match as [`Self::has_path_access`], for a path under a
+    /// protected prefix, where only some of the covering rules count (`crate::protected`).
+    pub async fn covering_rule_paths(
+        &self,
+        kind: Kind,
+        path: &str,
+        user_id: u64,
+        client_code: &str,
+        authorities: &[String],
+        write: bool,
+    ) -> Result<Vec<String>> {
+        let mut qb = QueryBuilder::new("SELECT PATH FROM files_access_path WHERE CLIENT_CODE = ");
+        qb.push_bind(client_code);
+        qb.push(" AND RESOURCE_TYPE = ");
+        qb.push_bind(kind.db_name());
+        qb.push(" AND (USER_ID = ");
+        qb.push_bind(user_id);
+        if authorities.is_empty() {
+            qb.push(" OR 1 = 0");
+        } else {
+            qb.push(" OR ACCESS_NAME IN (");
+            let mut sep = qb.separated(", ");
+            for a in authorities {
+                sep.push_bind(a.as_str());
+            }
+            qb.push(")");
+        }
+        qb.push(") AND CONCAT(");
+        qb.push_bind(path);
+        qb.push(") LIKE IF(ALLOW_SUB_PATH_ACCESS <> 0, CONCAT(PATH, '%'), PATH)");
+        if write {
+            qb.push(" AND WRITE_ACCESS = 1");
+        }
+        let rows = qb.build().fetch_all(&self.pool).await?;
+        rows.iter().map(|r| r.try_get::<Option<String>, _>("PATH").map(Option::unwrap_or_default).map_err(Into::into)).collect()
+    }
+
     /// `FilesAccessPathDao.hasPathReadAccess` for SECURED: a path rule for this user or one of
     /// their authorities that covers `path` (exactly, or as a prefix when sub paths are allowed).
     pub async fn has_secured_path_read_access(

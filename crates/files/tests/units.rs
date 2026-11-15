@@ -82,7 +82,7 @@ async fn file_system_pieces_without_rows() {
         h.put_object(Kind::Static, k, b.as_bytes());
     }
     let dir = TempDir::new(&h.state, "units").unwrap();
-    let zip = fs.directory_archive("/CLIA/site", &dir).await.unwrap();
+    let zip = fs.directory_archive("/CLIA/site", &dir, &[]).await.unwrap();
     let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
     let mut names: Vec<String> = (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect();
     names.sort();
@@ -90,7 +90,7 @@ async fn file_system_pieces_without_rows() {
     // An object that cannot be read fails the archive.
     h.put_object(Kind::Static, "CLIA/bad/s3fail.txt", b"x");
     let dir2 = TempDir::new(&h.state, "units").unwrap();
-    assert!(fs.directory_archive("CLIA/bad/", &dir2).await.is_err());
+    assert!(fs.directory_archive("CLIA/bad/", &dir2, &[]).await.is_err());
     let fetched = fs.fetch("CLIA/site/a.txt", &dir).await.unwrap();
     assert_eq!(std::fs::read(fetched).unwrap(), b"a");
     let path = dir.path.clone();
@@ -169,4 +169,27 @@ async fn app_owners_as_security_sends_them() {
     h.sec.world.lock().unwrap().apps.insert("zero".into(), json!(0));
     let r = h.json(Method::POST, "/api/files/retention", Some("clientless"), &body("zero")).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+/// A root export leaves out the protected folders it is told to skip (any case), and nothing
+/// else: `hrmsx` and a root file named like a protected folder's prefix stay.
+#[tokio::test]
+async fn root_archive_skips_protected_folders() {
+    let h = Harness::new(Unit::Manage).await;
+    let fs = Fs::new(&h.state, Kind::Secured);
+    for k in ["CLIA/hrms/emp/1/pan.pdf", "CLIA/HRMS/x.pdf", "CLIA/hrmsx/a.pdf", "CLIA/kyc/b.pdf", "CLIA/hrms.pdf", "CLIA/root.pdf"] {
+        h.put_object(Kind::Secured, k, b"x");
+    }
+    let names = |zip: std::path::PathBuf| {
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
+        let mut n: Vec<String> = (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect();
+        n.sort();
+        n
+    };
+    let dir = TempDir::new(&h.state, "units").unwrap();
+    let skipped = fs.directory_archive("CLIA/", &dir, &["hrms".to_string()]).await.unwrap();
+    assert_eq!(names(skipped), vec!["hrms.pdf", "hrmsx/a.pdf", "kyc/b.pdf", "root.pdf"]);
+    let dir2 = TempDir::new(&h.state, "units").unwrap();
+    let whole = fs.directory_archive("CLIA/", &dir2, &[]).await.unwrap();
+    assert_eq!(names(whole).len(), 6, "nothing skipped for a caller with the rule");
 }

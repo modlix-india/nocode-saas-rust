@@ -16,6 +16,7 @@ pub struct FilesConfig {
     pub storage: StorageConfig,
     pub secured_keys: SecuredKeysConfig,
     pub billing: BillingConfig,
+    pub files: FilesSection,
 }
 
 impl Default for FilesConfig {
@@ -30,6 +31,7 @@ impl Default for FilesConfig {
             storage: StorageConfig::default(),
             secured_keys: SecuredKeysConfig::default(),
             billing: BillingConfig::default(),
+            files: FilesSection::default(),
         }
     }
 }
@@ -74,4 +76,20 @@ impl Default for SecuredKeysConfig {
 #[serde(default)]
 pub struct BillingConfig {
     pub enabled: bool,
+}
+
+/// `[files]`: rules about the secured tree itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FilesSection {
+    /// Top-level SECURED folders that only a rule under that same folder opens; a broader rule
+    /// (`''`, `/`) does not, and root listing, export and import leave them out for a caller
+    /// without one. Matched on the first path segment, ignoring case (`crate::protected`).
+    pub protected_prefixes: Vec<String>,
+}
+
+impl Default for FilesSection {
+    fn default() -> Self {
+        Self { protected_prefixes: vec!["hrms".into()] }
+    }
 }
