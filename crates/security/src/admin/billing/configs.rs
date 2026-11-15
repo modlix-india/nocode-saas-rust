@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 
 use super::body;
 use super::service::{forbidden, Billing};
-use crate::data::billing_admin::{Find, Rec, Val, BUNDLE, CONFIG};
+use crate::data::billing_admin::{Find, Rec, Val, BUNDLE, CONFIG, PLAN};
 use crate::errors::{AuthError, AuthResult};
 use crate::model::ContextAuth;
 
@@ -161,8 +161,9 @@ impl Billing<'_> {
     }
 
     /// `AppBillingConfigService.create`.
-    pub async fn config_create(&self, ca: &ContextAuth, rec: Rec) -> AuthResult<Option<Rec>> {
+    pub async fn config_create(&self, ca: &ContextAuth, mut rec: Rec) -> AuthResult<Option<Rec>> {
         self.assert_can_manage(ca, rec.u64("appId"), rec.u64("clientId")).await?;
+        super::meters::normalise_currency(&mut rec)?;
         super::meters::check_config(&rec)?;
         let Some(saved) = self.create_row(rec).await? else { return Ok(None) };
         self.evict_config(&saved).await?;
@@ -177,10 +178,23 @@ impl Billing<'_> {
         let Some(id) = entity.id() else { return Ok(None) };
         let Some(mut target) = self.config_read(ca, id).await? else { return Ok(None) };
         let stored = target.map("paymentGatewayConfig");
+        let was = target.str("currency").unwrap_or("").to_string();
         copy(&mut target, entity, &CONFIG_EDITABLE);
+        // An update that leaves the currency out keeps it; one that names it must name a real code.
+        if matches!(target.get("currency"), Val::Null) {
+            target.set("currency", Val::Str(was.clone()));
+        }
+        let currency = super::meters::normalise_currency(&mut target)?;
         super::meters::check_config(&target)?;
+        let changed = currency != was;
+        if changed && self.has_ai_meter(id).await? {
+            self.check_ai_currency(&currency).await?;
+        }
         keep_stored_secrets(&mut target, &stored);
         let saved = self.update_row(&target).await?;
+        if changed {
+            self.follow_currency(id, &currency).await?;
+        }
         self.evict_config(&saved).await?;
         Ok(Some(saved))
     }
@@ -190,6 +204,21 @@ impl Billing<'_> {
         let Some(mut retrieved) = self.config_read(ca, id).await? else { return Ok(None) };
         body::patch(&mut retrieved, fields)?;
         self.config_update(ca, &retrieved).await
+    }
+
+    /// A config's plans and bundles are priced in its currency: a currency change moves them with
+    /// it (the amounts stay as they are, in the new currency).
+    async fn follow_currency(&self, config: u64, currency: &str) -> AuthResult<()> {
+        let f = Find::eq(vec![("BILLING_CONFIG_ID", Val::Id(config))]);
+        for schema in [&PLAN, &BUNDLE] {
+            for mut row in self.store.find(schema, &f).await? {
+                if row.str("currency") != Some(currency) {
+                    row.set("currency", Val::Str(currency.to_string()));
+                    self.store.update(&row).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// `AppBillingConfigService.delete`.
@@ -223,17 +252,20 @@ impl Billing<'_> {
     }
 
     /// `AppBillingBundleService.create`.
-    pub async fn bundle_create(&self, ca: &ContextAuth, rec: Rec) -> AuthResult<Option<Rec>> {
-        self.assert_manageable_config(ca, rec.u64("billingConfigId")).await?;
+    pub async fn bundle_create(&self, ca: &ContextAuth, mut rec: Rec) -> AuthResult<Option<Rec>> {
+        let config = self.assert_manageable_config(ca, rec.u64("billingConfigId")).await?;
+        // A bundle is sold in its app's currency, whatever the request says.
+        rec.set("currency", config.get("currency").clone());
         self.create_row(rec).await
     }
 
     /// `AppBillingBundleService.update(entity)`.
     pub async fn bundle_update(&self, ca: &ContextAuth, entity: &Rec) -> AuthResult<Rec> {
         let existing = self.read(&BUNDLE, entity.id()).await?;
-        self.assert_manageable_config(ca, existing.u64("billingConfigId")).await?;
+        let config = self.assert_manageable_config(ca, existing.u64("billingConfigId")).await?;
         let mut target = self.read(&BUNDLE, entity.id()).await?;
         copy(&mut target, entity, &BUNDLE_EDITABLE);
+        target.set("currency", config.get("currency").clone());
         self.update_row(&target).await
     }
 

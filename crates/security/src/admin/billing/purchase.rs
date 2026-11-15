@@ -66,7 +66,8 @@ pub fn price(bundle: &Rec, config: &Rec, requested: Option<Dec>) -> AuthResult<P
         gst_percentage,
         gst_amount,
         total: base.add(gst_amount),
-        currency: bundle.str("currency").unwrap_or("INR").to_string(),
+        // The app's currency: the config's, else the bundle's (which follows it), else Java's INR.
+        currency: config.str("currency").or(bundle.str("currency")).unwrap_or("INR").to_string(),
     })
 }
 

@@ -53,8 +53,13 @@ pub const PLAN_EDITABLE: [&str; 14] = [
 /// What an AI rate update copies from the request.
 pub const AI_RATE_EDITABLE: [&str; 8] = ["modelPattern", "provider", "inputPerM", "outputPerM", "cacheReadPerM", "cacheWritePerM", "currency", "status"];
 
-/// The platform settings SYSTEM may set.
-pub const SETTINGS: [&str; 1] = [crate::internal::billing::AI_FX_RATE];
+/// The platform settings SYSTEM may set: one exchange rate per currency, `AI_FX_RATE.<CUR>`
+/// (that currency's units per US dollar; AI model rates are in dollars).
+/// The currency of such a name (any case, kept upper case); `None` for any other name or USD.
+fn fx_setting_currency(name: &str) -> Option<String> {
+    let cur = name.trim().strip_prefix(crate::internal::billing::AI_FX_RATE)?.strip_prefix('.')?;
+    crate::internal::billing::currency_code(cur).filter(|c| c != "USD")
+}
 
 fn invalid(what: &str) -> AuthError {
     AuthError::literal(StatusCode::BAD_REQUEST, "SEC.BILLING_INVALID", what.to_string()).with_param("reason", what)
@@ -134,6 +139,15 @@ pub fn check_plan(p: &Rec) -> AuthResult<()> {
     Ok(())
 }
 
+/// Each app bills in its own currency: a three-letter code (USD, INR, EUR), kept upper case.
+pub fn normalise_currency(c: &mut Rec) -> AuthResult<String> {
+    let Some(code) = c.str("currency").and_then(crate::internal::billing::currency_code) else {
+        return Err(invalid("Pick the currency this app bills in: a three-letter code such as USD or INR."));
+    };
+    c.set("currency", Val::Str(code.clone()));
+    Ok(code)
+}
+
 /// The config fields hold together.
 pub fn check_config(c: &Rec) -> AuthResult<()> {
     if c.int("invoiceDay").is_some_and(|d| !(1..=28).contains(&d)) {
@@ -176,11 +190,31 @@ impl Billing<'_> {
         Ok(())
     }
 
-    /// One AI meter per config.
+    /// AI is priced in dollars and charged in the config's currency, so that currency needs an
+    /// exchange rate before AI can be billed in it.
+    pub(super) async fn check_ai_currency(&self, currency: &str) -> AuthResult<()> {
+        if self.internal.usd_rate(currency).await?.is_none() {
+            return Err(invalid(&format!(
+                "AI is priced in US dollars: set the exchange rate for {currency} (platform billing settings, {}) before billing AI in it.",
+                crate::internal::billing::fx_setting(currency)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Whether the config has an AI meter that is not deleted.
+    pub(super) async fn has_ai_meter(&self, config: u64) -> AuthResult<bool> {
+        let f = Find::eq(vec![("BILLING_CONFIG_ID", Val::Id(config)), ("SOURCE", Val::Str("AI_TOKENS".into()))]);
+        Ok(self.store.find(&METER, &f).await?.iter().any(|x| x.str("status") != Some("DELETED")))
+    }
+
+    /// One AI meter per config, and the config's currency has an exchange rate.
     async fn check_ai_once(&self, m: &Rec) -> AuthResult<()> {
         if m.str("source") != Some("AI_TOKENS") || m.str("status") == Some("DELETED") {
             return Ok(());
         }
+        let config = self.read(&CONFIG, m.u64("billingConfigId")).await?;
+        self.check_ai_currency(config.str("currency").unwrap_or("")).await?;
         let f = Find::eq(vec![("BILLING_CONFIG_ID", Val::Id(m.u64("billingConfigId").unwrap_or(0))), ("SOURCE", Val::Str("AI_TOKENS".into()))]);
         if self.store.find(&METER, &f).await?.iter().any(|x| x.id() != m.id() && x.str("status") != Some("DELETED")) {
             return Err(invalid("A config has one AI meter."));
@@ -248,9 +282,8 @@ impl Billing<'_> {
 
     pub async fn plan_create(&self, ca: &ContextAuth, mut rec: Rec) -> AuthResult<Option<Rec>> {
         let config = self.assert_manageable_config(ca, rec.u64("billingConfigId")).await?;
-        if matches!(rec.get("currency"), Val::Null) {
-            rec.set("currency", config.get("currency").clone());
-        }
+        // A plan is priced in its app's currency, whatever the request says.
+        rec.set("currency", config.get("currency").clone());
         check_plan(&rec)?;
         let saved = self.create_row(rec).await?;
         if let Some(s) = &saved {
@@ -261,8 +294,9 @@ impl Billing<'_> {
 
     pub async fn plan_update(&self, ca: &ContextAuth, entity: &Rec) -> AuthResult<Rec> {
         let mut target = self.read(&PLAN, entity.id()).await?;
-        self.assert_manageable_config(ca, target.u64("billingConfigId")).await?;
+        let config = self.assert_manageable_config(ca, target.u64("billingConfigId")).await?;
         copy(&mut target, entity, &PLAN_EDITABLE);
+        target.set("currency", config.get("currency").clone());
         check_plan(&target)?;
         let saved = self.update_row(&target).await?;
         self.keep_one_default(&saved).await?;
@@ -374,21 +408,32 @@ impl Billing<'_> {
         self.store.delete(&AI_RATE, id).await
     }
 
+    /// The exchange rates, `{"AI_FX_RATE.INR": "94", ...}`. The bare rupee rate V90 seeded shows
+    /// as `AI_FX_RATE.INR` until that one is set.
     pub async fn settings_read(&self, ca: &ContextAuth) -> AuthResult<Value> {
         Self::assert_system(ca)?;
         let mut out = Map::new();
-        for name in SETTINGS {
-            let v = self.internal.billing.setting(name).await?;
-            out.insert(name.to_string(), v.map(Value::from).unwrap_or(Value::Null));
+        let mut legacy = None;
+        for (name, value) in self.internal.billing.settings_all().await? {
+            if name == crate::internal::billing::AI_FX_RATE {
+                legacy = Some(value);
+            } else if fx_setting_currency(&name).is_some() {
+                out.insert(name, Value::from(value));
+            }
+        }
+        let inr = crate::internal::billing::fx_setting("INR");
+        if let (Some(v), false) = (legacy, out.contains_key(&inr)) {
+            out.insert(inr, Value::from(v));
         }
         Ok(Value::Object(out))
     }
 
     pub async fn setting_write(&self, ca: &ContextAuth, name: &str, value: &str) -> AuthResult<Value> {
         Self::assert_system(ca)?;
-        if !SETTINGS.contains(&name) {
-            return Err(invalid("Unknown billing setting."));
-        }
+        let Some(cur) = fx_setting_currency(name) else {
+            return Err(invalid("Unknown billing setting: an exchange rate is AI_FX_RATE.<currency>, such as AI_FX_RATE.INR."));
+        };
+        let name = crate::internal::billing::fx_setting(&cur);
         if Dec::parse(value).is_none_or(|d| d.signum() <= 0) {
             return Err(invalid("The value is a positive number."));
         }
@@ -398,6 +443,32 @@ impl Billing<'_> {
             .bind(ca.user.id)
             .execute(&self.internal.db.pool)
             .await?;
+        self.settings_read(ca).await
+    }
+
+    /// Removes a currency's exchange rate; refused while a config bills AI in that currency.
+    pub async fn setting_delete(&self, ca: &ContextAuth, name: &str) -> AuthResult<Value> {
+        Self::assert_system(ca)?;
+        let Some(cur) = fx_setting_currency(name) else {
+            return Err(invalid("Unknown billing setting: an exchange rate is AI_FX_RATE.<currency>, such as AI_FX_RATE.INR."));
+        };
+        let configs = self.store.find(&CONFIG, &Find { not_deleted: true, ..Find::eq(vec![("CURRENCY", Val::Str(cur.clone()))]) }).await?;
+        let mut using = 0;
+        for c in &configs {
+            if self.has_ai_meter(c.id().unwrap_or(0)).await? {
+                using += 1;
+            }
+        }
+        if using > 0 {
+            return Err(invalid(&format!("{using} billing config(s) charge AI in {cur}: change their currency or AI meter first.")));
+        }
+        let mut names = vec![crate::internal::billing::fx_setting(&cur)];
+        if cur == "INR" {
+            names.push(crate::internal::billing::AI_FX_RATE.to_string());
+        }
+        for n in names {
+            sqlx::query("DELETE FROM security_billing_setting WHERE NAME = ?").bind(n).execute(&self.internal.db.pool).await?;
+        }
         self.settings_read(ca).await
     }
 }
