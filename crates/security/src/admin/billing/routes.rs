@@ -54,7 +54,7 @@ pub fn router(settings: Arc<BillingSettings>) -> Router<AdminState> {
         .route("/api/security/billing-ai-rates", get(ai_rates).post(ai_rate_create))
         .route("/api/security/billing-ai-rates/{id}", put(ai_rate_put).delete(ai_rate_delete))
         .route("/api/security/billing-settings", get(settings_get))
-        .route("/api/security/billing-settings/{name}", put(setting_put))
+        .route("/api/security/billing-settings/{name}", put(setting_put).delete(setting_delete))
         // BillingProfileController
         .route("/api/security/billing-profile", get(profile_get).put(profile_put))
         // BundlePurchaseController
@@ -413,6 +413,11 @@ bl_route_path!(setting_put, "/billing-settings/{name}", true, |s, r, ca, cfg, na
     let value = body::field(&m, "value", text)?.unwrap_or_default();
     let out = live(&s, &cfg);
     Ok(json(&billing(&s, &out).setting_write(&ca, &name, &value).await?))
+});
+
+bl_route_path!(setting_delete, "/billing-settings/{name}", true, |s, r, ca, cfg, name| {
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).setting_delete(&ca, &name).await?))
 });
 
 // ---- BillingProfileController ----
