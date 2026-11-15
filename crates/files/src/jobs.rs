@@ -188,25 +188,38 @@ where
 }
 
 /// `createFromZipFile`: the zip is already in `dir`; extraction and upload run in the background.
+/// Entries whose path from the client's root falls under one of `skip` (protected folders the
+/// caller may not write, for an import into the root) are left out.
 #[allow(clippy::too_many_arguments)]
-pub fn start_import(st: AppState, id: u64, kind: Kind, cc: String, rp: String, zip: PathBuf, dir: TempDir, overwrite: bool) {
+pub fn start_import(st: AppState, id: u64, kind: Kind, cc: String, rp: String, zip: PathBuf, dir: TempDir, overwrite: bool, skip: Vec<String>) {
     let st2 = st.clone();
     spawn_job(st, id, "import", async move {
-        let res = import(&st2, kind, &cc, &rp, &zip, &dir.path, overwrite).await;
+        let res = import(&st2, kind, &cc, &rp, &zip, &dir.path, overwrite, &skip).await;
         Fs::new(&st2, kind).evict(&cc).await;
         drop(dir);
         res
     });
 }
 
-async fn import(st: &AppState, kind: Kind, cc: &str, rp: &str, zip: &Path, dir: &Path, overwrite: bool) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+async fn import(st: &AppState, kind: Kind, cc: &str, rp: &str, zip: &Path, dir: &Path, overwrite: bool, skip: &[String]) -> Result<()> {
     let is_root = rp.trim().is_empty();
     let (z, out) = (zip.to_path_buf(), dir.join("x"));
-    let extracted = tokio::task::spawn_blocking(move || {
+    let mut extracted = tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&out)?;
         crate::zipio::extract(&z, &out)
     })
     .await??;
+    if !skip.is_empty() {
+        let under = |entry: &str| crate::protected::is_blocked(skip, &format!("{rp}/{entry}"));
+        let (folders, files) = (extracted.folders.len(), extracted.files.len());
+        extracted.folders.retain(|f| !under(f));
+        extracted.files.retain(|(entry, _)| !under(entry));
+        let left_out = folders + files - extracted.folders.len() - extracted.files.len();
+        if left_out > 0 {
+            tracing::warn!(cc, left_out, "zip import into the root: entries under a protected folder left out");
+        }
+    }
 
     let mut folders = Vec::new();
     if !is_root {
@@ -267,12 +280,13 @@ async fn upload_one(
 }
 
 /// `asyncExportFolder`: zips the folder and stores it at the row's `cdnUrl` in the background.
-pub fn start_export(st: AppState, id: u64, kind: Kind, cc: String, rp: String, cdn_url: String) {
+/// Entries under one of `skip` (protected folders the caller may not read) are left out.
+pub fn start_export(st: AppState, id: u64, kind: Kind, cc: String, rp: String, cdn_url: String, skip: Vec<String>) {
     let st2 = st.clone();
     spawn_job(st, id, "export", async move {
         let fs = Fs::new(&st2, kind);
         let dir = TempDir::new(&st2, "export")?;
-        let archive = fs.directory_archive(&format!("{cc}/{rp}"), &dir).await?;
+        let archive = fs.directory_archive(&format!("{cc}/{rp}"), &dir, &skip).await?;
         let name = rp.rsplit('/').next().unwrap_or("");
         let (cdn_path, cdn_file) = cdn_url.rsplit_once('/').unwrap_or(("", cdn_url.as_str()));
         let len = tokio::fs::metadata(&archive).await?.len();

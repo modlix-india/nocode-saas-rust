@@ -8,7 +8,7 @@ use platform::error::{AppError, AppResult};
 use serde_json::Value;
 
 use super::{opt_i64, required, Ctx};
-use crate::access::{can_read_secured, has_read_access, has_write_access, sub_client_list_access};
+use crate::access::{blocked_prefixes, can_read_secured, has_read_access, has_write_access, protected_prefixes, sub_client_list_access};
 use crate::errors::{forbidden_path, missing, status, OrApp, UNABLE_TO_READ_UP_FILE};
 use crate::fs::{Fs, TempDir};
 use crate::fsdao::FileType;
@@ -16,6 +16,7 @@ use crate::jackson::{self, json};
 use crate::keys::{create_access_key, short_uuid, ChronoUnit};
 use crate::model::DetailOut;
 use crate::paths::{has_dot_segment, java_url_decode, resolve_with_client_code, resolve_without, uri_part, Kind};
+use crate::protected::{first_segment, is_root, name_is_protected, prefix_of};
 use crate::spring::{known_total, page_json, safe_bool, Pageable};
 use crate::upload::{read_form, read_json};
 
@@ -43,6 +44,21 @@ async fn require_write(cx: &Ctx, kind: Kind, rp: &str, cc: &str) -> AppResult<()
     }
 }
 
+/// A write at the root whose file name reaches into a protected folder (`name=hrms/x.pdf`, or
+/// a file named `hrms` over the folder): the protected folder's own rules must allow it too.
+/// Nothing to check when the folder written into is itself the protected one (already checked)
+/// or when the target is not protected.
+pub(crate) async fn require_write_target(cx: &Ctx, kind: Kind, rp: &str, target: &str, cc: &str) -> AppResult<()> {
+    if kind != Kind::Secured {
+        return Ok(());
+    }
+    let prefixes = protected_prefixes(&cx.st);
+    if prefix_of(prefixes, rp).is_some() || prefix_of(prefixes, target).is_none() {
+        return Ok(());
+    }
+    require_write(cx, kind, target.trim_start_matches('/'), cc).await
+}
+
 /// `GET /**`: a page of a folder's entries.
 pub async fn list(cx: &Ctx, kind: Kind) -> AppResult<Response> {
     let (rp, _) = resolved(cx, uri_part(kind));
@@ -63,7 +79,20 @@ pub async fn list(cx: &Ctx, kind: Kind) -> AppResult<Response> {
         return Err(forbidden_path(kind, &rp));
     }
 
-    let data = Fs::new(&cx.st, kind).list(&cc, &rp, &types, cx.params.get("filter"), &page).await.app()?;
+    let mut data = Fs::new(&cx.st, kind).list(&cc, &rp, &types, cx.params.get("filter"), &page).await.app()?;
+    // The root listing hides a protected folder from a caller without a rule under it. The
+    // rules are read only when the page holds such an entry.
+    if kind == Kind::Secured
+        && is_root(&rp)
+        && data.content.iter().any(|d| name_is_protected(protected_prefixes(&cx.st), &d.name).is_some())
+    {
+        let hidden = blocked_prefixes(&cx.st, cx.ca(), &cc, kind, false).await.app()?;
+        if !hidden.is_empty() {
+            let before = data.content.len();
+            data.content.retain(|d| name_is_protected(&hidden, &d.name).is_none());
+            data.total = (data.total - (before - data.content.len()) as i64).max(0);
+        }
+    }
     let content: Vec<Value> = data
         .content
         .iter()
@@ -134,6 +163,7 @@ pub async fn upload(cx: &mut Ctx, kind: Kind, req: Request) -> AppResult<Respons
         None => original.clone(),
         Some(n) => name_with_extension(&original, &n),
     };
+    require_write_target(cx, kind, &rp, &format!("{rp}/{file_name}"), &cc).await?;
     let fd = Fs::new(&cx.st, kind)
         .create_from_file(&cc, &rp, Some(&file_name), &part.file.path, part.size, overwrite, "inline", None)
         .await
@@ -156,11 +186,13 @@ pub async fn import(cx: &mut Ctx, kind: Kind, req: Request) -> AppResult<Respons
         return Err(status(StatusCode::BAD_REQUEST, UNABLE_TO_READ_UP_FILE, &[]));
     }
     require_write(cx, kind, &rp, &cc).await?;
+    // Into the root: entries under a protected folder the caller may not write are skipped.
+    let skip = if is_root(&rp) { blocked_prefixes(&cx.st, cx.ca(), &cc, kind, true).await.app()? } else { Vec::new() };
 
     let zip = dir.path.join("upload.zip");
     tokio::fs::rename(&part.file.path, &zip).await.map_err(anyhow::Error::from)?;
     let id = crate::jobs::create_row(&cx.st, true, kind, &cc, &rp, None, cx.user_id()).await.app()?;
-    crate::jobs::start_import(cx.st.clone(), id, kind, cc, rp, zip, dir, overwrite);
+    crate::jobs::start_import(cx.st.clone(), id, kind, cc, rp, zip, dir, overwrite, skip);
     Ok(json(&Value::from(id)))
 }
 
@@ -172,10 +204,38 @@ pub async fn export(cx: &Ctx, kind: Kind) -> AppResult<Response> {
     if !has_read_access(&cx.st, ca, &rp, &cc, kind).await.app()? {
         return Err(forbidden_path(kind, &rp));
     }
-    let cdn = format!("_downloads/{}.zip", short_uuid());
+    // A root export leaves out the protected folders the caller may not read.
+    let skip = if is_root(&rp) { blocked_prefixes(&cx.st, ca, &cc, kind, false).await.app()? } else { Vec::new() };
+    let cdn = format!("{}_downloads/{}.zip", export_folder(cx, kind, &rp, &cc, &skip).await?, short_uuid());
     let id = crate::jobs::create_row(&cx.st, false, kind, &cc, &rp, Some(&cdn), cx.user_id()).await.app()?;
-    crate::jobs::start_export(cx.st.clone(), id, kind, cc, rp, cdn);
+    crate::jobs::start_export(cx.st.clone(), id, kind, cc, rp, cdn, skip);
     Ok(json(&Value::from(id)))
+}
+
+/// Where an export's zip goes: `_downloads/` at the root, as Java does, unless the zip holds a
+/// protected folder's files. Then it goes to `<that folder>/_downloads/`, so only callers with
+/// a rule under that folder can read it (a root `_downloads/` is open to the open root rule).
+async fn export_folder(cx: &Ctx, kind: Kind, rp: &str, cc: &str, skip: &[String]) -> AppResult<String> {
+    if kind != Kind::Secured {
+        return Ok(String::new());
+    }
+    let prefixes = protected_prefixes(&cx.st);
+    if prefix_of(prefixes, rp).is_some() {
+        return Ok(format!("{}/", first_segment(rp)));
+    }
+    if !is_root(rp) {
+        return Ok(String::new());
+    }
+    for p in prefixes {
+        let folder = p.trim().trim_matches('/');
+        if folder.is_empty() || skip.contains(p) {
+            continue;
+        }
+        if cx.st.dao().get_id(kind, cc, folder).await.app()?.is_some() {
+            return Ok(format!("{folder}/"));
+        }
+    }
+    Ok(String::new())
 }
 
 /// `GET /exports`, `GET /imports`: the caller's own jobs.

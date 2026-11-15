@@ -5,6 +5,7 @@ use anyhow::Result;
 use platform::security::ContextAuthentication;
 
 use crate::paths::Kind;
+use crate::protected::{any_rule_under, prefix_of};
 use crate::state::AppState;
 
 const USER_IMAGES: &str = "_userImages";
@@ -83,10 +84,69 @@ async fn has_secured_read_access(
         return Ok(false);
     }
 
+    if let Some(prefix) = prefix_of(protected_prefixes(state), path) {
+        return protected_rule_allows(state, ca, Kind::Secured, path, client_code, prefix, false).await;
+    }
     state
         .dao()
         .has_secured_path_read_access(path, ca.user.id, client_code, &ca.user.string_authorities)
         .await
+}
+
+/// `[files] protected_prefixes`.
+pub fn protected_prefixes(state: &AppState) -> &[String] {
+    &state.config().files.protected_prefixes
+}
+
+/// A SECURED path under the protected `prefix`: allowed only by a covering rule whose own PATH
+/// is under that prefix (`crate::protected`). The caller has already checked that the client
+/// is managed.
+async fn protected_rule_allows(
+    state: &AppState,
+    ca: &ContextAuthentication,
+    kind: Kind,
+    path: &str,
+    client_code: &str,
+    prefix: &str,
+    write: bool,
+) -> Result<bool> {
+    let rules = state
+        .dao()
+        .covering_rule_paths(kind, path, ca.user.id, client_code, &ca.user.string_authorities, write)
+        .await?;
+    Ok(any_rule_under(prefix, &rules))
+}
+
+/// The protected prefixes this caller may NOT reach in `client_code` (to read, or to write):
+/// what a root listing hides, a root export leaves out and a root zip import skips. Empty for
+/// STATIC.
+pub async fn blocked_prefixes(
+    state: &AppState,
+    ca: &ContextAuthentication,
+    client_code: &str,
+    kind: Kind,
+    write: bool,
+) -> Result<Vec<String>> {
+    let mut blocked = Vec::new();
+    if kind != Kind::Secured {
+        return Ok(blocked);
+    }
+    for p in protected_prefixes(state) {
+        // The folder as listing, upload and export name it: no leading slash.
+        let folder = p.trim().trim_matches('/');
+        if folder.is_empty() {
+            continue;
+        }
+        let allowed = if write {
+            has_write_access(state, ca, folder, client_code, kind).await?
+        } else {
+            has_read_access(state, ca, folder, client_code, kind).await?
+        };
+        if !allowed {
+            blocked.push(p.clone());
+        }
+    }
+    Ok(blocked)
 }
 
 /// `FilesAccessPathService.hasReadAccess` for either type, as the listing and the export use it.
@@ -109,6 +169,11 @@ pub async fn has_read_access(
             .await?;
     if !managed {
         return Ok(false);
+    }
+    if kind == Kind::Secured {
+        if let Some(prefix) = prefix_of(protected_prefixes(state), path) {
+            return protected_rule_allows(state, ca, kind, path, client_code, prefix, false).await;
+        }
     }
     state
         .dao()
@@ -138,6 +203,12 @@ pub async fn has_write_access(
     };
     if !managed {
         return Ok(false);
+    }
+    // Before the mobile uploader shortcut: a protected folder opens only by its own rules.
+    if kind == Kind::Secured {
+        if let Some(prefix) = prefix_of(protected_prefixes(state), path) {
+            return protected_rule_allows(state, ca, kind, path, client_code, prefix, true).await;
+        }
     }
     if ca.is_system_client() && path.contains(WITH_IN_CLIENT) && ca.has_authority("Authorities.ROLE_MobileApp_UPLOADER") {
         return Ok(true);
