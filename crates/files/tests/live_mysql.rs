@@ -1427,3 +1427,163 @@ async fn keys_made_before_the_fix_open_the_decoded_file() {
     })
     .await;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Protected prefixes (`[files] protected_prefixes`, default `hrms`)
+// ---------------------------------------------------------------------------------------------
+
+fn zip_names(bytes: Vec<u8>) -> Vec<String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut entries: Vec<String> = (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect();
+    entries.sort();
+    entries
+}
+
+/// A company with the open SECURED root rule: `/hrms` opens only by rules under `hrms`; every
+/// other folder works as before; root listing, export and import leave `/hrms` out for a
+/// caller without such a rule, and a root delete never reaches it.
+#[tokio::test]
+#[ignore = "needs the local MySQL (FILES_TEST_MYSQL=1, MODLIX__DATABASE__PASSWORD)"]
+async fn protected_hrms_folder() {
+    with_scratch(|pool| async move {
+        let h = service(pool.clone()).await;
+        // The open root rule (`''`, sub paths, write) for everyone signed in.
+        clia_writable(&h).await;
+        // HRMS Files holders: both forms, as the hrms app files them.
+        for p in ["/hrms", "hrms"] {
+            rule(&h, json!({"clientCode": "CLIA", "accessName": "Authorities.HRMS.ROLE_Document_READ", "resourceType": "SECURED", "path": p, "writeAccess": true, "allowSubPathAccess": true})).await;
+        }
+        // One employee's own folder, by user id.
+        for p in ["/hrms/emp/503", "hrms/emp/503"] {
+            rule(&h, json!({"clientCode": "CLIA", "userId": 503, "resourceType": "SECURED", "path": p, "writeAccess": true, "allowSubPathAccess": true})).await;
+        }
+        h.sec.token("hr", ca(501, 10, "CLIA", false, &["Authorities.Logged_IN", "Authorities.HRMS.ROLE_Document_READ"]));
+        h.sec.token("emp", ca(503, 10, "CLIA", false, &["Authorities.Logged_IN"]));
+        let pdf = |name: &'static str| vec![FormPart::File("file", name, "application/pdf", b"%PDF".to_vec())];
+        let up = |uri: &'static str, token: &'static str, parts: Vec<FormPart<'static>>| {
+            let h = &h;
+            async move { h.form(uri, Some(token), &parts).await.status }
+        };
+        let read = |token: &'static str, p: &'static str| {
+            let h = &h;
+            async move { h.get(&format!("/api/files/secured/file/CLIA/{p}"), Some(token)).await.status }
+        };
+
+        // Uploads (the path has no leading slash there).
+        assert_eq!(up("/api/files/secured/hrms/emp/1", "hr", pdf("pan.pdf")).await, StatusCode::OK);
+        assert_eq!(up("/api/files/secured/hrms/emp/503", "hr", pdf("offer.pdf")).await, StatusCode::OK);
+        assert_eq!(up("/api/files/secured/hrms/emp/1", "clia", pdf("x.pdf")).await, StatusCode::FORBIDDEN, "the open root rule does not reach hrms");
+        assert_eq!(up("/api/files/secured/HRMS/emp/1", "clia", pdf("x.pdf")).await, StatusCode::FORBIDDEN, "nor a case variant");
+        assert_eq!(up("/api/files/secured/hrms", "clia", pdf("x.pdf")).await, StatusCode::FORBIDDEN);
+        // Reaching in from the root through the file name.
+        let mut sneak = pdf("a.pdf");
+        sneak.insert(0, FormPart::Text("name", "hrms/sneak"));
+        assert_eq!(up("/api/files/secured", "clia", sneak).await, StatusCode::FORBIDDEN);
+        assert!(h.object(Kind::Secured, "CLIA/hrms/sneak.pdf").is_none());
+        // Everything else works for the plain user as before.
+        assert_eq!(up("/api/files/secured/kyc", "clia", pdf("aadhaar.pdf")).await, StatusCode::OK);
+        assert_eq!(up("/api/files/secured/hrmsx", "clia", pdf("look.pdf")).await, StatusCode::OK, "hrmsx is not hrms");
+        assert_eq!(up("/api/files/secured", "clia", pdf("root.pdf")).await, StatusCode::OK);
+        // The employee's own folder by the user-id rule, and nothing else under hrms.
+        assert_eq!(up("/api/files/secured/hrms/emp/503", "emp", pdf("mine.pdf")).await, StatusCode::OK);
+        assert_eq!(up("/api/files/secured/hrms/emp/1", "emp", pdf("x.pdf")).await, StatusCode::FORBIDDEN);
+        // Folders and deletes are writes too.
+        assert_eq!(h.call(Method::POST, "/api/files/secured/directory/hrms/new", Some("clia")).await.status, StatusCode::FORBIDDEN);
+        assert_eq!(h.call(Method::DELETE, "/api/files/secured/hrms/emp/1/pan.pdf", Some("clia")).await.status, StatusCode::FORBIDDEN);
+        assert_eq!(h.call(Method::DELETE, "/api/files/secured/hrms", Some("clia")).await.status, StatusCode::FORBIDDEN);
+
+        // Reads (the path has a leading slash there).
+        assert_eq!(read("hr", "hrms/emp/1/pan.pdf").await, StatusCode::OK);
+        assert_eq!(read("clia", "hrms/emp/1/pan.pdf").await, StatusCode::FORBIDDEN);
+        assert_eq!(read("clia", "HRMS/emp/1/pan.pdf").await, StatusCode::FORBIDDEN);
+        assert_eq!(read("emp", "hrms/emp/503/offer.pdf").await, StatusCode::OK);
+        assert_eq!(read("emp", "hrms/emp/1/pan.pdf").await, StatusCode::FORBIDDEN);
+        assert_eq!(read("clia", "kyc/aadhaar.pdf").await, StatusCode::OK);
+        assert_eq!(read("clia", "hrmsx/look.pdf").await, StatusCode::OK);
+        assert_eq!(read("clia", "root.pdf").await, StatusCode::OK);
+        assert_eq!(read("hr", "kyc/aadhaar.pdf").await, StatusCode::OK, "the HRMS holder keeps the open rule elsewhere");
+        // No download key without the read.
+        assert_eq!(h.get("/api/files/secured/createKey/file/CLIA/hrms/emp/1/pan.pdf", Some("clia")).await.status, StatusCode::FORBIDDEN);
+        assert_eq!(h.get("/api/files/secured/createKey/file/CLIA/hrms/emp/1/pan.pdf", Some("hr")).await.status, StatusCode::OK);
+
+        // Listing: the root hides hrms from the plain user; hrms itself is refused.
+        for q in ["", "?size=200", "?size=200"] {
+            let page = h.get(&format!("/api/files/secured/{q}"), Some("clia")).await.json();
+            assert_eq!(names(&page), vec!["hrmsx", "kyc", "root.pdf"], "{q}");
+            assert_eq!(page["totalElements"], 3);
+        }
+        let page = h.get("/api/files/secured/?size=200", Some("hr")).await.json();
+        assert_eq!(names(&page), vec!["hrms", "hrmsx", "kyc", "root.pdf"], "the cached page, shown whole to the HRMS holder");
+        assert_eq!(h.get("/api/files/secured/hrms", Some("clia")).await.status, StatusCode::FORBIDDEN);
+        assert_eq!(h.get("/api/files/secured/hrms", Some("hr")).await.status, StatusCode::OK);
+
+        // Root export: without hrms for the plain user; with it (and stored under hrms) for HR.
+        let r = h.get("/api/files/secured/export/", Some("clia")).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        let done = job(&h, "secured", false, &r.json()).await;
+        assert_eq!(done["status"], "DONE", "{done}");
+        let cdn = done["cdnUrl"].as_str().unwrap().to_string();
+        assert!(cdn.starts_with("_downloads/"), "{cdn}");
+        let entries = zip_names(h.object(Kind::Secured, &format!("CLIA/{cdn}")).unwrap().bytes);
+        assert_eq!(entries, vec!["hrmsx/look.pdf", "kyc/aadhaar.pdf", "root.pdf"]);
+
+        h.sec.token("hr2", ca(500, 10, "CLIA", false, &["Authorities.Logged_IN", "Authorities.HRMS.ROLE_Document_READ"]));
+        let r = h.get("/api/files/secured/export/", Some("hr2")).await;
+        let id = r.json();
+        let mut last = Value::Null;
+        for _ in 0..200 {
+            let page = h.get("/api/files/secured/exports?clientCode=CLIA", Some("hr2")).await.json();
+            if let Some(j) = page["content"].as_array().and_then(|a| a.iter().find(|j| j["id"] == id)) {
+                last = j.clone();
+                if j["status"] != "PENDING" {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(last["status"], "DONE", "{last}");
+        let hr_cdn = last["cdnUrl"].as_str().unwrap().to_string();
+        assert!(hr_cdn.starts_with("hrms/_downloads/"), "{hr_cdn}");
+        let entries = zip_names(h.object(Kind::Secured, &format!("CLIA/{hr_cdn}")).unwrap().bytes);
+        assert!(entries.contains(&"hrms/emp/1/pan.pdf".to_string()), "{entries:?}");
+        assert!(entries.iter().any(|e| e.starts_with("_downloads/")), "the earlier root export is in it: {entries:?}");
+        assert_eq!(read("clia", Box::leak(hr_cdn.clone().into_boxed_str())).await, StatusCode::FORBIDDEN, "HR's zip is not open to the root rule");
+        assert_eq!(read("hr", Box::leak(hr_cdn.into_boxed_str())).await, StatusCode::OK);
+        // Exporting hrms itself.
+        assert_eq!(h.get("/api/files/secured/export/hrms", Some("clia")).await.status, StatusCode::FORBIDDEN);
+
+        // Zip import into the root: hrms entries are skipped for the plain user.
+        let z = zip_of(&[("hrms/evil.txt", Some(b"e")), ("HRMS/emp/1/pan.pdf", Some(b"overwrite")), ("hrms/", None), ("kyc/ok.txt", Some(b"k")), ("top.txt", Some(b"t"))]);
+        let r = h.form("/api/files/secured/import", Some("clia"), &[FormPart::File("file", "root.zip", "application/zip", z.clone())]).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(job(&h, "secured", true, &r.json()).await["status"], "DONE");
+        assert!(h.object(Kind::Secured, "CLIA/kyc/ok.txt").is_some());
+        assert!(h.object(Kind::Secured, "CLIA/top.txt").is_some());
+        assert!(h.object(Kind::Secured, "CLIA/hrms/evil.txt").is_none());
+        assert!(h.object(Kind::Secured, "CLIA/HRMS/emp/1/pan.pdf").is_none());
+        assert_eq!(h.object(Kind::Secured, "CLIA/hrms/emp/1/pan.pdf").unwrap().bytes, b"%PDF");
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM files_file_system WHERE NAME IN ('evil.txt') OR (NAME = 'HRMS' AND BINARY NAME = 'HRMS')").await, 0);
+        // The HRMS holder's import into the root keeps them.
+        let z = zip_of(&[("hrms/new.txt", Some(b"n"))]);
+        let r = h.form("/api/files/secured/import", Some("hr2"), &[FormPart::File("file", "root.zip", "application/zip", z)]).await;
+        let id = r.json();
+        for _ in 0..200 {
+            if h.object(Kind::Secured, "CLIA/hrms/new.txt").is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(h.object(Kind::Secured, "CLIA/hrms/new.txt").is_some(), "job {id}");
+
+        // A delete of the root removes nothing under hrms (nor anything else in the tree).
+        let r = h.call(Method::DELETE, "/api/files/secured/", Some("clia")).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(read("hr", "hrms/emp/1/pan.pdf").await, StatusCode::OK);
+        assert_eq!(read("clia", "kyc/aadhaar.pdf").await, StatusCode::OK);
+
+        // STATIC is not protected.
+        let r = h.form("/api/files/static/hrms", Some("clia"), &[FormPart::File("file", "logo.png", "image/png", png(1, 1))]).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    })
+    .await;
+}

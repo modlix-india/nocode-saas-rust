@@ -308,8 +308,9 @@ impl<'a> Fs<'a> {
     }
 
     /// `getDirectoryAsArchive`: every object under `<clientCode>/<path>/` in one zip, entries
-    /// relative to that folder.
-    pub async fn directory_archive(&self, fp: &str, dir: &TempDir) -> Result<PathBuf> {
+    /// relative to that folder. Entries whose first segment is one of `skip` (protected folders
+    /// the caller may not read, for a root export) are left out.
+    pub async fn directory_archive(&self, fp: &str, dir: &TempDir, skip: &[String]) -> Result<PathBuf> {
         let mut prefix = if fp.ends_with('/') { fp.to_string() } else { format!("{fp}/") };
         if let Some(p) = prefix.strip_prefix('/') {
             prefix = p.to_string();
@@ -321,7 +322,7 @@ impl<'a> Fs<'a> {
             .into_iter()
             .filter_map(|(key, _)| {
                 let rel = key.get(prefix.len()..)?.trim_start_matches('/').to_string();
-                if rel.is_empty() || rel.ends_with('/') {
+                if rel.is_empty() || rel.ends_with('/') || crate::protected::is_blocked(skip, &rel) {
                     return None;
                 }
                 let target = safe_join(&staging, &rel)?;
