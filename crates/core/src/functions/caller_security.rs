@@ -56,10 +56,12 @@ pub enum Op {
     LogClientActivity,
     QueryClientActivities,
     GetAppProfiles,
+    /// Rust only (HRMS): a login of the caller's own client made active or inactive.
+    SetUserActive,
 }
 
-/// `CallerSecurityFunctions.all` order.
-pub const ALL: [Op; 19] = [
+/// `CallerSecurityFunctions.all` order, then the Rust-only `SetUserActive`.
+pub const ALL: [Op; 20] = [
     Op::QueryUsers,
     Op::GetUser,
     Op::CreateUser,
@@ -79,6 +81,7 @@ pub const ALL: [Op; 19] = [
     Op::LogClientActivity,
     Op::QueryClientActivities,
     Op::GetAppProfiles,
+    Op::SetUserActive,
 ];
 
 impl Op {
@@ -103,6 +106,7 @@ impl Op {
             Op::LogClientActivity => "LogClientActivity",
             Op::QueryClientActivities => "QueryClientActivities",
             Op::GetAppProfiles => "GetAppProfiles",
+            Op::SetUserActive => "SetUserActive",
         }
     }
 
@@ -123,7 +127,7 @@ impl Op {
         match self {
             Op::CreateUser => &["Authorities.User_CREATE"],
             Op::DeleteUser => &["Authorities.User_DELETE"],
-            Op::SetUserStatus => &["Authorities.User_UPDATE"],
+            Op::SetUserStatus | Op::SetUserActive => &["Authorities.User_UPDATE"],
             Op::AssignProfile | Op::RemoveProfile => &["Authorities.User_UPDATE", "Authorities.Profile_READ"],
             Op::SetClientStatus
             | Op::UpdateClient
@@ -157,6 +161,9 @@ enum Fail {
     UnknownUser(Id),
     /// A `FeignException` from security.
     Feign(FeignFailure),
+    /// Rust only: a user who is not of the caller's own client (or not known), for the functions
+    /// that act only inside it.
+    OtherClient(Id),
 }
 
 impl From<CoreError> for Fail {
@@ -423,6 +430,63 @@ impl CallerSecurity {
         self.require_own_or_managed(c, client).await
     }
 
+    /// Rust only: the user must be of the caller's own client (not a managed one). An unknown user
+    /// is refused the same way, so a caller cannot tell the two apart.
+    async fn require_user_in_own_client(&self, c: &Caller, user_id: Id) -> R<()> {
+        match self.user_client_id(user_id).await {
+            Ok(Some(client)) if client == c.client_id => Ok(()),
+            Ok(_) | Err(Fail::UnknownUser(_)) => Err(Fail::OtherClient(user_id)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Rust only (HRMS): the profile `AssignProfile` / `RemoveProfile` act on, by `profileId`, or by
+    /// `profileName` in `appCode` (the running function's own app when blank). By name the target
+    /// must be of the caller's own client, and a profile that lets its holders change the app
+    /// (AppCustomizer, a definition edit right) is refused: a function never hands out or takes
+    /// builder rights by name. By id it stays as before (existing callers, such as leadzumptwo's
+    /// teammateCreate, give LeadZump Admin, which holds Application_Manager).
+    async fn profile_for(&self, args: &KMap<Value>, c: &Caller, user_id: Id) -> R<Id> {
+        let by_id = id(args, "profileId")?;
+        let name = string_arg(args, "profileName");
+        let full = format!("{SECURITY_NAMESPACE}.{}", self.name());
+        let (profile_id, check) = match (by_id, name) {
+            (Some(p), _) => {
+                self.require_user_in_scope(c, user_id).await?;
+                (p, None)
+            }
+            (None, Some(name)) => {
+                self.require_user_in_own_client(c, user_id).await?;
+                let app = string_arg(args, "appCode")
+                    .or_else(|| context::owner_app_code().filter(|a| !a.trim().is_empty()))
+                    .unwrap_or_else(|| c.headers.app_code.clone());
+                if app.trim().is_empty() {
+                    return Err(required_argument("appCode").into());
+                }
+                let check = self.security.profile_check(Some(&app), c.client_id, Some(&name), None).await?;
+                let Some(found) = check.as_ref().and_then(|v| v.get("id")).and_then(crate::security_calls::id_value) else {
+                    return Err(Fail::Core(
+                        CoreError::coded(StatusCode::NOT_FOUND, "CORE.PROFILE_NAME_NOT_FOUND", format!("{full}: no profile '{name}' in the app {app} for the caller's client"))
+                            .param("profile", &name)
+                            .param("app", &app),
+                    ));
+                };
+                (found, check)
+            }
+            (None, None) => return Err(required_argument("profileId or profileName").into()),
+        };
+        if let Some(chk) = check.as_ref().filter(|v| v.get("builder").and_then(Value::as_bool).unwrap_or(false)) {
+            let shown = chk.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| profile_id.to_string());
+            let authority = chk.get("builderAuthority").and_then(Value::as_str).unwrap_or("");
+            return Err(Fail::Core(
+                forbidden("CORE.PROFILE_BUILDER_REFUSED", format!("{full} does not give or take the profile '{shown}': it holds {authority}"))
+                    .param("profile", shown)
+                    .param("authority", authority),
+            ));
+        }
+        Ok(profile_id)
+    }
+
     async fn require_users_in_scope(&self, c: &Caller, users: &[Id]) -> R<()> {
         for u in users {
             self.require_user_in_scope(c, *u).await?;
@@ -444,6 +508,12 @@ impl CallerSecurity {
                 match scope {
                     Fail::OutOfScope(m, client) => self.security_refusal(args, m, client),
                     Fail::UnknownUser(id) => self.security_not_found(args, id),
+                    Fail::OtherClient(user) => {
+                        let full = format!("{SECURITY_NAMESPACE}.{}", self.name());
+                        forbidden("CORE.USER_OTHER_CLIENT", format!("{full} acts only on users of the caller's own client; user {user} is not one"))
+                            .param("function", full)
+                            .param("user", user)
+                    }
                     _ => unreachable!("scope failures only"),
                 }
             }
@@ -542,10 +612,26 @@ impl CallerSecurity {
             }
             Op::AssignProfile | Op::RemoveProfile => {
                 let user_id = required_id(args, "userId")?;
-                let profile_id = required_id(args, "profileId")?;
-                self.require_user_in_scope(c, user_id).await?;
+                let profile_id = self.profile_for(args, c, user_id).await?;
                 let verb = if self.op == Op::AssignProfile { "assignProfile" } else { "removeProfile" };
                 self.call_parsed(c, Method::GET, &format!("{USERS}/{user_id}/{verb}/{profile_id}"), &[], None).await
+            }
+            Op::SetUserActive => {
+                let user_id = required_id(args, "userId")?;
+                let active = match args.get("active") {
+                    Some(Value::Bool(b)) => *b,
+                    Some(Value::String(s)) if s.trim().eq_ignore_ascii_case("true") => true,
+                    Some(Value::String(s)) if s.trim().eq_ignore_ascii_case("false") => false,
+                    _ => return Err(invalid_argument("active", "true or false", "active must be true or false").into()),
+                };
+                if user_id == c.user_id {
+                    let full = format!("{SECURITY_NAMESPACE}.{}", self.name());
+                    return Err(Fail::Core(forbidden("CORE.OWN_LOGIN_REFUSED", "You cannot change your own login.").param("function", full)));
+                }
+                self.require_user_in_own_client(c, user_id).await?;
+                let path = if active { "makeUserActive" } else { "makeUserInActive" };
+                let done = accepted_count(self.call(c, Method::PATCH, &format!("{USERS}/{path}"), &[("userId".into(), user_id.to_string())], None).await?)?;
+                Ok(json!({"done": done, "statusCode": if active { "ACTIVE" } else { "INACTIVE" }}))
             }
             Op::SetClientStatus => {
                 let client_id = required_id(args, "clientId")?;
@@ -807,6 +893,13 @@ impl CoreFunction for CallerSecurity {
             Ok(v) => v,
             Err(f) => return Err(self.report(args, &c, f)),
         };
-        Ok(output_map([(self.op.output_name(), out)]))
+        Ok(match self.op {
+            // Rust only: the answer's own fields.
+            Op::SetUserActive => output_map([("done", out.get("done").cloned().unwrap_or(Value::Bool(false))), ("statusCode", out.get("statusCode").cloned().unwrap_or(Value::Null))]),
+            // Rust only: `assigned` / `removed` beside Java's `result`.
+            Op::AssignProfile => output_map([("result", out.clone()), ("assigned", Value::Bool(out.as_bool().unwrap_or(false)))]),
+            Op::RemoveProfile => output_map([("result", out.clone()), ("removed", Value::Bool(out.as_bool().unwrap_or(false)))]),
+            _ => output_map([(self.op.output_name(), out)]),
+        })
     }
 }

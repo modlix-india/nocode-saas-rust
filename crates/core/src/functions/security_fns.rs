@@ -2,7 +2,8 @@
 //! (`makeSecurityFunctions`): `IsBeingManagedByCode`, `IsBeingManagedById`, `GetClient`,
 //! `GetUserAdminEmails`, `GetOwnersEmails`, `GetUserSubOrg`, `GetManagedClientIds`,
 //! `GetUsersForDistribution`, `GetUsersByIds`, `GetClientsByIds`, `GetClientUsersPage` and
-//! `GetClientsDenorm`, and the Rust-only `GetUserManager` and `GetUsersWithAuthority`.
+//! `GetClientsDenorm`, and the Rust-only `GetUserManager`, `GetUsersWithAuthority`, `GetUsersOrg`
+//! and `GetClientOrg`.
 //!
 //! Security's answers are read into Java's DTOs (`Client`, `User`, `EntityProcessorUser`,
 //! `ClientDenormData`) and written back with Gson, so what a function hands out is the DTO's
@@ -50,6 +51,8 @@ pub fn all(security: &Arc<SecurityCalls>) -> Vec<Arc<dyn Function>> {
         Java::function(GetClientsDenorm(s())),
         Java::function(GetUserManager(s())),
         Java::function(GetUsersWithAuthority(s())),
+        Java::function(GetUsersOrg(s())),
+        Java::function(GetClientOrg(s())),
     ]
 }
 
@@ -771,6 +774,79 @@ fn manager_output(manager: Option<&Value>) -> FunctionOutput {
             ("manager", user_json(m)),
         ]),
         None => output_map([("found", Value::Bool(false)), ("managerId", Value::from(0)), ("manager", json!({}))]),
+    }
+}
+
+// --- GetUsersOrg / GetClientOrg (Rust only, HRMS) -------------------------------------------
+
+/// The most ids `GetUsersOrg` reads at once.
+pub const ORG_IDS_MAX: usize = 1000;
+
+/// The signed-in caller's own client: these functions read only it, never a client an argument
+/// names. An anonymous run (a public page, a webhook, an event without a user) is refused.
+fn signed_in_client(name: &str, ca: &Authentication) -> Result<Id, CoreError> {
+    let full = format!("CoreServices.Security.{name}");
+    if !ca.is_authenticated() || !has_user(ca) || ca.ca.user.client_id == 0 {
+        return Err(forbidden("CORE.SIGNED_IN_USER_REQUIRED", format!("{full} needs a signed in user")).param("function", &full));
+    }
+    Ok(ca.ca.user.client_id)
+}
+
+/// `CoreServices.Security.GetUsersOrg(ids)`: the department, designation and reporting manager of
+/// users of the caller's own client, for directories and records an ordinary employee reads (the
+/// security org routes need Client_CREATE or Client_UPDATE). Only the ids and names, nothing else
+/// of a designation or department. At most [`ORG_IDS_MAX`] ids; none is an empty map.
+///
+/// Output: `users`, `{<userId>: {reportingTo, designationId, designationName, departmentId,
+/// departmentName}}`, fields without a value left out. Users of any other client (managed ones too)
+/// and unknown ids are left out. Only inside a server function, for a signed-in user.
+pub struct GetUsersOrg(Arc<SecurityCalls>);
+
+#[async_trait]
+impl JavaFunction for GetUsersOrg {
+    fn full_name(&self) -> &'static str {
+        "CoreServices.Security.GetUsersOrg"
+    }
+
+    async fn run(&self, args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
+        let ids = ids_of("ids", args.get("ids"))?;
+        if ids.len() > ORG_IDS_MAX {
+            return Err(super::support::invalid_argument("ids", "at most 1000 ids", format!("ids holds {} ids; at most {ORG_IDS_MAX} are read at once", ids.len())));
+        }
+        let ca = definition_context_authentication("GetUsersOrg")?;
+        let client = signed_in_client("GetUsersOrg", &ca)?;
+        let users = if ids.is_empty() {
+            Value::Object(Map::new())
+        } else {
+            match self.0.users_org(client, &ids).await? {
+                Some(Value::Object(m)) => Value::Object(m),
+                _ => Value::Object(Map::new()),
+            }
+        };
+        Ok(output_map([("users", users)]))
+    }
+}
+
+/// `CoreServices.Security.GetClientOrg()`: the caller's own client's `departments [{id, name,
+/// parentDepartmentId}]` and `designations [{id, name, departmentId, parentDesignationId}]`, by
+/// name, for organisation views and filters. Only inside a server function, for a signed-in user.
+pub struct GetClientOrg(Arc<SecurityCalls>);
+
+#[async_trait]
+impl JavaFunction for GetClientOrg {
+    fn full_name(&self) -> &'static str {
+        "CoreServices.Security.GetClientOrg"
+    }
+
+    async fn run(&self, _args: &KMap<Value>) -> Result<FunctionOutput, CoreError> {
+        let ca = definition_context_authentication("GetClientOrg")?;
+        let client = signed_in_client("GetClientOrg", &ca)?;
+        let org = self.0.client_org(client).await?.unwrap_or(Value::Null);
+        let list = |k: &str| match org.get(k) {
+            Some(Value::Array(a)) => Value::Array(a.clone()),
+            _ => Value::Array(Vec::new()),
+        };
+        Ok(output_map([("departments", list("departments")), ("designations", list("designations"))]))
     }
 }
 

@@ -1147,8 +1147,130 @@ async fn registered_in_java_order() {
         "SetClientManagers", "MigrateClientManagers", "LogClientActivity", "QueryClientActivities", "GetAppProfiles", "GetClient",
         "IsBeingManagedByCode", "IsBeingManagedById", "GetUserAdminEmails", "GetOwnersEmails", "GetUserSubOrg",
         "GetManagedClientIds", "GetUsersForDistribution", "GetUsersByIds", "GetClientsByIds", "GetClientUsersPage", "GetClientsDenorm",
-        "GetUserManager", "GetUsersWithAuthority",
+        "GetUserManager", "GetUsersWithAuthority", "GetUsersOrg", "GetClientOrg", "SetUserActive",
     ] {
         assert!(core.find(Some("CoreServices.Security"), name).await.unwrap().is_some(), "{name}");
     }
+}
+
+// --- HRMS (Rust only): GetUsersOrg, GetClientOrg, SetUserActive, AssignProfile by name ---------
+
+const USER_UPDATE: &str = "Authorities.User_UPDATE";
+
+#[tokio::test]
+async fn users_org_and_client_org_read_only_the_callers_client() {
+    let (w, fns) = world().await;
+    let f = find(&fns, "GetUsersOrg");
+    assert_eq!(f.get_signature().get_full_name(), "CoreServices.Security.GetUsersOrg");
+    w.answer("GET", "/api/security/users/internal/org", 200, r#"{"111":{"reportingTo":110,"designationId":4,"designationName":"Engineer","departmentId":2,"departmentName":"Tech"}}"#);
+    let r = run(f.as_ref(), json!({"ids": [111, "500", 111]}), fin(), true, true).await.unwrap();
+    assert_eq!(r["users"]["111"]["designationName"], "Engineer");
+    assert_eq!(r["users"]["111"]["reportingTo"], 110);
+    let c = w.last("/api/security/users/internal/org");
+    // The client is the caller's own, never an argument; the ids once each.
+    assert_eq!(c.query["clientId"], "7");
+    assert_eq!(c.raw_query, "clientId=7&userIds=111&userIds=500");
+    // No ids: an empty map, no call. Too many: refused. Anonymous, outside a definition: refused, no call.
+    let n = w.count("/api/security/users/internal/org");
+    let r = run(f.as_ref(), json!({"ids": []}), fin(), true, true).await.unwrap();
+    assert_eq!(r["users"], json!({}));
+    let many: Vec<u64> = (1..=1001).collect();
+    assert_eq!(status(&run(f.as_ref(), json!({"ids": many}), fin(), true, true).await), StatusCode::BAD_REQUEST);
+    let r = run(f.as_ref(), json!({"ids": [111]}), anonymous(7, "FIN"), true, true).await;
+    assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "CoreServices.Security.GetUsersOrg needs a signed in user".into()));
+    assert_eq!(status(&run(f.as_ref(), json!({"ids": [111]}), fin(), false, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(w.count("/api/security/users/internal/org"), n);
+
+    let g = find(&fns, "GetClientOrg");
+    w.answer("GET", "/api/security/users/internal/clientOrg", 200, r#"{"departments":[{"id":2,"name":"Tech"}],"designations":[]}"#);
+    let r = run(g.as_ref(), json!({}), user(111, 7, "FIN", &[]), true, true).await.unwrap();
+    assert_eq!(r["departments"], json!([{"id": 2, "name": "Tech"}]));
+    assert_eq!(r["designations"], json!([]));
+    assert_eq!(w.last("/api/security/users/internal/clientOrg").query["clientId"], "7");
+    let n = w.count("/api/security/users/internal/clientOrg");
+    assert_eq!(status(&run(g.as_ref(), json!({}), anonymous(7, "FIN"), true, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(w.count("/api/security/users/internal/clientOrg"), n);
+}
+
+#[tokio::test]
+async fn set_user_active_acts_only_inside_the_callers_client_and_never_on_themselves() {
+    let (w, fns) = world().await;
+    let f = find(&fns, "SetUserActive");
+    let admin = user(110, 7, "FIN", &[USER_UPDATE]);
+    w.answer("PATCH", "/api/security/users/makeUserInActive", 200, "true");
+    w.answer("PATCH", "/api/security/users/makeUserActive", 200, "true");
+    let r = run(f.as_ref(), json!({"userId": 111, "active": false}), admin.clone(), true, true).await.unwrap();
+    assert_eq!((r["done"].clone(), r["statusCode"].clone()), (json!(true), json!("INACTIVE")));
+    let c = w.last("/api/security/users/makeUserInActive");
+    assert_eq!(c.query["userId"], "111");
+    assert_eq!(c.headers.get("authorization").and_then(|h| h.to_str().ok()), Some("tok-110"));
+    let r = run(f.as_ref(), json!({"userId": "111", "active": true}), admin.clone(), true, true).await.unwrap();
+    assert_eq!(r["statusCode"], "ACTIVE");
+
+    let n = w.as_caller_calls().len();
+    // Themselves.
+    let r = run(f.as_ref(), json!({"userId": 110, "active": false}), admin.clone(), true, true).await;
+    assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "You cannot change your own login.".into()));
+    // A user of a managed client, of another client, an unknown one: the same refusal.
+    for other in [500, 600, 999] {
+        let r = run(f.as_ref(), json!({"userId": other, "active": false}), admin.clone(), true, true).await;
+        assert_eq!(status(&r), StatusCode::FORBIDDEN, "{other}");
+        assert!(message(&r).contains("acts only on users of the caller's own client"), "{}", message(&r));
+    }
+    // Without User_UPDATE, out of scope: Access Denied.
+    let r = run(f.as_ref(), json!({"userId": 500, "active": false}), user(111, 7, "FIN", &[]), true, true).await;
+    assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "Access Denied".into()));
+    // Anonymous, no token, no request (a webhook or an event), outside a definition, no active.
+    assert_eq!(status(&run(f.as_ref(), json!({"userId": 111, "active": false}), anonymous(7, "FIN"), true, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(status(&run(f.as_ref(), json!({"userId": 111, "active": false}), without_token(admin.clone()), true, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(status(&run(f.as_ref(), json!({"userId": 111, "active": false}), admin.clone(), true, false).await), StatusCode::FORBIDDEN);
+    assert_eq!(status(&run(f.as_ref(), json!({"userId": 111, "active": false}), admin.clone(), false, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(w.as_caller_calls().len(), n);
+}
+
+#[tokio::test]
+async fn assign_profile_by_name_refuses_builder_profiles_and_other_clients() {
+    let (w, fns) = world().await;
+    let assign = find(&fns, "AssignProfile");
+    let remove = find(&fns, "RemoveProfile");
+    let admin = user(110, 7, "FIN", &[USER_UPDATE, "Authorities.Profile_READ"]);
+    w.answer("GET", "/api/security/users/internal/profileCheck", 200, r#"{"id":300,"name":"HRMS Employee","appId":9,"builder":false}"#);
+    w.answer("GET", "/api/security/users/111/assignProfile/300", 200, "true");
+    w.answer("GET", "/api/security/users/111/removeProfile/300", 200, "true");
+    let r = run(assign.as_ref(), json!({"userId": 111, "profileName": "HRMS Employee", "appCode": "hrms"}), admin.clone(), true, true).await.unwrap();
+    assert_eq!((r["result"].clone(), r["assigned"].clone()), (json!(true), json!(true)));
+    let c = w.last("/api/security/users/internal/profileCheck");
+    assert_eq!((c.query["appCode"].as_str(), c.query["clientId"].as_str(), c.query["name"].as_str()), ("hrms", "7", "HRMS Employee"));
+    assert_eq!(w.last("/api/security/users/111/assignProfile/300").headers.get("authorization").and_then(|h| h.to_str().ok()), Some("tok-110"));
+    // No appCode: the running function's app (here the URL's, leadzumptwo).
+    let r = run(remove.as_ref(), json!({"userId": 111, "profileName": "HRMS Employee"}), admin.clone(), true, true).await.unwrap();
+    assert_eq!(r["removed"], json!(true));
+    assert_eq!(w.last("/api/security/users/internal/profileCheck").query["appCode"], "leadzumptwo");
+
+    let n = w.as_caller_calls().len();
+    // A builder's profile by name, to assign or to remove.
+    w.answer("GET", "/api/security/users/internal/profileCheck", 200, r#"{"id":215,"name":"AppCustomizer","builder":true,"builderAuthority":"Authorities.Page_UPDATE"}"#);
+    for (f, args) in [
+        (&assign, json!({"userId": 111, "profileName": "AppCustomizer", "appCode": "hrms"})),
+        (&remove, json!({"userId": 111, "profileName": "AppCustomizer", "appCode": "hrms"})),
+    ] {
+        let r = run(f.as_ref(), args, admin.clone(), true, true).await;
+        assert_eq!(status(&r), StatusCode::FORBIDDEN);
+        assert!(message(&r).contains("does not give or take the profile 'AppCustomizer'"), "{}", message(&r));
+    }
+    // No such profile.
+    w.answer("GET", "/api/security/users/internal/profileCheck", 200, "");
+    let r = run(assign.as_ref(), json!({"userId": 111, "profileName": "Nope", "appCode": "hrms"}), admin.clone(), true, true).await;
+    assert_eq!(status(&r), StatusCode::NOT_FOUND);
+    // By name only inside the caller's own client: a managed client's user is refused before any lookup.
+    let checks = w.count("/api/security/users/internal/profileCheck");
+    let r = run(assign.as_ref(), json!({"userId": 500, "profileName": "HRMS Employee", "appCode": "hrms"}), admin.clone(), true, true).await;
+    assert_eq!(status(&r), StatusCode::FORBIDDEN);
+    assert!(message(&r).contains("acts only on users of the caller's own client"), "{}", message(&r));
+    // Without the authorities: Access Denied.
+    let r = run(assign.as_ref(), json!({"userId": 600, "profileName": "HRMS Employee", "appCode": "hrms"}), user(111, 7, "FIN", &[]), true, true).await;
+    assert_eq!((status(&r), message(&r)), (StatusCode::FORBIDDEN, "Access Denied".into()));
+    assert_eq!(status(&run(assign.as_ref(), json!({"userId": 111, "profileName": "X"}), anonymous(7, "FIN"), true, true).await), StatusCode::FORBIDDEN);
+    assert_eq!(w.count("/api/security/users/internal/profileCheck"), checks);
+    assert_eq!(w.as_caller_calls().len(), n);
 }

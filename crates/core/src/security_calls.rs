@@ -296,6 +296,38 @@ impl SecurityCalls {
         as_list(self.post_value("/api/security/users/internal/notification", &[], &body).await?)
     }
 
+    /// Rust only (HRMS): `GET /users/internal/org`, the org line (`reportingTo`, `designationId`,
+    /// `designationName`, `departmentId`, `departmentName`) of each listed user of ONE client, keyed
+    /// by user id; users of another client are left out by security.
+    pub async fn users_org(&self, client_id: Id, user_ids: &[Id]) -> Result<Option<Value>, CoreError> {
+        let mut q = vec![("clientId", client_id.to_string())];
+        q.extend(user_ids.iter().map(|i| ("userIds", i.to_string())));
+        self.get_value("/api/security/users/internal/org", &q).await
+    }
+
+    /// Rust only (HRMS): `GET /users/internal/clientOrg`, the client's `departments` and
+    /// `designations`.
+    pub async fn client_org(&self, client_id: Id) -> Result<Option<Value>, CoreError> {
+        self.get_value("/api/security/users/internal/clientOrg", &[("clientId", client_id.to_string())]).await
+    }
+
+    /// Rust only (HRMS): `GET /users/internal/profileCheck`, the profile a function names (by name in
+    /// an app, or by id) as the client sees it: `{id, name, appId, builder, builderAuthority}`, or
+    /// nothing when no profile matches.
+    pub async fn profile_check(&self, app_code: Option<&str>, client_id: Id, name: Option<&str>, profile_id: Option<Id>) -> Result<Option<Value>, CoreError> {
+        let mut q = vec![("clientId", client_id.to_string())];
+        if let Some(a) = app_code {
+            q.push(("appCode", a.to_string()));
+        }
+        if let Some(n) = name {
+            q.push(("name", n.to_string()));
+        }
+        if let Some(p) = profile_id {
+            q.push(("profileId", p.to_string()));
+        }
+        self.get_value("/api/security/users/internal/profileCheck", &q).await
+    }
+
     /// Rust only: a use recorded against a billing meter (`internal/billing/record`).
     pub async fn billing_record(&self, body: &Value) -> Result<Option<Value>, CoreError> {
         self.post_value("/api/security/internal/billing/record", &[], body).await

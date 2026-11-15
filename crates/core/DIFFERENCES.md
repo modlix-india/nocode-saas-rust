@@ -398,6 +398,43 @@ created from 2026-11-12 (IST). Every other field is unchanged.
   per core instance. Refusals are answers (`INVALID`, `NO_SMS`, `NOT_ACTIVE`, `LIMIT`,
   `SEND_FAILED`, the last also for a 2xx reply matching `sms.errorWhen`). Answers `sent`, `reason`,
   `message`, `target`, `text`, `characters`, `parts`. Only inside a server function.
+- **D56 `CoreServices.Security.GetUsersOrg` and `GetClientOrg`** (2026-11-14, Rust only, HRMS
+  phase 3). `GetUsersOrg(ids)` (at most 1000) answers `users`, `{<userId>: {reportingTo,
+  designationId, designationName, departmentId, departmentName}}` for users of the signed-in
+  caller's OWN client (managed clients and unknown ids are left out); `GetClientOrg()` answers that
+  client's `departments [{id, name, parentDepartmentId}]` and `designations [{id, name,
+  departmentId, parentDesignationId}]`. Readable by any signed-in user of the client (the callers
+  gate them with their own roles); refused for an anonymous run. Security-internal `GET
+  /users/internal/org` and `/users/internal/clientOrg`; the client is never an argument.
+- **D57 `CoreServices.Security.SetUserActive`** (2026-11-14, Rust only, HRMS phase 3). `userId`,
+  `active`: a login of the caller's own client made ACTIVE or INACTIVE through security's
+  `makeUserActive` / `makeUserInActive` with the caller's own token (so `User_UPDATE`, the sub org
+  rules, the audit and the managed-change notice stay security's). Refused for the caller themselves
+  ("You cannot change your own login."), for a user of any other client (a managed one too) or an
+  unknown user (`CORE.USER_OTHER_CLIENT`, "Access Denied" without `User_UPDATE`), and without a
+  signed-in caller's request (anonymous, webhook, event). Answers `done`, `statusCode`.
+- **D58 `CoreServices.Security.AssignProfile` / `RemoveProfile` by name** (2026-11-14, HRMS phase
+  3). Besides `profileId`, `profileName` with `appCode` (the running function's app when blank):
+  resolved by security-internal `GET /users/internal/profileCheck` among the app's profiles the
+  caller's client sees (root name or the hierarchy's override name; the root id is assigned), and
+  then only for a user of the caller's OWN client, and a profile that lets its holders change the
+  app is refused (`CORE.PROFILE_BUILDER_REFUSED`): AppCustomizer, or any of `Page`, `Function`,
+  `Storage`, `Schema`, `Theme`, `Role`, `Connection`, `Application` CREATE, UPDATE or DELETE or
+  their Manager roles, read in the client's hierarchy. By `profileId` nothing changed: leadzumptwo's
+  teammateCreate gives LeadZump Admin (Application_Manager), as CXZump may give CXZump Admin. Answers
+  Java's `result` plus `assigned` / `removed`.
+- **D59 `CoreServices.File.CreateSecuredKey` and `SaveSecuredFile`** (2026-11-14, Rust only, HRMS
+  phase 3). A secured file of the signed-in caller's own client (`<clientCode>/...` from the
+  context only), under the folder of the app that owns the running function (`hrms/` for HRMS), so
+  the function decides who may open it and the files service's own path rules are not consulted.
+  `CreateSecuredKey(path, minutes = 10 (1 to 1440), accessLimit = 0 (no limit))` answers `key` and
+  `url` (`/api/files/secured/downloadFileByKey/<key>`), through files-manage's new internal `GET
+  /internal/secured/createTimedKey` (a route of its own so an older files unit answers 404, never
+  the year-long default of `createKey`). `SaveSecuredFile(path, fileName, base64, override = false)`
+  writes at most 50 MB through the internal upload and answers `file`. `path` may be relative to the
+  client, start with its code, or be the file's `/api/files/secured/file/...` URL; another client,
+  another app's folder, `.`, `..` or empty segments are refused (`CORE.FILE_PATH_OUTSIDE_APP`). Only
+  inside a server function, for a signed-in user.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

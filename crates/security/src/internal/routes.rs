@@ -95,6 +95,9 @@ pub fn router(state: State_) -> Router {
         .route("/api/security/users/internal/batch", post(users_batch))
         .route("/api/security/users/internal/clients/batch", post(users_of_clients_batch))
         .route("/api/security/users/internal/notification", post(users_for_notification))
+        .route("/api/security/users/internal/org", get(users_org))
+        .route("/api/security/users/internal/clientOrg", get(client_org))
+        .route("/api/security/users/internal/profileCheck", get(profile_check))
         .route("/api/security/users/internal/ownerEmails", get(owner_emails))
         .route("/api/security/users/internal/processor", post(users_for_processor))
         .route("/api/security/users/internal/query", post(users_query))
@@ -609,6 +612,29 @@ route!(users_for_notification, "/users/internal/notification", false, |s, r, ca|
 route!(users_for_processor, "/users/internal/processor", false, |s, r, ca| {
     let req = users_list_body(&r.body)?;
     Ok(json(&Value::Array(s.users_for_processor(&req).await?)))
+});
+
+// Rust only (HRMS): what core's `CoreServices.Security.GetUsersOrg`, `GetClientOrg`,
+// `AssignProfile` and `RemoveProfile` read. Core names the client from the signed-in caller.
+
+route!(users_org, "/users/internal/org", false, |s, r, ca| {
+    let client = req_u64(&r.params, "clientId")?;
+    let ids = req_u64_list(&r.params, "userIds")?;
+    Ok(json(&s.users_org(client, &ids).await?))
+});
+
+route!(client_org, "/users/internal/clientOrg", false, |s, r, ca| {
+    let client = req_u64(&r.params, "clientId")?;
+    Ok(json(&s.client_org(client).await?))
+});
+
+route!(profile_check, "/users/internal/profileCheck", false, |s, r, ca| {
+    let client = req_u64(&r.params, "clientId")?;
+    let profile = opt_u64(&r.params, "profileId")?;
+    Ok(match s.profile_check(r.params.get("appCode"), client, r.params.get("name"), profile).await? {
+        Some(v) => json(&v),
+        None => nothing(),
+    })
 });
 
 route!(users_query, "/users/internal/query", false, |s, r, ca| {

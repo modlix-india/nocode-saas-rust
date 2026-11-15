@@ -3365,6 +3365,30 @@
     "parameterName": "profileId",
     "variableArgument": false,
     "type": "EXPRESSION"
+   },
+   "profileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "profileName",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "profileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
    }
   },
   "events": {
@@ -3374,6 +3398,12 @@
      "result": {
       "namespace": "_",
       "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "assigned": {
+      "namespace": "_",
+      "name": "assigned",
       "version": 1,
       "type": "BOOLEAN"
      }
@@ -4866,6 +4896,30 @@
     "parameterName": "profileId",
     "variableArgument": false,
     "type": "EXPRESSION"
+   },
+   "profileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "profileName",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "profileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
    }
   },
   "events": {
@@ -4875,6 +4929,12 @@
      "result": {
       "namespace": "_",
       "name": "result",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "removed": {
+      "namespace": "_",
+      "name": "removed",
       "version": 1,
       "type": "BOOLEAN"
      }
@@ -5392,6 +5452,257 @@
       "name": "reason",
       "version": 1,
       "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetUsersOrg": {
+  "namespace": "CoreServices.Security",
+  "name": "GetUsersOrg",
+  "parameters": {
+   "ids": {
+    "schema": {
+     "namespace": "_",
+     "name": "ids",
+     "version": 1,
+     "type": "ARRAY",
+     "defaultValue": [],
+     "items": {
+      "namespace": "_",
+      "name": "idsItem",
+      "version": 1,
+      "type": [
+       "LONG",
+       "STRING"
+      ]
+     }
+    },
+    "parameterName": "ids",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "users": {
+      "namespace": "_",
+      "name": "users",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.GetClientOrg": {
+  "namespace": "CoreServices.Security",
+  "name": "GetClientOrg",
+  "parameters": {},
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "departments": {
+      "namespace": "_",
+      "name": "departments",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "department",
+       "version": 1,
+       "type": "OBJECT"
+      }
+     },
+     "designations": {
+      "namespace": "_",
+      "name": "designations",
+      "version": 1,
+      "type": "ARRAY",
+      "items": {
+       "namespace": "_",
+       "name": "designation",
+       "version": 1,
+       "type": "OBJECT"
+      }
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.Security.SetUserActive": {
+  "namespace": "CoreServices.Security",
+  "name": "SetUserActive",
+  "parameters": {
+   "userId": {
+    "schema": {
+     "namespace": "_",
+     "name": "userId",
+     "version": 1,
+     "type": [
+      "LONG",
+      "STRING"
+     ],
+     "defaultValue": 0
+    },
+    "parameterName": "userId",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "active": {
+    "schema": {
+     "namespace": "_",
+     "name": "active",
+     "version": 1,
+     "type": "BOOLEAN"
+    },
+    "parameterName": "active",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "done": {
+      "namespace": "_",
+      "name": "done",
+      "version": 1,
+      "type": "BOOLEAN"
+     },
+     "statusCode": {
+      "namespace": "_",
+      "name": "statusCode",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.File.CreateSecuredKey": {
+  "namespace": "CoreServices.File",
+  "name": "CreateSecuredKey",
+  "parameters": {
+   "path": {
+    "schema": {
+     "namespace": "_",
+     "name": "path",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "path",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "minutes": {
+    "schema": {
+     "namespace": "_",
+     "name": "minutes",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 10
+    },
+    "parameterName": "minutes",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "accessLimit": {
+    "schema": {
+     "namespace": "_",
+     "name": "accessLimit",
+     "version": 1,
+     "type": "INTEGER",
+     "defaultValue": 0
+    },
+    "parameterName": "accessLimit",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "key": {
+      "namespace": "_",
+      "name": "key",
+      "version": 1,
+      "type": "STRING"
+     },
+     "url": {
+      "namespace": "_",
+      "name": "url",
+      "version": 1,
+      "type": "STRING"
+     }
+    }
+   }
+  }
+ },
+ "CoreServices.File.SaveSecuredFile": {
+  "namespace": "CoreServices.File",
+  "name": "SaveSecuredFile",
+  "parameters": {
+   "path": {
+    "schema": {
+     "namespace": "_",
+     "name": "path",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "path",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "base64": {
+    "schema": {
+     "namespace": "_",
+     "name": "base64",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "base64",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "override": {
+    "schema": {
+     "namespace": "_",
+     "name": "override",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "override",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "file": {
+      "namespace": "_",
+      "name": "file",
+      "version": 1,
+      "type": "OBJECT"
      }
     }
    }
