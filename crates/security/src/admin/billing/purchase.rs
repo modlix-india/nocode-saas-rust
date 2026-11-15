@@ -423,10 +423,17 @@ impl Billing<'_> {
             return Err(forbidden("pay this invoice"));
         }
         let status = invoice.str("status").unwrap_or("null");
-        if status != "PENDING" && status != "FAILED" {
+        if !matches!(status, "PENDING" | "FAILED" | "OVERDUE") {
             return Err(params_not_found(&format!("invoice (already {status})")));
         }
-        let (_, config) = self.bundle_and_config(invoice.u64("bundleId")).await?;
+        // A bundle purchase takes its bundle's config; a monthly invoice its seller's config.
+        let config = match invoice.u64("bundleId") {
+            Some(_) => self.bundle_and_config(invoice.u64("bundleId")).await?.1,
+            None => {
+                let (Some(app), Some(seller)) = (invoice.u64("appId"), invoice.u64("sellerClientId")) else { return Ok(None) };
+                self.config_of(app, seller).await?.ok_or_else(|| params_not_found("billing config"))?
+            }
+        };
         let Some(buyer) = self.client_info(invoice.u64("clientId").unwrap_or(0)).await? else { return Ok(None) };
         Ok(Some(self.checkout_order(ca, &invoice, &config, Some(&buyer)).await?))
     }
@@ -503,7 +510,7 @@ impl Billing<'_> {
         }
         invoice.set("status", Val::Str("PAID".into()));
         self.update_row(&payment).await?;
-        self.credit_from_payment(&invoice).await?;
+        self.credit_from_payment(ca, &invoice).await?;
         self.mark_paid_and_emit(ca, &invoice).await?;
         Ok(())
     }

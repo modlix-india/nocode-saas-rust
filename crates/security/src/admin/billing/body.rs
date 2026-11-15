@@ -105,7 +105,11 @@ pub fn coerce(kind: Kind, v: &Value) -> Result<Val, ()> {
         },
         Kind::Int => integer(v, i32::MIN.into(), i32::MAX.into())?.map(Val::Int),
         Kind::Small => integer(v, i16::MIN.into(), i16::MAX.into())?.map(Val::Int),
-        Kind::Byte => integer(v, i8::MIN.into(), i8::MAX.into())?.map(Val::Int),
+        // A checkbox sends true / false for a TINYINT(1) flag (a plan's isDefault).
+        Kind::Byte => match v {
+            Value::Bool(b) => Some(Val::Int(i64::from(*b))),
+            _ => integer(v, i8::MIN.into(), i8::MAX.into())?.map(Val::Int),
+        },
         Kind::Json => match v {
             Value::Null => None,
             Value::Object(_) => Some(Val::Json(v.clone())),

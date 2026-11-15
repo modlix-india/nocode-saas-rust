@@ -15,22 +15,9 @@ use crate::data::billing_admin::{Find, Rec, Val, BUNDLE, CONFIG};
 use crate::errors::{AuthError, AuthResult};
 use crate::model::ContextAuth;
 
-/// What `AppBillingConfigService.updatableEntity` copies from the request.
-const CONFIG_EDITABLE: [&str; 24] = [
-    "appRentPerMonth",
-    "siteRentPerMonth",
-    "filesTokensPerMonth",
-    "storageRowTokensPerMonth",
-    "dealTokensPerMonth",
-    "userTokensPerMonth",
-    "aiTokensPerMillion",
-    "freeApps",
-    "freeSites",
-    "freeFilesGb",
-    "freeStorageRows",
-    "freeDeals",
-    "freeUsers",
-    "freeAiTokensPerMonth",
+/// What a config update copies from the request. What it charges for is its meters and plans
+/// (`meters.rs`), not columns of the config.
+const CONFIG_EDITABLE: [&str; 15] = [
     "gstPercentage",
     "paymentGateway",
     "paymentGatewayConfig",
@@ -40,6 +27,11 @@ const CONFIG_EDITABLE: [&str; 24] = [
     "lowBalanceThreshold",
     "suspendAppCode",
     "suspendClientCode",
+    "suspendMode",
+    "purchasedCreditValidityMonths",
+    "invoiceDay",
+    "invoiceDueDays",
+    "currency",
     "status",
 ];
 
@@ -91,7 +83,7 @@ fn keep_stored_secrets(target: &mut Rec, stored: &Map<String, Value>) {
     target.set("paymentGatewayConfig", Val::Json(Value::Object(gw)));
 }
 
-fn copy(target: &mut Rec, from: &Rec, props: &[&str]) {
+pub(super) fn copy(target: &mut Rec, from: &Rec, props: &[&str]) {
     for p in props {
         target.set(p, from.get(p).clone());
     }
@@ -148,7 +140,7 @@ impl Billing<'_> {
     }
 
     /// `assertManageableConfig`: the config (its 404 when missing), managed by the caller.
-    async fn assert_manageable_config(&self, ca: &ContextAuth, id: Option<u64>) -> AuthResult<Rec> {
+    pub(super) async fn assert_manageable_config(&self, ca: &ContextAuth, id: Option<u64>) -> AuthResult<Rec> {
         let config = self.read(&CONFIG, id).await?;
         self.assert_can_manage(ca, config.u64("appId"), config.u64("clientId")).await?;
         Ok(config)
@@ -156,7 +148,7 @@ impl Billing<'_> {
 
     /// `AbstractJOOQDataService.create` (`createdBy` stays null: no logged-in user id is
     /// resolved) and the DAO's insert-then-select; `None` when the row cannot be read back.
-    async fn create_row(&self, mut rec: Rec) -> AuthResult<Option<Rec>> {
+    pub(super) async fn create_row(&self, mut rec: Rec) -> AuthResult<Option<Rec>> {
         rec.set("createdBy", Val::Null);
         let id = self.store.insert(&rec).await?;
         self.store.by_id(rec.schema, id).await
@@ -171,6 +163,7 @@ impl Billing<'_> {
     /// `AppBillingConfigService.create`.
     pub async fn config_create(&self, ca: &ContextAuth, rec: Rec) -> AuthResult<Option<Rec>> {
         self.assert_can_manage(ca, rec.u64("appId"), rec.u64("clientId")).await?;
+        super::meters::check_config(&rec)?;
         let Some(saved) = self.create_row(rec).await? else { return Ok(None) };
         self.evict_config(&saved).await?;
         Ok(Some(saved))
@@ -185,6 +178,7 @@ impl Billing<'_> {
         let Some(mut target) = self.config_read(ca, id).await? else { return Ok(None) };
         let stored = target.map("paymentGatewayConfig");
         copy(&mut target, entity, &CONFIG_EDITABLE);
+        super::meters::check_config(&target)?;
         keep_stored_secrets(&mut target, &stored);
         let saved = self.update_row(&target).await?;
         self.evict_config(&saved).await?;

@@ -296,6 +296,31 @@ impl SecurityCalls {
         as_list(self.post_value("/api/security/users/internal/notification", &[], &body).await?)
     }
 
+    /// Rust only: a use recorded against a billing meter (`internal/billing/record`).
+    pub async fn billing_record(&self, body: &Value) -> Result<Option<Value>, CoreError> {
+        self.post_value("/api/security/internal/billing/record", &[], body).await
+    }
+
+    /// Rust only: a recorded use undone within its meter's refund window (`internal/billing/reverse`).
+    pub async fn billing_reverse(&self, body: &Value) -> Result<Option<Value>, CoreError> {
+        self.post_value("/api/security/internal/billing/reverse", &[], body).await
+    }
+
+    /// Rust only: may the client use a meter (or AI) now (`internal/billing/allowed`).
+    pub async fn billing_allowed(&self, app_code: &str, client_code: &str, meter_key: Option<&str>, model: Option<&str>, count: Option<String>) -> Result<Option<Value>, CoreError> {
+        let mut q = vec![("appCode", app_code.to_string()), ("clientCode", client_code.to_string())];
+        if let Some(m) = meter_key.filter(|m| !m.trim().is_empty()) {
+            q.push(("meterKey", m.to_string()));
+        }
+        if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+            q.push(("model", m.to_string()));
+        }
+        if let Some(c) = count {
+            q.push(("count", c));
+        }
+        self.get_value("/api/security/internal/billing/allowed", &q).await
+    }
+
     /// `readUserPageFilterInternal(query, {})`: a Spring `Page` of `User`.
     pub async fn read_user_page(&self, query: &Value) -> Result<Option<Value>, CoreError> {
         self.post_value("/api/security/users/internal/query", &[], query).await

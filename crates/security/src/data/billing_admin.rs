@@ -88,12 +88,27 @@ const UPDATED_BY: Col = col("updatedBy", "UPDATED_BY", Kind::Id, true);
 pub const RECORD_STATUS: &[&str] = &["ACTIVE", "INACTIVE", "DELETED"];
 pub const GATEWAYS: &[&str] = &["RAZORPAY", "OTHER"];
 pub const BUNDLE_TYPES: &[&str] = &["FIXED", "CUSTOM"];
-pub const INVOICE_STATUS: &[&str] = &["PENDING", "PAID", "FAILED", "UNDER_REVIEW"];
+pub const INVOICE_STATUS: &[&str] = &["PENDING", "PAID", "FAILED", "UNDER_REVIEW", "OVERDUE"];
+pub const INVOICE_KINDS: &[&str] = &["BUNDLE", "MONTHLY"];
 pub const PAYMENT_STATUS: &[&str] = &["PENDING", "PAID", "FAILED"];
 pub const WALLET_STATUS: &[&str] = &["ACTIVE", "SUSPENDED"];
-pub const TXN_TYPES: &[&str] = &["CREDIT", "DEBIT", "ADJUST", "SUSPEND", "REACTIVATE", "REFUND"];
+pub const TXN_TYPES: &[&str] = &["CREDIT", "DEBIT", "ADJUST", "SUSPEND", "REACTIVATE", "REFUND", "EXPIRE"];
+pub const SUSPEND_MODES: &[&str] = &["AI_ONLY", "AI_AND_BANNER", "BLOCK_APP"];
+pub const METER_KINDS: &[&str] = &["GAUGE", "COUNTER"];
+pub const METER_SOURCES: &[&str] = &["USERS", "APPS", "SITES", "STORAGE_ROWS", "STORAGE_COUNT", "FILES_GB", "AI_TOKENS", "EVENT"];
+pub const RATE_UNITS: &[&str] = &["MONTH", "EACH", "PER_MILLION", "PERCENT", "MARKUP"];
+pub const CHARGE_MODES: &[&str] = &["TOKENS", "INVOICE"];
+pub const REFUND_POLICIES: &[&str] = &["NONE", "WITHIN_DAYS"];
+pub const PLAN_PERIODS: &[&str] = &["MONTH", "YEAR"];
+pub const PAYMENT_MODES: &[&str] = &["WALLET", "INVOICE"];
+pub const WALLET_PLAN_STATUS: &[&str] = &["ACTIVE", "LAPSED", "CANCELLED", "ENDED"];
+pub const LOT_SOURCES: &[&str] = &["PLAN", "PURCHASE", "GRANT", "ADJUST"];
+pub const USAGE_KINDS: &[&str] = &["SNAPSHOT", "EVENT", "REVERSAL"];
+pub const LINE_KINDS: &[&str] = &["PLAN", "METER", "ADJUSTMENT"];
 
-/// `security_app_billing_config` / `AppBillingConfig`.
+/// `security_app_billing_config` / `AppBillingConfig`. What it charges for is its meters
+/// ([`METER`]); V90 left the seven old rate and free columns in the table until a later release drops
+/// them, and nothing reads or writes them.
 const CONFIG_COLS: &[Col] = &[
         ID,
         CREATED_AT,
@@ -102,20 +117,6 @@ const CONFIG_COLS: &[Col] = &[
         UPDATED_BY,
         col("clientId", "CLIENT_ID", Kind::Id, false),
         col("appId", "APP_ID", Kind::Id, false),
-        col("appRentPerMonth", "APP_RENT_PER_MONTH", Kind::Dec, false),
-        col("siteRentPerMonth", "SITE_RENT_PER_MONTH", Kind::Dec, false),
-        col("filesTokensPerMonth", "FILES_TOKENS_PER_MONTH", Kind::Dec, false),
-        col("storageRowTokensPerMonth", "STORAGE_ROW_TOKENS_PER_MONTH", Kind::Dec, false),
-        col("dealTokensPerMonth", "DEAL_TOKENS_PER_MONTH", Kind::Dec, false),
-        col("userTokensPerMonth", "USER_TOKENS_PER_MONTH", Kind::Dec, false),
-        col("aiTokensPerMillion", "AI_TOKENS_PER_MILLION", Kind::Dec, false),
-        col("freeApps", "FREE_APPS", Kind::Dec, false),
-        col("freeSites", "FREE_SITES", Kind::Dec, false),
-        col("freeFilesGb", "FREE_FILES_GB", Kind::Dec, false),
-        col("freeStorageRows", "FREE_STORAGE_ROWS", Kind::Dec, false),
-        col("freeDeals", "FREE_DEALS", Kind::Dec, false),
-        col("freeUsers", "FREE_USERS", Kind::Dec, false),
-        col("freeAiTokensPerMonth", "FREE_AI_TOKENS_PER_MONTH", Kind::Dec, false),
         col("gstPercentage", "GST_PERCENTAGE", Kind::Dec, false),
         col("paymentGateway", "PAYMENT_GATEWAY", Kind::Enum(GATEWAYS), false),
         col("paymentGatewayConfig", "PAYMENT_GATEWAY_CONFIG", Kind::Json, true),
@@ -125,6 +126,11 @@ const CONFIG_COLS: &[Col] = &[
         col("lowBalanceThreshold", "LOW_BALANCE_THRESHOLD", Kind::Dec, true),
         col("suspendAppCode", "SUSPEND_APP_CODE", Kind::Str, true),
         col("suspendClientCode", "SUSPEND_CLIENT_CODE", Kind::Str, true),
+        col("suspendMode", "SUSPEND_MODE", Kind::Enum(SUSPEND_MODES), false),
+        col("purchasedCreditValidityMonths", "PURCHASED_CREDIT_VALIDITY_MONTHS", Kind::Int, true),
+        col("invoiceDay", "INVOICE_DAY", Kind::Int, false),
+        col("invoiceDueDays", "INVOICE_DUE_DAYS", Kind::Int, false),
+        col("currency", "CURRENCY", Kind::Str, false),
         col("status", "STATUS", Kind::Enum(RECORD_STATUS), false),];
 
 pub static CONFIG: Schema = Schema { table: "security_app_billing_config", pojo: "AppBillingConfig", cols: CONFIG_COLS };
@@ -179,6 +185,11 @@ const INVOICE_COLS: &[Col] = &[
         col("invoiceNumber", "INVOICE_NUMBER", Kind::Str, false),
         col("invoiceDate", "INVOICE_DATE", Kind::Ts, false),
         col("status", "STATUS", Kind::Enum(INVOICE_STATUS), false),
+        col("kind", "KIND", Kind::Enum(INVOICE_KINDS), false),
+        col("periodStart", "PERIOD_START", Kind::Date, true),
+        col("periodEnd", "PERIOD_END", Kind::Date, true),
+        col("dueDate", "DUE_DATE", Kind::Date, true),
+        col("periodKey", "PERIOD_KEY", Kind::Str, true),
         col("sellerClientId", "SELLER_CLIENT_ID", Kind::Id, false),
         col("sellerLegalName", "SELLER_LEGAL_NAME", Kind::Str, true),
         col("sellerGstin", "SELLER_GSTIN", Kind::Str, true),
@@ -190,7 +201,7 @@ const INVOICE_COLS: &[Col] = &[
         col("appId", "APP_ID", Kind::Id, false),
         col("bundleId", "BUNDLE_ID", Kind::Id, true),
         col("bundleLabel", "BUNDLE_LABEL", Kind::Str, true),
-        col("tokensPurchased", "TOKENS_PURCHASED", Kind::Dec, false),
+        col("tokensPurchased", "TOKENS_PURCHASED", Kind::Dec, true),
         col("baseAmount", "BASE_AMOUNT", Kind::Dec, false),
         col("gstPercentage", "GST_PERCENTAGE", Kind::Dec, false),
         col("gstAmount", "GST_AMOUNT", Kind::Dec, false),
@@ -260,6 +271,146 @@ const TXN_COLS: &[Col] = &[
         col("description", "DESCRIPTION", Kind::Str, true),];
 
 pub static TXN: Schema = Schema { table: "security_wallet_transaction", pojo: "WalletTransaction", cols: TXN_COLS };
+
+
+/// `security_billing_meter`: what a config charges for.
+const METER_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        CREATED_BY,
+        UPDATED_AT,
+        UPDATED_BY,
+        col("billingConfigId", "BILLING_CONFIG_ID", Kind::Id, false),
+        col("meterKey", "METER_KEY", Kind::Str, false),
+        col("label", "LABEL", Kind::Str, false),
+        col("unitLabel", "UNIT_LABEL", Kind::Str, true),
+        col("kind", "KIND", Kind::Enum(METER_KINDS), false),
+        col("source", "SOURCE", Kind::Enum(METER_SOURCES), false),
+        col("sourceConfig", "SOURCE_CONFIG", Kind::Json, true),
+        col("rate", "RATE", Kind::Dec, false),
+        col("rateUnit", "RATE_UNIT", Kind::Enum(RATE_UNITS), false),
+        col("freeQuantity", "FREE_QUANTITY", Kind::Dec, false),
+        col("chargeMode", "CHARGE_MODE", Kind::Enum(CHARGE_MODES), false),
+        col("basis", "BASIS", Kind::Str, true),
+        col("minCharge", "MIN_CHARGE", Kind::Dec, true),
+        col("maxCharge", "MAX_CHARGE", Kind::Dec, true),
+        col("refundPolicy", "REFUND_POLICY", Kind::Enum(REFUND_POLICIES), false),
+        col("refundDays", "REFUND_DAYS", Kind::Int, true),
+        col("displayOrder", "DISPLAY_ORDER", Kind::Int, false),
+        col("status", "STATUS", Kind::Enum(RECORD_STATUS), false),];
+
+pub static METER: Schema = Schema { table: "security_billing_meter", pojo: "BillingMeter", cols: METER_COLS };
+
+/// `security_billing_plan`.
+const PLAN_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        CREATED_BY,
+        UPDATED_AT,
+        UPDATED_BY,
+        col("billingConfigId", "BILLING_CONFIG_ID", Kind::Id, false),
+        col("code", "CODE", Kind::Str, false),
+        col("label", "LABEL", Kind::Str, false),
+        col("description", "DESCRIPTION", Kind::Str, true),
+        col("period", "PERIOD", Kind::Enum(PLAN_PERIODS), false),
+        col("paymentMode", "PAYMENT_MODE", Kind::Enum(PAYMENT_MODES), false),
+        col("priceTokens", "PRICE_TOKENS", Kind::Dec, false),
+        col("priceAmount", "PRICE_AMOUNT", Kind::Dec, false),
+        col("currency", "CURRENCY", Kind::Str, false),
+        col("includedTokens", "INCLUDED_TOKENS", Kind::Dec, false),
+        col("includedTokensRecurring", "INCLUDED_TOKENS_RECURRING", Kind::Byte, false),
+        col("meterOverrides", "METER_OVERRIDES", Kind::Json, true),
+        col("aiModelsAllowed", "AI_MODELS_ALLOWED", Kind::Json, true),
+        col("isDefault", "IS_DEFAULT", Kind::Byte, false),
+        col("displayOrder", "DISPLAY_ORDER", Kind::Int, false),
+        col("status", "STATUS", Kind::Enum(RECORD_STATUS), false),];
+
+pub static PLAN: Schema = Schema { table: "security_billing_plan", pojo: "BillingPlan", cols: PLAN_COLS };
+
+/// `security_wallet_plan`: the plan a wallet is on.
+const WALLET_PLAN_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        CREATED_BY,
+        UPDATED_AT,
+        UPDATED_BY,
+        col("walletId", "WALLET_ID", Kind::Id, false),
+        col("planId", "PLAN_ID", Kind::Id, false),
+        col("periodStart", "PERIOD_START", Kind::Date, false),
+        col("periodEnd", "PERIOD_END", Kind::Date, false),
+        col("status", "STATUS", Kind::Enum(WALLET_PLAN_STATUS), false),
+        col("autoRenew", "AUTO_RENEW", Kind::Byte, false),
+        col("nextPlanId", "NEXT_PLAN_ID", Kind::Id, true),];
+
+pub static WALLET_PLAN: Schema = Schema { table: "security_wallet_plan", pojo: "WalletPlan", cols: WALLET_PLAN_COLS };
+
+/// `security_wallet_lot`: one credit with its expiry.
+const LOT_COLS: &[Col] = &[
+        ID,
+        col("walletId", "WALLET_ID", Kind::Id, false),
+        col("source", "SOURCE", Kind::Enum(LOT_SOURCES), false),
+        col("referenceType", "REFERENCE_TYPE", Kind::Str, true),
+        col("referenceId", "REFERENCE_ID", Kind::Id, true),
+        col("tokensAdded", "TOKENS_ADDED", Kind::Dec, false),
+        col("tokensLeft", "TOKENS_LEFT", Kind::Dec, false),
+        col("addedAt", "ADDED_AT", Kind::Ts, false),
+        col("expiresAt", "EXPIRES_AT", Kind::Ts, true),];
+
+pub static LOT: Schema = Schema { table: "security_wallet_lot", pojo: "WalletLot", cols: LOT_COLS };
+
+/// `security_usage_record`: a day's count or a usage event of an INVOICE meter.
+const USAGE_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        col("clientId", "CLIENT_ID", Kind::Id, false),
+        col("appId", "APP_ID", Kind::Id, false),
+        col("meterId", "METER_ID", Kind::Id, false),
+        col("usageDate", "USAGE_DATE", Kind::Date, false),
+        col("kind", "KIND", Kind::Enum(USAGE_KINDS), false),
+        col("quantity", "QUANTITY", Kind::Dec, false),
+        col("figures", "FIGURES", Kind::Json, true),
+        col("reference", "REFERENCE", Kind::Str, true),
+        col("uniqueKey", "UNIQUE_KEY", Kind::Str, false),
+        col("invoiceId", "INVOICE_ID", Kind::Id, true),];
+
+pub static USAGE: Schema = Schema { table: "security_usage_record", pojo: "UsageRecord", cols: USAGE_COLS };
+
+/// `security_invoice_line`.
+const INVOICE_LINE_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        col("invoiceId", "INVOICE_ID", Kind::Id, false),
+        col("kind", "KIND", Kind::Enum(LINE_KINDS), false),
+        col("meterId", "METER_ID", Kind::Id, true),
+        col("planId", "PLAN_ID", Kind::Id, true),
+        col("description", "DESCRIPTION", Kind::Str, false),
+        col("periodStart", "PERIOD_START", Kind::Date, true),
+        col("periodEnd", "PERIOD_END", Kind::Date, true),
+        col("quantity", "QUANTITY", Kind::Dec, false),
+        col("freeQuantity", "FREE_QUANTITY", Kind::Dec, false),
+        col("rate", "RATE", Kind::Dec, false),
+        col("amount", "AMOUNT", Kind::Dec, false),
+        col("displayOrder", "DISPLAY_ORDER", Kind::Int, false),];
+
+pub static INVOICE_LINE: Schema = Schema { table: "security_invoice_line", pojo: "InvoiceLine", cols: INVOICE_LINE_COLS };
+
+/// `security_ai_model_rate`: a provider's price per million tokens of a model.
+const AI_RATE_COLS: &[Col] = &[
+        ID,
+        CREATED_AT,
+        CREATED_BY,
+        UPDATED_AT,
+        UPDATED_BY,
+        col("modelPattern", "MODEL_PATTERN", Kind::Str, false),
+        col("provider", "PROVIDER", Kind::Str, true),
+        col("inputPerM", "INPUT_PER_M", Kind::Dec, false),
+        col("outputPerM", "OUTPUT_PER_M", Kind::Dec, false),
+        col("cacheReadPerM", "CACHE_READ_PER_M", Kind::Dec, false),
+        col("cacheWritePerM", "CACHE_WRITE_PER_M", Kind::Dec, false),
+        col("currency", "CURRENCY", Kind::Str, false),
+        col("status", "STATUS", Kind::Enum(RECORD_STATUS), false),];
+
+pub static AI_RATE: Schema = Schema { table: "security_ai_model_rate", pojo: "AiModelRate", cols: AI_RATE_COLS };
 
 /// One value of a row.
 #[derive(Debug, Clone, PartialEq)]
@@ -338,6 +489,14 @@ impl Rec {
     pub fn int(&self, prop: &str) -> Option<i64> {
         match self.get(prop) {
             Val::Int(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn date_of(&self, prop: &str) -> Option<NaiveDate> {
+        match self.get(prop) {
+            Val::Date(d) => Some(*d),
+            Val::Ts(t) => Some(t.date()),
             _ => None,
         }
     }
@@ -749,7 +908,7 @@ pub mod sql {
     }
 
     pub async fn seed_wallet(c: &mut MySqlConnection, client: u64, app: u64, initial: Dec) -> AuthResult<Option<Rec>> {
-        crate::data::billing::sql::create_seeded_wallet(&mut *c, client, app, initial).await?;
+        let _ = crate::data::billing::sql::create_seeded_wallet(&mut *c, client, app, initial).await?;
         let found = find(&mut *c, &WALLET, &Find { first: true, ..Find::eq(vec![("CLIENT_ID", Val::Id(client)), ("APP_ID", Val::Id(app))]) }).await?;
         Ok(found.into_iter().next())
     }
@@ -872,11 +1031,11 @@ impl AdminBillingStore for Db {
     }
 
     async fn count_apps(&self, client: u64, app_type: &str) -> AuthResult<i64> {
-        crate::data::billing::BillingStore::count_apps(self, client, app_type).await
+        crate::data::billing::BillingStore::count_apps(self, client, app_type, true).await
     }
 
     async fn count_users_with_profile(&self, client: u64, app: u64) -> AuthResult<i64> {
-        crate::data::billing::BillingStore::count_users_with_profile(self, client, app).await
+        crate::data::billing::BillingStore::count_users_with_profile(self, client, app, &[]).await
     }
 }
 
@@ -891,13 +1050,14 @@ mod tests {
 
     #[test]
     fn schemas_follow_the_dto_property_order() {
-        for s in [&CONFIG, &BUNDLE, &PROFILE, &INVOICE, &PAYMENT, &WALLET, &TXN] {
+        for s in [&CONFIG, &BUNDLE, &PROFILE, &INVOICE, &PAYMENT, &WALLET, &TXN, &METER, &PLAN, &WALLET_PLAN, &AI_RATE] {
             assert_eq!(s.cols[0].prop, "id");
             assert_eq!(s.cols[1].prop, "createdAt");
             assert_eq!(s.cols[2].prop, "createdBy");
         }
-        assert_eq!((CONFIG.cols.len(), INVOICE.cols.len(), TXN.cols.len()), (31, 29, 17));
-        assert_eq!(INVOICE_FILTER_COLUMNS[8], ("SELLER_CLIENT_ID", ColType::Num));
+        assert_eq!((CONFIG.cols.len(), INVOICE.cols.len(), TXN.cols.len()), (22, 34, 17));
+        assert_eq!((METER.cols.len(), PLAN.cols.len(), LOT.cols.len(), USAGE.cols.len(), INVOICE_LINE.cols.len()), (23, 21, 9, 12, 14));
+        assert_eq!(INVOICE_FILTER_COLUMNS[13], ("SELLER_CLIENT_ID", ColType::Num));
         assert_eq!(TXN_TABLE.column("walletId"), Some(("WALLET_ID", ColType::Num)));
         assert_eq!(INVOICE_TABLE.column("status"), Some(("STATUS", ColType::Enum)));
         assert_eq!(TXN_TABLE.column("chargeDate"), Some(("CHARGE_DATE", ColType::Ts)));

@@ -17,7 +17,7 @@ use axum::Router;
 use chrono::{Duration, NaiveDate};
 use serde_json::Value;
 
-use super::billing::{AiChargeRequest, ChargeRequest};
+use super::billing::{AiChargeRequest, ChargeRequest, RecordRequest};
 use super::clients::ClientFill;
 use super::users::UserFill;
 use super::Internal;
@@ -70,6 +70,9 @@ pub fn router(state: State_) -> Router {
         .route("/api/security/clienturls/internal/draft/token/resolve", get(draft_token_resolve))
         // InternalBillingController
         .route("/api/security/internal/billing/ai-allowed", get(ai_allowed))
+        .route("/api/security/internal/billing/allowed", get(allowed))
+        .route("/api/security/internal/billing/record", post(record))
+        .route("/api/security/internal/billing/reverse", post(reverse))
         .route("/api/security/internal/billing/charge", post(charge))
         .route("/api/security/internal/billing/charge-ai", post(charge_ai))
         .route("/api/security/internal/billing/hosting", get(hosting))
@@ -131,9 +134,30 @@ fn charge_body(bytes: &[u8]) -> AuthResult<Vec<ChargeRequest>> {
                 quantity: dec_json(v.get("quantity"))?,
                 date: epoch_date(v.get("date"))?,
                 window_index: opt_i64(v.get("windowIndex"))?.map(|w| w as i32),
+                meter_id: opt_u64_json(v.get("meterId"))?,
             })
         })
         .collect()
+}
+
+/// `{clientCode, appCode, meterKey, quantity | figures, reference}`.
+fn record_body(bytes: &[u8]) -> AuthResult<RecordRequest> {
+    let v: Value = body(bytes)?;
+    let mut figures = match v.get("figures") {
+        None | Some(Value::Null) => serde_json::Map::new(),
+        Some(Value::Object(m)) => m.clone(),
+        Some(_) => return Err(unreadable()),
+    };
+    if let Some(q) = v.get("quantity").filter(|q| !q.is_null()) {
+        figures.insert("quantity".into(), q.clone());
+    }
+    Ok(RecordRequest {
+        client_code: opt_text(v.get("clientCode"))?,
+        app_code: opt_text(v.get("appCode"))?,
+        meter_key: opt_text(v.get("meterKey"))?,
+        figures,
+        reference: opt_text(v.get("reference"))?,
+    })
 }
 
 fn ai_charge_body(bytes: &[u8]) -> AuthResult<AiChargeRequest> {
@@ -142,6 +166,10 @@ fn ai_charge_body(bytes: &[u8]) -> AuthResult<AiChargeRequest> {
         client_code: opt_text(v.get("clientCode"))?,
         app_code: opt_text(v.get("appCode"))?,
         model: opt_text(v.get("model"))?,
+        input_tokens: opt_i64(v.get("inputTokens"))?,
+        output_tokens: opt_i64(v.get("outputTokens"))?,
+        cache_read_tokens: opt_i64(v.get("cacheReadTokens"))?,
+        cache_write_tokens: opt_i64(v.get("cacheWriteTokens"))?,
         weighted_tokens: dec_json(v.get("weightedTokens"))?,
         request_id: opt_text(v.get("requestId"))?,
         session_id: opt_text(v.get("sessionId"))?,
@@ -417,7 +445,8 @@ route!(draft_token_resolve, "/clienturls/internal/draft/token/resolve", false, |
 
 route!(instructions, "/internal/billing/instructions", false, |s, r, ca| {
     let action = req_str(&r.params, "action")?;
-    let list = s.billing.charge_instructions(action).await?;
+    let Some(source) = crate::data::billing::action::source(action) else { return Ok(json(&Value::Array(vec![]))) };
+    let list = s.billing.charge_instructions(source).await?;
     Ok(json(&Value::Array(list.iter().map(|i| i.to_json()).collect())))
 });
 
@@ -450,7 +479,26 @@ route!(charge_ai, "/internal/billing/charge-ai", false, |s, r, ca| {
 route!(ai_allowed, "/internal/billing/ai-allowed", false, |s, r, ca| {
     let app = req_str(&r.params, "appCode")?;
     let client = req_str(&r.params, "clientCode")?;
-    Ok(json(&Value::Bool(s.is_ai_allowed(app, client).await?)))
+    let model = r.params.get("model");
+    let v = s.allowed(app, client, None, model, None).await?;
+    Ok(json(&Value::Bool(v["allowed"] == Value::Bool(true))))
+});
+
+route!(allowed, "/internal/billing/allowed", false, |s, r, ca| {
+    let app = req_str(&r.params, "appCode")?;
+    let client = req_str(&r.params, "clientCode")?;
+    let count = r.params.get("count").and_then(crate::decimal::Dec::parse);
+    Ok(json(&s.allowed(app, client, r.params.get("meterKey"), r.params.get("model"), count).await?))
+});
+
+route!(record, "/internal/billing/record", false, |s, r, ca| {
+    let req = record_body(&r.body)?;
+    Ok(json(&s.record(&ca, &req).await?.to_json()))
+});
+
+route!(reverse, "/internal/billing/reverse", false, |s, r, ca| {
+    let req = record_body(&r.body)?;
+    Ok(json(&s.reverse(&ca, &req).await?))
 });
 
 // Java can never answer this one: `InternalBillingController` has no `ULong` binder, so every

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::Router;
 use serde_json::Value;
 
@@ -23,7 +23,7 @@ use super::settings::BillingSettings;
 use super::service::{pre_authorize, Billing, Live, APPLICATION_CREATE, INVOICE_READ, PAYMENT_CREATE, ROLE_OWNER};
 use crate::admin::{Admin, AdminState};
 use crate::condition::{from_params, Cond};
-use crate::data::billing_admin::{Rec, Val, BUNDLE, CONFIG, PROFILE};
+use crate::data::billing_admin::{Rec, Val, AI_RATE, BUNDLE, CONFIG, METER, PLAN, PROFILE};
 use crate::errors::{AuthError, AuthResult};
 use crate::jackson::{empty, json};
 use crate::spring::{Pageable, Params};
@@ -42,6 +42,19 @@ pub fn router(settings: Arc<BillingSettings>) -> Router<AdminState> {
         .route("/api/security/billing-configs/query", post(configs_query))
         .route("/api/security/billing-configs/app/{appId}", get(configs_of_app))
         .route("/api/security/billing-configs/{id}", get(config_read).put(config_put).patch(config_patch).delete(config_delete))
+        // Meters and plans of a config; plan subscription; platform AI rates and settings
+        .route("/api/security/billing-meters", post(meter_create))
+        .route("/api/security/billing-meters/config/{billingConfigId}", get(meters_of_config))
+        .route("/api/security/billing-meters/{id}", put(meter_put).delete(meter_delete))
+        .route("/api/security/billing-plans", post(plan_create))
+        .route("/api/security/billing-plans/config/{billingConfigId}", get(plans_of_config))
+        .route("/api/security/billing-plans/{id}", put(plan_put).delete(plan_delete))
+        .route("/api/security/billing/plans/{id}/subscribe", post(plan_subscribe))
+        .route("/api/security/billing/plans/cancel", post(plan_cancel))
+        .route("/api/security/billing-ai-rates", get(ai_rates).post(ai_rate_create))
+        .route("/api/security/billing-ai-rates/{id}", put(ai_rate_put).delete(ai_rate_delete))
+        .route("/api/security/billing-settings", get(settings_get))
+        .route("/api/security/billing-settings/{name}", put(setting_put))
         // BillingProfileController
         .route("/api/security/billing-profile", get(profile_get).put(profile_put))
         // BundlePurchaseController
@@ -289,6 +302,117 @@ bl_route_path!(config_delete, "/billing-configs/{id}", true, |s, r, ca, cfg, id|
     let out = live(&s, &cfg);
     billing(&s, &out).config_delete(&ca, id).await?;
     Ok(no_content())
+});
+
+// ---- Meters, plans, subscription, AI rates ----
+
+bl_route!(meter_create, "/billing-meters", true, |s, r, ca, cfg| {
+    let rec = body::dto(&METER, &r.body)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(ok_or_nothing(billing(&s, &out).meter_create(&ca, rec).await?.map(|m| m.to_json())))
+});
+
+bl_route_path!(meters_of_config, "/billing-meters/config/{billingConfigId}", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(list(&billing(&s, &out).meters_of(&ca, id).await?))
+});
+
+bl_route_path!(meter_put, "/billing-meters/{id}", true, |s, r, ca, cfg, id| {
+    let entity = put_entity(&r, &METER, &id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).meter_update(&ca, &entity).await?.to_json()))
+});
+
+bl_route_path!(meter_delete, "/billing-meters/{id}", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    billing(&s, &out).meter_delete(&ca, id).await?;
+    Ok(no_content())
+});
+
+bl_route!(plan_create, "/billing-plans", true, |s, r, ca, cfg| {
+    let rec = body::dto(&PLAN, &r.body)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(ok_or_nothing(billing(&s, &out).plan_create(&ca, rec).await?.map(|p| p.to_json())))
+});
+
+bl_route_path!(plans_of_config, "/billing-plans/config/{billingConfigId}", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(list(&billing(&s, &out).plans_of(&ca, id).await?))
+});
+
+bl_route_path!(plan_put, "/billing-plans/{id}", true, |s, r, ca, cfg, id| {
+    let entity = put_entity(&r, &PLAN, &id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).plan_update(&ca, &entity).await?.to_json()))
+});
+
+bl_route_path!(plan_delete, "/billing-plans/{id}", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    pre_authorize(&ca, &[APPLICATION_CREATE])?;
+    let out = live(&s, &cfg);
+    billing(&s, &out).plan_delete(&ca, id).await?;
+    Ok(no_content())
+});
+
+bl_route_path!(plan_subscribe, "/billing/plans/{id}/subscribe", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    pre_authorize(&ca, &BUYERS)?;
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).subscribe(&ca, id).await?))
+});
+
+bl_route!(plan_cancel, "/billing/plans/cancel", true, |s, r, ca, cfg| {
+    let next = if r.body.is_empty() { None } else { body::field(&record(&r.body)?, "nextPlanId", ulong)? };
+    pre_authorize(&ca, &BUYERS)?;
+    let out = live(&s, &cfg);
+    let app = r.info.header("appCode");
+    Ok(json(&billing(&s, &out).cancel_plan(&ca, app.as_deref(), next).await?))
+});
+
+bl_route!(ai_rates, "/billing-ai-rates", true, |s, r, ca, cfg| {
+    let out = live(&s, &cfg);
+    Ok(list(&billing(&s, &out).ai_rates_list(&ca).await?))
+});
+
+bl_route!(ai_rate_create, "/billing-ai-rates", true, |s, r, ca, cfg| {
+    let rec = body::dto(&AI_RATE, &r.body)?;
+    let out = live(&s, &cfg);
+    Ok(ok_or_nothing(billing(&s, &out).ai_rate_create(&ca, rec).await?.map(|x| x.to_json())))
+});
+
+bl_route_path!(ai_rate_put, "/billing-ai-rates/{id}", true, |s, r, ca, cfg, id| {
+    let entity = put_entity(&r, &AI_RATE, &id)?;
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).ai_rate_update(&ca, &entity).await?.to_json()))
+});
+
+bl_route_path!(ai_rate_delete, "/billing-ai-rates/{id}", true, |s, r, ca, cfg, id| {
+    let id = to_u64(&id)?;
+    let out = live(&s, &cfg);
+    billing(&s, &out).ai_rate_delete(&ca, id).await?;
+    Ok(no_content())
+});
+
+bl_route!(settings_get, "/billing-settings", true, |s, r, ca, cfg| {
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).settings_read(&ca).await?))
+});
+
+bl_route_path!(setting_put, "/billing-settings/{name}", true, |s, r, ca, cfg, name| {
+    let m = record(&r.body)?;
+    let value = body::field(&m, "value", text)?.unwrap_or_default();
+    let out = live(&s, &cfg);
+    Ok(json(&billing(&s, &out).setting_write(&ca, &name, &value).await?))
 });
 
 // ---- BillingProfileController ----

@@ -615,7 +615,7 @@ async fn run_serves_with_the_local_configuration() {
 /// no wallet is ever created or changed.
 #[tokio::test]
 async fn wallet_statements_in_a_rolled_back_transaction() {
-    use security::data::billing::{sql, BillingStore, Txn};
+    use security::data::billing::{sql, BillingStore, NewLot, Txn, Usage};
     use security::decimal::Dec;
     let Some(l) = live().await else { return };
     let free = sqlx::query(
@@ -626,38 +626,81 @@ async fn wallet_statements_in_a_rolled_back_transaction() {
     .await
     .unwrap();
     let (client, app): (u64, u64) = (free.get(0), free.get(1));
+    let d = |s: &str| Dec::parse(s).unwrap();
     let mut tx = l.pool.begin().await.unwrap();
-    let w = sql::create_seeded_wallet(&mut tx, client, app, Dec::ONE).await.unwrap().expect("seeded");
-    assert_eq!((w.balance.to_string(), w.status.as_str(), w.low_balance_notified), ("1.0000".into(), "ACTIVE", Some(0)));
-    // A second create finds the first.
-    assert_eq!(sql::create_seeded_wallet(&mut tx, client, app, Dec::ONE).await.unwrap().map(|x| x.id), Some(w.id));
+    // A new wallet starts at zero; a second create finds the first.
+    assert!(sql::create_seeded_wallet(&mut tx, client, app, Dec::ZERO).await.unwrap());
+    assert!(!sql::create_seeded_wallet(&mut tx, client, app, Dec::ZERO).await.unwrap());
+    let w = sql::wallet(&mut tx, client, app).await.unwrap().expect("created");
+    assert_eq!((w.balance.to_string(), w.status.as_str(), w.low_balance_notified), ("0.000000".into(), "ACTIVE", Some(0)));
     let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+    let at = |s: &str| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap();
+    let credit = |key: &str, tokens: &str| Txn {
+        wallet_id: w.id,
+        kind: "CREDIT",
+        tokens: d(tokens),
+        idempotency_key: key.into(),
+        reason: "live test".into(),
+        ..Default::default()
+    };
+    // Credits become lots: a later expiry, a sooner one, one that never expires.
+    for (key, tokens, expires) in [("live:a", "10", Some("2031-01-01 00:00:00")), ("live:b", "5", Some("2030-01-01 00:00:00")), ("live:c", "100", None)] {
+        let lot = NewLot { source: "GRANT", reference_type: None, reference_id: None, expires_at: expires.map(at) };
+        assert!(sql::credit_with_lot(&mut tx, &credit(key, tokens), &lot).await.unwrap());
+    }
+    let lot = NewLot { source: "GRANT", reference_type: None, reference_id: None, expires_at: None };
+    assert!(!sql::credit_with_lot(&mut tx, &credit("live:a", "10"), &lot).await.unwrap(), "the idempotency key is unique");
     let txn = Txn {
         wallet_id: w.id,
         kind: "DEBIT",
-        tokens: Dec::from_i64(3),
-        balance_after: Dec::from_i64(-2),
-        action_key: Some("security.app.rent".into()),
+        tokens: d("8.5"),
+        balance_after: d("106.5"),
+        action_key: Some("crm.apps".into()),
         app_id: Some(app),
-        quantity: Some(Dec::parse("2.5").unwrap()),
+        quantity: Some(d("2.5")),
         charge_date: Some(day),
         window_index: Some(4),
         idempotency_key: "live-test:rolled-back".into(),
         reason: "live test".into(),
-        created_by: None,
+        ..Default::default()
     };
-    assert!(sql::record_txn(&mut tx, &txn).await.unwrap());
-    assert!(!sql::record_txn(&mut tx, &txn).await.unwrap(), "the idempotency key is unique");
-    assert_eq!(sql::debit(&mut tx, w.id, Dec::from_i64(3)).await.unwrap(), 1);
+    assert!(sql::debit_with_lots(&mut tx, &txn).await.unwrap());
+    assert!(!sql::debit_with_lots(&mut tx, &txn).await.unwrap(), "a repeated key debits nothing");
+    // The soonest expiry is drawn first, then the next.
+    let lots: Vec<String> = sql::open_lots(&mut tx, w.id).await.unwrap().iter().map(|l| l.tokens_left.to_string()).collect();
+    assert_eq!(lots, ["6.500000", "100.000000"]);
     assert_eq!(sql::set_status(&mut tx, w.id, "SUSPENDED").await.unwrap(), 1);
     assert_eq!(sql::set_low_balance_notified(&mut tx, w.id, true).await.unwrap(), 1);
     let after = sql::wallet(&mut tx, client, app).await.unwrap().unwrap();
-    assert_eq!((after.balance.to_string(), after.status.as_str(), after.low_balance_notified), ("-2.0000".into(), "SUSPENDED", Some(1)));
-    let sum = sql::sum_quantity_between(&mut tx, w.id, "security.app.rent", day, day).await.unwrap();
-    assert_eq!(sum.to_string(), "2.5000");
-    assert_eq!(sql::sum_quantity_between(&mut tx, w.id, "nope", day, day).await.unwrap().to_string(), "0.0000");
-    assert_eq!(sql::charged_windows(&mut tx, w.id, "security.app.rent", day).await.unwrap(), vec![4]);
-    assert_eq!(sql::debit(&mut tx, u64::MAX, Dec::ONE).await.unwrap(), 0);
+    assert_eq!((after.balance.to_string(), after.status.as_str(), after.low_balance_notified), ("106.500000".into(), "SUSPENDED", Some(1)));
+    let sum = sql::sum_between(&mut tx, "QUANTITY", w.id, "crm.apps", day, day).await.unwrap();
+    assert_eq!(sum.to_string(), "2.500000");
+    assert_eq!(sql::sum_between(&mut tx, "TOKENS", w.id, "crm.apps", day, day).await.unwrap().to_string(), "8.500000");
+    assert_eq!(sql::sum_between(&mut tx, "QUANTITY", w.id, "nope", day, day).await.unwrap().to_string(), "0.000000");
+    assert_eq!(sql::charged_windows(&mut tx, w.id, "crm.apps", day).await.unwrap(), vec![4]);
+    // A debt is paid before a credit becomes a lot.
+    let big = Txn { tokens: d("200"), idempotency_key: "live:d".into(), kind: "DEBIT", ..credit("live:d", "200") };
+    assert!(sql::debit_with_lots(&mut tx, &big).await.unwrap());
+    assert!(sql::open_lots(&mut tx, w.id).await.unwrap().is_empty());
+    assert!(sql::credit_with_lot(&mut tx, &credit("live:e", "100"), &lot).await.unwrap());
+    let lots: Vec<String> = sql::open_lots(&mut tx, w.id).await.unwrap().iter().map(|l| l.tokens_left.to_string()).collect();
+    assert_eq!(lots, ["6.500000"]);
+    // A day's snapshot keeps its highest count; an event counts once.
+    let meter: Option<u64> = sqlx::query_scalar("SELECT ID FROM security_billing_meter LIMIT 1").fetch_optional(&mut *tx).await.unwrap();
+    if let Some(meter_id) = meter {
+        let snap = Usage { client_id: client, app_id: app, meter_id, date: day, kind: "SNAPSHOT", quantity: d("5"), figures: None, reference: None };
+        assert!(sql::record_usage(&mut tx, &snap).await.unwrap());
+        assert!(sql::record_usage(&mut tx, &Usage { quantity: d("3"), ..snap.clone() }).await.unwrap());
+        assert!(sql::record_usage(&mut tx, &Usage { quantity: d("7"), ..snap.clone() }).await.unwrap());
+        let ev = Usage { kind: "EVENT", reference: Some("live-ref".into()), ..snap.clone() };
+        assert!(sql::record_usage(&mut tx, &ev).await.unwrap());
+        assert!(!sql::record_usage(&mut tx, &ev).await.unwrap());
+        let q: String = sqlx::query_scalar(&format!("SELECT CAST(QUANTITY AS CHAR) FROM security_usage_record WHERE METER_ID = {meter_id} AND CLIENT_ID = {client} AND UNIQUE_KEY = 'snap:2026-06-15'"))
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(q, "7.000000");
+    }
     tx.rollback().await.unwrap();
     let gone: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM security_wallet WHERE CLIENT_ID = {client} AND APP_ID = {app}"))
         .fetch_one(&l.pool)
@@ -667,9 +710,10 @@ async fn wallet_statements_in_a_rolled_back_transaction() {
 
     // The reads the metering run makes, through the store.
     let db = security::data::Db::new(l.pool.clone());
-    let apps: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_app WHERE CLIENT_ID = 1 AND APP_TYPE = 'APP'").fetch_one(&l.pool).await.unwrap();
-    assert_eq!(db.count_apps(1, "APP").await.unwrap(), apps);
-    assert!(db.count_users_with_profile(1, 2).await.unwrap() >= 0);
+    let apps: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_app WHERE CLIENT_ID = 1 AND APP_TYPE = 'APP' AND STATUS = 'ACTIVE'").fetch_one(&l.pool).await.unwrap();
+    assert_eq!(db.count_apps(1, "APP", true).await.unwrap(), apps);
+    assert!(db.count_apps(1, "APP", false).await.unwrap() >= apps);
+    assert!(db.count_users_with_profile(1, 2, &[]).await.unwrap() >= 0);
     assert!(db.wallet(u64::MAX, 1).await.unwrap().is_none());
     assert!(db.config_by_app_client(u64::MAX, 1).await.unwrap().is_none());
     let configured = sqlx::query("SELECT a.APP_CODE, c.CODE FROM security_app_billing_config b JOIN security_app a ON a.ID = b.APP_ID \

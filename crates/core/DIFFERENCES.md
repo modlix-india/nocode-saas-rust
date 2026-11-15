@@ -386,6 +386,18 @@ created from 2026-11-12 (IST). Every other field is unchanged.
   `filterAuthorization` names the holders, `POST /users/internal/batch` reads them; only ACTIVE
   users of that client are kept. Answers `users`, `[{id, emailId, firstName, lastName}]` by id
   (fields without a value, and an `emailId` of `NONE`, left out). Only inside a server function.
+- **D55 `CoreServices.Messaging.SendSms`** (2026-11-14, Rust only, PLAN-SMS-CONNECTION). One text
+  message through a company's own SMS provider (a REST connection whose details carry an `sms`
+  block, the one `SendContactCode` uses, with secrets in `credentials`), from one of its core
+  templates of `templateType` `sms` (FreeMarker body in `templateParts.<lang>.body`, settings in
+  `design.sms`: `status`, `dltTemplateId`, `senderId`, `language`, `registeredText`). Never free
+  text. `appCode`, `clientCode` (the URL's when blank), `connectionName`, `phone` (with its country
+  code), `templateName`, `vars`. Sends only an `ACTIVE` template; to +91 only with a DLT template
+  id and while the body's DLT text (`${...}` as `{#var#}`, a link or url field as `{#url#}`) equals
+  `registeredText` when one is kept. At most 300 an hour per company and 10 an hour to one number,
+  per core instance. Refusals are answers (`INVALID`, `NO_SMS`, `NOT_ACTIVE`, `LIMIT`,
+  `SEND_FAILED`, the last also for a 2xx reply matching `sms.errorWhen`). Answers `sent`, `reason`,
+  `message`, `target`, `text`, `characters`, `parts`. Only inside a server function.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 
