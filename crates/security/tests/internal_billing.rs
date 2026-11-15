@@ -20,10 +20,11 @@ use security::data::billing::{
 };
 use security::data::billing_admin::{Rec, Val, INVOICE};
 use security::data::Db;
+use axum::http::StatusCode;
 use security::decimal::Dec;
 use security::errors::{AuthError, AuthResult};
 use security::internal::billing::{
-    days_in_month, AiChargeRequest, ChargeRequest, RecordRequest, AI_FX_RATE, WALLET_LOW_BALANCE, WALLET_SUSPENDED,
+    days_in_month, AiChargeRequest, ChargeRequest, RecordRequest, AI_FX_RATE, fx_setting, WALLET_LOW_BALANCE, WALLET_SUSPENDED,
 };
 use security::internal::billing_cycle::{totals, INVOICE_ISSUED, INVOICE_OVERDUE, WALLET_CREDITS_EXPIRED, WALLET_CREDITS_EXPIRING, WALLET_PLAN_LAPSED};
 use security::internal::Internal;
@@ -361,6 +362,11 @@ impl BillingStore for FakeBilling {
     }
     async fn setting(&self, name: &str) -> AuthResult<Option<String>> {
         Ok(self.b.lock().unwrap().settings.get(name).cloned())
+    }
+    async fn settings_all(&self) -> AuthResult<Vec<(String, String)>> {
+        let mut all: Vec<(String, String)> = self.b.lock().unwrap().settings.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        all.sort();
+        Ok(all)
     }
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
         let b = self.b.lock().unwrap();
@@ -1101,7 +1107,9 @@ async fn ai_allowed_only_blocks_an_active_billed_suspended_wallet() {
     assert!(w.internal.is_ai_allowed("crm", "BUS").await.unwrap(), "paused config");
     w.b().configs[0].status = "ACTIVE".into();
     assert!(!w.internal.is_ai_allowed("crm", "BUS").await.unwrap(), "suspended wallet, no AI meter");
-    // A TOKENS AI meter stops; an invoiced one does not need the wallet.
+    // A TOKENS AI meter stops; an invoiced one does not need the wallet. (The INR config has
+    // its exchange rate: without one AI is refused, see each_app_bills_ai_in_its_own_currency.)
+    w.b().settings.insert(fx_setting("INR"), "94".into());
     w.b().meters.push(Meter { rate_unit: "MARKUP".into(), ..Meter { kind: "COUNTER".into(), ..gauge(41, "ai.tokens", "AI_TOKENS", "2", "0") } });
     assert!(!w.internal.is_ai_allowed("crm", "BUS").await.unwrap());
     w.b().meters[0].charge_mode = "INVOICE".into();
@@ -1193,7 +1201,8 @@ fn ai_world(free: &str, fx: Option<&str>) -> World {
     let w = world();
     {
         let mut b = w.b();
-        b.configs.push(config());
+        // An INR config, so the USD model prices go through the rupee rate (a USD config takes them 1:1).
+        b.configs.push(BillingConfig { currency: "INR".into(), ..config() });
         b.meters.push(Meter { kind: "COUNTER".into(), rate_unit: "MARKUP".into(), ..gauge(41, "ai.tokens", "AI_TOKENS", "2", free) });
         b.wallets.push(wallet("100000", "ACTIVE", 0));
         b.rates = vec![usd("opus", "15", "75", "1.5", "18.75"), usd("deepseek", "0.3", "1.2", "0.03", "0.3")];
@@ -1230,6 +1239,37 @@ async fn ai_is_priced_per_model_in_the_configs_currency_with_the_markup() {
     same(t.quantity.unwrap(), "6750");
 }
 
+#[tokio::test]
+async fn each_app_bills_ai_in_its_own_currency() {
+    // USD: the dollar prices as they are, no rate needed. Opus 37.5 x 2 = 75.
+    let w = ai_world("0", None);
+    w.b().configs[0].currency = "USD".into();
+    assert!(w.internal.charge_ai(&system(), &ai_call("claude-opus-5-5", "u1")).await.unwrap().charged);
+    assert_eq!(w.b().txns[0].tokens.to_string(), "75.000000");
+    // EUR through its own rate, not the rupee one: 37.5 x 0.9 x 2 = 67.5.
+    let w = ai_world("0", Some("90"));
+    {
+        let mut b = w.b();
+        b.configs[0].currency = "EUR".into();
+        b.settings.insert(fx_setting("EUR"), "0.9".into());
+    }
+    w.internal.charge_ai(&system(), &ai_call("claude-opus-5-5", "e1")).await.unwrap();
+    assert_eq!(w.b().txns[0].tokens.to_string(), "67.500000");
+    // INR: AI_FX_RATE.INR wins over the bare AI_FX_RATE V90 seeded. 37.5 x 94 x 2 = 7050.
+    let w = ai_world("0", Some("90"));
+    w.b().settings.insert(fx_setting("INR"), "94".into());
+    w.internal.charge_ai(&system(), &ai_call("claude-opus-5-5", "i1")).await.unwrap();
+    assert_eq!(w.b().txns[0].tokens.to_string(), "7050.000000");
+    // A currency with no rate: nothing charged, the call refused, and AI not offered.
+    let w = ai_world("0", Some("90"));
+    w.b().configs[0].currency = "GBP".into();
+    let e = w.internal.charge_ai(&system(), &ai_call("claude-opus-5-5", "g1")).await.unwrap_err();
+    assert_eq!(e.status(), StatusCode::CONFLICT);
+    assert!(e.message().contains("AI_FX_RATE.GBP"), "{}", e.message());
+    assert!(w.b().txns.is_empty());
+    assert!(!w.internal.is_ai_allowed("crm", "BUS").await.unwrap());
+}
+
 /// The suspected bug: the call's figures (the ledger row's DESCRIPTION, an invoiced meter's usage
 /// FIGURES) are written with serde's `to_string`, but `cost` is put as `Dec::to_json`, a jackson
 /// raw-number marker string, so the stored JSON holds `"cost": "\u0001num:3375.000000"`.
@@ -1243,7 +1283,7 @@ async fn ai_figures_keep_the_cost_as_a_number() {
 }
 
 #[tokio::test]
-async fn ai_free_credits_go_first_and_old_bodies_and_missing_fx_still_price() {
+async fn ai_free_credits_go_first_and_old_bodies_and_missing_fx_is_refused() {
     // 200 free a month: the first 129.6 is inside it, the second call pays the 59.2 past it.
     let w = ai_world("200", Some("90"));
     let first = w.internal.charge_ai(&system(), &ai_call("deepseek", "r1")).await.unwrap();
@@ -1261,10 +1301,10 @@ async fn ai_free_credits_go_first_and_old_bodies_and_missing_fx_still_price() {
     let old = AiChargeRequest { input_tokens: None, output_tokens: None, cache_read_tokens: None, weighted_tokens: Some(d("1000000")), ..ai_call("deepseek", "o1") };
     w.internal.charge_ai(&system(), &old).await.unwrap();
     assert_eq!(w.b().txns[0].tokens.to_string(), "216.000000");
-    // No FX rate: taken 1:1.
+    // An INR config with no rate at all: refused, nothing charged (never 1:1).
     let w = ai_world("0", None);
-    w.internal.charge_ai(&system(), &ai_call("opus", "x")).await.unwrap();
-    assert_eq!(w.b().txns[0].tokens.to_string(), "75.000000");
+    assert!(w.internal.charge_ai(&system(), &ai_call("opus", "x")).await.is_err());
+    assert!(w.b().txns.is_empty());
     // An invoiced AI meter keeps the priced call for the invoice.
     let w = ai_world("0", Some("90"));
     w.b().meters[0].charge_mode = "INVOICE".into();

@@ -502,6 +502,8 @@ pub trait BillingStore: Send + Sync {
     async fn count_users_with_profile(&self, client_id: u64, app_id: u64, profile_ids: &[u64]) -> AuthResult<i64>;
     async fn ai_rates(&self) -> AuthResult<Vec<AiRate>>;
     async fn setting(&self, name: &str) -> AuthResult<Option<String>>;
+    /// Every platform billing setting, by name.
+    async fn settings_all(&self) -> AuthResult<Vec<(String, String)>>;
     /// Whether (client, app) has an OVERDUE invoice.
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool>;
     /// The buyer's billing profile for the app.
@@ -1041,6 +1043,10 @@ impl BillingStore for Db {
 
     async fn setting(&self, name: &str) -> AuthResult<Option<String>> {
         Ok(sqlx::query_scalar("SELECT VALUE FROM security_billing_setting WHERE NAME = ?").bind(name).fetch_optional(&self.pool).await?)
+    }
+
+    async fn settings_all(&self) -> AuthResult<Vec<(String, String)>> {
+        Ok(sqlx::query_as("SELECT NAME, VALUE FROM security_billing_setting ORDER BY NAME").fetch_all(&self.pool).await?)
     }
 
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {

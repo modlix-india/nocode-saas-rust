@@ -36,8 +36,28 @@ const SECURITY_ACTIONS: [&str; 3] = [action::APP_RENT, action::SITE_RENT, action
 const ONE_MILLION: i128 = 1_000_000;
 /// Decimals the wallet keeps (`DECIMAL(19,6)`, V90).
 pub const SCALE: u32 = 6;
-/// The platform setting with the USD to INR rate for AI prices.
+/// AI model rates are in US dollars; each app bills in its own config's currency. The platform
+/// settings `AI_FX_RATE.<CUR>` hold that currency's units per dollar (`AI_FX_RATE.INR` = rupees
+/// per dollar). A USD config needs none. The bare `AI_FX_RATE` is the rupee rate V90 seeded; it
+/// still counts for INR while `AI_FX_RATE.INR` is not set.
 pub const AI_FX_RATE: &str = "AI_FX_RATE";
+
+/// The setting with `currency`'s units per US dollar.
+pub fn fx_setting(currency: &str) -> String {
+    format!("{AI_FX_RATE}.{}", currency.trim().to_ascii_uppercase())
+}
+
+/// A currency code as configs hold it: three letters, upper case.
+pub fn currency_code(s: &str) -> Option<String> {
+    let c = s.trim().to_ascii_uppercase();
+    (c.len() == 3 && c.chars().all(|x| x.is_ascii_uppercase())).then_some(c)
+}
+
+/// No rate to turn the AI prices into this currency: the call is not charged and AI is refused.
+pub fn fx_missing(currency: &str) -> AuthError {
+    let what = format!("No exchange rate for {currency}: set {} in the platform billing settings.", fx_setting(currency));
+    AuthError::literal(axum::http::StatusCode::CONFLICT, "SEC.BILLING_FX_MISSING", what.clone()).with_param("reason", &what)
+}
 
 /// `ChargeRequest`: a gauge's count for one window, from a producer.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -659,16 +679,33 @@ impl Internal {
         })
     }
 
-    /// The USD to INR rate for AI prices (`AI_FX_RATE`).
+    /// Units of `currency` per US dollar: 1 for USD, else its `AI_FX_RATE.<CUR>` setting (for
+    /// INR also the bare `AI_FX_RATE`); `None` when it has none.
+    pub async fn usd_rate(&self, currency: &str) -> AuthResult<Option<Dec>> {
+        let cur = currency.trim().to_ascii_uppercase();
+        if cur == "USD" {
+            return Ok(Some(Dec::ONE));
+        }
+        let mut v = self.billing.setting(&fx_setting(&cur)).await?;
+        if v.is_none() && cur == "INR" {
+            v = self.billing.setting(AI_FX_RATE).await?;
+        }
+        Ok(v.as_deref().and_then(Dec::parse).filter(|r| r.signum() > 0))
+    }
+
+    /// The factor from a price in `currency` into `into`: 1 when they match, else through each
+    /// one's rate to the dollar. Refused (and nothing charged) when either has no rate.
     async fn fx(&self, currency: &str, into: &str) -> AuthResult<Dec> {
         if currency.eq_ignore_ascii_case(into) {
             return Ok(Dec::ONE);
         }
-        match self.billing.setting(AI_FX_RATE).await?.as_deref().and_then(Dec::parse) {
-            Some(r) if r.signum() > 0 => Ok(r),
+        let (from, to) = (self.usd_rate(currency).await?, self.usd_rate(into).await?);
+        match (from, to) {
+            (Some(f), Some(t)) => t.div(f, 10).ok_or_else(|| fx_missing(currency)),
             _ => {
-                tracing::error!(from = currency, to = into, "AI_FX_RATE is not set: AI prices taken 1:1");
-                Ok(Dec::ONE)
+                let missing = if from.is_none() { currency } else { into };
+                tracing::error!(from = currency, to = into, missing, "AI FX RATE MISSING: AI usage not charged");
+                Err(fx_missing(missing))
             }
         }
     }
@@ -704,6 +741,11 @@ impl Internal {
             }
         }
         let suspended = wallet.as_ref().is_some_and(Wallet::suspended);
+        // AI is charged in the config's currency: without a rate for it, AI is not offered.
+        if meter.is_some_and(|m| m.source == "AI_TOKENS") && self.usd_rate(&config.currency).await?.is_none() {
+            tracing::error!(currency = config.currency, config = config.id, "AI FX RATE MISSING: AI refused");
+            return Ok(allowed_json(false, Some("AI prices cannot be converted into this app's currency yet")));
+        }
         let Some(meter) = meter else {
             // AI with no AI meter on the config: only a suspended wallet stops it.
             return Ok(if meter_key.is_none() && suspended { allowed_json(false, Some("The wallet is suspended")) } else { yes() });

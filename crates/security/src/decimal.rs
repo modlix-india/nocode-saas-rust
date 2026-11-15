@@ -93,6 +93,16 @@ impl Dec {
         Dec { unscaled: at_scale / divisor, scale }
     }
 
+    /// `divide(divisor, scale, DOWN)` by a decimal; `None` for a zero divisor or an overflow.
+    pub fn div(self, o: Dec, scale: u32) -> Option<Dec> {
+        if o.unscaled == 0 {
+            return None;
+        }
+        let num = self.unscaled.checked_mul(10i128.checked_pow(scale + o.scale)?)?;
+        let den = o.unscaled.checked_mul(10i128.checked_pow(self.scale)?)?;
+        Some(Dec { unscaled: num / den, scale })
+    }
+
     /// The value truncated towards zero at `scale` decimals.
     pub fn round_down(self, scale: u32) -> Dec {
         self.div_down_scaled(1, scale)
