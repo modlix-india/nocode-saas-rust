@@ -18,6 +18,7 @@ pub mod platform;
 pub mod schedule;
 pub mod message;
 pub mod security;
+pub mod secured_file;
 pub mod security_fns;
 pub mod securitycontext;
 pub mod storage;

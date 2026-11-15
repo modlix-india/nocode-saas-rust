@@ -356,6 +356,139 @@ impl Internal {
     }
 }
 
+/// Rust only (HRMS): the authority endings that make a profile a builder's: the app editing roles a
+/// KIRun function must never hand out (`CoreServices.Security.AssignProfile`). Platform authorities
+/// only (no app code in the name): `Authorities.Page_UPDATE`, `Authorities.ROLE_Page_Manager`.
+const BUILDER_OBJECTS: [&str; 8] = ["Page", "Function", "Storage", "Schema", "Theme", "Role", "Connection", "Application"];
+
+/// Whether `authority` lets its holder change app definitions: an edit (CREATE, UPDATE, DELETE) of a
+/// definition kind, the kind's Manager role, or the AppCustomizer profile or role of any app.
+pub fn is_builder_authority(authority: &str) -> bool {
+    let Some(rest) = authority.strip_prefix("Authorities.") else { return false };
+    let last = rest.rsplit('.').next().unwrap_or(rest);
+    let lower = last.to_ascii_lowercase();
+    if lower == "profile_appcustomizer" || lower == "role_appcustomizer" {
+        return true;
+    }
+    // App specific authorities (`Authorities.HRMS.Page_UPDATE`) are the app's own names, not the
+    // platform's definition rights.
+    if last != rest {
+        return false;
+    }
+    BUILDER_OBJECTS.iter().any(|o| {
+        last == format!("ROLE_{o}_Manager") || ["CREATE", "UPDATE", "DELETE"].iter().any(|v| last == format!("{o}_{v}"))
+    })
+}
+
+/// The org line of one user, as `GET /users/internal/org` answers it.
+pub fn org_user_json(r: &crate::data::org::OrgUserRow) -> Value {
+    Obj::new()
+        .put("reportingTo", crate::jackson::opt(r.reporting_to.filter(|i| *i != 0)))
+        .put("designationId", crate::jackson::opt(r.designation_id))
+        .put("designationName", crate::jackson::opt(r.designation_name.clone()))
+        .put("departmentId", crate::jackson::opt(r.department_id))
+        .put("departmentName", crate::jackson::opt(r.department_name.clone()))
+        .build()
+}
+
+impl Internal {
+    /// Rust only (`CoreServices.Security.GetUsersOrg`): `{<userId>: {reportingTo, designationId,
+    /// designationName, departmentId, departmentName}}` for the listed users of ONE client; users of
+    /// any other client are left out.
+    pub async fn users_org(&self, client_id: u64, user_ids: &[u64]) -> AuthResult<Value> {
+        let mut out = serde_json::Map::new();
+        for r in self.db.org_of_users(client_id, user_ids).await? {
+            out.insert(r.id.to_string(), org_user_json(&r));
+        }
+        Ok(Value::Object(out))
+    }
+
+    /// Rust only (`CoreServices.Security.GetClientOrg`): the client's `departments [{id, name,
+    /// parentDepartmentId}]` and `designations [{id, name, departmentId, parentDesignationId}]`.
+    pub async fn client_org(&self, client_id: u64) -> AuthResult<Value> {
+        let departments: Vec<Value> = self
+            .db
+            .client_departments(client_id)
+            .await?
+            .iter()
+            .map(|d| {
+                Obj::new()
+                    .put("id", d.id)
+                    .put("name", crate::jackson::opt(d.name.clone()))
+                    .put("parentDepartmentId", crate::jackson::opt(d.parent_department_id))
+                    .build()
+            })
+            .collect();
+        let designations: Vec<Value> = self
+            .db
+            .client_designations(client_id)
+            .await?
+            .iter()
+            .map(|d| {
+                Obj::new()
+                    .put("id", d.id)
+                    .put("name", crate::jackson::opt(d.name.clone()))
+                    .put("departmentId", crate::jackson::opt(d.department_id))
+                    .put("parentDesignationId", crate::jackson::opt(d.parent_designation_id))
+                    .build()
+            })
+            .collect();
+        Ok(Obj::new().put_always("departments", Value::from(departments)).put_always("designations", Value::from(designations)).build())
+    }
+
+    /// Rust only (`CoreServices.Security.AssignProfile` / `RemoveProfile`): the profile a server
+    /// function names, as the client sees it, and whether it is a builder's. By `name` (with
+    /// `app_code`): the app's profiles the client can see (its restricted ones, else all), matched on
+    /// the root's name or the name of the client hierarchy's own override of it; the root id is the
+    /// one answered. By `profile_id`: that profile. `None` when nothing matches.
+    ///
+    /// Answers `{id, name, appId, builder, builderAuthority}`; `builder` is true when the profile, read
+    /// in the client's hierarchy, holds an authority [`is_builder_authority`] names.
+    pub async fn profile_check(&self, app_code: Option<&str>, client_id: u64, name: Option<&str>, profile_id: Option<u64>) -> AuthResult<Option<Value>> {
+        let h = self.dir().hierarchy(client_id).await?;
+        let found = match (profile_id, name.map(str::trim).filter(|n| !n.is_empty())) {
+            (Some(id), _) => self.db.profile(id).await?,
+            (None, Some(wanted)) => {
+                let Some(app) = (match app_code.map(str::trim).filter(|a| !a.is_empty()) {
+                    Some(a) => self.dir().app_by_code(a).await?,
+                    None => None,
+                }) else {
+                    return Ok(None);
+                };
+                let mut ids = self.db.restricted_profiles(h.client_id, app.id).await?;
+                if ids.is_empty() {
+                    ids = self.db.app_profiles(app.id, &h.client_ids()).await?;
+                }
+                let mut hit = None;
+                for pid in ids {
+                    let rows = self.db.profile_and_overrides(pid, &h.client_ids()).await?;
+                    if rows.iter().any(|p| p.name.as_deref().is_some_and(|n| n.trim().eq_ignore_ascii_case(wanted))) {
+                        hit = rows.into_iter().find(|p| p.id == pid).or(self.db.profile(pid).await?);
+                        break;
+                    }
+                }
+                hit
+            }
+            (None, None) => None,
+        };
+        let Some(profile) = found else { return Ok(None) };
+        let authorities = self.dir().profile_authorities_of(profile.id, h).await?;
+        let mut builder = authorities.iter().find(|a| is_builder_authority(a)).cloned();
+        if builder.is_none() && profile.name.as_deref().is_some_and(|n| n.trim().eq_ignore_ascii_case("AppCustomizer")) {
+            builder = Some("PROFILE_AppCustomizer".into());
+        }
+        Ok(Some(
+            Obj::new()
+                .put("id", profile.id)
+                .put("name", crate::jackson::opt(profile.name.clone()))
+                .put("appId", crate::jackson::opt(profile.app_id))
+                .put("builder", builder.is_some())
+                .put("builderAuthority", crate::jackson::opt(builder))
+                .build(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +506,48 @@ mod tests {
         assert_eq!(users[0], ProcessorUser { id: 5, role_id: Some(3), designation_id: Some(1), department_id: Some(2), profile_ids: vec![40, 17] });
         assert_eq!(users[0].to_json()["profileIds"], serde_json::json!([17, 40]));
         assert_eq!(users[1].to_json(), serde_json::json!({"id": 6}));
+    }
+
+    #[test]
+    fn builder_authorities() {
+        for a in [
+            "Authorities.Page_UPDATE",
+            "Authorities.Function_CREATE",
+            "Authorities.Storage_DELETE",
+            "Authorities.Schema_UPDATE",
+            "Authorities.Theme_CREATE",
+            "Authorities.Role_UPDATE",
+            "Authorities.Connection_CREATE",
+            "Authorities.Application_UPDATE",
+            "Authorities.ROLE_Page_Manager",
+            "Authorities.APPBUILDER.PROFILE_AppCustomizer",
+            "Authorities.PROFILE_AppCustomizer",
+            "Authorities.HRMS.ROLE_AppCustomizer",
+        ] {
+            assert!(is_builder_authority(a), "{a}");
+        }
+        for a in [
+            "Authorities.Page_READ",
+            "Authorities.Function_READ",
+            "Authorities.User_UPDATE",
+            "Authorities.Logged_IN",
+            "Authorities.HRMS.Page_UPDATE",
+            "Authorities.HRMS.ROLE_Employee",
+            "Authorities.HRMS.PROFILE_HRMS_Employee",
+            "Page_UPDATE",
+            "Authorities.ROLE_Owner",
+        ] {
+            assert!(!is_builder_authority(a), "{a}");
+        }
+        let r = crate::data::org::OrgUserRow {
+            id: 5,
+            reporting_to: Some(0),
+            designation_id: Some(3),
+            designation_name: Some("Engineer".into()),
+            department_id: None,
+            department_name: None,
+        };
+        assert_eq!(org_user_json(&r), serde_json::json!({"designationId": 3, "designationName": "Engineer"}));
     }
 
     #[test]

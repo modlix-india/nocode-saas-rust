@@ -286,6 +286,54 @@ java_text = "$ profile forbidden for the $ user"
 when = "CoreServices.Security.AssignProfile or RemoveProfile for a user the caller does not manage."
 audience = "signed-in"
 
+[CORE.USER_OTHER_CLIENT]
+status = 403
+params = ["function", "user"]
+text = "[{function}|This function] acts only on users of your own organisation."
+action = "Choose a user of your own organisation."
+when = "CoreServices.Security.SetUserActive, or AssignProfile / RemoveProfile by profile name, for a user of another client (a managed one too) or an unknown user (Rust only, HRMS)."
+audience = "signed-in"
+
+[CORE.OWN_LOGIN_REFUSED]
+status = 403
+params = ["function"]
+text = "You cannot change your own login."
+action = "Ask another administrator to make this change."
+when = "CoreServices.Security.SetUserActive for the caller themselves (Rust only, HRMS)."
+audience = "signed-in"
+
+[CORE.PROFILE_NAME_NOT_FOUND]
+status = 404
+params = ["profile", "app"]
+text = "There is no profile[ {profile}][ in the app {app}] for your organisation."
+action = "Check the profile name and the app, and that your organisation has access to the app."
+when = "CoreServices.Security.AssignProfile or RemoveProfile by a profile name that matches none of the app's profiles the client can see (Rust only, HRMS)."
+audience = "signed-in"
+
+[CORE.PROFILE_BUILDER_REFUSED]
+status = 403
+params = ["profile", "authority"]
+text = "A function cannot give or take the profile[ {profile}]: it lets its holders change the app."
+action = "Give app editing profiles from the Users screen instead."
+when = "CoreServices.Security.AssignProfile or RemoveProfile by profile name with a profile holding AppCustomizer or a definition edit right (Page, Function, Storage, Schema, Theme, Role, Connection, Application) (Rust only, HRMS)."
+audience = "signed-in"
+
+[CORE.FILE_PATH_OUTSIDE_APP]
+status = 403
+params = ["function", "path", "prefix"]
+text = "[{function}|This function] works only with files under[ {prefix}] of your organisation[; {path} is not one]."
+action = "Use a path inside the app's own folder."
+when = "CoreServices.File.CreateSecuredKey or SaveSecuredFile with a path outside the owning app's folder of the caller's client, or a path stepping out of its folder (Rust only, HRMS)."
+audience = "signed-in"
+
+[CORE.FILES_NO_ANSWER]
+status = 502
+params = ["function"]
+text = "[{function}|This function] got no answer from the files service."
+action = "Try again in a moment."
+when = "CoreServices.File.CreateSecuredKey or SaveSecuredFile when the files service answers nothing (Rust only, HRMS)."
+audience = "signed-in"
+
 [CORE.OWN_CLIENT_REFUSED]
 status = 403
 params = ["function", "client"]

@@ -87,6 +87,23 @@ impl FilesCalls {
     }
 }
 
+impl FilesCalls {
+    /// Rust only (HRMS, `CoreServices.File.CreateSecuredKey`): `GET
+    /// /internal/secured/createTimedKey`, a download key for the storage path `<clientCode>/<path>`
+    /// that lasts `minutes` and opens the file at most `access_limit` times. The answer is the key's
+    /// URL path (`api/files/secured/downloadFileByKey/<key>`).
+    pub async fn create_timed_key(&self, storage_path: &str, minutes: i64, access_limit: Option<u64>, created_by: Option<u64>) -> Result<Option<String>, CoreError> {
+        let mut q: Vec<(&str, String)> = vec![("filePath", storage_path.to_string()), ("minutes", minutes.to_string())];
+        if let Some(l) = access_limit {
+            q.push(("accessLimit", l.to_string()));
+        }
+        if let Some(u) = created_by {
+            q.push(("createdBy", u.to_string()));
+        }
+        text(self.http.get(self.url("secured", "/createTimedKey").await?).query(&q)).await
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::Arc;

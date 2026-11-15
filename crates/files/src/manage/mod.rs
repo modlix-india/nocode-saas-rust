@@ -51,6 +51,8 @@ enum Route {
     GenericBase64,
     GenericBase64Details,
     InternalCreateKey,
+    /// Rust only (HRMS): a key with its own lifetime, use limit and maker.
+    InternalCreateTimedKey,
     InternalUpload(Kind),
     InternalCleanup(Kind),
     InternalRetention(Kind),
@@ -113,6 +115,7 @@ impl Route {
             GenericBase64 => "/api/files/generic/convertToBase64",
             GenericBase64Details => "/api/files/generic/convertToBase64WithDetails",
             InternalCreateKey => "/api/files/internal/secured/createKey",
+            InternalCreateTimedKey => "/api/files/internal/secured/createTimedKey",
             InternalUpload(_) => "/api/files/internal/{resourceType}",
             InternalCleanup(_) => "/api/files/internal/{resourceType}/cleanupExpired",
             InternalRetention(_) => "/api/files/internal/{resourceType}/applyRetention",
@@ -140,6 +143,7 @@ impl Route {
             self,
             GenericPopulate
                 | InternalCreateKey
+                | InternalCreateTimedKey
                 | InternalUpload(_)
                 | InternalCleanup(_)
                 | InternalRetention(_)
@@ -220,6 +224,7 @@ fn route(method: &Method, rest: &str) -> Option<Route> {
         let segs: Vec<&str> = i.split('/').collect();
         return match (segs.as_slice(), post, get) {
             (["secured", "createKey"], _, true) => Some(InternalCreateKey),
+            (["secured", "createTimedKey"], _, true) => Some(InternalCreateTimedKey),
             (["accesspath"], true, _) => Some(InternalAccessPath),
             (["aiUploader"], true, _) => Some(InternalAiUploader),
             (["billing", "meter"], true, _) => Some(BillingMeter),
@@ -365,6 +370,7 @@ async fn handle(st: AppState, r: Route, uri: String, req: Request) -> AppResult<
         GenericBase64 => generic::base64(&mut cx, req, false).await,
         GenericBase64Details => generic::base64(&mut cx, req, true).await,
         InternalCreateKey => internal::create_key(&cx).await,
+        InternalCreateTimedKey => internal::create_timed_key(&cx).await,
         InternalUpload(k) => internal::upload(&cx, k, req).await,
         InternalCleanup(k) => internal::cleanup(&cx, k).await,
         InternalRetention(k) => internal::retention(&cx, k).await,
@@ -504,6 +510,8 @@ mod tests {
         assert_eq!(r(Method::POST, "internal/billing/meter"), Some(BillingMeter));
         assert_eq!(r(Method::POST, "internal/secured/cleanupExpired"), Some(InternalCleanup(Kind::Secured)));
         assert_eq!(r(Method::GET, "internal/secured/createKey"), Some(InternalCreateKey));
+        assert_eq!(r(Method::GET, "internal/secured/createTimedKey"), Some(InternalCreateTimedKey));
+        assert_eq!(r(Method::POST, "internal/secured/createTimedKey"), None);
         assert_eq!(r(Method::GET, "internal/static/convertToBase64"), Some(InternalBase64(Kind::Static)));
         assert_eq!(r(Method::POST, "accesspath/query"), Some(AccessQuery));
         assert_eq!(r(Method::GET, "accesspath/query"), Some(AccessRead("query".into())));
@@ -519,5 +527,6 @@ mod tests {
         assert_eq!(r(Method::DELETE, "generic/user/5"), None);
         assert_eq!(r(Method::GET, "generic/user"), None);
         assert!(GenericPopulate.is_public() && !List(Kind::Static).is_public());
+        assert!(InternalCreateTimedKey.is_public() && InternalCreateKey.is_public());
     }
 }

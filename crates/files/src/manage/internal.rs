@@ -44,6 +44,39 @@ pub async fn create_key(cx: &Ctx) -> AppResult<Response> {
     Ok(jackson::text(format!("{}{key}", cx.st.config().secured_keys.key_uri)))
 }
 
+/// Rust only (HRMS, core's `CoreServices.File.CreateSecuredKey`): `GET
+/// /internal/secured/createTimedKey?filePath=&minutes=&accessLimit=&createdBy=`, a key for the
+/// storage path as is (unchecked, like `createKey`: core decides who may have it) that lasts
+/// `minutes` (required, 1 to 1440) and opens the file at most `accessLimit` times when one is given.
+/// A route of its own, not new parameters on `createKey`: a files unit without it answers 404, so a
+/// core deployed first never hands out `createKey`'s year-long default.
+pub async fn create_timed_key(cx: &Ctx) -> AppResult<Response> {
+    let path = required(&cx.params, "filePath")?;
+    let path = path.split('?').next().unwrap_or(path);
+    let path = path.strip_prefix('/').unwrap_or(path);
+    if path.is_empty() || crate::paths::has_dot_segment(path) {
+        return Err(forbidden_path(Kind::Secured, path));
+    }
+    let minutes = match opt_i64(&cx.params, "minutes")? {
+        Some(m) if (1..=1440).contains(&m) => m,
+        other => {
+            let shown = other.map(|m| m.to_string()).unwrap_or_default();
+            return Err(crate::errors::param_invalid("minutes", format!("Invalid value '{shown}' for parameter 'minutes'")));
+        }
+    };
+    let limit = match opt_i64(&cx.params, "accessLimit")? {
+        None | Some(0) => None,
+        Some(l) if l > 0 => Some(l as u64),
+        Some(l) => return Err(crate::errors::param_invalid("accessLimit", format!("Invalid value '{l}' for parameter 'accessLimit'"))),
+    };
+    let created_by = match opt_i64(&cx.params, "createdBy")? {
+        Some(u) if u > 0 => Some(u as u64),
+        _ => None,
+    };
+    let key = create_access_key(&cx.st, Some(minutes), Some(crate::keys::ChronoUnit::Minutes), limit, path, created_by).await?;
+    Ok(jackson::text(format!("{}{key}", cx.st.config().secured_keys.key_uri)))
+}
+
 /// `POST /internal/{resourceType}`: the raw body stored at `<filePath>/<fileName>`.
 pub async fn upload(cx: &Ctx, kind: Kind, req: Request) -> AppResult<Response> {
     let cc = required(&cx.params, "clientCode")?.to_string();
