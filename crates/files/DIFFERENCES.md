@@ -178,6 +178,26 @@ split. A missing file's empty 404 stays empty.
   else the `User Images` 403. Answers `true` when a photo was removed, `false` when there was
   none. A tenant user cannot do this through `DELETE /secured/**` (no write access to SYSTEM's
   folder); the My profile page's Remove photo uses it (CXZ-1327).
+- **Protected SECURED folders (new, 2026-11-15, HRMS-P3, no Java counterpart).** `[files]
+  protected_prefixes` (default `["hrms"]`, `src/protected.rs`). A SECURED path whose first
+  segment is a protected prefix (any case, with or without the leading `/`: `/hrms/...`,
+  `hrms/...`, `/HRMS/...`; not `/hrmsx`) is allowed only by a covering rule whose own PATH is
+  under that prefix (`/hrms`, `hrms`, `/hrms/emp/7`), for the user or one of their
+  authorities. The open rules (`''`, `/`) and any other broader rule no longer reach it. This
+  holds for reads, `createKey`, listing, upload, folder creation, delete, transform, export and
+  import of such a path, and comes before the `_withInClient` mobile uploader shortcut.
+  Operations on the ROOT for a caller without a rule under the prefix: the root listing leaves
+  the folder out (`totalElements` too; on later pages of a long root listing a page may come
+  back one entry short), a root export does not zip it, a zip imported into the root skips its
+  entries (the job still ends DONE; a warning is logged), and an upload or transform at the
+  root whose file name reaches into it (`name=hrms/x`) is a 403. A root delete never reached
+  it (it removes only the object at the exact key `<client>/` and no row). An export that holds
+  a protected folder's files (the folder itself, or the root by a caller who may read it) is
+  stored at `<prefix>/_downloads/<id>.zip` instead of `_downloads/`, so the zip is not open to
+  the root rule. Paths outside the protected prefixes, and STATIC (read without any check, so
+  protecting it would protect nothing), behave exactly as before; the extra rule query runs
+  only for protected paths, and the root listing reads rules only when a protected folder is
+  on the page.
 
 ## Known, kept
 
