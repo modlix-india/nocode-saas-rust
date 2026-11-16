@@ -117,6 +117,8 @@ const COUNTER_TIMEOUT: Duration = Duration::from_millis(250);
 /// How long the counters leave Redis alone after a call failed or timed out, so a Redis that is
 /// down costs each request nothing rather than a timeout.
 const COUNTER_PAUSE: Duration = Duration::from_secs(5);
+/// Keys per pipelined round trip in [`CacheService::evict_many_everywhere`].
+const EVICT_CHUNK: usize = 500;
 
 fn unix_millis() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or_default()
@@ -456,6 +458,42 @@ impl CacheService {
                     crate::meter::redis_error("connect");
                     tracing::warn!(cache = full, error = %e, "redis unavailable for eviction");
                 }
+            }
+        }
+    }
+
+    /// [`Self::evict_everywhere`] for many keys of one cache: the same messages and the same
+    /// HDEL, but over ONE connection with the commands pipelined in chunks. Calling
+    /// `evict_everywhere` in a loop opens a connection and waits two round trips per key, which
+    /// for a user holding thousands of tokens kept `revoke?ssoLogout=true` (Logout) busy for
+    /// minutes while the browser waited.
+    pub async fn evict_many_everywhere(&self, cache_name: &str, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        let full = self.full_name(cache_name);
+        for key in keys {
+            self.dispatch(&format!("{full}:{key}")).await;
+        }
+        let Some(client) = &self.inner.redis else { return };
+        let mut conn = match client.get_multiplexed_async_connection().await {
+            Ok(c) => c,
+            Err(e) => {
+                crate::meter::redis_error("connect");
+                tracing::warn!(cache = full, error = %e, "redis unavailable for eviction");
+                return;
+            }
+        };
+        for chunk in keys.chunks(EVICT_CHUNK) {
+            let mut pipe = redis::pipe();
+            for key in chunk {
+                pipe.cmd("PUBLISH").arg(&self.inner.channel).arg(format!("{full}:{key}")).ignore();
+            }
+            pipe.cmd("HDEL").arg(&full).arg(chunk).ignore();
+            let done: redis::RedisResult<()> = pipe.query_async(&mut conn).await;
+            if let Err(e) = done {
+                crate::meter::redis_error("command");
+                tracing::warn!(cache = full, keys = chunk.len(), error = %e, "eviction not propagated");
             }
         }
     }

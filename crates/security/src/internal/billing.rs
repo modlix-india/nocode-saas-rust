@@ -36,6 +36,11 @@ const SECURITY_ACTIONS: [&str; 3] = [action::APP_RENT, action::SITE_RENT, action
 const ONE_MILLION: i128 = 1_000_000;
 /// Decimals the wallet keeps (`DECIMAL(19,6)`, V90).
 pub const SCALE: u32 = 6;
+
+/// The `allowed` refusals nocode-ai tells apart (it words its own message for each).
+pub const WALLET_SUSPENDED_REASON: &str = "The wallet is suspended";
+pub const INVOICE_OVERDUE_REASON: &str = "An invoice is overdue";
+pub const MODEL_NOT_IN_PLAN_REASON: &str = "The plan does not include this AI model";
 /// AI model rates are in US dollars; each app bills in its own config's currency. The platform
 /// settings `AI_FX_RATE.<CUR>` hold that currency's units per dollar (`AI_FX_RATE.INR` = rupees
 /// per dollar). A USD config needs none. The bare `AI_FX_RATE` is the rupee rate V90 seeded; it
@@ -194,6 +199,24 @@ pub fn period_end(start: NaiveDate, period: &str) -> NaiveDate {
     start.checked_add_months(Months::new(months)).unwrap_or(start + Duration::days(30))
 }
 
+/// The month of a plan period that `day` falls in, `[from, to)`: a plan's credits are given per
+/// month and last that month, so a yearly plan gives them twelve times (the last month ends with
+/// the period). Counted from the period start each time, so a 31st start keeps its day. `None`
+/// outside the period.
+pub fn credit_slice(start: NaiveDate, end: NaiveDate, day: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    if day < start || day >= end {
+        return None;
+    }
+    let mut n = 0u32;
+    loop {
+        let to = start.checked_add_months(Months::new(n + 1))?.min(end);
+        if day < to {
+            return Some((start.checked_add_months(Months::new(n))?, to));
+        }
+        n += 1;
+    }
+}
+
 /// One 15-minute window's share of a monthly rate for what is above the free quantity, at six
 /// decimals (so a small rate accrues instead of rounding to nothing). `None` when nothing is due.
 pub fn window_tokens(quantity: Dec, free: Dec, rate: Dec, date: NaiveDate) -> Option<Dec> {
@@ -300,14 +323,33 @@ impl Internal {
         Ok(None)
     }
 
+    /// Whether the config bills a client that has no wallet yet: not when the client existed before
+    /// the config was switched on (it is billed once it joins).
+    pub async fn bills_new_wallet(&self, client_id: u64, config: Option<&BillingConfig>) -> AuthResult<bool> {
+        match config {
+            Some(c) => Ok(!self.billing.client_predates_config(client_id, c.id).await?),
+            None => Ok(true),
+        }
+    }
+
     /// The client's wallet on the app, created (at zero) when absent. A new wallet goes on the
     /// governing config's default plan, with its credits.
-    pub async fn wallet_ready(&self, ca: &ContextAuth, client_id: u64, app_id: u64, config: Option<&BillingConfig>) -> AuthResult<Option<Wallet>> {
+    ///
+    /// `join` is the client's own step into billing (subscribing, buying or being granted
+    /// credits). Without it no wallet is created for a client that existed before the config was
+    /// switched on: meters, AI and status reads leave such a client unbilled. With it such a client
+    /// gets a wallet but NO plan (Kiran 2026-11-16): bought or granted credits pay for AI and
+    /// messages only, the default plan's limits never start; subscribing puts it on a plan.
+    pub async fn wallet_ready(&self, ca: &ContextAuth, client_id: u64, app_id: u64, config: Option<&BillingConfig>, join: bool) -> AuthResult<Option<Wallet>> {
         if let Some(w) = self.billing.wallet(client_id, app_id).await? {
             return Ok(Some(w));
         }
+        let predates = !self.bills_new_wallet(client_id, config).await?;
+        if predates && !join {
+            return Ok(None);
+        }
         let Some((wallet, created)) = self.billing.create_wallet(client_id, app_id).await? else { return Ok(None) };
-        if created {
+        if created && !predates {
             if let Some(c) = config {
                 if let Some(plan) = self.default_plan(c.id).await? {
                     let today = self.auth.clock.local().date();
@@ -319,25 +361,54 @@ impl Internal {
         Ok(Some(wallet))
     }
 
-    /// Starts a plan period for the wallet and gives the plan's credits: every period when they
-    /// recur (expiring with the period), once when they do not (`once_only`: already given).
+    /// A wallet of a client from before the config was switched on that joined without a plan
+    /// (bought or was granted credits): only what is paid from credits applies to it (AI,
+    /// messages). No counts, no monthly invoice, no limits, until it subscribes.
+    pub async fn credits_only(&self, wallet: &Wallet, config: &BillingConfig) -> AuthResult<bool> {
+        Ok(self.billing.wallet_plan(wallet.id).await?.is_none() && self.billing.client_predates_config(wallet.client_id, config.id).await?)
+    }
+
+    /// Starts a plan period for the wallet and gives the plan's credits: every month of the period
+    /// when they recur (each month's lasting that month; the later months come from the daily
+    /// run), once when they do not (`once_only`: already given).
     pub async fn put_on_plan(&self, ca: &ContextAuth, wallet: &Wallet, config: &BillingConfig, plan: &Plan, start: NaiveDate, once_only: bool) -> AuthResult<u64> {
         let end = period_end(start, &plan.period);
         let wp = self.billing.start_wallet_plan(wallet.id, plan.id, start, end).await?;
-        let give = plan.included_tokens.signum() > 0 && (plan.included_recurring || !once_only);
-        if give {
-            let expires = plan.included_recurring.then(|| end.and_hms_opt(0, 0, 0)).flatten();
-            let key = if plan.included_recurring { format!("plan:{wp}:{start}") } else { format!("plan-once:{}:{}", wallet.id, plan.id) };
-            let reason = format!("{} plan credits", plan.label);
-            self.credit_wallet(ca, wallet, config, plan.included_tokens, &key, &reason, NewLot {
-                source: "PLAN",
-                reference_type: Some("WALLET_PLAN".into()),
-                reference_id: Some(wp),
-                expires_at: expires,
-            })
-            .await?;
+        if plan.included_tokens.signum() > 0 {
+            if plan.included_recurring {
+                self.give_month_credits(ca, wallet, config, plan, wp, start, start).await?;
+            } else if !once_only {
+                let key = format!("plan-once:{}:{}", wallet.id, plan.id);
+                let reason = format!("{} plan credits", plan.label);
+                self.credit_wallet(ca, wallet, config, plan.included_tokens, &key, &reason, NewLot {
+                    source: "PLAN",
+                    reference_type: Some("WALLET_PLAN".into()),
+                    reference_id: Some(wp),
+                    expires_at: None,
+                })
+                .await?;
+            }
         }
         Ok(wp)
+    }
+
+    /// A recurring plan's credits for the month of its period that `day` falls in, once (the key is
+    /// the wallet plan and the month's first day), expiring at that month's end.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn give_month_credits(&self, ca: &ContextAuth, wallet: &Wallet, config: &BillingConfig, plan: &Plan, wallet_plan_id: u64, period_start: NaiveDate, day: NaiveDate) -> AuthResult<bool> {
+        let end = period_end(period_start, &plan.period);
+        let Some((from, to)) = credit_slice(period_start, end, day.min(end - Duration::days(1))) else { return Ok(false) };
+        let key = format!("plan:{wallet_plan_id}:{from}");
+        let reason = if from == period_start { format!("{} plan credits", plan.label) } else { format!("{} plan credits from {from}", plan.label) };
+        let r = self
+            .credit_wallet(ca, wallet, config, plan.included_tokens, &key, &reason, NewLot {
+                source: "PLAN",
+                reference_type: Some("WALLET_PLAN".into()),
+                reference_id: Some(wallet_plan_id),
+                expires_at: to.and_hms_opt(0, 0, 0),
+            })
+            .await?;
+        Ok(r.charged)
     }
 
     /// The config's default plan (where a new client starts), if it has an ACTIVE one.
@@ -479,7 +550,10 @@ impl Internal {
             return Ok(ChargeResult::none());
         }
         let app = self.dir().app_by_id(app_id).await?;
-        let Some(mut wallet) = self.wallet_ready(ca, billed, app_id, Some(&config)).await? else { return Ok(ChargeResult::none()) };
+        let Some(mut wallet) = self.wallet_ready(ca, billed, app_id, Some(&config), false).await? else { return Ok(ChargeResult::none()) };
+        if self.credits_only(&wallet, &config).await? {
+            return Ok(ChargeResult::none());
+        }
         let plan = self.plan_of(&wallet).await?;
         let mut last = ChargeResult::none();
         for m in meters {
@@ -564,7 +638,10 @@ impl Internal {
         }
         let reference = req.reference.clone().filter(|r| !r.trim().is_empty()).unwrap_or_else(crate::admin::billing::wallets::random_uuid);
         let units = Self::units_of(&meter, &req.figures);
-        let Some(wallet) = self.wallet_ready(ca, client_id, app.id, Some(&config)).await? else { return Ok(RecordResult::nothing()) };
+        let Some(wallet) = self.wallet_ready(ca, client_id, app.id, Some(&config), false).await? else { return Ok(RecordResult::nothing()) };
+        if meter.invoiced() && self.credits_only(&wallet, &config).await? {
+            return Ok(RecordResult::nothing());
+        }
         let plan = self.plan_of(&wallet).await?;
         let t = terms(&meter, plan.as_ref());
         let today = self.auth.clock.local().date();
@@ -729,15 +806,19 @@ impl Internal {
             .iter()
             .find(|m| m.status == "ACTIVE" && (m.key == key || (meter_key.is_none() && m.source == "AI_TOKENS")));
         // No wallet yet (the client's first use): judge by the plan it will land on, the config's
-        // default plan, so a new Free client cannot use a premium model or pass a cap once.
+        // default plan, so a new Free client cannot use a premium model or pass a cap once. A client
+        // that existed before billing was switched on is not billed until it joins: no limits.
         let wallet = self.billing.wallet(client.id(), app.id).await?;
+        if wallet.is_none() && !self.bills_new_wallet(client.id(), Some(&config)).await? {
+            return Ok(yes());
+        }
         let plan = match wallet.as_ref() {
             Some(w) => self.plan_of(w).await?,
             None => self.default_plan(config.id).await?,
         };
         if let (Some(p), Some(model)) = (plan.as_ref(), model) {
             if !p.allows_model(model) {
-                return Ok(allowed_json(false, Some("The plan does not include this AI model")));
+                return Ok(allowed_json(false, Some(MODEL_NOT_IN_PLAN_REASON)));
             }
         }
         let suspended = wallet.as_ref().is_some_and(Wallet::suspended);
@@ -746,12 +827,23 @@ impl Internal {
             tracing::error!(currency = config.currency, config = config.id, "AI FX RATE MISSING: AI refused");
             return Ok(allowed_json(false, Some("AI prices cannot be converted into this app's currency yet")));
         }
+        // An OVERDUE invoice stops what is paid from credits (AI, messages) whatever the suspend
+        // mode; BLOCK_APP also takes the app down (`hosting`).
+        let credit_use = meter.is_none_or(|m| !m.invoiced());
+        let overdue = credit_use && wallet.is_some() && self.billing.has_overdue_invoice(client.id(), app.id).await?;
         let Some(meter) = meter else {
-            // AI with no AI meter on the config: only a suspended wallet stops it.
-            return Ok(if meter_key.is_none() && suspended { allowed_json(false, Some("The wallet is suspended")) } else { yes() });
+            // AI with no AI meter on the config: only a suspended wallet or an overdue invoice stops it.
+            return Ok(match (meter_key.is_none(), suspended, overdue) {
+                (true, true, _) => allowed_json(false, Some(WALLET_SUSPENDED_REASON)),
+                (true, _, true) => allowed_json(false, Some(INVOICE_OVERDUE_REASON)),
+                _ => yes(),
+            });
         };
         if !meter.invoiced() && suspended {
-            return Ok(allowed_json(false, Some("The wallet is suspended")));
+            return Ok(allowed_json(false, Some(WALLET_SUSPENDED_REASON)));
+        }
+        if overdue {
+            return Ok(allowed_json(false, Some(INVOICE_OVERDUE_REASON)));
         }
         let t = terms(meter, plan.as_ref());
         if let Some(cap) = t.hard_cap {
@@ -838,7 +930,9 @@ impl Internal {
             },
         };
         let cost = ai_cost(&rate, req).mul(self.fx(&rate.currency, &config.currency).await?);
-        let Some(wallet) = self.wallet_ready(ca, client.id(), app.id, Some(&config)).await? else { return Ok(ChargeResult::none()) };
+        let Some(wallet) = self.wallet_ready(ca, client.id(), app.id, Some(&config), false).await? else {
+            return Ok(unbilled("the client existed before billing was switched on and has not joined"));
+        };
         let plan = self.plan_of(&wallet).await?;
         let t = terms(&meter, plan.as_ref());
         // The meter's rate is the markup on cost (MARKUP); PER_MILLION prices raw tokens instead.
@@ -860,6 +954,9 @@ impl Internal {
             .put("cost", serde_json::from_str::<Value>(&cost.to_string()).unwrap_or(Value::Null))
             .build();
         if meter.invoiced() {
+            if self.credits_only(&wallet, &config).await? {
+                return Ok(unbilled("an invoiced AI meter does not bill a credits-only client"));
+            }
             let u = Usage {
                 client_id: client.id(),
                 app_id: app.id,
@@ -903,7 +1000,7 @@ impl Internal {
         let active = status_json("ACTIVE", None, false);
         let Some(config) = self.billing_config_by_codes(url_app_code, url_client_code).await? else { return Ok(active) };
         let ca = ContextAuth::default();
-        Ok(match self.wallet_ready(&ca, client_id, config.app_id, Some(&config)).await? {
+        Ok(match self.wallet_ready(&ca, client_id, config.app_id, Some(&config), false).await? {
             Some(w) => status_json(&w.status, Some(w.balance), w.suspended()),
             None => active,
         })
@@ -1102,6 +1199,20 @@ mod tests {
         assert_eq!(Internal::units_of(&m, &Map::new()).to_string(), "1");
         let by_value = Meter { basis: Some("bookingValue".into()), ..Default::default() };
         assert_eq!(Internal::units_of(&by_value, &f).to_string(), "12000000");
+    }
+
+    #[test]
+    fn a_plan_period_is_cut_into_months_from_its_start() {
+        let day = |m: u32, d: u32| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let (start, year_end) = (day(1, 31), NaiveDate::from_ymd_opt(2027, 1, 31).unwrap());
+        assert_eq!(credit_slice(start, year_end, day(1, 31)), Some((day(1, 31), day(2, 28))));
+        assert_eq!(credit_slice(start, year_end, day(2, 27)), Some((day(1, 31), day(2, 28))));
+        assert_eq!(credit_slice(start, year_end, day(2, 28)), Some((day(2, 28), day(3, 31))));
+        assert_eq!(credit_slice(start, year_end, day(12, 31)), Some((day(12, 31), year_end)));
+        assert_eq!(credit_slice(start, year_end, year_end), None);
+        assert_eq!(credit_slice(start, year_end, day(1, 30)), None);
+        // A monthly plan is one slice: its whole period.
+        assert_eq!(credit_slice(day(3, 5), day(4, 5), day(3, 20)), Some((day(3, 5), day(4, 5))));
     }
 
     #[test]

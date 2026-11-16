@@ -74,7 +74,7 @@ impl Billing<'_> {
             return Ok(Some(w));
         }
         let config = self.internal.governing_config(app, client).await?;
-        self.internal.wallet_ready(ca, client, app, config.as_ref()).await?;
+        self.internal.wallet_ready(ca, client, app, config.as_ref(), true).await?;
         self.wallet_of(client, app).await
     }
 

@@ -26,7 +26,7 @@ use security::errors::{AuthError, AuthResult};
 use security::internal::billing::{
     days_in_month, AiChargeRequest, ChargeRequest, RecordRequest, AI_FX_RATE, fx_setting, WALLET_LOW_BALANCE, WALLET_SUSPENDED,
 };
-use security::internal::billing_cycle::{totals, INVOICE_ISSUED, INVOICE_OVERDUE, WALLET_CREDITS_EXPIRED, WALLET_CREDITS_EXPIRING, WALLET_PLAN_LAPSED};
+use security::internal::billing_cycle::{period_key, totals, Fee, INVOICE_ISSUED, INVOICE_OVERDUE, WALLET_CREDITS_EXPIRED, WALLET_CREDITS_EXPIRING, WALLET_PLAN_LAPSED};
 use security::internal::Internal;
 use security::model::ContextAuth;
 use serde_json::{json, Map, Value};
@@ -66,6 +66,8 @@ struct Books {
     statuses: Vec<(u64, String)>,
     notified: Vec<(u64, bool)>,
     fail_counts: bool,
+    /// Clients created before the config was switched on (V91).
+    predates: Vec<u64>,
     next: u64,
 }
 
@@ -368,6 +370,10 @@ impl BillingStore for FakeBilling {
         all.sort();
         Ok(all)
     }
+    async fn client_predates_config(&self, client_id: u64, _config_id: u64) -> AuthResult<bool> {
+        Ok(self.b.lock().unwrap().predates.contains(&client_id))
+    }
+
     async fn has_overdue_invoice(&self, client_id: u64, app_id: u64) -> AuthResult<bool> {
         let b = self.b.lock().unwrap();
         Ok(b.invoices.iter().any(|i| i.u64("clientId") == Some(client_id) && i.u64("appId") == Some(app_id) && i.str("status") == Some("OVERDUE")))
@@ -1577,14 +1583,14 @@ async fn monthly_invoice_lines_price_each_invoiced_meter_above_its_free_quantity
     // An INVOICE plan adds its fee for the new period first; a hard-capped meter is never billed.
     let mut pro = Plan { price_amount: d("5000"), ..plan(32, "pro", "Pro") };
     pro.overrides.insert("users".into(), MeterOverride { free: Some(d("10")), rate: None, hard_cap: true });
-    let lines = w.internal.invoice_lines(&config, M_CLIENT, Some(&pro), Some(date(2026, 10, 1)), date(2026, 10, 1)).await.unwrap();
+    let lines = w.internal.invoice_lines(&config, M_CLIENT, Some(&Fee { plan: &pro, start: date(2026, 10, 1), wallet_plan_id: 7 }), Some(&pro), date(2026, 10, 1)).await.unwrap();
     let kinds: Vec<(&str, Option<u64>, Option<u64>)> = lines.iter().map(|l| (l.kind, l.meter_id, l.plan_id)).collect();
     assert_eq!(kinds, vec![("PLAN", None, Some(32)), ("METER", Some(21), None), ("METER", Some(41), None)]);
     assert_eq!(lines[0].description, "Pro plan, 01 Oct 2026 to 31 Oct 2026");
     assert_eq!((lines[0].amount.to_string(), lines[0].period_end), ("5000".into(), date(2026, 11, 1)));
     // A free default plan bills no usage: past its caps the actions are refused.
     let free = Plan { is_default: true, ..plan(30, "free", "Free") };
-    assert!(w.internal.invoice_lines(&config, M_CLIENT, Some(&free), None, date(2026, 10, 1)).await.unwrap().is_empty());
+    assert!(w.internal.invoice_lines(&config, M_CLIENT, None, Some(&free), date(2026, 10, 1)).await.unwrap().is_empty());
     // Usage on or after the cut-off day waits for the next invoice.
     assert!(w.internal.invoice_lines(&config, M_CLIENT, None, None, date(2026, 9, 1)).await.unwrap().is_empty());
 }
@@ -1688,10 +1694,10 @@ async fn a_monthly_invoice_is_raised_once_with_its_lines() {
 
     // An INVOICE plan's fee for a period: the period key stops a second invoice.
     let pro = Plan { config_id: UNSEEN_CONFIG, price_amount: d("5000"), ..plan(32, "pro", "Pro") };
-    let fee = w.internal.raise_monthly_invoice(&system(), &config, M_CLIENT, Some(&pro), Some(date(2026, 10, 1)), date(2026, 10, 1)).await.unwrap().expect("raised");
-    assert_eq!((fee.str("periodKey"), fee.str("bundleLabel")), (Some("2:2:2026-10-01:2026-10-01"), Some("Pro plan")));
+    let fee = w.internal.raise_monthly_invoice(&system(), &config, M_CLIENT, Some(Fee { plan: &pro, start: date(2026, 10, 1), wallet_plan_id: 7 }), Some(&pro), date(2026, 10, 1)).await.unwrap().expect("raised");
+    assert_eq!((fee.str("periodKey"), fee.str("bundleLabel")), (Some("2:2:wp7:2026-10-01:2026-10-01"), Some("Pro plan")));
     assert_eq!(fee.dec("totalAmount").unwrap().to_string(), "5900.00");
-    assert!(w.internal.raise_monthly_invoice(&system(), &config, M_CLIENT, Some(&pro), Some(date(2026, 10, 1)), date(2026, 10, 1)).await.unwrap().is_none());
+    assert!(w.internal.raise_monthly_invoice(&system(), &config, M_CLIENT, Some(Fee { plan: &pro, start: date(2026, 10, 1), wallet_plan_id: 7 }), Some(&pro), date(2026, 10, 1)).await.unwrap().is_none());
     assert_eq!(w.b().invoices.len(), 2);
 }
 
@@ -1721,4 +1727,184 @@ async fn the_invoice_day_raises_the_usage_of_clients_not_on_an_invoiced_plan() {
     let b = w.b();
     assert_eq!(b.invoices.len(), 1);
     assert_eq!(b.invoices[0].dec("totalAmount").unwrap().to_string(), "2613.18");
+}
+
+// ---------------------------------------------------------------------------------------------
+// The 2026-11-16 fixes: switching billing on, same-day plan changes, the last paid month on
+// cancel, yearly plan credits, overdue invoices and AI.
+
+#[tokio::test]
+async fn a_client_from_before_billing_was_switched_on_is_not_billed_until_it_joins() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.meters.push(counter(21, "leads", "1", "0"));
+        let mut free = Plan { is_default: true, included_tokens: d("1"), included_recurring: false, ..plan(30, "free", "Free") };
+        free.overrides.insert("leads".into(), MeterOverride { free: Some(d("0")), rate: None, hard_cap: true });
+        b.plans.push(free);
+        b.predates.push(M_CLIENT);
+    }
+    let config = w.b().configs[0].clone();
+    // Meters, AI and status reads leave it alone: no wallet, no plan, no charge.
+    assert!(w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), false).await.unwrap().is_none());
+    let r = w.internal.record(&system(), &use_of("leads", None, "L1")).await.unwrap();
+    assert!(!r.recorded && !r.over_limit, "nothing recorded, and no Free cap applied");
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
+    assert!(w.b().wallets.is_empty() && w.b().wallet_plans.is_empty());
+    // Joining (a purchase, a grant, a subscription) creates the wallet but puts it on NO plan: no
+    // Free credit, no Free limits; bought credits pay for AI and messages only.
+    let joined = w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), true).await.unwrap().expect("wallet");
+    assert!(w.b().wallet_plans.is_empty());
+    same(joined.balance, "0");
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
+    // A credits meter charges it; what goes on the invoice (counts, invoiced events) does not.
+    w.b().wallets[0].balance = d("10");
+    let r = w.internal.record(&system(), &use_of("leads", None, "L2")).await.unwrap();
+    assert!(r.recorded, "a credits meter still charges a credits-only client");
+    w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..counter(22, "deals", "1", "0") });
+    w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(11, "users", "USERS", "300", "2") });
+    let r = w.internal.record(&system(), &use_of("deals", None, "D1")).await.unwrap();
+    assert!(!r.recorded, "no invoiced event for a credits-only client");
+    w.internal.charge(&system(), &ChargeRequest { date: Some(today()), action_key: Some(action::USER.into()), ..req("6", action::USER) }).await.unwrap();
+    assert!(w.b().usage.is_empty(), "no user count for a credits-only client");
+    // Subscribing puts it on a plan; from then on it is billed like any client.
+    w.b().wallet_plans.push(on_plan(joined.id, 30, today(), date(2026, 11, 15)));
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], false);
+    // A client created after the switch-on starts on the default plan at its first use.
+    w.b().predates.clear();
+    w.b().wallets.clear();
+    w.b().wallet_plans.clear();
+    assert!(w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), false).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn an_overdue_invoice_stops_ai_in_every_suspend_mode() {
+    for mode in ["AI_ONLY", "AI_AND_BANNER", "BLOCK_APP"] {
+        let w = world();
+        {
+            let mut b = w.b();
+            b.configs.push(BillingConfig { suspend_mode: mode.into(), ..config() });
+            b.settings.insert(fx_setting("INR"), "94".into());
+            b.meters.push(Meter { rate_unit: "MARKUP".into(), ..Meter { kind: "COUNTER".into(), ..gauge(41, "ai.tokens", "AI_TOKENS", "2", "0") } });
+            b.meters.push(Meter { charge_mode: "INVOICE".into(), ..counter(21, "leads", "1", "0") });
+            b.wallets.push(wallet("50", "ACTIVE", 0));
+        }
+        assert!(w.internal.is_ai_allowed("crm", "BUS").await.unwrap(), "{mode}: nothing overdue");
+        w.b().invoices.push(monthly_invoice(1, "OVERDUE", date(2026, 10, 1)));
+        let v = w.internal.allowed("crm", "BUS", None, Some("deepseek-chat"), None).await.unwrap();
+        assert_eq!((v["allowed"].as_bool(), v["reason"].as_str()), (Some(false), Some("An invoice is overdue")), "{mode}");
+        // What goes on the invoice is not stopped by it (BLOCK_APP takes the app down instead).
+        assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true, "{mode}");
+        // Paid: AI again.
+        w.b().invoices.clear();
+        assert!(w.internal.is_ai_allowed("crm", "BUS").await.unwrap(), "{mode}: paid");
+    }
+}
+
+#[tokio::test]
+async fn a_free_plan_model_list_refuses_a_model_it_does_not_include() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.settings.insert(fx_setting("INR"), "94".into());
+        b.meters.push(Meter { rate_unit: "MARKUP".into(), ..Meter { kind: "COUNTER".into(), ..gauge(41, "ai.tokens", "AI_TOKENS", "2", "0") } });
+        b.plans.push(Plan { is_default: true, ai_models: vec!["deepseek".into()], ..plan(30, "free", "Free") });
+    }
+    let opus = w.internal.allowed("crm", "BUS", None, Some("claude-opus-5-5"), None).await.unwrap();
+    assert_eq!((opus["allowed"].as_bool(), opus["reason"].as_str()), (Some(false), Some("The plan does not include this AI model")));
+    assert_eq!(w.internal.allowed("crm", "BUS", None, Some("deepseek-v4-flash"), None).await.unwrap()["allowed"], true);
+    // The old gate (no model named) cannot apply the list: why nocode-ai now sends the model.
+    assert_eq!(w.internal.allowed("crm", "BUS", None, None, None).await.unwrap()["allowed"], true);
+}
+
+#[tokio::test]
+async fn a_yearly_plan_gives_its_credits_every_month() {
+    let w = world();
+    let yearly = Plan { period: "YEAR".into(), included_tokens: d("30"), included_recurring: true, ..plan(33, "growth-y", "Growth yearly") };
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.plans.push(yearly.clone());
+        b.wallets.push(wallet("0", "ACTIVE", 0));
+    }
+    let config = w.b().configs[0].clone();
+    let wallet0 = w.b().wallets[0].clone();
+    // Started on the 31st: the first month's 30 credits, lasting to 28 Feb (not the whole year).
+    let wp = w.internal.put_on_plan(&system(), &wallet0, &config, &yearly, date(2026, 1, 31), false).await.unwrap();
+    // The daily run in the second month, twice: once only.
+    w.internal.give_monthly_plan_credits(&system(), date(2026, 3, 5)).await.unwrap();
+    w.internal.give_monthly_plan_credits(&system(), date(2026, 3, 6)).await.unwrap();
+    // The third month starts on the 31st again (counted from the start, not month to month).
+    w.internal.give_monthly_plan_credits(&system(), date(2026, 3, 31)).await.unwrap();
+    // Outside the period: nothing.
+    w.internal.give_monthly_plan_credits(&system(), date(2027, 2, 1)).await.unwrap();
+    let b = w.b();
+    let keys: Vec<String> = b.txns.iter().map(|t| t.idempotency_key.clone()).collect();
+    assert_eq!(keys, ["2026-01-31", "2026-02-28", "2026-03-31"].map(|m| format!("plan:{wp}:{m}")));
+    assert!(b.txns.iter().all(|t| t.tokens.cmp_value(&d("30")).is_eq()));
+    let expiries: Vec<Option<NaiveDateTime>> = b.lots.iter().map(|l| l.expires_at).collect();
+    assert_eq!(expiries, vec![Some(dt("2026-02-28 00:00:00")), Some(dt("2026-03-31 00:00:00")), Some(dt("2026-04-30 00:00:00"))]);
+    same(b.wallets[0].balance, "90");
+}
+
+#[test]
+fn each_plan_period_has_its_own_invoice_key() {
+    let (starter, growth) = (plan(31, "starter", "Starter"), plan(32, "growth", "Growth"));
+    let day = date(2026, 11, 16);
+    let a = period_key(M_CLIENT, APP, Some(&Fee { plan: &starter, start: day, wallet_plan_id: 7 }), day);
+    let b = period_key(M_CLIENT, APP, Some(&Fee { plan: &growth, start: day, wallet_plan_id: 8 }), day);
+    // Starter, then Growth the same day (and back to Starter): each its own invoice.
+    let c = period_key(M_CLIENT, APP, Some(&Fee { plan: &starter, start: day, wallet_plan_id: 9 }), day);
+    assert!(a != b && b != c && a != c);
+    // The invoice day's usage-only invoice keeps its old key.
+    assert_eq!(period_key(M_CLIENT, APP, None, day), "2:2::2026-11-16");
+}
+
+#[tokio::test]
+async fn a_plan_ending_on_free_still_bills_its_last_months_extras() {
+    let Some(db) = local_db().await else { return };
+    let w = world_on(db);
+    invoice_world(&w);
+    w.b().configs[0].id = UNSEEN_CONFIG;
+    for m in w.b().meters.iter_mut() {
+        m.config_id = UNSEEN_CONFIG;
+    }
+    {
+        let mut b = w.b();
+        b.plans.push(Plan { config_id: UNSEEN_CONFIG, is_default: true, ..plan(30, "free", "Free") });
+        b.plans.push(Plan { config_id: UNSEEN_CONFIG, price_amount: d("5000"), ..plan(32, "pro", "Pro") });
+        b.wallets.push(wallet("0", "ACTIVE", 0));
+        // Cancelled: no renewal, so the client moves to Free on 1 Oct.
+        b.wallet_plans.push(WalletPlan { auto_renew: false, ..on_plan(7, 32, date(2026, 9, 1), date(2026, 10, 1)) });
+    }
+    w.internal.renew_plans(&system(), date(2026, 10, 1)).await.unwrap();
+    let b = w.b();
+    assert_eq!(b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect::<Vec<_>>(), vec![(32, "ENDED"), (30, "ACTIVE")]);
+    // No fee (Free costs nothing), but September's extras on Pro's terms.
+    assert_eq!(b.invoices.len(), 1, "the last paid month is invoiced");
+    assert_eq!(b.invoices[0].dec("totalAmount").unwrap().to_string(), "2613.18");
+    assert!(b.lines.iter().all(|l| l.str("kind") == Some("METER")));
+}
+
+#[tokio::test]
+async fn a_client_from_before_billing_goes_back_to_credits_only_when_its_plan_ends() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.plans.push(Plan { is_default: true, included_tokens: d("1"), included_recurring: false, ..plan(30, "free", "Free") });
+        b.plans.push(Plan { price_amount: d("219"), ..plan(31, "starter", "Starter") });
+        b.wallets.push(wallet("5", "ACTIVE", 0));
+        // Subscribed to Starter, then cancelled: no renewal.
+        b.wallet_plans.push(WalletPlan { auto_renew: false, ..on_plan(7, 31, date(2026, 9, 15), today()) });
+        b.predates.push(M_CLIENT);
+    }
+    w.internal.renew_plans(&system(), today()).await.unwrap();
+    let b = w.b();
+    // Starter ended, and no Free plan follows (no Free limits, no Free credit): credits only.
+    assert_eq!(b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect::<Vec<_>>(), vec![(31, "ENDED")]);
+    same(b.wallets[0].balance, "5");
+    assert!(b.txns.is_empty());
 }

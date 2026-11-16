@@ -47,6 +47,23 @@ pub struct Line {
     pub order: i64,
 }
 
+/// The plan fee an invoice charges: the plan, the day its period starts, and the wallet plan row of
+/// that period (part of the invoice's period key, so each plan change has its own invoice).
+#[derive(Debug, Clone, Copy)]
+pub struct Fee<'a> {
+    pub plan: &'a Plan,
+    pub start: NaiveDate,
+    pub wallet_plan_id: u64,
+}
+
+/// The period key of a monthly invoice: one invoice per (client, app, plan period, usage end).
+pub fn period_key(client_id: u64, app_id: u64, fee: Option<&Fee<'_>>, usage_to: NaiveDate) -> String {
+    match fee {
+        Some(f) => format!("{client_id}:{app_id}:wp{}:{}:{usage_to}", f.wallet_plan_id, f.start),
+        None => format!("{client_id}:{app_id}::{usage_to}"),
+    }
+}
+
 /// A counter's invoice line amount: what is above the free quantity, at the rate unit. An AI
 /// meter on the invoice holds priced amounts already (MARKUP), so its rate is one.
 pub fn counter_amount(net_units: Dec, free: Dec, rate: Dec, rate_unit: &str) -> (Dec, Dec) {
@@ -84,6 +101,9 @@ impl Internal {
         }
         if let Err(e) = self.renew_plans(ca, now.date()).await {
             tracing::error!(error = %e, "billing: plan renewal failed");
+        }
+        if let Err(e) = self.give_monthly_plan_credits(ca, now.date()).await {
+            tracing::error!(error = %e, "billing: monthly plan credits failed");
         }
         if let Err(e) = self.invoice_day(ca, now.date()).await {
             tracing::error!(error = %e, "billing: monthly invoices failed");
@@ -160,7 +180,13 @@ impl Internal {
         let Some(wallet) = self.billing.wallet_by_id(wp.wallet_id).await? else { return Ok(()) };
         let Some(current) = self.billing.plan_by_id(wp.plan_id).await? else { return Ok(()) };
         let Some(config) = self.billing.config_by_id(current.config_id).await? else { return Ok(()) };
-        let default = self.billing.plans_of_config(config.id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE");
+        // A client from before the config was switched on falls back to credits only (no plan),
+        // never onto the default plan's limits (Kiran 2026-11-16).
+        let default = if self.billing.client_predates_config(wallet.client_id, config.id).await? {
+            None
+        } else {
+            self.billing.plans_of_config(config.id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE")
+        };
         // What comes next: a chosen next plan, the same plan, or (not renewing) the default.
         let next = match wp.next_plan_id {
             Some(id) => self.billing.plan_by_id(id).await?,
@@ -170,6 +196,10 @@ impl Internal {
         let start = wp.period_end;
         let Some(next) = next.filter(|p| p.status == "ACTIVE") else {
             self.billing.set_wallet_plan(&WalletPlan { status: "ENDED".into(), ..wp.clone() }).await?;
+            // No plan follows: the ended period's extras are still invoiced.
+            if current.invoiced() {
+                self.raise_monthly_invoice(ca, &config, wallet.client_id, None, Some(&current), start).await?;
+            }
             return Ok(());
         };
         if !next.invoiced() && next.price_tokens.signum() > 0 {
@@ -186,9 +216,31 @@ impl Internal {
                 return Ok(());
             }
         }
-        self.put_on_plan(ca, &wallet, &config, &next, start, true).await?;
-        if next.invoiced() {
-            self.raise_monthly_invoice(ca, &config, wallet.client_id, Some(&next), Some(start), start).await?;
+        let new_wp = self.put_on_plan(ca, &wallet, &config, &next, start, true).await?;
+        // The new period's fee (an invoiced next plan) and the ended period's usage, priced on the
+        // ended plan's terms: a client moving to Free still pays its last paid month's extras.
+        if next.invoiced() || current.invoiced() {
+            let fee = next.invoiced().then_some(Fee { plan: &next, start, wallet_plan_id: new_wp });
+            self.raise_monthly_invoice(ca, &config, wallet.client_id, fee, Some(&current), start).await?;
+        }
+        Ok(())
+    }
+
+    /// The credits of each recurring plan for the month of its period that today falls in (a
+    /// yearly plan's months after the first; the first comes with the period). Once per month.
+    pub async fn give_monthly_plan_credits(&self, ca: &ContextAuth, today: NaiveDate) -> AuthResult<()> {
+        for wp in self.billing.active_wallet_plans().await? {
+            if today < wp.period_start || today >= wp.period_end {
+                continue;
+            }
+            let Some(plan) = self.billing.plan_by_id(wp.plan_id).await? else { continue };
+            if !plan.included_recurring || plan.included_tokens.signum() <= 0 {
+                continue;
+            }
+            let (Some(wallet), Some(config)) = (self.billing.wallet_by_id(wp.wallet_id).await?, self.billing.config_by_id(plan.config_id).await?) else { continue };
+            if let Err(e) = self.give_month_credits(ca, &wallet, &config, &plan, wp.id, wp.period_start, today).await {
+                tracing::error!(error = %e, wallet_plan = wp.id, "monthly plan credits not given");
+            }
         }
         Ok(())
     }
@@ -230,14 +282,14 @@ impl Internal {
                 continue;
             }
             for client_id in self.billing.clients_with_usage(config.id, today).await? {
-                let on_invoiced_plan = match self.billing.wallet(client_id, config.app_id).await? {
-                    Some(w) => self.plan_of(&w).await?.is_some_and(|p| p.invoiced()),
-                    None => false,
+                let plan = match self.billing.wallet(client_id, config.app_id).await? {
+                    Some(w) => self.plan_of(&w).await?,
+                    None => None,
                 };
-                if on_invoiced_plan {
+                if plan.as_ref().is_some_and(Plan::invoiced) {
                     continue;
                 }
-                if let Err(e) = self.raise_monthly_invoice(ca, &config, client_id, None, None, today).await {
+                if let Err(e) = self.raise_monthly_invoice(ca, &config, client_id, None, plan.as_ref(), today).await {
                     tracing::error!(error = %e, client = client_id, config = config.id, "monthly invoice failed");
                 }
             }
@@ -245,11 +297,12 @@ impl Internal {
         Ok(())
     }
 
-    /// The lines of an invoice for a client: the plan's fee for the period starting on
-    /// `plan_start` (when given), and every INVOICE meter's usage not invoiced yet, up to `usage_to`.
-    pub async fn invoice_lines(&self, config: &BillingConfig, client_id: u64, plan: Option<&Plan>, plan_start: Option<NaiveDate>, usage_to: NaiveDate) -> AuthResult<Vec<Line>> {
+    /// The lines of an invoice for a client: the fee's plan for its period (when given), and every
+    /// INVOICE meter's usage not invoiced yet, up to `usage_to`, on the terms of `plan` (the plan
+    /// the usage was made on).
+    pub async fn invoice_lines(&self, config: &BillingConfig, client_id: u64, fee: Option<&Fee<'_>>, plan: Option<&Plan>, usage_to: NaiveDate) -> AuthResult<Vec<Line>> {
         let mut lines = Vec::new();
-        if let (Some(p), Some(start)) = (plan, plan_start) {
+        if let Some(&Fee { plan: p, start, .. }) = fee {
             if p.invoiced() && p.price_amount.signum() > 0 {
                 let end = period_end(start, &p.period);
                 lines.push(Line {
@@ -329,8 +382,8 @@ impl Internal {
     /// Raises (once) the monthly invoice of a client: the lines, GST, seller and buyer snapshots,
     /// the due date; marks the usage invoiced and publishes `INVOICE_ISSUED`. Nothing for a zero
     /// total. The invoice is paid through `billing/repay` (a Checkout order).
-    pub async fn raise_monthly_invoice(&self, ca: &ContextAuth, config: &BillingConfig, client_id: u64, plan: Option<&Plan>, plan_start: Option<NaiveDate>, usage_to: NaiveDate) -> AuthResult<Option<Rec>> {
-        let lines = self.invoice_lines(config, client_id, plan, plan_start, usage_to).await?;
+    pub async fn raise_monthly_invoice(&self, ca: &ContextAuth, config: &BillingConfig, client_id: u64, fee: Option<Fee<'_>>, plan: Option<&Plan>, usage_to: NaiveDate) -> AuthResult<Option<Rec>> {
+        let lines = self.invoice_lines(config, client_id, fee.as_ref(), plan, usage_to).await?;
         let (base, gst, total) = totals(&lines, config.gst_percentage);
         if total.signum() <= 0 {
             return Ok(None);
@@ -347,7 +400,7 @@ impl Internal {
             .map(str::to_string)
             .or_else(|| buyer.as_ref().and_then(|b| b.name.clone()));
         let s = |v: Option<String>| v.map(Val::Str).unwrap_or(Val::Null);
-        let usage_key = format!("{client_id}:{}:{}:{}", config.app_id, plan_start.map(|d| d.to_string()).unwrap_or_default(), usage_to);
+        let usage_key = period_key(client_id, config.app_id, fee.as_ref(), usage_to);
         let invoice = Rec::new(&INVOICE)
             .with("invoiceNumber", Val::Str(String::new()))
             .with("invoiceDate", Val::Ts(self.auth.clock.utc()))
@@ -366,7 +419,7 @@ impl Internal {
             .with("buyerGstin", s(profile.as_ref().and_then(|p| p.str("gstin")).map(str::to_string)))
             .with("buyerAddress", s(profile.as_ref().and_then(format_address)))
             .with("appId", Val::Id(config.app_id))
-            .with("bundleLabel", s(plan.map(|p| format!("{} plan", p.label))))
+            .with("bundleLabel", s(fee.map(|f| f.plan).or(plan).map(|p| format!("{} plan", p.label))))
             .with("baseAmount", Val::Dec(base))
             .with("gstPercentage", Val::Dec(config.gst_percentage))
             .with("gstAmount", Val::Dec(gst))
