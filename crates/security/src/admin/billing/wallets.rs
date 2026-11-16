@@ -241,7 +241,7 @@ impl Billing<'_> {
                 ("KIND", Val::Str("MONTHLY".into())),
             ])
         };
-        let Some(inv) = self.store.find(&INVOICE, &f).await?.into_iter().next() else { return Ok(None) };
+        let Some(inv) = self.store.find(&INVOICE, &f).await?.into_iter().min_by_key(|i| (i.date_of("dueDate"), i.id())) else { return Ok(None) };
         Ok(Some(
             Obj::new()
                 .put("id", opt(inv.id()))
