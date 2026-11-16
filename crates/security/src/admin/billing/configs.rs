@@ -166,8 +166,20 @@ impl Billing<'_> {
         super::meters::normalise_currency(&mut rec)?;
         super::meters::check_config(&rec)?;
         let Some(saved) = self.create_row(rec).await? else { return Ok(None) };
+        self.stamp_activation(None, &saved).await?;
         self.evict_config(&saved).await?;
         Ok(Some(saved))
+    }
+
+    /// A config saved going from not ACTIVE to ACTIVE records when: clients created before it are
+    /// billed only once they join (V91).
+    async fn stamp_activation(&self, was: Option<&str>, saved: &Rec) -> AuthResult<()> {
+        if saved.str("status") == Some("ACTIVE") && was != Some("ACTIVE") {
+            if let Some(id) = saved.id() {
+                self.internal.billing.mark_config_activated(id).await?;
+            }
+        }
+        Ok(())
     }
 
     /// `AppBillingConfigService.update(entity)`, for `PUT` and (without the authority) `PATCH`.
@@ -179,6 +191,7 @@ impl Billing<'_> {
         let Some(mut target) = self.config_read(ca, id).await? else { return Ok(None) };
         let stored = target.map("paymentGatewayConfig");
         let was = target.str("currency").unwrap_or("").to_string();
+        let was_status = target.str("status").map(str::to_string);
         copy(&mut target, entity, &CONFIG_EDITABLE);
         // An update that leaves the currency out keeps it; one that names it must name a real code.
         if matches!(target.get("currency"), Val::Null) {
@@ -195,6 +208,7 @@ impl Billing<'_> {
         if changed {
             self.follow_currency(id, &currency).await?;
         }
+        self.stamp_activation(was_status.as_deref(), &saved).await?;
         self.evict_config(&saved).await?;
         Ok(Some(saved))
     }

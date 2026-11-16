@@ -519,6 +519,19 @@ pub trait BillingStore: Send + Sync {
     /// A gauge's month-units over [from, to): each day's count above the free quantity divided by
     /// that month's days, summed (times the monthly rate is the amount).
     async fn gauge_month_units(&self, meter_id: u64, client_id: u64, from: NaiveDate, to: NaiveDate, free: Dec) -> AuthResult<Dec>;
+    /// Whether the client was created before the config was last switched on (`ACTIVATED_AT`).
+    /// Such a client is not billed until it joins: it subscribes, buys or is granted credits.
+    async fn client_predates_config(&self, _client_id: u64, _config_id: u64) -> AuthResult<bool> {
+        Ok(false)
+    }
+    /// Stamps the config's `ACTIVATED_AT` (it was just switched on).
+    async fn mark_config_activated(&self, _config_id: u64) -> AuthResult<()> {
+        Ok(())
+    }
+    /// Every ACTIVE wallet plan (the monthly credits of yearly plans).
+    async fn active_wallet_plans(&self) -> AuthResult<Vec<WalletPlan>> {
+        self.wallet_plans_due(NaiveDate::from_ymd_opt(9999, 12, 31).unwrap_or_default()).await
+    }
 }
 
 const CONFIG_COLUMNS: &str = "c.ID, c.CLIENT_ID, c.APP_ID, CAST(c.GST_PERCENTAGE AS CHAR) GST_PERCENTAGE, \
@@ -1122,6 +1135,32 @@ impl BillingStore for Db {
         .fetch_one(&self.pool)
         .await?;
         Ok(s.as_deref().and_then(Dec::parse).unwrap_or(Dec::ZERO).round_down(6))
+    }
+
+    async fn client_predates_config(&self, client_id: u64, config_id: u64) -> AuthResult<bool> {
+        // Compared in SQL: both are TIMESTAMPs of the same server, no zone to get wrong.
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM security_client cl JOIN security_app_billing_config c ON c.ID = ? \
+             WHERE cl.ID = ? AND c.ACTIVATED_AT IS NOT NULL AND cl.CREATED_AT < c.ACTIVATED_AT",
+        )
+        .bind(config_id)
+        .bind(client_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n > 0)
+    }
+
+    async fn mark_config_activated(&self, config_id: u64) -> AuthResult<()> {
+        sqlx::query("UPDATE security_app_billing_config SET ACTIVATED_AT = CURRENT_TIMESTAMP WHERE ID = ? AND STATUS = 'ACTIVE'")
+            .bind(config_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn active_wallet_plans(&self) -> AuthResult<Vec<WalletPlan>> {
+        let sql = format!("SELECT {WALLET_PLAN_COLUMNS} FROM security_wallet_plan WHERE STATUS = 'ACTIVE' ORDER BY ID");
+        sqlx::query(&sql).fetch_all(&self.pool).await?.iter().map(wallet_plan).collect()
     }
 }
 
