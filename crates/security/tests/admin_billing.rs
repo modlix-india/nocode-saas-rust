@@ -1373,7 +1373,7 @@ async fn status_of(w: &World) -> Value {
 #[tokio::test]
 async fn display_statuses() {
     let w = world();
-    assert_eq!(status_of(&w).await, json!({"status": "ACTIVE", "overdue": false}));
+    assert_eq!(status_of(&w).await, json!({"status": "ACTIVE", "overdue": false, "overdueInvoice": null}));
     assert_eq!(w.billing().display_status(&buyer(), Some("nope")).await.unwrap(), json!({"status": "ACTIVE"}));
     w.books.put(wallet("50", "SUSPENDED", 0));
     assert_eq!(status_of(&w).await["status"], "SUSPENDED");
@@ -1403,9 +1403,22 @@ async fn display_statuses() {
     let s = status_of(&w).await;
     assert_eq!((s["status"].as_str(), s.get("threshold")), (Some("ACTIVE"), None));
     assert_eq!(security::jackson::pretty(&s["balance"]), "5");
-    // An unpaid monthly invoice past its due date.
-    w.books.put(invoice(1, C_CLIENT, M_CLIENT, APP, "OVERDUE"));
-    assert_eq!(status_of(&w).await["overdue"], true);
+    // An unpaid monthly invoice past its due date: the oldest one is named, for the banner.
+    let monthly = |id: u64, due: (i32, u32, u32), number: &str, total: &str| {
+        invoice(id, C_CLIENT, M_CLIENT, APP, "OVERDUE")
+            .with("kind", Val::Str("MONTHLY".into()))
+            .with("dueDate", Val::Date(chrono::NaiveDate::from_ymd_opt(due.0, due.1, due.2).unwrap()))
+            .with("invoiceNumber", Val::Str(number.into()))
+            .with("totalAmount", Val::Dec(d(total)))
+            .with("currency", Val::Str("USD".into()))
+    };
+    w.books.put(monthly(2, (2026, 11, 1), "INV/2", "258.42"));
+    w.books.put(monthly(1, (2026, 10, 1), "INV/1", "69.62"));
+    let s = status_of(&w).await;
+    assert_eq!(s["overdue"], true);
+    let o = &s["overdueInvoice"];
+    assert_eq!((o["id"].as_u64(), o["invoiceNumber"].as_str(), o["currency"].as_str(), o["dueDate"].as_str()), (Some(1), Some("INV/1"), Some("USD"), Some("2026-10-01")));
+    assert_eq!(security::jackson::pretty(&o["totalAmount"]), "69.62");
     w.books.put(config_rec("18").with("suspendMode", Val::Str("BLOCK_APP".into())));
     assert_eq!(status_of(&w).await["suspendMode"], "BLOCK_APP");
 }
