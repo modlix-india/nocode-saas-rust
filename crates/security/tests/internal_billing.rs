@@ -1745,25 +1745,36 @@ async fn a_client_from_before_billing_was_switched_on_is_not_billed_until_it_joi
         b.plans.push(free);
         b.predates.push(M_CLIENT);
     }
-    let config = w.b().configs[0].clone();
-    // Meters, AI and status reads leave it alone: no wallet, no plan, no charge.
-    assert!(w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), false).await.unwrap().is_none());
-    let r = w.internal.record(&system(), &use_of("leads", None, "L1")).await.unwrap();
-    assert!(!r.recorded && !r.over_limit, "nothing recorded, and no Free cap applied");
-    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
-    assert!(w.b().wallets.is_empty() && w.b().wallet_plans.is_empty());
-    // Joining (a purchase, a grant, a subscription) creates the wallet but puts it on NO plan: no
-    // Free credit, no Free limits; bought credits pay for AI and messages only.
-    let joined = w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), true).await.unwrap().expect("wallet");
-    assert!(w.b().wallet_plans.is_empty());
-    same(joined.balance, "0");
-    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
-    // A credits meter charges it; what goes on the invoice (counts, invoiced events) does not.
-    w.b().wallets[0].balance = d("10");
-    let r = w.internal.record(&system(), &use_of("leads", None, "L2")).await.unwrap();
-    assert!(r.recorded, "a credits meter still charges a credits-only client");
     w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..counter(22, "deals", "1", "0") });
     w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(11, "users", "USERS", "300", "2") });
+    let config = w.b().configs[0].clone();
+    // Counts, invoiced events and status reads leave it alone: no wallet, no plan, no limits.
+    assert!(w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), false).await.unwrap().is_none());
+    w.internal.charge(&system(), &ChargeRequest { date: Some(today()), action_key: Some(action::USER.into()), ..req("6", action::USER) }).await.unwrap();
+    let r = w.internal.record(&system(), &use_of("deals", None, "D0")).await.unwrap();
+    assert!(!r.recorded && !r.over_limit, "no invoiced event, and no Free cap applied");
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("deals"), None, None).await.unwrap()["allowed"], true);
+    assert!(w.b().wallets.is_empty() && w.b().usage.is_empty());
+    // What is paid from credits needs credits first (Kiran 2026-11-16): it has none yet.
+    let v = w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap();
+    assert_eq!((v["allowed"].as_bool(), v["reason"].as_str()), (Some(false), Some("The wallet is suspended")));
+    // A credit-paid use that gets through anyway is its join: a credits-only wallet (no plan, no Free
+    // credit), charged below zero and suspended.
+    let r = w.internal.record(&system(), &use_of("leads", None, "L1")).await.unwrap();
+    assert!(r.recorded && r.suspended && !r.over_limit);
+    let joined = w.b().wallets[0].clone();
+    assert!(w.b().wallet_plans.is_empty());
+    same(joined.balance, "-1");
+    // Credits bought or granted: it may use them, with no plan limits.
+    {
+        let mut b = w.b();
+        b.wallets[0].balance = d("10");
+        b.wallets[0].status = "ACTIVE".into();
+    }
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
+    let r = w.internal.record(&system(), &use_of("leads", None, "L2")).await.unwrap();
+    assert!(r.recorded, "a credits meter still charges a credits-only client");
+    // What goes on the invoice (counts, invoiced events) still does not.
     let r = w.internal.record(&system(), &use_of("deals", None, "D1")).await.unwrap();
     assert!(!r.recorded, "no invoiced event for a credits-only client");
     w.internal.charge(&system(), &ChargeRequest { date: Some(today()), action_key: Some(action::USER.into()), ..req("6", action::USER) }).await.unwrap();
@@ -1907,4 +1918,40 @@ async fn a_client_from_before_billing_goes_back_to_credits_only_when_its_plan_en
     assert_eq!(b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect::<Vec<_>>(), vec![(31, "ENDED")]);
     same(b.wallets[0].balance, "5");
     assert!(b.txns.is_empty());
+}
+
+#[tokio::test]
+async fn a_capped_plan_refuses_one_more_site() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(12, "sites", "SITES", "29", "1") });
+        let mut free = Plan { is_default: true, ..plan(30, "free", "Free") };
+        free.overrides.insert("sites".into(), MeterOverride { free: Some(d("1")), rate: None, hard_cap: true });
+        b.plans.push(free);
+        b.wallets.push(wallet("1", "ACTIVE", 0));
+        b.wallet_plans.push(on_plan(7, 30, today(), date(2026, 11, 15)));
+    }
+    // No site yet: the first one is allowed.
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
+    // One site on Free (one included): the next is refused.
+    w.b().app_counts.push(((M_CLIENT, "SITE".into()), 1));
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap().as_deref(), Some("The plan's limit is reached"));
+    // A paid plan without a cap: extra sites go on the invoice instead.
+    w.b().wallet_plans[0].plan_id = 31;
+    w.b().plans.push(plan(31, "starter", "Starter"));
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
+    // A client from before the switch-on with no wallet: no limits.
+    {
+        let mut b = w.b();
+        b.wallets.clear();
+        b.wallet_plans.clear();
+        b.predates.push(M_CLIENT);
+    }
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
+    // Billing off: no limits.
+    w.b().predates.clear();
+    w.b().configs[0].status = "INACTIVE".into();
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
 }

@@ -638,7 +638,8 @@ impl Internal {
         }
         let reference = req.reference.clone().filter(|r| !r.trim().is_empty()).unwrap_or_else(crate::admin::billing::wallets::random_uuid);
         let units = Self::units_of(&meter, &req.figures);
-        let Some(wallet) = self.wallet_ready(ca, client_id, app.id, Some(&config), false).await? else { return Ok(RecordResult::nothing()) };
+        // A use paid from credits is a join (credits only for a client from before the switch-on).
+        let Some(wallet) = self.wallet_ready(ca, client_id, app.id, Some(&config), !meter.invoiced()).await? else { return Ok(RecordResult::nothing()) };
         if meter.invoiced() && self.credits_only(&wallet, &config).await? {
             return Ok(RecordResult::nothing());
         }
@@ -807,10 +808,12 @@ impl Internal {
             .find(|m| m.status == "ACTIVE" && (m.key == key || (meter_key.is_none() && m.source == "AI_TOKENS")));
         // No wallet yet (the client's first use): judge by the plan it will land on, the config's
         // default plan, so a new Free client cannot use a premium model or pass a cap once. A client
-        // that existed before billing was switched on is not billed until it joins: no limits.
+        // that existed before billing was switched on has no plan and no limits, but what is paid
+        // from credits (AI, messages) needs credits first: it has none until it buys or is granted
+        // some (Kiran 2026-11-16).
         let wallet = self.billing.wallet(client.id(), app.id).await?;
         if wallet.is_none() && !self.bills_new_wallet(client.id(), Some(&config)).await? {
-            return Ok(yes());
+            return Ok(if meter.is_some_and(|m| !m.invoiced()) { allowed_json(false, Some(WALLET_SUSPENDED_REASON)) } else { yes() });
         }
         let plan = match wallet.as_ref() {
             Some(w) => self.plan_of(w).await?,
@@ -875,6 +878,23 @@ impl Internal {
         Ok(yes())
     }
 
+    /// Why the client may not add one more unit of a gauge the app's plan caps (a site), or `None`
+    /// when it may: no governing ACTIVE config, no ACTIVE meter of that source, or within the
+    /// plan's limit (see [`Self::allowed`]).
+    pub async fn gauge_refusal(&self, app_code: &str, client_id: u64, source: &str) -> AuthResult<Option<String>> {
+        let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(None) };
+        let Some(config) = self.governing_config(app.id, client_id).await? else { return Ok(None) };
+        if !config.is_active() {
+            return Ok(None);
+        }
+        let Some(meter) = self.billing.meters_of_config(config.id).await?.into_iter().find(|m| m.status == "ACTIVE" && m.source == source) else {
+            return Ok(None);
+        };
+        let Some(client) = self.dir().client(client_id).await? else { return Ok(None) };
+        let v = self.allowed(app_code, client.code(), Some(&meter.key), None, None).await?;
+        Ok((v["allowed"] == Value::Bool(false)).then(|| v["reason"].as_str().unwrap_or("The plan's limit is reached").to_string()))
+    }
+
     /// `isAiAllowed`, as nocode-ai asks it.
     pub async fn is_ai_allowed(&self, app_code: &str, client_code: &str) -> AuthResult<bool> {
         Ok(self.allowed(app_code, client_code, None, None, None).await?["allowed"] == Value::Bool(true))
@@ -930,7 +950,9 @@ impl Internal {
             },
         };
         let cost = ai_cost(&rate, req).mul(self.fx(&rate.currency, &config.currency).await?);
-        let Some(wallet) = self.wallet_ready(ca, client.id(), app.id, Some(&config), false).await? else {
+        // AI paid from credits is a join: a client from before the switch-on gets a credits-only
+        // wallet (its call, if the gate let it through, takes it below zero and suspends it).
+        let Some(wallet) = self.wallet_ready(ca, client.id(), app.id, Some(&config), !meter.invoiced()).await? else {
             return Ok(unbilled("the client existed before billing was switched on and has not joined"));
         };
         let plan = self.plan_of(&wallet).await?;

@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use super::service::{forbidden, Billing};
 use crate::data::billing::{terms, BillingConfig, NewLot, Wallet};
-use crate::data::billing_admin::{Find, Rec, Val, WALLET};
+use crate::data::billing_admin::{Find, Rec, Val, INVOICE, WALLET};
 use crate::decimal::Dec;
 use crate::errors::{AuthError, AuthResult};
 use crate::internal::billing::ChargeResult;
@@ -194,8 +194,9 @@ impl Billing<'_> {
     }
 
     /// `getDisplayStatus`: the caller's own wallet on the app (ACTIVE, LOW or SUSPENDED), with
-    /// `overdue` (an unpaid monthly invoice past its due date) and the config's `suspendMode`, so
-    /// the shell knows which banner to show.
+    /// `overdue` (an unpaid monthly invoice past its due date), `overdueInvoice` (the oldest such
+    /// invoice: `id`, `invoiceNumber`, `totalAmount`, `currency`, `dueDate`; null when none) and the
+    /// config's `suspendMode`, so the shell knows which banner to show and which invoice to pay.
     pub async fn display_status(&self, ca: &ContextAuth, app_code: Option<&str>) -> AuthResult<Value> {
         let active = || status_response("ACTIVE", None, None);
         let Some(app) = self.app_by_code(app_code).await? else { return Ok(active()) };
@@ -218,13 +219,38 @@ impl Billing<'_> {
                 }
             }
         };
+        let oldest = if overdue { self.oldest_overdue(client, app.id).await? } else { None };
         if let Value::Object(m) = &mut v {
             m.insert("overdue".into(), Value::Bool(overdue));
+            m.insert("overdueInvoice".into(), oldest.unwrap_or(Value::Null));
             if let Some(c) = &config {
                 m.insert("suspendMode".into(), Value::from(c.suspend_mode.clone()));
             }
         }
         Ok(v)
+    }
+
+    /// The client's oldest OVERDUE monthly invoice on the app, as the shell's banner shows it.
+    async fn oldest_overdue(&self, client: u64, app: u64) -> AuthResult<Option<Value>> {
+        let f = Find {
+            order_by: Some("DUE_DATE"),
+            ..Find::eq(vec![
+                ("CLIENT_ID", Val::Id(client)),
+                ("APP_ID", Val::Id(app)),
+                ("STATUS", Val::Str("OVERDUE".into())),
+                ("KIND", Val::Str("MONTHLY".into())),
+            ])
+        };
+        let Some(inv) = self.store.find(&INVOICE, &f).await?.into_iter().min_by_key(|i| (i.date_of("dueDate"), i.id())) else { return Ok(None) };
+        Ok(Some(
+            Obj::new()
+                .put("id", opt(inv.id()))
+                .put("invoiceNumber", opt(inv.str("invoiceNumber").map(str::to_string)))
+                .put("totalAmount", inv.dec("totalAmount").map(Dec::to_json).unwrap_or(Value::Null))
+                .put("currency", opt(inv.str("currency").map(str::to_string)))
+                .put("dueDate", opt(inv.date_of("dueDate").map(|d| d.to_string())))
+                .build(),
+        ))
     }
 
     /// `getMyTransactions`: a page of the caller's own ledger on the app.
@@ -302,6 +328,9 @@ impl Billing<'_> {
                         Obj::new()
                             .put("meterKey", m.key.as_str())
                             .put("label", m.label.as_str())
+                            .put("unit", m.unit_label.clone().unwrap_or_else(|| m.label.to_lowercase()))
+                            .put("rateUnit", m.rate_unit.as_str())
+                            .put("chargeMode", m.charge_mode.as_str())
                             .put("free", t.free.to_json())
                             .put("rate", t.rate.to_json())
                             .put("hardCap", t.hard_cap.is_some())

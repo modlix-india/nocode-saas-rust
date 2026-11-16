@@ -704,6 +704,9 @@ async fn evict_app_code(s: &AdminState, code: &str) {
     }
 }
 
+/// What a buyer is told when its plan has no room for another website.
+pub const SITE_LIMIT_REACHED: &str = "You have reached the number of websites your plan includes. Upgrade your plan to add more websites.";
+
 /// `AppService.create(entity)`.
 pub async fn create(s: &AdminState, ca: &ContextAuth, mut entity: Row) -> AuthResult<Row> {
     if let Some(code) = entity::str_of(&entity, "appCode") {
@@ -735,6 +738,14 @@ pub async fn create(s: &AdminState, ca: &ContextAuth, mut entity: Row) -> AuthRe
     }
     let code = entity::str_of(&entity, "appCode").unwrap_or("").to_string();
     check_subdomain_free(s, &code).await?;
+    // A site counts against the owner's SiteZump plan: past a capped plan's websites (Free: one),
+    // it is refused here, whichever way it was asked for (blank, template through multi, an agent).
+    if entity::str_of(&entity, "appType") == Some("SITE") {
+        let owner = entity::u64_of(&entity, "clientId").unwrap_or(user_client);
+        if let Some(why) = s.internal.gauge_refusal("sitezump", owner, "SITES").await? {
+            return Err(AuthError::literal(StatusCode::BAD_REQUEST, "SEC.BILLING_LIMIT", SITE_LIMIT_REACHED.to_string()).with_param("reason", why));
+        }
+    }
     entity.insert("createdBy".into(), Value::Null);
     let id = entity::insert(&s.db, &APP, &entity).await?;
     let created = read(s, id).await?;
