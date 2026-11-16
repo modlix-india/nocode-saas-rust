@@ -1752,11 +1752,24 @@ async fn a_client_from_before_billing_was_switched_on_is_not_billed_until_it_joi
     assert!(!r.recorded && !r.over_limit, "nothing recorded, and no Free cap applied");
     assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
     assert!(w.b().wallets.is_empty() && w.b().wallet_plans.is_empty());
-    // Joining (a subscription, a purchase, a grant) creates the wallet on the default plan.
+    // Joining (a purchase, a grant, a subscription) creates the wallet but puts it on NO plan: no
+    // Free credit, no Free limits; bought credits pay for AI and messages only.
     let joined = w.internal.wallet_ready(&system(), M_CLIENT, APP, Some(&config), true).await.unwrap().expect("wallet");
-    assert_eq!(w.b().wallet_plans.iter().map(|p| p.plan_id).collect::<Vec<_>>(), vec![30]);
-    same(joined.balance, "1");
-    // From then on it is billed like any client: the Free cap now holds.
+    assert!(w.b().wallet_plans.is_empty());
+    same(joined.balance, "0");
+    assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], true);
+    // A credits meter charges it; what goes on the invoice (counts, invoiced events) does not.
+    w.b().wallets[0].balance = d("10");
+    let r = w.internal.record(&system(), &use_of("leads", None, "L2")).await.unwrap();
+    assert!(r.recorded, "a credits meter still charges a credits-only client");
+    w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..counter(22, "deals", "1", "0") });
+    w.b().meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(11, "users", "USERS", "300", "2") });
+    let r = w.internal.record(&system(), &use_of("deals", None, "D1")).await.unwrap();
+    assert!(!r.recorded, "no invoiced event for a credits-only client");
+    w.internal.charge(&system(), &ChargeRequest { date: Some(today()), action_key: Some(action::USER.into()), ..req("6", action::USER) }).await.unwrap();
+    assert!(w.b().usage.is_empty(), "no user count for a credits-only client");
+    // Subscribing puts it on a plan; from then on it is billed like any client.
+    w.b().wallet_plans.push(on_plan(joined.id, 30, today(), date(2026, 11, 15)));
     assert_eq!(w.internal.allowed("crm", "BUS", Some("leads"), None, None).await.unwrap()["allowed"], false);
     // A client created after the switch-on starts on the default plan at its first use.
     w.b().predates.clear();
@@ -1873,4 +1886,25 @@ async fn a_plan_ending_on_free_still_bills_its_last_months_extras() {
     assert_eq!(b.invoices.len(), 1, "the last paid month is invoiced");
     assert_eq!(b.invoices[0].dec("totalAmount").unwrap().to_string(), "2613.18");
     assert!(b.lines.iter().all(|l| l.str("kind") == Some("METER")));
+}
+
+#[tokio::test]
+async fn a_client_from_before_billing_goes_back_to_credits_only_when_its_plan_ends() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.plans.push(Plan { is_default: true, included_tokens: d("1"), included_recurring: false, ..plan(30, "free", "Free") });
+        b.plans.push(Plan { price_amount: d("219"), ..plan(31, "starter", "Starter") });
+        b.wallets.push(wallet("5", "ACTIVE", 0));
+        // Subscribed to Starter, then cancelled: no renewal.
+        b.wallet_plans.push(WalletPlan { auto_renew: false, ..on_plan(7, 31, date(2026, 9, 15), today()) });
+        b.predates.push(M_CLIENT);
+    }
+    w.internal.renew_plans(&system(), today()).await.unwrap();
+    let b = w.b();
+    // Starter ended, and no Free plan follows (no Free limits, no Free credit): credits only.
+    assert_eq!(b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect::<Vec<_>>(), vec![(31, "ENDED")]);
+    same(b.wallets[0].balance, "5");
+    assert!(b.txns.is_empty());
 }

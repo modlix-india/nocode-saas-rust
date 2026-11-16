@@ -180,7 +180,13 @@ impl Internal {
         let Some(wallet) = self.billing.wallet_by_id(wp.wallet_id).await? else { return Ok(()) };
         let Some(current) = self.billing.plan_by_id(wp.plan_id).await? else { return Ok(()) };
         let Some(config) = self.billing.config_by_id(current.config_id).await? else { return Ok(()) };
-        let default = self.billing.plans_of_config(config.id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE");
+        // A client from before the config was switched on falls back to credits only (no plan),
+        // never onto the default plan's limits (Kiran 2026-11-16).
+        let default = if self.billing.client_predates_config(wallet.client_id, config.id).await? {
+            None
+        } else {
+            self.billing.plans_of_config(config.id).await?.into_iter().find(|p| p.is_default && p.status == "ACTIVE")
+        };
         // What comes next: a chosen next plan, the same plan, or (not renewing) the default.
         let next = match wp.next_plan_id {
             Some(id) => self.billing.plan_by_id(id).await?,
@@ -190,6 +196,10 @@ impl Internal {
         let start = wp.period_end;
         let Some(next) = next.filter(|p| p.status == "ACTIVE") else {
             self.billing.set_wallet_plan(&WalletPlan { status: "ENDED".into(), ..wp.clone() }).await?;
+            // No plan follows: the ended period's extras are still invoiced.
+            if current.invoiced() {
+                self.raise_monthly_invoice(ca, &config, wallet.client_id, None, Some(&current), start).await?;
+            }
             return Ok(());
         };
         if !next.invoiced() && next.price_tokens.signum() > 0 {

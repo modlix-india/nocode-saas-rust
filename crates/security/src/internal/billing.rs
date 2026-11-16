@@ -337,16 +337,19 @@ impl Internal {
     ///
     /// `join` is the client's own step into billing (subscribing, buying or being granted
     /// credits). Without it no wallet is created for a client that existed before the config was
-    /// switched on: meters, AI and status reads leave such a client unbilled.
+    /// switched on: meters, AI and status reads leave such a client unbilled. With it such a client
+    /// gets a wallet but NO plan (Kiran 2026-11-16): bought or granted credits pay for AI and
+    /// messages only, the default plan's limits never start; subscribing puts it on a plan.
     pub async fn wallet_ready(&self, ca: &ContextAuth, client_id: u64, app_id: u64, config: Option<&BillingConfig>, join: bool) -> AuthResult<Option<Wallet>> {
         if let Some(w) = self.billing.wallet(client_id, app_id).await? {
             return Ok(Some(w));
         }
-        if !join && !self.bills_new_wallet(client_id, config).await? {
+        let predates = !self.bills_new_wallet(client_id, config).await?;
+        if predates && !join {
             return Ok(None);
         }
         let Some((wallet, created)) = self.billing.create_wallet(client_id, app_id).await? else { return Ok(None) };
-        if created {
+        if created && !predates {
             if let Some(c) = config {
                 if let Some(plan) = self.default_plan(c.id).await? {
                     let today = self.auth.clock.local().date();
@@ -356,6 +359,13 @@ impl Internal {
             }
         }
         Ok(Some(wallet))
+    }
+
+    /// A wallet of a client from before the config was switched on that joined without a plan
+    /// (bought or was granted credits): only what is paid from credits applies to it (AI,
+    /// messages). No counts, no monthly invoice, no limits, until it subscribes.
+    pub async fn credits_only(&self, wallet: &Wallet, config: &BillingConfig) -> AuthResult<bool> {
+        Ok(self.billing.wallet_plan(wallet.id).await?.is_none() && self.billing.client_predates_config(wallet.client_id, config.id).await?)
     }
 
     /// Starts a plan period for the wallet and gives the plan's credits: every month of the period
@@ -541,6 +551,9 @@ impl Internal {
         }
         let app = self.dir().app_by_id(app_id).await?;
         let Some(mut wallet) = self.wallet_ready(ca, billed, app_id, Some(&config), false).await? else { return Ok(ChargeResult::none()) };
+        if self.credits_only(&wallet, &config).await? {
+            return Ok(ChargeResult::none());
+        }
         let plan = self.plan_of(&wallet).await?;
         let mut last = ChargeResult::none();
         for m in meters {
@@ -626,6 +639,9 @@ impl Internal {
         let reference = req.reference.clone().filter(|r| !r.trim().is_empty()).unwrap_or_else(crate::admin::billing::wallets::random_uuid);
         let units = Self::units_of(&meter, &req.figures);
         let Some(wallet) = self.wallet_ready(ca, client_id, app.id, Some(&config), false).await? else { return Ok(RecordResult::nothing()) };
+        if meter.invoiced() && self.credits_only(&wallet, &config).await? {
+            return Ok(RecordResult::nothing());
+        }
         let plan = self.plan_of(&wallet).await?;
         let t = terms(&meter, plan.as_ref());
         let today = self.auth.clock.local().date();
@@ -938,6 +954,9 @@ impl Internal {
             .put("cost", serde_json::from_str::<Value>(&cost.to_string()).unwrap_or(Value::Null))
             .build();
         if meter.invoiced() {
+            if self.credits_only(&wallet, &config).await? {
+                return Ok(unbilled("an invoiced AI meter does not bill a credits-only client"));
+            }
             let u = Usage {
                 client_id: client.id(),
                 app_id: app.id,
