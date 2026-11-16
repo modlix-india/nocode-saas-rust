@@ -1102,6 +1102,28 @@ async fn read_by_id_is_for_the_parties_and_system() {
     let e = b.invoice_read(&stranger(), INVOICE_ID).await.unwrap_err();
     assert_eq!((e.status(), e.message()), (StatusCode::FORBIDDEN, "Permission/Role the invoice is required to use this operation".into()));
     assert_eq!(b.invoice_read(&system(), 1).await.unwrap_err().status(), StatusCode::NOT_FOUND);
+    // A bundle invoice has no lines.
+    assert!(b.invoice_read(&buyer(), INVOICE_ID).await.unwrap().get("lines").is_none());
+}
+
+#[tokio::test]
+async fn a_monthly_invoice_is_read_with_its_lines_in_order() {
+    let w = world();
+    w.books.put(invoice(INVOICE_ID, C_CLIENT, M_CLIENT, APP, "PENDING").with("kind", Val::Str("MONTHLY".into())));
+    let line = |id: u64, order: i64, text: &str| {
+        Rec::new(&security::data::billing_admin::INVOICE_LINE)
+            .with("id", Val::Id(id))
+            .with("invoiceId", Val::Id(INVOICE_ID))
+            .with("kind", Val::Str("METER".into()))
+            .with("description", Val::Str(text.into()))
+            .with("displayOrder", Val::Int(order))
+    };
+    w.books.put(line(2, 3, "Sites above 1 free"));
+    w.books.put(line(1, 0, "Starter plan"));
+    w.books.put(line(3, 1, "Users above 5 free").with("invoiceId", Val::Id(INVOICE_ID + 1)));
+    let v = w.billing().invoice_read(&buyer(), INVOICE_ID).await.unwrap();
+    let texts: Vec<&str> = v["lines"].as_array().unwrap().iter().map(|l| l["description"].as_str().unwrap()).collect();
+    assert_eq!(texts, ["Starter plan", "Sites above 1 free"]);
 }
 
 #[tokio::test]

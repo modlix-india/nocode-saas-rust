@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use super::service::{forbidden, Billing};
 use crate::condition::{Cond, Filter};
-use crate::data::billing_admin::{Find, Rec, Val, INVOICE, PROFILE};
+use crate::data::billing_admin::{Find, Rec, Val, INVOICE, INVOICE_LINE, PROFILE};
 use crate::errors::AuthResult;
 use crate::events::EventMessage;
 use crate::jackson::{opt, Obj};
@@ -111,7 +111,16 @@ impl Billing<'_> {
         let inv = self.read(&INVOICE, Some(id)).await?;
         self.assert_can_see_invoice(ca, &inv)?;
         let payments = self.store.payments_of(&[id]).await?;
-        Ok(invoice_json(&inv, method_by_invoice(&payments).get(&id).map(String::as_str)))
+        let mut v = invoice_json(&inv, method_by_invoice(&payments).get(&id).map(String::as_str));
+        // A monthly invoice carries its lines (plan fee, each meter's usage), for the buyer pages.
+        if inv.str("kind") == Some("MONTHLY") {
+            let f = Find { order_by: Some("DISPLAY_ORDER"), ..Find::eq(vec![("INVOICE_ID", Val::Id(id))]) };
+            let lines: Vec<Value> = self.store.find(&INVOICE_LINE, &f).await?.iter().map(Rec::to_json).collect();
+            if let Value::Object(m) = &mut v {
+                m.insert("lines".into(), Value::Array(lines));
+            }
+        }
+        Ok(v)
     }
 
     /// `readDocumentKeys`: download keys for the invoice and receipt PDFs, under the invoice's
