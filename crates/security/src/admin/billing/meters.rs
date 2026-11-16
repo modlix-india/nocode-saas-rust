@@ -328,7 +328,7 @@ impl Billing<'_> {
         if governing.as_ref().map(|g| g.id) != Some(config.id) {
             return Err(forbidden("this plan (it is not offered to your client)"));
         }
-        let Some(wallet) = self.internal.wallet_ready(ca, client, config.app_id, Some(&config)).await? else { return Err(params_not_found("wallet")) };
+        let Some(wallet) = self.internal.wallet_ready(ca, client, config.app_id, Some(&config), true).await? else { return Err(params_not_found("wallet")) };
         if let Some(wp) = self.internal.billing.wallet_plan(wallet.id).await? {
             if wp.plan_id == plan.id && wp.auto_renew {
                 return Ok(Obj::new().put("planId", plan.id).put("unchanged", true).build());
@@ -338,9 +338,12 @@ impl Billing<'_> {
         if !plan.invoiced() && plan.price_tokens.signum() > 0 && !self.internal.pay_plan_from_wallet(ca, &wallet, &config, &plan, today).await? {
             return Err(invalid("Not enough credits for this plan: add credits first."));
         }
+        // Usage so far was made on the plan the client is leaving: priced on its terms.
+        let before = self.internal.plan_of(&wallet).await?;
         let wp = self.internal.put_on_plan(ca, &wallet, &config, &plan, today, false).await?;
         let invoice = if plan.invoiced() {
-            self.internal.raise_monthly_invoice(ca, &config, client, Some(&plan), Some(today), today).await?
+            let fee = crate::internal::billing_cycle::Fee { plan: &plan, start: today, wallet_plan_id: wp };
+            self.internal.raise_monthly_invoice(ca, &config, client, Some(fee), before.as_ref(), today).await?
         } else {
             None
         };
