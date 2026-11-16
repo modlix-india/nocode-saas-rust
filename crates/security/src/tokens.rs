@@ -73,12 +73,14 @@ impl Auth {
         Ok(())
     }
 
-    /// `TokenService.deleteTokens`: every token of the user evicted, then deleted.
+    /// `TokenService.deleteTokens`: every token of the user deleted, then evicted. The rows go
+    /// first so a request racing the logout cannot cache a token again from the database after
+    /// its eviction; the evictions go out in one pipelined batch (a user can hold thousands of
+    /// tokens, and one round trip per token kept Logout waiting for minutes).
     async fn revoke_all(&self, user_id: u64) -> AuthResult<()> {
-        for t in self.dir.store.token_strings_of_user(user_id).await? {
-            self.dir.caches.service.evict_everywhere(caches::TOKEN, &t).await;
-        }
+        let tokens = self.dir.store.token_strings_of_user(user_id).await?;
         self.dir.store.delete_tokens_of_user(user_id).await?;
+        self.dir.caches.service.evict_many_everywhere(caches::TOKEN, &tokens).await;
         Ok(())
     }
 

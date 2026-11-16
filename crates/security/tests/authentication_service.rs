@@ -74,6 +74,24 @@ mod revoke_tests {
     }
 
     #[tokio::test]
+    async fn revoke_sso_logout_evicts_every_cached_token_of_the_user() {
+        let h = harness();
+        let r = sys_req("appbuilder");
+        let a = sign_in(&h, &r, &pw("kirangrandhi", "Pass@1234")).await;
+        let b = sign_in(&h, &r, &pw("kirangrandhi", "Pass@1234")).await;
+        let (sa, sb) = (with_bearer(&r, &a), with_bearer(&r, &b));
+        let ca = h.auth.context(&sa).await.unwrap();
+        assert!(h.auth.context(&sb).await.unwrap().authenticated);
+        assert!(h.auth.dir.caches.tokens.get(caches::TOKEN, &a).await.is_some());
+        assert!(h.auth.dir.caches.tokens.get(caches::TOKEN, &b).await.is_some());
+        h.auth.revoke(true, &sa, &ca).await.unwrap();
+        assert!(h.auth.dir.caches.tokens.get(caches::TOKEN, &a).await.is_none());
+        assert!(h.auth.dir.caches.tokens.get(caches::TOKEN, &b).await.is_none());
+        assert!(!h.auth.context(&sa).await.unwrap().authenticated);
+        assert!(!h.auth.context(&sb).await.unwrap().authenticated);
+    }
+
+    #[tokio::test]
     async fn revoke_cookie_token_extracts_from_cookie() {
         let h = harness();
         let r = sys_req("appbuilder");
