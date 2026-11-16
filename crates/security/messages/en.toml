@@ -920,6 +920,14 @@ audience = "system admins"
 
 # ---- Billing ----
 
+[SEC.BILLING_LIMIT]
+status = 400
+params = ["reason"]
+text = "You have reached the number of websites your plan includes"
+action = "Upgrade your plan to add more websites."
+java_text = "$"
+when = "A new site past the owner's SiteZump plan limit (Free: one website). The reason holds the billing gate's answer (Rust only, 2026-11-16)."
+
 [SEC.BILLING_INVALID]
 status = 400
 params = ["reason"]
