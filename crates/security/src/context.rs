@@ -247,7 +247,49 @@ impl Auth {
         if users.len() != 1 {
             return Ok(None);
         }
-        let user = Arc::new(users.remove(0));
+        self.found_for(users.remove(0), client_code, app_code).await
+    }
+
+    /// Every non-deleted user for this identity under the client, up to `limit`, each with what
+    /// `find_user` returns for one; an account whose client (or one above it) is not active is
+    /// left out instead of failing the whole lookup. The anonymous password reset uses it, where
+    /// the login alone does not say which organisation's account is meant (CXZ-1921).
+    pub async fn find_users(
+        &self,
+        user_name: Option<&str>,
+        client_code: Option<&str>,
+        app_code: Option<&str>,
+        identifier: IdentifierType,
+        limit: u32,
+    ) -> AuthResult<Vec<Found>> {
+        let q = UserQuery {
+            user_name: user_name.map(str::to_string),
+            identifier,
+            user_id: None,
+            client_code: client_code.map(str::to_string),
+            app_code: app_code.map(str::to_string),
+            active_client_only: false,
+            limit,
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for user in self.dir.store.users_by(&q).await? {
+            if !seen.insert(user.id) {
+                continue;
+            }
+            match self.found_for(user, client_code, app_code).await {
+                Ok(Some(f)) => out.push(f),
+                Ok(None) => {}
+                Err(e) if e.status() == StatusCode::BAD_REQUEST => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    }
+
+    /// The user with their authorities for the app, their (active) client and the request's.
+    async fn found_for(&self, user: crate::model::User, client_code: Option<&str>, app_code: Option<&str>) -> AuthResult<Option<Found>> {
+        let user = Arc::new(user);
         let authorities = self.dir.user_authorities(app_code, user.client_id, user.id).await?;
         let user_client = self.dir.active_client(user.client_id).await?;
         let url_client = if Some(user_client.code()) == client_code {
