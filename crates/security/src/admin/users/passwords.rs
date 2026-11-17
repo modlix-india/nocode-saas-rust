@@ -903,6 +903,86 @@ mod live {
         fx.finish().await;
     }
 
+    /// CXZ-1921, option 2: the reset needs no lookup of the organisations first. A login that has
+    /// accounts in two organisations is found by the login alone, each account has a code of its
+    /// own, and the code typed says which account is meant.
+    #[tokio::test]
+    async fn the_code_finds_the_account() {
+        use crate::store::NewOtp;
+        let Some(fx) = fx().await else { return };
+        let (s, c, m) = (&fx.s, fx.c, fx.m);
+        let a = fx.user(c, "ra").await;
+        let e = fx.user(m, "re").await;
+        // One login (the e-mail), two accounts in two organisations.
+        sqlx::query("UPDATE security_user SET EMAIL_ID = ? WHERE ID = ?").bind(a.email_id.clone()).bind(e.id).execute(&s.db.pool).await.unwrap();
+        let on_c = anonymous(c, "ZZRUL");
+        let login = AuthRequest { user_name: a.email_id.clone(), ..Default::default() };
+        let said = |r: AuthResult<Vec<Value>>| r.map_err(|e| (e.status(), e.message()));
+        let wrong = said(s.reset_otp_accounts(&on_c, &AuthRequest { otp: Some("333333".into()), ..login.clone() }).await);
+        assert_eq!(wrong.unwrap_err().0, StatusCode::FORBIDDEN);
+
+        // Each account has its own code (made here, so the codes are known). A code is good for two
+        // uses (verify, then reset), so it is made again where the test spends it.
+        let app = s.dir().app_by_code("appbuilder").await.unwrap().unwrap().id;
+        let seed = |codes: [(u64, &'static str); 2]| {
+            let (email, s) = (a.email_id.clone(), s.clone());
+            async move {
+                let now = chrono::Utc::now().naive_utc();
+                for (user, code) in codes {
+                    let hash = bcrypt::hash_with_result(code, 10).unwrap().format_for_version(bcrypt::Version::TwoA);
+                    s.dir()
+                        .store
+                        .insert_otp(&NewOtp {
+                            app_id: app,
+                            user_id: Some(user),
+                            email_id: email.clone(),
+                            phone_number: None,
+                            purpose: OtpPurpose::PasswordReset.name().into(),
+                            target_type: "EMAIL".into(),
+                            unique_code: hash,
+                            expires_at: now + chrono::Duration::days(2),
+                            ip_address: None,
+                            created_at: now,
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let ids = |r: Vec<Value>| r.iter().filter_map(|v| v["userId"].as_u64()).collect::<Vec<_>>();
+        let with = |otp: &str| AuthRequest { otp: Some(otp.into()), ..login.clone() };
+        assert_eq!(ids(s.reset_otp_accounts(&on_c, &with("111111")).await.unwrap()), [a.id]);
+        assert_eq!(ids(s.reset_otp_accounts(&on_c, &with("222222")).await.unwrap()), [e.id]);
+        assert_eq!(said(s.reset_otp_accounts(&on_c, &with("333333")).await), said(s.reset_otp_accounts(&on_c, &AuthRequest { user_name: Some("nobody@example.invalid".into()), otp: Some("333333".into()), ..Default::default() }).await));
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let picked = s.reset_otp_accounts(&on_c, &with("222222")).await.unwrap();
+        assert_eq!(picked[0]["client"]["code"], json!(s.dir().client(m).await.unwrap().unwrap().code));
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        // The old bool answer, and a user id that narrows to one account, still work.
+        assert!(s.reset_otp_verify(&on_c, &with("111111")).await.unwrap());
+        let by_id = AuthRequest { user_id: Some(e.id), ..with("222222") };
+        assert!(s.reset_otp_verify(&on_c, &by_id).await.unwrap());
+        assert_eq!(s.reset_otp_verify(&on_c, &AuthRequest { user_id: Some(e.id), ..with("111111") }).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+
+        // reset/password with no user id: the code opens one account, and that one changes.
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let reset = |otp: &str, pw: &str| PasswordBody::read(json!({"authRequest": {"userName": login.user_name, "otp": otp}, "newPassword": pw}).as_object().unwrap()).unwrap();
+        assert!(s.reset_password(&on_c, &reset("222222", "Zz@24680z")).await.unwrap());
+        assert_eq!(s.reset_password(&on_c, &reset("333333", "Zz@24680y")).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+
+        // A blank login is no one, not everyone under the client: nothing is sent, nothing is found.
+        let before = fx.count("SELECT COUNT(*) FROM security_otp").await;
+        assert!(!s.reset_otp_generate(&on_c, &AuthRequest::default(), None, None).await.unwrap());
+        assert!(!s.reset_otp_generate(&on_c, &AuthRequest { user_name: Some("  ".into()), ..Default::default() }, None, None).await.unwrap());
+        assert_eq!(fx.count("SELECT COUNT(*) FROM security_otp").await, before);
+        assert_eq!(said(s.reset_otp_accounts(&on_c, &AuthRequest { otp: Some("111111".into()), ..Default::default() }).await).unwrap_err().0, StatusCode::FORBIDDEN);
+
+        // The code request reaches both accounts of the login (a code each).
+        assert!(s.reset_otp_generate(&on_c, &login, None, None).await.unwrap());
+        fx.finish().await;
+    }
+
     /// 2026-10-30: another user of one's own client. A Sales-Member-style caller (no User_UPDATE)
     /// is refused, even for the Owner; User_UPDATE reaches the caller's reporting line only; an
     /// Owner or a Client_MANAGE holder reaches the whole client; one's own change is as before.
