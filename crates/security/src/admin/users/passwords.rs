@@ -86,6 +86,11 @@ impl PasswordBody {
     }
 }
 
+/// The new secret of a request: present and not blank, or `new_password_missing`.
+fn new_secret(b: &PasswordBody) -> AuthResult<&str> {
+    b.new_password.as_deref().filter(|p| !p.trim().is_empty()).ok_or_else(|| forbidden("new_password_missing", &[]))
+}
+
 fn npe(what: &str) -> AuthError {
     AuthError::internal(format!("Cannot invoke \"{what}\""))
 }
@@ -278,9 +283,7 @@ impl Admin {
     /// `isPasswordUpdatable`: a new secret, unlike the old (when changing one's own), within the
     /// policy of the client signed in from.
     async fn password_updatable(&self, ca: &ContextAuth, u: &User, b: &PasswordBody, is_update: bool) -> AuthResult<()> {
-        let Some(new) = b.new_password.as_deref().filter(|p| !p.trim().is_empty()) else {
-            return Err(forbidden("new_password_missing", &[]));
-        };
+        let new = new_secret(b)?;
         if is_update && u.id == ca.user.id() {
             if !Self::secret_matches(u, b.old_password.as_deref(), b.pass_type)? {
                 return Err(forbidden("old_password_match", &[]));
@@ -289,7 +292,13 @@ impl Admin {
                 return Err(forbidden("new_password_match", &[]));
             }
         }
-        self.validate_secret_policy(ca.logged_in_from_client_id.unwrap_or_default(), ca.url_app_code.as_deref(), Some(u.id), b.pass_type, new).await
+        self.validate_new_secret(ca, Some(u.id), b.pass_type, new).await
+    }
+
+    /// The policy check of `isPasswordUpdatable`; `user_id` is `None` for a login that names no user
+    /// (the anonymous reset runs it for those too, so they get the policy answers a real user gets).
+    async fn validate_new_secret(&self, ca: &ContextAuth, user_id: Option<u64>, t: Option<SecretType>, new: &str) -> AuthResult<()> {
+        self.validate_secret_policy(ca.logged_in_from_client_id.unwrap_or_default(), ca.url_app_code.as_deref(), user_id, t, new).await
     }
 
     /// `updatePasswordInternal`: the secret set, logged, announced, tokens evicted, user
@@ -361,7 +370,8 @@ impl Admin {
         Ok(crate::context::check_user_and_client(&found, client).then_some(found))
     }
 
-    /// `generateOtpResetPassword`.
+    /// `generateOtpResetPassword`: true when a code was sent. The route does not return this to the
+    /// anonymous caller (see [`Admin::reset_otp_generate_masked`]); tests and internal callers do.
     pub async fn reset_otp_generate(&self, ca: &ContextAuth, r: &AuthRequest, ip: Option<String>, x_debug: Option<String>) -> AuthResult<bool> {
         let Some(found) = self.reset_user(ca, r).await? else { return Ok(false) };
         let Some(app) = (match ca.url_app_code.as_deref() {
@@ -389,29 +399,70 @@ impl Admin {
         self.auth.generate_otp_internal(&req).await
     }
 
-    /// `verifyOtpResetPassword`.
+    /// `POST users/reset/password/otp/generate` as the anonymous forgot-password flow sees it
+    /// (CXZ-1921, 2026-11-17): the answer is `true` for every login, one that exists or not, one
+    /// that has an e-mail or not. The lookup and the sending run after the answer is on its way,
+    /// so the time it takes does not tell either; a failure is logged, not returned. A signed-in
+    /// caller is still refused (that does not depend on the login).
+    pub async fn reset_otp_generate_masked(self: &std::sync::Arc<Self>, ca: &ContextAuth, r: &AuthRequest, ip: Option<String>, x_debug: Option<String>) -> AuthResult<bool> {
+        if ca.authenticated {
+            return Err(forbidden("pass_reset_req_error", &[]));
+        }
+        let (s, ca, r) = (self.clone(), ca.clone(), r.clone());
+        tokio::spawn(async move {
+            match s.reset_otp_generate(&ca, &r, ip, x_debug).await {
+                Ok(true) => {}
+                Ok(false) => tracing::debug!("password reset code not sent (no such user, app or address)"),
+                Err(e) => tracing::warn!("password reset code failed: {}", e.message()),
+            }
+        });
+        Ok(true)
+    }
+
+    /// `verifyOtpResetPassword`: every refusal is the same 403 `user_password_invalid`, whether the
+    /// login exists, has asked for a code, or the code is wrong or expired (CXZ-1921: it was a 200
+    /// `false` for a login that does not exist). A missing `otp` counts as a wrong one.
     pub async fn reset_otp_verify(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<bool> {
-        let Some(found) = self.reset_user(ca, r).await? else { return Ok(false) };
-        if self.auth.verify_user_otp(ca.url_app_code.as_deref(), found.user.id, OtpPurpose::PasswordReset, r.otp.as_deref()).await? {
+        let found = self.reset_user(ca, r).await?;
+        if self.reset_code_ok(ca, found.as_ref(), r, true).await? {
             return Ok(true);
         }
         Err(forbidden("user_password_invalid", &["OTP", "OTP"]))
     }
 
-    /// `resetPassword`.
+    /// Checks the reset code of `found` (spending it when `spend`, else only looking); with no user
+    /// the lookup still runs against a user id that has no codes (the same queries and bcrypt
+    /// work), and the answer is `false`.
+    async fn reset_code_ok(&self, ca: &ContextAuth, found: Option<&crate::context::Found>, r: &AuthRequest, spend: bool) -> AuthResult<bool> {
+        let otp = Some(r.otp.as_deref().unwrap_or(""));
+        let id = found.map_or(0, |f| f.user.id);
+        let (app, purpose) = (ca.url_app_code.as_deref(), OtpPurpose::PasswordReset);
+        let ok = if spend { self.auth.verify_user_otp(app, id, purpose, otp).await? } else { self.auth.peek_user_otp(app, id, purpose, otp).await? };
+        Ok(ok && found.is_some())
+    }
+
+    /// `resetPassword`. Order (CXZ-1921): what is the same for every login first (the new secret
+    /// and its policy, then the code, looked at but not spent), and the account only after a good
+    /// code (its state, its password history), so a login that does not exist and a real one with a
+    /// wrong code get the same answers. The code is spent last: a refusal that needs the account
+    /// (inactive, a password used before) leaves it unspent, as it did.
     pub async fn reset_password(&self, ca: &ContextAuth, b: &PasswordBody) -> AuthResult<bool> {
         let Some(r) = b.auth_request.as_ref() else {
             return Err(AuthError::internal("Cannot invoke \"com.fincity.security.model.AuthenticationRequest.getOtp()\" because \"authRequest\" is null"));
         };
-        let Some(found) = self.reset_user(ca, r).await? else {
-            return Ok(false);
-        };
+        let found = self.reset_user(ca, r).await?;
+        self.validate_new_secret(ca, None, b.pass_type, new_secret(b)?).await?;
+        let wrong_code = || forbidden("user_password_invalid", &["OTP", "OTP"]);
+        if !self.reset_code_ok(ca, found.as_ref(), r, false).await? {
+            return Err(wrong_code());
+        }
+        let Some(found) = found else { return Err(wrong_code()) };
         if found.user.status_code != "ACTIVE" {
             return Err(forbidden("user_not_active", &[]));
         }
         self.password_updatable(ca, &found.user, b, false).await?;
-        if !self.auth.verify_user_otp(ca.url_app_code.as_deref(), found.user.id, OtpPurpose::PasswordReset, r.otp.as_deref()).await? {
-            return Err(forbidden("user_password_invalid", &["OTP", "OTP"]));
+        if !self.reset_code_ok(ca, Some(&found), r, true).await? {
+            return Err(wrong_code());
         }
         let t = b.pass_type.ok_or_else(|| npe("java.util.Map.get(Object)"))?;
         self.set_user_secret(ca, &found.user, found.user.id, t, b.new_password.as_deref().unwrap_or(""), true).await
@@ -505,7 +556,7 @@ crate::web_route_path!(update_theirs, AdminState, "/users/{userId}/updatePasswor
 
 r!(reset_generate, "/users/reset/password/otp/generate", false, |s, r, ca| {
     let body = auth_body(&r.body)?;
-    Ok(json(&Value::Bool(s.reset_otp_generate(&ca, &body, r.info.remote_host(), r.info.header("x-debug")).await?)))
+    Ok(json(&Value::Bool(s.reset_otp_generate_masked(&ca, &body, r.info.remote_host(), r.info.header("x-debug")).await?)))
 });
 
 r!(reset_verify, "/users/reset/password/otp/verify", false, |s, r, ca| {
@@ -672,6 +723,19 @@ mod policy_tests {
         assert_eq!(secret_change_rule(&caller(5, 1, "SYSTEM", "SYS", &[]), 6, 1), SecretGate::NoAuthority);
     }
 
+    /// CXZ-1921: the code request answers `true` before it looks the login up (so it cannot tell
+    /// whether one exists, nor how long sending takes); a signed-in caller is refused as before.
+    /// Offline: the lookup the spawned task makes fails against the dead pool and is only logged.
+    #[tokio::test]
+    async fn code_request_answers_true_and_refuses_a_signed_in_caller() {
+        use crate::admin::users::testkit::{anonymous, sys};
+        let s = offline();
+        let who = AuthRequest { user_name: Some("nobody@example.invalid".into()), ..Default::default() };
+        assert!(s.reset_otp_generate_masked(&anonymous(1, "SYSTEM"), &who, None, None).await.unwrap());
+        let e = s.reset_otp_generate_masked(&sys(), &who, None, None).await.unwrap_err();
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+    }
+
     #[test]
     fn secret_types() {
         assert_eq!((SecretType::Otp.constant(), SecretType::Pin.display(), SecretType::Otp.display()), ("OTP", "PIN", "OTP"));
@@ -730,10 +794,34 @@ mod live {
         assert!(!s.reset_otp_generate(&no_app, &who(&a), None, None).await.unwrap());
         no_app.url_app_code = None;
         assert!(!s.reset_otp_generate(&no_app, &who(&a), None, None).await.unwrap());
-        assert!(!s.reset_otp_verify(&on_c, &nobody).await.unwrap());
         let wrong = AuthRequest { otp: Some("000000".into()), ..who(&a) };
         assert_eq!(s.reset_otp_verify(&on_c, &wrong).await.unwrap_err().status(), StatusCode::FORBIDDEN);
-        assert!(!s.reset_password(&on_c, &body(json!({"authRequest": {"userName": "nobody@example.invalid"}, "newPassword": PASSWORD}))).await.unwrap());
+
+        // CXZ-1921 (2026-11-17): a login that does not exist is answered exactly like a real one
+        // with a wrong code, on all three reset routes; nothing tells the two apart.
+        let said = |r: AuthResult<bool>| r.map_err(|e| (e.status(), e.message(), e.code()));
+        let unknown_wrong = AuthRequest { otp: Some("000000".into()), ..nobody.clone() };
+        let (real, ghost) = (said(s.reset_otp_verify(&on_c, &wrong).await), said(s.reset_otp_verify(&on_c, &unknown_wrong).await));
+        assert_eq!(real, ghost);
+        assert_eq!(real.unwrap_err().0, StatusCode::FORBIDDEN);
+        // A missing code is a wrong code, for both (it was a 500 for a user with a pending code).
+        assert_eq!(said(s.reset_otp_verify(&on_c, &who(&a)).await), said(s.reset_otp_verify(&on_c, &nobody).await));
+        let reset_of = |name: Option<String>| body(json!({"authRequest": {"userName": name, "otp": "000000"}, "newPassword": "Zz@24680a"}));
+        let (real, ghost) = (said(s.reset_password(&on_c, &reset_of(a.email_id.clone())).await), said(s.reset_password(&on_c, &reset_of(Some("nobody@example.invalid".into()))).await));
+        assert_eq!(real, ghost);
+        assert_eq!(real.unwrap_err().1, crate::errors::message("user_password_invalid", &["OTP", "OTP"]));
+        // The new secret is judged first, the same for both: a blank one.
+        let blank_of = |name: Option<String>| body(json!({"authRequest": {"userName": name, "otp": "000000"}, "newPassword": " "}));
+        let (real, ghost) = (said(s.reset_password(&on_c, &blank_of(a.email_id.clone())).await), said(s.reset_password(&on_c, &blank_of(Some("nobody@example.invalid".into()))).await));
+        assert_eq!(real, ghost);
+        assert_eq!(real.unwrap_err().1, crate::errors::message("new_password_missing", &[]));
+        // The code request: `true` for a login that exists, one that does not, and an unknown app.
+        let mut no_app = on_c.clone();
+        no_app.url_app_code = Some("nosuchapp".into());
+        for (ca, r) in [(&on_c, who(&a)), (&on_c, nobody.clone()), (&no_app, who(&a))] {
+            assert!(s.reset_otp_generate_masked(ca, &r, None, None).await.unwrap());
+        }
+        assert_eq!(s.reset_otp_generate_masked(&sys, &who(&a), None, None).await.unwrap_err().status(), StatusCode::FORBIDDEN);
         s.user_set_active(&sys, Some(b.id), false).await.unwrap();
         let inactive = body(json!({"authRequest": {"userName": b.email_id, "otp": "1"}, "newPassword": PASSWORD}));
         let r = s.reset_password(&on_c, &inactive).await;
