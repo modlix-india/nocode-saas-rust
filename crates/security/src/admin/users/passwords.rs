@@ -161,6 +161,13 @@ fn secret_change_rule(ca: &ContextAuth, target: u64, target_client: u64) -> Secr
     SecretGate::SubOrg
 }
 
+/// Most accounts of one login the anonymous reset looks at (and sends a code to).
+const RESET_ACCOUNTS_MAX: u32 = 5;
+
+/// The number of bcrypt checks a reset code check always runs, side by side (see
+/// `Auth::peek_users_otp`).
+const RESET_CODE_SLOTS: usize = 3;
+
 /// The special characters `ClientPasswordPolicyService` accepts.
 const SPECIAL: &str = "~`!@#$%^&*()_-+={}[]|\\/:;\"'<>,.?";
 
@@ -358,22 +365,35 @@ impl Admin {
         self.set_user_secret(ca, &u, ca.user.id(), t, b.new_password.as_deref().unwrap_or(""), false).await
     }
 
-    /// `findNonDeletedUserNClient` + `checkUserAndClient` for the anonymous reset routes.
-    async fn reset_user(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<Option<crate::context::Found>> {
+    /// `findNonDeletedUserNClient` + `checkUserAndClient` for the anonymous reset routes, widened
+    /// (CXZ-1921, option 2): with a `userId` it is that one account as before; with only the login
+    /// as typed it is every account of that login under the URL's client (up to
+    /// [`RESET_ACCOUNTS_MAX`]), so the page needs no lookup of the organisations first and the code
+    /// that is typed later says which account is meant. No login, or one that matches nothing, is
+    /// an empty list, never an error.
+    async fn reset_accounts(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<Vec<crate::context::Found>> {
         if ca.authenticated {
             return Err(forbidden("pass_reset_req_error", &[]));
         }
         let client = ca.url_client_code.as_deref();
-        let Some(found) = self.auth.find_user(r.user_name.as_deref(), r.user_id, client, None, r.identifier(), false).await? else {
-            return Ok(None);
+        let accounts = if r.user_id.is_some() {
+            self.auth.find_user(r.user_name.as_deref(), r.user_id, client, None, r.identifier(), false).await?.into_iter().collect()
+        } else {
+            // Without a user id a blank login must not mean "everyone under the client".
+            let named = r.user_name.as_deref().is_some_and(|n| !n.trim().is_empty() && n != crate::model::PLACEHOLDER);
+            if !named {
+                return Ok(Vec::new());
+            }
+            self.auth.find_users(r.user_name.as_deref(), client, None, r.identifier(), RESET_ACCOUNTS_MAX).await?
         };
-        Ok(crate::context::check_user_and_client(&found, client).then_some(found))
+        Ok(accounts.into_iter().filter(|f| crate::context::check_user_and_client(f, client)).collect())
     }
 
-    /// `generateOtpResetPassword`: true when a code was sent. The route does not return this to the
+    /// `generateOtpResetPassword`: true when a code was sent, to each account of the login (each
+    /// with a code of its own, to its own address). The route does not return this to the
     /// anonymous caller (see [`Admin::reset_otp_generate_masked`]); tests and internal callers do.
     pub async fn reset_otp_generate(&self, ca: &ContextAuth, r: &AuthRequest, ip: Option<String>, x_debug: Option<String>) -> AuthResult<bool> {
-        let Some(found) = self.reset_user(ca, r).await? else { return Ok(false) };
+        let accounts = self.reset_accounts(ca, r).await?;
         let Some(app) = (match ca.url_app_code.as_deref() {
             Some(a) => self.dir().app_by_code(a).await?,
             None => None,
@@ -381,22 +401,32 @@ impl Admin {
             return Ok(false);
         };
         let blank_none = |s: Option<String>| s.filter(|v| !v.trim().is_empty());
-        let req = OtpRequest {
-            client_id: found.url_client.id(),
-            client_code: found.url_client.code.clone(),
-            app_id: app.id,
-            app_code: app.app_code.clone(),
-            app_name: app.app_name.clone(),
-            user_id: Some(found.user.id),
-            email_id: blank_none(found.user.email_id()),
-            phone_number: blank_none(found.user.phone_number()),
-            ip_address: ip,
-            resend: r.resend,
-            x_debug,
-            purpose: Some(OtpPurpose::PasswordReset),
-            with_user: true,
-        };
-        self.auth.generate_otp_internal(&req).await
+        let (mut any, mut first_error) = (false, None);
+        for found in accounts {
+            let req = OtpRequest {
+                client_id: found.url_client.id(),
+                client_code: found.url_client.code.clone(),
+                app_id: app.id,
+                app_code: app.app_code.clone(),
+                app_name: app.app_name.clone(),
+                user_id: Some(found.user.id),
+                email_id: blank_none(found.user.email_id()),
+                phone_number: blank_none(found.user.phone_number()),
+                ip_address: ip.clone(),
+                resend: r.resend,
+                x_debug: x_debug.clone(),
+                purpose: Some(OtpPurpose::PasswordReset),
+                with_user: true,
+            };
+            match self.auth.generate_otp_internal(&req).await {
+                Ok(sent) => any |= sent,
+                Err(e) => first_error = first_error.or(Some(e)),
+            }
+        }
+        match (any, first_error) {
+            (false, Some(e)) => Err(e),
+            _ => Ok(any),
+        }
     }
 
     /// `POST users/reset/password/otp/generate` as the anonymous forgot-password flow sees it
@@ -419,49 +449,73 @@ impl Admin {
         Ok(true)
     }
 
-    /// `verifyOtpResetPassword`: every refusal is the same 403 `user_password_invalid`, whether the
-    /// login exists, has asked for a code, or the code is wrong or expired (CXZ-1921: it was a 200
-    /// `false` for a login that does not exist). A missing `otp` counts as a wrong one.
-    pub async fn reset_otp_verify(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<bool> {
-        let found = self.reset_user(ca, r).await?;
-        if self.reset_code_ok(ca, found.as_ref(), r, true).await? {
-            return Ok(true);
-        }
-        Err(forbidden("user_password_invalid", &["OTP", "OTP"]))
+    /// The accounts of `accounts` whose latest reset code is the one in `r` (looked at, not
+    /// spent), as indexes into `accounts`. The same bcrypt work runs for any number of accounts,
+    /// none included ([`RESET_CODE_SLOTS`]).
+    async fn reset_code_matches(&self, ca: &ContextAuth, accounts: &[crate::context::Found], r: &AuthRequest) -> AuthResult<Vec<usize>> {
+        let ids: Vec<u64> = accounts.iter().map(|f| f.user.id).collect();
+        let hits = self.auth.peek_users_otp(ca.url_app_code.as_deref(), &ids, OtpPurpose::PasswordReset, r.otp.as_deref(), RESET_CODE_SLOTS).await?;
+        Ok(hits.iter().enumerate().filter(|(_, h)| **h).map(|(i, _)| i).collect())
     }
 
-    /// Checks the reset code of `found` (spending it when `spend`, else only looking); with no user
-    /// the lookup still runs against a user id that has no codes (the same queries and bcrypt
-    /// work), and the answer is `false`.
-    async fn reset_code_ok(&self, ca: &ContextAuth, found: Option<&crate::context::Found>, r: &AuthRequest, spend: bool) -> AuthResult<bool> {
-        let otp = Some(r.otp.as_deref().unwrap_or(""));
-        let id = found.map_or(0, |f| f.user.id);
-        let (app, purpose) = (ca.url_app_code.as_deref(), OtpPurpose::PasswordReset);
-        let ok = if spend { self.auth.verify_user_otp(app, id, purpose, otp).await? } else { self.auth.peek_user_otp(app, id, purpose, otp).await? };
-        Ok(ok && found.is_some())
+    /// Spends the check of the code on each matched account (what `verify` has always done).
+    async fn reset_code_spend(&self, ca: &ContextAuth, accounts: &[crate::context::Found], hits: &[usize], r: &AuthRequest) -> AuthResult<bool> {
+        let mut ok = false;
+        for i in hits {
+            ok |= self.auth.verify_user_otp(ca.url_app_code.as_deref(), accounts[*i].user.id, OtpPurpose::PasswordReset, Some(r.otp.as_deref().unwrap_or(""))).await?;
+        }
+        Ok(ok)
+    }
+
+    /// `verifyOtpResetPassword`: every refusal is the same 403 `user_password_invalid`, whether the
+    /// login exists, has asked for a code, or the code is wrong or expired (CXZ-1921: it was a 200
+    /// `false` for a login that does not exist). A missing `otp` counts as a wrong one. With no
+    /// `userId` the code is tried against every account of the login.
+    pub async fn reset_otp_verify(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<bool> {
+        self.reset_otp_accounts(ca, r).await.map(|_| true)
+    }
+
+    /// `verify` for a page that has no list of organisations: the same check as
+    /// [`Admin::reset_otp_verify`], and for a good code the accounts it opens, `[{userId, client}]`
+    /// (usually one; several only when their codes are the same, as with a constant code). A wrong
+    /// code is the same 403 for every login, so nothing is told before the code is proven.
+    pub async fn reset_otp_accounts(&self, ca: &ContextAuth, r: &AuthRequest) -> AuthResult<Vec<Value>> {
+        let accounts = self.reset_accounts(ca, r).await?;
+        let hits = self.reset_code_matches(ca, &accounts, r).await?;
+        if !hits.is_empty() && self.reset_code_spend(ca, &accounts, &hits, r).await? {
+            return Ok(hits
+                .iter()
+                .map(|i| {
+                    let f = &accounts[*i];
+                    Obj::new().put("userId", f.user.id).put("client", client_json(&f.user_client, &ClientExtras::default())).build()
+                })
+                .collect());
+        }
+        Err(forbidden("user_password_invalid", &["OTP", "OTP"]))
     }
 
     /// `resetPassword`. Order (CXZ-1921): what is the same for every login first (the new secret
     /// and its policy, then the code, looked at but not spent), and the account only after a good
     /// code (its state, its password history), so a login that does not exist and a real one with a
     /// wrong code get the same answers. The code is spent last: a refusal that needs the account
-    /// (inactive, a password used before) leaves it unspent, as it did.
+    /// (inactive, a password used before) leaves it unspent, as it did. Without a `userId` the
+    /// code must open exactly one account of the login; with several it is refused (the page
+    /// names the account after `verify`).
     pub async fn reset_password(&self, ca: &ContextAuth, b: &PasswordBody) -> AuthResult<bool> {
         let Some(r) = b.auth_request.as_ref() else {
             return Err(AuthError::internal("Cannot invoke \"com.fincity.security.model.AuthenticationRequest.getOtp()\" because \"authRequest\" is null"));
         };
-        let found = self.reset_user(ca, r).await?;
+        let accounts = self.reset_accounts(ca, r).await?;
         self.validate_new_secret(ca, None, b.pass_type, new_secret(b)?).await?;
         let wrong_code = || forbidden("user_password_invalid", &["OTP", "OTP"]);
-        if !self.reset_code_ok(ca, found.as_ref(), r, false).await? {
-            return Err(wrong_code());
-        }
-        let Some(found) = found else { return Err(wrong_code()) };
+        let hits = self.reset_code_matches(ca, &accounts, r).await?;
+        let [hit] = hits[..] else { return Err(wrong_code()) };
+        let found = &accounts[hit];
         if found.user.status_code != "ACTIVE" {
             return Err(forbidden("user_not_active", &[]));
         }
         self.password_updatable(ca, &found.user, b, false).await?;
-        if !self.reset_code_ok(ca, Some(&found), r, true).await? {
+        if !self.reset_code_spend(ca, &accounts, &hits, r).await? {
             return Err(wrong_code());
         }
         let t = b.pass_type.ok_or_else(|| npe("java.util.Map.get(Object)"))?;
@@ -561,6 +615,11 @@ r!(reset_generate, "/users/reset/password/otp/generate", false, |s, r, ca| {
 
 r!(reset_verify, "/users/reset/password/otp/verify", false, |s, r, ca| {
     let body = auth_body(&r.body)?;
+    // `?accounts=true` (CXZ-1921): a good code answers the accounts it opens instead of `true`.
+    let with_accounts = matches!(r.params.get("accounts").map(|v| v.trim().to_lowercase()).as_deref(), Some("true" | "on" | "yes" | "1"));
+    if with_accounts {
+        return Ok(json(&Value::Array(s.reset_otp_accounts(&ca, &body).await?)));
+    }
     Ok(json(&Value::Bool(s.reset_otp_verify(&ca, &body).await?)))
 });
 
@@ -841,6 +900,86 @@ mod live {
         assert_eq!(st, StatusCode::OK);
         let picker = s.find_user_clients(&AuthRequest::default(), None, Some("ZZRUL".into())).await.unwrap();
         assert!(!picker.iter().any(|v| v["userId"] == e.id));
+        fx.finish().await;
+    }
+
+    /// CXZ-1921, option 2: the reset needs no lookup of the organisations first. A login that has
+    /// accounts in two organisations is found by the login alone, each account has a code of its
+    /// own, and the code typed says which account is meant.
+    #[tokio::test]
+    async fn the_code_finds_the_account() {
+        use crate::store::NewOtp;
+        let Some(fx) = fx().await else { return };
+        let (s, c, m) = (&fx.s, fx.c, fx.m);
+        let a = fx.user(c, "ra").await;
+        let e = fx.user(m, "re").await;
+        // One login (the e-mail), two accounts in two organisations.
+        sqlx::query("UPDATE security_user SET EMAIL_ID = ? WHERE ID = ?").bind(a.email_id.clone()).bind(e.id).execute(&s.db.pool).await.unwrap();
+        let on_c = anonymous(c, "ZZRUL");
+        let login = AuthRequest { user_name: a.email_id.clone(), ..Default::default() };
+        let said = |r: AuthResult<Vec<Value>>| r.map_err(|e| (e.status(), e.message()));
+        let wrong = said(s.reset_otp_accounts(&on_c, &AuthRequest { otp: Some("333333".into()), ..login.clone() }).await);
+        assert_eq!(wrong.unwrap_err().0, StatusCode::FORBIDDEN);
+
+        // Each account has its own code (made here, so the codes are known). A code is good for two
+        // uses (verify, then reset), so it is made again where the test spends it.
+        let app = s.dir().app_by_code("appbuilder").await.unwrap().unwrap().id;
+        let seed = |codes: [(u64, &'static str); 2]| {
+            let (email, s) = (a.email_id.clone(), s.clone());
+            async move {
+                let now = chrono::Utc::now().naive_utc();
+                for (user, code) in codes {
+                    let hash = bcrypt::hash_with_result(code, 10).unwrap().format_for_version(bcrypt::Version::TwoA);
+                    s.dir()
+                        .store
+                        .insert_otp(&NewOtp {
+                            app_id: app,
+                            user_id: Some(user),
+                            email_id: email.clone(),
+                            phone_number: None,
+                            purpose: OtpPurpose::PasswordReset.name().into(),
+                            target_type: "EMAIL".into(),
+                            unique_code: hash,
+                            expires_at: now + chrono::Duration::days(2),
+                            ip_address: None,
+                            created_at: now,
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let ids = |r: Vec<Value>| r.iter().filter_map(|v| v["userId"].as_u64()).collect::<Vec<_>>();
+        let with = |otp: &str| AuthRequest { otp: Some(otp.into()), ..login.clone() };
+        assert_eq!(ids(s.reset_otp_accounts(&on_c, &with("111111")).await.unwrap()), [a.id]);
+        assert_eq!(ids(s.reset_otp_accounts(&on_c, &with("222222")).await.unwrap()), [e.id]);
+        assert_eq!(said(s.reset_otp_accounts(&on_c, &with("333333")).await), said(s.reset_otp_accounts(&on_c, &AuthRequest { user_name: Some("nobody@example.invalid".into()), otp: Some("333333".into()), ..Default::default() }).await));
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let picked = s.reset_otp_accounts(&on_c, &with("222222")).await.unwrap();
+        assert_eq!(picked[0]["client"]["code"], json!(s.dir().client(m).await.unwrap().unwrap().code));
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        // The old bool answer, and a user id that narrows to one account, still work.
+        assert!(s.reset_otp_verify(&on_c, &with("111111")).await.unwrap());
+        let by_id = AuthRequest { user_id: Some(e.id), ..with("222222") };
+        assert!(s.reset_otp_verify(&on_c, &by_id).await.unwrap());
+        assert_eq!(s.reset_otp_verify(&on_c, &AuthRequest { user_id: Some(e.id), ..with("111111") }).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+
+        // reset/password with no user id: the code opens one account, and that one changes.
+        seed([(a.id, "111111"), (e.id, "222222")]).await;
+        let reset = |otp: &str, pw: &str| PasswordBody::read(json!({"authRequest": {"userName": login.user_name, "otp": otp}, "newPassword": pw}).as_object().unwrap()).unwrap();
+        assert!(s.reset_password(&on_c, &reset("222222", "Zz@24680z")).await.unwrap());
+        assert_eq!(s.reset_password(&on_c, &reset("333333", "Zz@24680y")).await.unwrap_err().status(), StatusCode::FORBIDDEN);
+
+        // A blank login is no one, not everyone under the client: nothing is sent, nothing is found.
+        let before = fx.count("SELECT COUNT(*) FROM security_otp").await;
+        assert!(!s.reset_otp_generate(&on_c, &AuthRequest::default(), None, None).await.unwrap());
+        assert!(!s.reset_otp_generate(&on_c, &AuthRequest { user_name: Some("  ".into()), ..Default::default() }, None, None).await.unwrap());
+        assert_eq!(fx.count("SELECT COUNT(*) FROM security_otp").await, before);
+        assert_eq!(said(s.reset_otp_accounts(&on_c, &AuthRequest { otp: Some("111111".into()), ..Default::default() }).await).unwrap_err().0, StatusCode::FORBIDDEN);
+
+        // The code request reaches both accounts of the login (a code each).
+        assert!(s.reset_otp_generate(&on_c, &login, None, None).await.unwrap());
         fx.finish().await;
     }
 
