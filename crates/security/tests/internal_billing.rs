@@ -721,14 +721,16 @@ async fn low_balance_fires_once_on_the_downward_crossing() {
 }
 
 #[tokio::test]
-async fn no_alert_when_already_notified_or_already_below() {
+async fn no_alert_when_already_notified_but_once_when_it_starts_below() {
     let w = world();
     alerting(&w, "420", "ACTIVE", 1, Some("400"));
     assert!(!w.internal.charge(&system(), &req("1", action::USER)).await.unwrap().low_balance_crossed);
+    assert!(w.events.events.lock().unwrap().is_empty());
+    // Already under the threshold and never warned (a small Free grant): the first debit warns, once.
     let w = world();
     alerting(&w, "390", "ACTIVE", 0, Some("400"));
-    assert!(!w.internal.charge(&system(), &req("1", action::USER)).await.unwrap().low_balance_crossed);
-    assert!(w.events.events.lock().unwrap().is_empty());
+    assert!(w.internal.charge(&system(), &req("1", action::USER)).await.unwrap().low_balance_crossed);
+    assert_eq!(w.event_names(), vec![WALLET_LOW_BALANCE.to_string()]);
 }
 
 #[tokio::test]

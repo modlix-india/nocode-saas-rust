@@ -285,12 +285,12 @@ pub struct DebitOutcome {
 
 /// The decisions of a debit: crossing the low-balance threshold (once, until a credit resets it),
 /// and going below zero for the first time.
-pub fn debit_outcome(wallet: &Wallet, config: Option<&BillingConfig>, before: Dec, after: Dec) -> DebitOutcome {
+pub fn debit_outcome(wallet: &Wallet, config: Option<&BillingConfig>, _before: Dec, after: Dec) -> DebitOutcome {
     let threshold = wallet.alert_threshold.or_else(|| config.and_then(|c| c.low_balance_threshold));
+    // The first debit that leaves the balance under the threshold, once until the next credit resets
+    // the flag; a wallet that starts under it (a small Free grant) is warned on its first debit too.
     let low_cross = threshold.is_some_and(|t| {
-        before.cmp_value(&t) != std::cmp::Ordering::Less
-            && after.cmp_value(&t) == std::cmp::Ordering::Less
-            && wallet.low_balance_notified.unwrap_or(0) == 0
+        after.cmp_value(&t) == std::cmp::Ordering::Less && wallet.low_balance_notified.unwrap_or(0) == 0
     });
     let now_negative = after.signum() < 0;
     DebitOutcome { low_cross, now_negative, newly_suspended: now_negative && !wallet.suspended() }
@@ -1216,9 +1216,15 @@ mod tests {
         let w = Wallet { balance: d("10.0000"), status: "ACTIVE".into(), ..Default::default() };
         let c = BillingConfig { low_balance_threshold: Some(d("5.0000")), ..Default::default() };
         assert_eq!(debit_outcome(&w, Some(&c), d("10"), d("4")), DebitOutcome { low_cross: true, now_negative: false, newly_suspended: false });
-        assert_eq!(debit_outcome(&w, Some(&c), d("4"), d("-1")), DebitOutcome { low_cross: false, now_negative: true, newly_suspended: true });
+        // Already under the threshold and never warned (a 1-credit Free grant under a threshold of 2):
+        // the first debit warns, and going below zero in the same debit warns and suspends.
+        assert_eq!(debit_outcome(&w, Some(&c), d("4"), d("-1")), DebitOutcome { low_cross: true, now_negative: true, newly_suspended: true });
+        assert!(debit_outcome(&w, Some(&c), d("1"), d("0.98")).low_cross);
         let notified = Wallet { low_balance_notified: Some(1), ..w.clone() };
         assert!(!debit_outcome(&notified, Some(&c), d("10"), d("4")).low_cross);
+        assert!(!debit_outcome(&notified, Some(&c), d("4"), d("-1")).low_cross);
+        // Above the threshold after the debit: no warning.
+        assert!(!debit_outcome(&w, Some(&c), d("10"), d("6")).low_cross);
         let own = Wallet { alert_threshold: Some(d("20")), ..w.clone() };
         assert!(debit_outcome(&own, Some(&c), d("25"), d("15")).low_cross);
         let suspended = Wallet { status: "SUSPENDED".into(), ..w };
