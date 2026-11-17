@@ -39,6 +39,8 @@ pub const SCALE: u32 = 6;
 
 /// The `allowed` refusals nocode-ai tells apart (it words its own message for each).
 pub const WALLET_SUSPENDED_REASON: &str = "The wallet is suspended";
+/// The apps clients build with and pay in: the hosting gate never swaps them.
+pub const BUILDER_APPS: [&str; 2] = ["appbuilder", "sitezump"];
 pub const INVOICE_OVERDUE_REASON: &str = "An invoice is overdue";
 pub const MODEL_NOT_IN_PLAN_REASON: &str = "The plan does not include this AI model";
 /// AI model rates are in US dollars; each app bills in its own config's currency. The platform
@@ -283,12 +285,12 @@ pub struct DebitOutcome {
 
 /// The decisions of a debit: crossing the low-balance threshold (once, until a credit resets it),
 /// and going below zero for the first time.
-pub fn debit_outcome(wallet: &Wallet, config: Option<&BillingConfig>, before: Dec, after: Dec) -> DebitOutcome {
+pub fn debit_outcome(wallet: &Wallet, config: Option<&BillingConfig>, _before: Dec, after: Dec) -> DebitOutcome {
     let threshold = wallet.alert_threshold.or_else(|| config.and_then(|c| c.low_balance_threshold));
+    // The first debit that leaves the balance under the threshold, once until the next credit resets
+    // the flag; a wallet that starts under it (a small Free grant) is warned on its first debit too.
     let low_cross = threshold.is_some_and(|t| {
-        before.cmp_value(&t) != std::cmp::Ordering::Less
-            && after.cmp_value(&t) == std::cmp::Ordering::Less
-            && wallet.low_balance_notified.unwrap_or(0) == 0
+        after.cmp_value(&t) == std::cmp::Ordering::Less && wallet.low_balance_notified.unwrap_or(0) == 0
     });
     let now_negative = after.signum() < 0;
     DebitOutcome { low_cross, now_negative, newly_suspended: now_negative && !wallet.suspended() }
@@ -1028,10 +1030,13 @@ impl Internal {
         })
     }
 
-    /// Whether the app is served for the URL's client, or the configured suspend app and client:
-    /// when the builder wallet (appbuilder for apps; sitezump, else appbuilder, for sites) is
-    /// suspended, or when the app's own governing config blocks the app and the client's wallet is
-    /// suspended or it has an overdue invoice.
+    /// Whether the app is served for the URL's client, or the configured suspend app and client.
+    /// Only a config in BLOCK_APP mode, with a suspend app and client named, ever swaps an app; it
+    /// does so when the client's wallet under it is suspended (credits below zero) or the client
+    /// has an overdue invoice for its app. A builder app is never swapped (the client must still
+    /// reach it to pay). The app's own governing config is checked first; then the builder's (appbuilder
+    /// for apps; sitezump, else appbuilder, for sites), the first builder the client has a wallet
+    /// or an overdue invoice in deciding.
     pub async fn hosting(&self, url_app_code: &str, url_client_code: &str) -> AuthResult<Value> {
         let pass = || hosting_json(false, Some(url_app_code), Some(url_client_code));
         if url_client_code.trim().is_empty() || url_client_code.eq_ignore_ascii_case("SYSTEM") || url_app_code.trim().is_empty() {
@@ -1039,32 +1044,42 @@ impl Internal {
         }
         let Some(client) = self.client_by_code(url_client_code).await? else { return Ok(pass()) };
         let Some(app) = self.dir().app_by_code(url_app_code).await? else { return Ok(pass()) };
-        let serve = |config: &BillingConfig| match (config.suspend_app_code.as_deref(), config.suspend_client_code.as_deref()) {
-            (Some(a), Some(c)) if !a.trim().is_empty() && !c.trim().is_empty() => Some(hosting_json(true, Some(a), Some(c))),
-            _ => None,
-        };
+        if BUILDER_APPS.iter().any(|b| app.app_code.eq_ignore_ascii_case(b)) {
+            return Ok(pass());
+        }
         // The app's own terms first.
-        if let Some(config) = self.governing_config(app.id, client.id()).await? {
-            if config.is_active() && config.blocks_app() {
-                let suspended = self.billing.wallet(client.id(), app.id).await?.is_some_and(|w| w.suspended());
-                if suspended || self.billing.has_overdue_invoice(client.id(), app.id).await? {
-                    if let Some(v) = serve(&config) {
-                        return Ok(v);
-                    }
-                }
-            }
+        if let Some(v) = self.blocked_under(app.id, client.id()).await? {
+            return Ok(v);
         }
         let builders: &[&str] = if app.app_type.as_deref() == Some("SITE") { &["sitezump", "appbuilder"] } else { &["appbuilder"] };
         for b in builders {
             let Some(builder) = self.dir().app_by_code(b).await? else { continue };
-            let Some(w) = self.billing.wallet(client.id(), builder.id).await? else { continue };
-            if !w.suspended() {
-                return Ok(pass());
+            let has_wallet = self.billing.wallet(client.id(), builder.id).await?.is_some();
+            if !has_wallet && !self.billing.has_overdue_invoice(client.id(), builder.id).await? {
+                continue;
             }
-            let Some(config) = self.governing_config(builder.id, client.id()).await? else { return Ok(pass()) };
-            return Ok(serve(&config).unwrap_or_else(pass));
+            return Ok(self.blocked_under(builder.id, client.id()).await?.unwrap_or_else(pass));
         }
         Ok(pass())
+    }
+
+    /// The suspend target when the client's governing config for the app is ACTIVE, in BLOCK_APP
+    /// mode, names a suspend app and client, and the client's wallet for the app is suspended or
+    /// it has an overdue invoice for it.
+    async fn blocked_under(&self, app_id: u64, client_id: u64) -> AuthResult<Option<Value>> {
+        let Some(config) = self.governing_config(app_id, client_id).await? else { return Ok(None) };
+        if !(config.is_active() && config.blocks_app()) {
+            return Ok(None);
+        }
+        let (Some(a), Some(c)) = (config.suspend_app_code.as_deref(), config.suspend_client_code.as_deref()) else { return Ok(None) };
+        if a.trim().is_empty() || c.trim().is_empty() {
+            return Ok(None);
+        }
+        let suspended = self.billing.wallet(client_id, app_id).await?.is_some_and(|w| w.suspended());
+        if suspended || self.billing.has_overdue_invoice(client_id, app_id).await? {
+            return Ok(Some(hosting_json(true, Some(a), Some(c))));
+        }
+        Ok(None)
     }
 
     /// Security's gauges for one window.
@@ -1201,9 +1216,15 @@ mod tests {
         let w = Wallet { balance: d("10.0000"), status: "ACTIVE".into(), ..Default::default() };
         let c = BillingConfig { low_balance_threshold: Some(d("5.0000")), ..Default::default() };
         assert_eq!(debit_outcome(&w, Some(&c), d("10"), d("4")), DebitOutcome { low_cross: true, now_negative: false, newly_suspended: false });
-        assert_eq!(debit_outcome(&w, Some(&c), d("4"), d("-1")), DebitOutcome { low_cross: false, now_negative: true, newly_suspended: true });
+        // Already under the threshold and never warned (a 1-credit Free grant under a threshold of 2):
+        // the first debit warns, and going below zero in the same debit warns and suspends.
+        assert_eq!(debit_outcome(&w, Some(&c), d("4"), d("-1")), DebitOutcome { low_cross: true, now_negative: true, newly_suspended: true });
+        assert!(debit_outcome(&w, Some(&c), d("1"), d("0.98")).low_cross);
         let notified = Wallet { low_balance_notified: Some(1), ..w.clone() };
         assert!(!debit_outcome(&notified, Some(&c), d("10"), d("4")).low_cross);
+        assert!(!debit_outcome(&notified, Some(&c), d("4"), d("-1")).low_cross);
+        // Above the threshold after the debit: no warning.
+        assert!(!debit_outcome(&w, Some(&c), d("10"), d("6")).low_cross);
         let own = Wallet { alert_threshold: Some(d("20")), ..w.clone() };
         assert!(debit_outcome(&own, Some(&c), d("25"), d("15")).low_cross);
         let suspended = Wallet { status: "SUSPENDED".into(), ..w };
