@@ -58,6 +58,8 @@ struct Books {
     instructions: Vec<(String, Instruction)>,
     app_counts: Vec<((u64, String), i64)>,
     user_counts: Vec<((u64, u64), i64)>,
+    /// (user, app) pairs that already hold a profile of the app.
+    in_app: Vec<(u64, u64)>,
     rates: Vec<AiRate>,
     settings: HashMap<String, String>,
     invoices: Vec<Rec>,
@@ -358,6 +360,9 @@ impl BillingStore for FakeBilling {
             return Err(AuthError::internal("count failed"));
         }
         Ok(b.user_counts.iter().find(|(k, _)| *k == (client_id, app_id)).map(|(_, n)| *n).unwrap_or(0))
+    }
+    async fn user_in_app(&self, user_id: u64, app_id: u64) -> AuthResult<bool> {
+        Ok(self.b.lock().unwrap().in_app.contains(&(user_id, app_id)))
     }
     async fn ai_rates(&self) -> AuthResult<Vec<AiRate>> {
         Ok(self.b.lock().unwrap().rates.clone())
@@ -959,6 +964,34 @@ async fn a_wallet_plan_renews_from_the_wallet_or_lapses_to_the_default() {
     let statuses: Vec<(u64, &str)> = b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect();
     assert_eq!(statuses, vec![(31, "ENDED"), (30, "ACTIVE")]);
     assert!(b.debits.is_empty());
+}
+
+#[tokio::test]
+async fn nothing_renews_or_gives_credits_while_the_config_is_inactive() {
+    let w = world();
+    let yearly = Plan { period: "YEAR".into(), included_tokens: d("30"), included_recurring: true, ..plan(33, "growth-y", "Growth yearly") };
+    {
+        let mut b = w.b();
+        b.configs.push(BillingConfig { status: "INACTIVE".into(), ..config() });
+        b.plans.push(Plan { is_default: true, ..plan(30, "free", "Free") });
+        b.plans.push(Plan { payment_mode: "WALLET".into(), price_tokens: d("100"), ..plan(31, "pro", "Pro") });
+        b.plans.push(yearly);
+        b.wallets.push(wallet("500", "ACTIVE", 0));
+        b.wallet_plans.push(on_plan(7, 31, date(2026, 9, 15), today()));
+        b.wallet_plans.push(on_plan(7, 33, date(2026, 1, 31), date(2027, 1, 31)));
+    }
+    w.internal.renew_plans(&system(), today()).await.unwrap();
+    w.internal.give_monthly_plan_credits(&system(), date(2026, 3, 5)).await.unwrap();
+    {
+        let b = w.b();
+        assert!(b.txns.is_empty(), "no debit and no credits while billing is off");
+        same(b.wallets[0].balance, "500");
+        assert!(b.wallet_plans.iter().all(|p| p.status == "ACTIVE"));
+    }
+    // Switched on: the due plan renews.
+    w.b().configs[0].status = "ACTIVE".into();
+    w.internal.renew_plans(&system(), today()).await.unwrap();
+    assert_eq!(w.b().txns.len(), 1);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1993,4 +2026,51 @@ async fn a_capped_plan_refuses_one_more_site() {
     w.b().predates.clear();
     w.b().configs[0].status = "INACTIVE".into();
     assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_capped_plan_refuses_one_more_user() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(12, "users", "USERS", "10", "5") });
+        let mut free = Plan { is_default: true, ..plan(30, "free", "Free") };
+        free.overrides.insert("users".into(), MeterOverride { free: Some(d("2")), rate: None, hard_cap: true });
+        b.plans.push(free);
+        b.wallets.push(wallet("1", "ACTIVE", 0));
+        b.wallet_plans.push(on_plan(7, 30, today(), date(2026, 11, 15)));
+        b.user_counts.push(((M_CLIENT, APP), 1));
+    }
+    let refused = |r: AuthResult<()>| r.err().map(|e| e.to_string());
+    // One of two seats used: the next user is allowed.
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None).await.is_ok());
+    // Both seats used: a new user is refused with the upgrade message and the gate's reason.
+    w.b().user_counts[0].1 = 2;
+    let why = refused(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None).await).expect("refused");
+    assert!(why.contains("Upgrade your plan to add more users"), "{why}");
+    // A user already holding a profile of the app is already counted: never refused, so existing users keep working.
+    w.b().in_app.push((77, APP));
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, Some(77)).await.is_ok());
+    // Someone else getting their first profile of the app is refused.
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, Some(78)).await.is_err());
+    // A profile with no app is not a seat.
+    assert!(w.internal.refuse_user_over_limit(None, M_CLIENT, None).await.is_ok());
+    // A paid plan without a cap: the sixth user is allowed (extra users go on the invoice).
+    w.b().user_counts[0].1 = 9;
+    w.b().wallet_plans[0].plan_id = 31;
+    w.b().plans.push(plan(31, "starter", "Starter"));
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None).await.is_ok());
+    // A client from before the switch-on with no wallet: no limits.
+    {
+        let mut b = w.b();
+        b.wallets.clear();
+        b.wallet_plans.clear();
+        b.predates.push(M_CLIENT);
+    }
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None).await.is_ok());
+    // Billing off: no limits.
+    w.b().predates.clear();
+    w.b().configs[0].status = "INACTIVE".into();
+    assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None).await.is_ok());
 }

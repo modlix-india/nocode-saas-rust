@@ -501,6 +501,14 @@ impl Admin {
         })
     }
 
+    /// The app a profile belongs to (`None` for no profile or one with no app).
+    async fn profile_app_id(&self, profile_id: Option<u64>) -> AuthResult<Option<u64>> {
+        match profile_id {
+            Some(p) => Ok(self.db.profile(p).await?.and_then(|row| row.app_id)),
+            None => Ok(None),
+        }
+    }
+
     /// `createInvite`.
     pub async fn invite_create(&self, ca: &ContextAuth, mut i: Invite) -> AuthResult<Value> {
         pre_authorize(ca, &["Authorities.User_CREATE"])?;
@@ -522,7 +530,12 @@ impl Admin {
             }
         }
         let existing = self.db.users_with_any_identity(client_id, i.user_name.as_deref(), i.email_id.as_deref(), i.phone_number.as_deref(), None).await?;
+        let profile_app = self.profile_app_id(i.profile_id).await?;
         if existing.is_empty() {
+            // A new user takes a seat of the plan once they hold a profile: a capped plan (Free) says no now.
+            if i.profile_id.is_some() {
+                self.refuse_user_over_limit(profile_app, client_id, None).await?;
+            }
             return self.invite_new(ca, i).await;
         }
         let u = &existing[0];
@@ -536,6 +549,7 @@ impl Admin {
             if !self.has_access_to_profiles(u.client_id, &[p]).await? {
                 return Err(refused());
             }
+            self.refuse_user_over_limit(profile_app, u.client_id, Some(u.id)).await?;
             self.db.add_profile_to_user(u.id, p).await?.ok_or_else(refused)?;
             self.raise_invited(ca, &i, Some(u)).await;
             // `Map.of`: its order is the JVM's (any order is Java's).
@@ -663,6 +677,11 @@ impl Admin {
             return Err(unknown());
         };
         self.invite_user_check(ca, &app, u.client_id, u.user_name.as_deref(), u.email_id.as_deref(), u.phone_number.as_deref()).await?;
+        // Invites sent before the plan filled up can outnumber its seats: the last ones are refused here.
+        if i.profile_id.is_some() {
+            let profile_app = self.profile_app_id(i.profile_id).await?;
+            self.refuse_user_over_limit(profile_app, u.client_id, None).await?;
+        }
         if let Some(p) = password.as_deref().filter(|p| !p.trim().is_empty()) {
             self.check_policy_for(u.client_id, app.id, pass_type, p).await?;
         }
@@ -957,6 +976,7 @@ impl Admin {
         if !self.has_access_to_profiles(r.client_id.unwrap_or_default(), &[pid]).await? {
             return Err(profile_refused());
         }
+        self.refuse_user_over_limit(profile.app_id, r.client_id.unwrap_or_default(), r.user_id).await?;
         if self.db.add_profile_to_user(r.user_id.unwrap_or_default(), pid).await?.is_none() {
             return Err(forbidden("forbidden_update", &["User Request"]));
         }

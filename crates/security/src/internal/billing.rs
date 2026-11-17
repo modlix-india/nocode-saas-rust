@@ -39,6 +39,8 @@ pub const SCALE: u32 = 6;
 
 /// The `allowed` refusals nocode-ai tells apart (it words its own message for each).
 pub const WALLET_SUSPENDED_REASON: &str = "The wallet is suspended";
+/// What a buyer is told when its plan has no room for another user.
+pub const USER_LIMIT_REACHED: &str = "You have reached the number of users your plan includes. Upgrade your plan to add more users.";
 /// The apps clients build with and pay in: the hosting gate never swaps them.
 pub const BUILDER_APPS: [&str; 2] = ["appbuilder", "sitezump"];
 pub const INVOICE_OVERDUE_REASON: &str = "An invoice is overdue";
@@ -895,6 +897,25 @@ impl Internal {
         let Some(client) = self.dir().client(client_id).await? else { return Ok(None) };
         let v = self.allowed(app_code, client.code(), Some(&meter.key), None, None).await?;
         Ok((v["allowed"] == Value::Bool(false)).then(|| v["reason"].as_str().unwrap_or("The plan's limit is reached").to_string()))
+    }
+
+    /// Refuses one more user of the app in the client when the plan caps users and they are used
+    /// up (Free: two). `user_id` is the user being given their first profile of the app, when it
+    /// is an existing user: someone already holding a profile of the app is already counted, so
+    /// nothing is refused for them. Plans without a cap never refuse (extra users are invoiced),
+    /// nor does an app with no ACTIVE config, no USERS meter, or a client that predates billing.
+    pub async fn refuse_user_over_limit(&self, app_id: Option<u64>, client_id: u64, user_id: Option<u64>) -> AuthResult<()> {
+        let Some(app_id) = app_id else { return Ok(()) };
+        let app = self.dir().app_by_id(app_id).await?;
+        if let Some(user_id) = user_id {
+            if self.billing.user_in_app(user_id, app_id).await? {
+                return Ok(());
+            }
+        }
+        match self.gauge_refusal(&app.app_code, client_id, "USERS").await? {
+            None => Ok(()),
+            Some(why) => Err(AuthError::literal(axum::http::StatusCode::BAD_REQUEST, "SEC.BILLING_USER_LIMIT", USER_LIMIT_REACHED.to_string()).with_param("reason", why)),
+        }
     }
 
     /// `isAiAllowed`, as nocode-ai asks it.

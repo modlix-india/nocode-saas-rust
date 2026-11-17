@@ -928,6 +928,21 @@ action = "Upgrade your plan to add more websites."
 java_text = "$"
 when = "A new site past the owner's SiteZump plan limit (Free: one website). The reason holds the billing gate's answer (Rust only, 2026-11-16)."
 
+[SEC.BILLING_USER_LIMIT]
+status = 400
+params = ["reason"]
+text = "You have reached the number of users your plan includes"
+action = "Upgrade your plan to add more users."
+java_text = "$"
+when = "A new user (invite, accepted invite, first profile of an app) past a capped plan's user limit (Free: two users). Paid plans are not capped: extra users go on the monthly invoice (Rust only, 2026-11-17)."
+
+[SEC.BILLING_PAYMENT_NOT_SET_UP]
+status = 400
+text = "Online payment is not set up for this app yet"
+action = "Please contact support."
+java_text = "Razorpay keyId/keySecret missing in billing config"
+when = "A purchase, order or repay for a seller whose billing config has no Razorpay key id or secret. Java answered 500 (Rust only, 2026-11-17)."
+
 [SEC.BILLING_INVALID]
 status = 400
 params = ["reason"]

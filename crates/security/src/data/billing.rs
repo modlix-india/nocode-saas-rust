@@ -500,6 +500,10 @@ pub trait BillingStore: Send + Sync {
     async fn count_apps(&self, client_id: u64, app_type: &str, active_only: bool) -> AuthResult<i64>;
     /// Users of the client with a profile in the app (in the profiles, when given).
     async fn count_users_with_profile(&self, client_id: u64, app_id: u64, profile_ids: &[u64]) -> AuthResult<i64>;
+    /// Whether the user already holds a profile of the app (so is already counted by its users meter).
+    async fn user_in_app(&self, _user_id: u64, _app_id: u64) -> AuthResult<bool> {
+        Ok(false)
+    }
     async fn ai_rates(&self) -> AuthResult<Vec<AiRate>>;
     async fn setting(&self, name: &str) -> AuthResult<Option<String>>;
     /// Every platform billing setting, by name.
@@ -1031,6 +1035,18 @@ impl BillingStore for Db {
             qb.push("))");
         }
         Ok(qb.build_query_scalar().fetch_one(&self.pool).await?)
+    }
+
+    async fn user_in_app(&self, user_id: u64, app_id: u64) -> AuthResult<bool> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM security_profile_user JOIN security_profile ON security_profile.ID = security_profile_user.PROFILE_ID \
+             WHERE security_profile_user.USER_ID = ? AND security_profile.APP_ID = ?",
+        )
+        .bind(user_id)
+        .bind(app_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n > 0)
     }
 
     async fn ai_rates(&self) -> AuthResult<Vec<AiRate>> {
