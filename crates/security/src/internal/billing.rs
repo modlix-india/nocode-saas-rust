@@ -43,6 +43,8 @@ pub const WALLET_SUSPENDED_REASON: &str = "The wallet is suspended";
 pub const USER_LIMIT_REACHED: &str = "You have reached the number of users your plan includes. Upgrade your plan to add more users.";
 /// The apps clients build with and pay in: the hosting gate never swaps them.
 pub const BUILDER_APPS: [&str; 2] = ["appbuilder", "sitezump"];
+/// The gate's answer when a capped plan's limit (users, leads, sites) is used up.
+pub const LIMIT_REACHED_REASON: &str = "You have reached the limit of your plan. Upgrade your plan to add more";
 pub const INVOICE_OVERDUE_REASON: &str = "An invoice is overdue";
 pub const MODEL_NOT_IN_PLAN_REASON: &str = "The plan does not include this AI model";
 /// AI model rates are in US dollars; each app bills in its own config's currency. The platform
@@ -876,7 +878,7 @@ impl Internal {
                 }
             };
             if used.cmp_value(&cap) != std::cmp::Ordering::Less {
-                return Ok(allowed_json(false, Some("The plan's limit is reached")));
+                return Ok(allowed_json(false, Some(LIMIT_REACHED_REASON)));
             }
         }
         Ok(yes())
@@ -896,7 +898,7 @@ impl Internal {
         };
         let Some(client) = self.dir().client(client_id).await? else { return Ok(None) };
         let v = self.allowed(app_code, client.code(), Some(&meter.key), None, None).await?;
-        Ok((v["allowed"] == Value::Bool(false)).then(|| v["reason"].as_str().unwrap_or("The plan's limit is reached").to_string()))
+        Ok((v["allowed"] == Value::Bool(false)).then(|| v["reason"].as_str().unwrap_or(LIMIT_REACHED_REASON).to_string()))
     }
 
     /// Refuses one more user of the app in the client when the plan caps users and they are used
