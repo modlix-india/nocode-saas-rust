@@ -264,6 +264,46 @@ impl Auth {
         Ok(self.matching_otp(latest, otp)?.is_some())
     }
 
+    /// [`Auth::peek_user_otp`] for several users at once: for each id, whether `otp` matches that
+    /// user's latest unexpired `purpose` code (nothing is used or counted). Exactly
+    /// `max(ids.len(), slots)` bcrypt checks run, side by side, whether the users have a code or
+    /// not, so the time an answer takes does not tell how many accounts a login has or whether
+    /// any asked for a code (CXZ-1921: the reset by code finds the account by the code).
+    pub async fn peek_users_otp(&self, app_code: Option<&str>, user_ids: &[u64], purpose: OtpPurpose, otp: Option<&str>, slots: usize) -> AuthResult<Vec<bool>> {
+        let app = match app_code.filter(|a| !a.trim().is_empty()) {
+            Some(a) => self.dir.app_by_code(a).await?,
+            None => None,
+        };
+        let mut checks: Vec<(String, bool)> = Vec::new();
+        for id in user_ids {
+            let latest = match &app {
+                Some(app) => self.dir.store.latest_otp(app.id, *id, purpose.name()).await?,
+                None => None,
+            };
+            checks.push(match latest.filter(|l| l.expires_at >= self.clock.local()) {
+                Some(l) => (l.unique_code, true),
+                None => (decoy_hash().to_string(), false),
+            });
+        }
+        while checks.len() < slots {
+            checks.push((decoy_hash().to_string(), false));
+        }
+        let otp = otp.unwrap_or("").to_string();
+        let tasks: Vec<_> = checks
+            .into_iter()
+            .map(|(hash, real)| {
+                let otp = otp.clone();
+                tokio::task::spawn_blocking(move || if real { bcrypt::verify(&otp, &hash).unwrap_or(false) } else { spend_hash(&otp, &hash) })
+            })
+            .collect();
+        let mut out = Vec::new();
+        for t in tasks {
+            out.push(t.await.map_err(AuthError::internal)?);
+        }
+        out.truncate(user_ids.len());
+        Ok(out)
+    }
+
     /// The code `otp` matches: the latest one, when it has not expired. No code, or an expired
     /// one, is refused only after the bcrypt work a wrong code costs, so the answer's timing does
     /// not tell whether the user ever asked for a code (CXZ-1921).
@@ -297,6 +337,12 @@ impl Auth {
 fn decoy_hash() -> &'static str {
     static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HASH.get_or_init(|| bcrypt::hash_with_result("decoy-otp", 10).map(|h| h.format_for_version(bcrypt::Version::TwoA)).unwrap_or_default())
+}
+
+/// One bcrypt check against a decoy hash: always `false`, the answer for a code that cannot match.
+fn spend_hash(otp: &str, hash: &str) -> bool {
+    let _ = bcrypt::verify(otp, hash);
+    false
 }
 
 /// Does the bcrypt check a stored code would get (against a decoy) and returns `false`, the answer
