@@ -580,3 +580,18 @@ client's owners), each once, never the requester's own, joined with `;` so a tem
 so nothing depends on the requester (a signed-in user without access) reaching anything. A failed
 publish is logged and the request is still made.
 Tests: `admin::users::invites::tests::request_created_data`, `admin::users::invites::live::invites_and_requests`.
+
+## Billing: user limit at invite and profile assign; payment-not-set-up is a 400; nothing renews while a config is INACTIVE (2026-11-17, LZT-2559)
+
+Java had no billing meters. In Rust a capped plan (Free: 2 users) now refuses the user who would take
+one seat too many: `invite_create` (new invite, and an existing user getting their first profile of the
+app), `invite_accept` (invites sent before the plan filled up), `user_assign_profile` and
+`request_accept`. The refusal is `SEC.BILLING_USER_LIMIT` (400): "You have reached the number of users
+your plan includes. Upgrade your plan to add more users." A user who already holds a profile of the
+app is never refused, so nobody already in the organisation is removed or blocked. Plans without a cap
+(Starter and up) never refuse: extra users go on the monthly invoice. Billing off, an app without a USERS
+meter, and a client from before the switch-on are never refused. A user created with no profile takes no seat.
+Tests: `internal_billing::a_capped_plan_refuses_one_more_user`.
+Also: a purchase, order or repay for a seller with no Razorpay keys answers 400 `SEC.BILLING_PAYMENT_NOT_SET_UP`
+(Java: 500 IllegalStateException), and `renew_plans` / `give_monthly_plan_credits` skip a config that is INACTIVE
+(a due plan renews when the config is switched on again).
