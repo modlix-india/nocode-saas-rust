@@ -170,6 +170,44 @@ async fn constant_otp(l: &Live) -> Option<String> {
     v.flatten().map(|c| c.trim().to_string()).filter(|c| !c.is_empty())
 }
 
+/// CXZ-1921 (2026-11-17): the anonymous reset routes answer a login that does not exist the way
+/// they answer one that does: the same status, code, message and body shape.
+#[tokio::test]
+async fn reset_routes_do_not_tell_whether_a_login_exists() {
+    let Some(l) = live().await else { return };
+    // A login that exists: SYSTEM's user 142 (never sent a code, never given a password here).
+    let real: Option<Option<String>> = sqlx::query_scalar("SELECT EMAIL_ID FROM security_user WHERE ID = 142").fetch_optional(&l.pool).await.unwrap();
+    let Some(real) = real.flatten() else { return };
+    let ghost = "nobody.zz.enum@example.invalid";
+    let call = |path: &'static str, who: &str, extra: Value| {
+        let mut body = json!({"userName": who});
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        let l = &l;
+        async move { l.call("POST", path, &anon("SYSTEM"), Some(body)).await }
+    };
+    // The code request: `true` for a login that does not exist (the real one is not asked: that would send a code).
+    let gen = call("/users/reset/password/otp/generate", ghost, json!({})).await;
+    assert_eq!((gen.status, gen.json()), (StatusCode::OK, json!(true)));
+    // The code check: the same 403, code and message, wrong code or none at all.
+    for extra in [json!({"otp": "000000"}), json!({})] {
+        let (a, b) = (call("/users/reset/password/otp/verify", &real, extra.clone()).await, call("/users/reset/password/otp/verify", ghost, extra).await);
+        assert_eq!((a.status, a.json()["code"].clone(), a.message()), (b.status, b.json()["code"].clone(), b.message()), "{} / {}", a.body, b.body);
+        assert_eq!((b.status, b.json()["code"].as_str()), (StatusCode::FORBIDDEN, Some("SEC.USER_PASSWORD_INVALID")));
+    }
+    // The reset: refused alike (the new password is judged first, for both).
+    let reset = |who: &str, pw: &str| json!({"authRequest": {"userName": who, "otp": "000000"}, "newPassword": pw});
+    for pw in ["Zz@24680a", " "] {
+        let (a, b) = (
+            l.call("POST", "/users/reset/password", &anon("SYSTEM"), Some(reset(&real, pw))).await,
+            l.call("POST", "/users/reset/password", &anon("SYSTEM"), Some(reset(ghost, pw))).await,
+        );
+        assert_eq!((a.status, a.json()["code"].clone(), a.message()), (b.status, b.json()["code"].clone(), b.message()), "{} / {}", a.body, b.body);
+        assert!(b.status.is_client_error());
+    }
+}
+
 #[tokio::test]
 async fn organisation_and_roles_read_as_java_does() {
     let Some(l) = live().await else { return };
@@ -673,7 +711,17 @@ async fn scratch_lifecycle() {
         let who = email("b");
         let reset = |pw: &str| json!({"authRequest": {"userName": who, "otp": otp}, "newPassword": pw});
         assert_eq!(l.ok("POST", "/users/reset/password/otp/generate", &an, Some(json!({"userName": who}))).await, json!(true));
-        assert_eq!(l.ok("POST", "/users/reset/password/otp/verify", &an, Some(json!({"userName": who, "otp": otp}))).await, json!(true));
+        // The code is made after the answer is sent (CXZ-1921): wait for it.
+        let mut verified = json!(false);
+        for _ in 0..40 {
+            let r = l.call("POST", "/users/reset/password/otp/verify", &an, Some(json!({"userName": who, "otp": otp}))).await;
+            if r.status == StatusCode::OK {
+                verified = r.json();
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert_eq!(verified, json!(true));
         let same = l.call("POST", "/users/reset/password", &an, Some(reset(PASSWORD))).await;
         assert_eq!(
             (same.status, same.message().as_str()),

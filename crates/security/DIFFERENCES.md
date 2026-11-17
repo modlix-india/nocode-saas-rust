@@ -595,3 +595,26 @@ Tests: `internal_billing::a_capped_plan_refuses_one_more_user`.
 Also: a purchase, order or repay for a seller with no Razorpay keys answers 400 `SEC.BILLING_PAYMENT_NOT_SET_UP`
 (Java: 500 IllegalStateException), and `renew_plans` / `give_monthly_plan_credits` skip a config that is INACTIVE
 (a due plan renews when the config is switched on again).
+
+## The anonymous password reset no longer tells whether a login exists (2026-11-17, CXZ-1921)
+
+Java answered the three anonymous reset routes differently for a login that does not exist: `reset/password/otp/generate`
+200 `false` (a real login: 200 `true`, after about ten times the work), `reset/password/otp/verify` 200 `false` (a real
+login with a wrong code: 403 `user_password_invalid`), `reset/password` 200 `false` (a real one: 400/403). Anyone could ask
+for any address and read the difference. Now:
+- `generate` answers 200 `true` for every login (found or not, with an address or not, app known or not) and does the
+  lookup and the sending after the answer, so neither the body nor the time tells. A failure (no address, send error) is
+  logged at the service, not returned. A signed-in caller is still refused (403 `pass_reset_req_error`).
+- `verify` answers a login that does not exist, or one with no code asked for, or no `otp` at all (it was a 500 for a user with
+  a pending code), with the same 403 `user_password_invalid` a wrong code gets. It never answers `false` any more.
+- `reset/password` judges the new secret against the policy first (for a login that does not exist too, without the history),
+  then the code (looked at, not spent), and only after a good code the account (inactive: 403 `user_not_active`; the history
+  check), then spends the code. An unknown login ends in the same 403 as a wrong code.
+- A code that does not exist or has expired costs the same bcrypt check as a wrong one (`otp::spend_bcrypt`), so the answer's time
+  does not tell either. This also applies to the sign-in and registration OTP checks that share `use_otp`.
+Not changed: `POST users/findUserClients` (the sign-in client picker, anonymous by design) still returns `[]` for an unknown login
+and the organisations of a real one. The pages that read `generate`'s answer as "sent or not" (the classic forgetPassword pages,
+bpForgetPassword) no longer get "could not send" for an unknown login; they go on to the code step and fail at the code.
+Tests: `admin::users::passwords::policy_tests::code_request_answers_true_and_refuses_a_signed_in_caller`,
+`admin::users::passwords::live::changes_resets_and_the_picker` (the same answers for a real and an unknown login),
+`otp::tests::a_missing_code_costs_a_check_and_never_matches`, `live_admin_users::reset_routes_do_not_tell_whether_a_login_exists`.
