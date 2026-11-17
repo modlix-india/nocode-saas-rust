@@ -500,6 +500,11 @@ pub trait BillingStore: Send + Sync {
     async fn count_apps(&self, client_id: u64, app_type: &str, active_only: bool) -> AuthResult<i64>;
     /// Users of the client with a profile in the app (in the profiles, when given).
     async fn count_users_with_profile(&self, client_id: u64, app_id: u64, profile_ids: &[u64]) -> AuthResult<i64>;
+    /// Invites still waiting (not accepted, not revoked) that give a profile of the app in the client:
+    /// each is a seat promised to a user who is not in the count yet.
+    async fn pending_invites_with_profile(&self, _client_id: u64, _app_id: u64) -> AuthResult<i64> {
+        Ok(0)
+    }
     /// Whether the user already holds a profile of the app (so is already counted by its users meter).
     async fn user_in_app(&self, _user_id: u64, _app_id: u64) -> AuthResult<bool> {
         Ok(false)
@@ -1035,6 +1040,16 @@ impl BillingStore for Db {
             qb.push("))");
         }
         Ok(qb.build_query_scalar().fetch_one(&self.pool).await?)
+    }
+
+    async fn pending_invites_with_profile(&self, client_id: u64, app_id: u64) -> AuthResult<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM security_user_invite i JOIN security_profile p ON p.ID = i.PROFILE_ID WHERE i.CLIENT_ID = ? AND p.APP_ID = ?",
+        )
+        .bind(client_id)
+        .bind(app_id)
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     async fn user_in_app(&self, user_id: u64, app_id: u64) -> AuthResult<bool> {

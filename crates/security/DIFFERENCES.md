@@ -618,3 +618,28 @@ bpForgetPassword) no longer get "could not send" for an unknown login; they go o
 Tests: `admin::users::passwords::policy_tests::code_request_answers_true_and_refuses_a_signed_in_caller`,
 `admin::users::passwords::live::changes_resets_and_the_picker` (the same answers for a real and an unknown login),
 `otp::tests::a_missing_code_costs_a_check_and_never_matches`, `live_admin_users::reset_routes_do_not_tell_whether_a_login_exists`.
+
+## The anonymous password reset finds the account by the login and the code, no lookup first (2026-11-17, CXZ-1921 option 2)
+
+Until now the forgot-password pages called `POST users/findUserClients` (anonymous, tells whether a login exists and
+where) to learn the user id, then sent it to `generate`, `verify` and `reset/password`. Now those three routes accept the
+login as typed, with no `userId`:
+- `generate` (no `userId`) finds every non-deleted account of the login under the URL's client (at most 5; a blank login
+  is no one, never everyone), skips accounts whose client is not active, and sends each its own code, to its own address.
+  Still `true` for every login, still sent after the answer. With a `userId` it is the one account as before.
+- `verify` checks the code against the latest code of every account of the login; the same 403 `user_password_invalid`
+  as before when none matches. `verify?accounts=true` answers, for a good code, `[{userId, client}]` for the accounts it
+  opens (usually one; several only when their codes are equal, as with a constant code) instead of `true`.
+  `Auth::peek_users_otp` runs at least 3 bcrypt checks side by side whatever the number of accounts, so the time
+  tells neither the number of accounts nor whether any asked for a code.
+- `reset/password` without a `userId` needs the code to open exactly one account (else the same 403); that account
+  changes. With a `userId` as before.
+`users/findUserClients` is unchanged (sign-in client picker). Callers that still send a `userId` keep working.
+Tests: `admin::users::passwords::live::the_code_finds_the_account`,
+`live_admin_users::reset_routes_do_not_tell_whether_a_login_exists` (`?accounts=true` case).
+
+Also (2026-11-17, walk through on dev): a new invite counts the invites still waiting with the users
+(`BillingStore::pending_invites_with_profile`, `Internal::refuse_user_over_limit(.., count_pending_invites)`), so a
+Free organisation cannot send more invites than it has seats; accepting an invite does not count the others.
+`SEC.BILLING_USER_LIMIT` carries "Upgrade your plan to add more users" in its text (pages show only the text).
+Tests: `internal_billing::pending_invites_take_a_seat_when_a_new_invite_is_sent`.

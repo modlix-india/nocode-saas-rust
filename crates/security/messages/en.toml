@@ -931,8 +931,8 @@ when = "A new site past the owner's SiteZump plan limit (Free: one website). The
 [SEC.BILLING_USER_LIMIT]
 status = 400
 params = ["reason"]
-text = "You have reached the number of users your plan includes"
-action = "Upgrade your plan to add more users."
+text = "You have reached the number of users your plan includes. Upgrade your plan to add more users"
+action = "Upgrade your plan, or remove a user you no longer need."
 java_text = "$"
 when = "A new user (invite, accepted invite, first profile of an app) past a capped plan's user limit (Free: two users). Paid plans are not capped: extra users go on the monthly invoice (Rust only, 2026-11-17)."
 
