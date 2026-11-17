@@ -845,12 +845,12 @@ async fn write_routes_inside_one_rolled_back_session() {
         assert_eq!((s, v["totalAmount"].as_f64()), (StatusCode::OK, Some(118.0)));
         // The purchase stops at the seller's missing keys (after its PENDING invoice).
         let (s, v) = call("POST", "/billing/purchase".into(), Some(json!({"bundleId": bid})), vec![]).await;
-        assert_eq!((s, v["debugMessage"].as_str()), (StatusCode::INTERNAL_SERVER_ERROR, Some("Razorpay keyId/keySecret missing in billing config")));
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
         let (s, v) = call("POST", "/billing/purchase/order".into(), Some(json!({"bundleId": bid})), vec![]).await;
-        assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
         let invoice: u64 = sqlx::query_scalar(&format!("SELECT MAX(ID) FROM security_invoice WHERE SELLER_CLIENT_ID = {seller}")).fetch_one(&pool).await.unwrap();
         let (s, v) = call("POST", "/billing/repay".into(), Some(json!({"invoiceId": invoice})), vec![]).await;
-        assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
         // The wallet routes only read here.
         let (s, v) = call("GET", "/wallets/plan".into(), None, vec![]).await;
         assert_eq!(s, StatusCode::OK, "{v}");

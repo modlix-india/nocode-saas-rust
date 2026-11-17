@@ -180,6 +180,10 @@ impl Internal {
         let Some(wallet) = self.billing.wallet_by_id(wp.wallet_id).await? else { return Ok(()) };
         let Some(current) = self.billing.plan_by_id(wp.plan_id).await? else { return Ok(()) };
         let Some(config) = self.billing.config_by_id(current.config_id).await? else { return Ok(()) };
+        // Billing switched off: nothing renews, invoices or debits (it carries on when switched on).
+        if !config.is_active() {
+            return Ok(());
+        }
         // A client from before the config was switched on falls back to credits only (no plan),
         // never onto the default plan's limits (Kiran 2026-11-16).
         let default = if self.billing.client_predates_config(wallet.client_id, config.id).await? {
@@ -238,6 +242,9 @@ impl Internal {
                 continue;
             }
             let (Some(wallet), Some(config)) = (self.billing.wallet_by_id(wp.wallet_id).await?, self.billing.config_by_id(plan.config_id).await?) else { continue };
+            if !config.is_active() {
+                continue;
+            }
             if let Err(e) = self.give_month_credits(ca, &wallet, &config, &plan, wp.id, wp.period_start, today).await {
                 tracing::error!(error = %e, wallet_plan = wp.id, "monthly plan credits not given");
             }
