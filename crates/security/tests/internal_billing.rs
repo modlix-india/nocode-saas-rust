@@ -1088,7 +1088,7 @@ async fn a_hard_cap_refuses_the_use_and_charges_nothing() {
     let over = w.internal.record(&system(), &use_of("leads", None, "C")).await.unwrap();
     assert!(over.over_limit && !over.recorded);
     assert_eq!(over.to_json()["overLimit"], true);
-    assert_eq!(allowed("leads", None).await, json!({"allowed": false, "reason": "The plan's limit is reached"}));
+    assert_eq!(allowed("leads", None).await, json!({"allowed": false, "reason": "You have reached the limit of your plan. Upgrade your plan to add more"}));
     // A gauge security counts itself: 2 users of 3, then 3.
     assert_eq!(allowed("users", None).await["allowed"], true);
     w.b().user_counts[0].1 = 3;
@@ -2009,7 +2009,7 @@ async fn a_capped_plan_refuses_one_more_site() {
     assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap(), None);
     // One site on Free (one included): the next is refused.
     w.b().app_counts.push(((M_CLIENT, "SITE".into()), 1));
-    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap().as_deref(), Some("The plan's limit is reached"));
+    assert_eq!(w.internal.gauge_refusal("crm", M_CLIENT, "SITES").await.unwrap().as_deref(), Some("You have reached the limit of your plan. Upgrade your plan to add more"));
     // A paid plan without a cap: extra sites go on the invoice instead.
     w.b().wallet_plans[0].plan_id = 31;
     w.b().plans.push(plan(31, "starter", "Starter"));

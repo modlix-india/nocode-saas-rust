@@ -279,6 +279,7 @@ impl Billing<'_> {
         let meters = self.internal.billing.meters_of_config(config.id).await?;
         let today = self.today();
         let mut meter_rows = Vec::new();
+        let mut meter_by_key = serde_json::Map::new();
         let mut dims = Vec::new();
         for m in meters.iter().filter(|m| m.status == "ACTIVE") {
             let t = terms(m, current.as_ref());
@@ -291,8 +292,7 @@ impl Billing<'_> {
                 }
             };
             let unit = m.unit_label.clone().unwrap_or_else(|| m.label.to_lowercase());
-            meter_rows.push(
-                Obj::new()
+            let row = Obj::new()
                     .put("meterKey", m.key.as_str())
                     .put("label", m.label.as_str())
                     .put("unit", unit.as_str())
@@ -303,8 +303,9 @@ impl Billing<'_> {
                     .put("free", t.free.to_json())
                     .put("hardCap", t.hard_cap.map(Dec::to_json).unwrap_or(Value::Null))
                     .put("used", used.map(Dec::to_json).unwrap_or(Value::Null))
-                    .build(),
-            );
+                    .build();
+            meter_by_key.insert(m.key.clone(), row.clone());
+            meter_rows.push(row);
             dims.push(
                 Obj::new()
                     .put("actionKey", m.action_key(&app.app_code))
@@ -386,6 +387,7 @@ impl Billing<'_> {
         };
         Ok(Obj::new()
             .put("currency", config.currency.as_str())
+            .put("active", config.is_active())
             .put("lowBalanceThreshold", config.low_balance_threshold.map(Dec::to_json).unwrap_or(Value::Null))
             .put("suspendMode", config.suspend_mode.as_str())
             .put("purchasedCreditValidityMonths", opt(config.purchased_credit_validity_months))
@@ -394,6 +396,7 @@ impl Billing<'_> {
             .put("plan", plan)
             .put("plans", Value::Array(plan_rows))
             .put("meters", Value::Array(meter_rows))
+            .put("meterByKey", Value::Object(meter_by_key))
             .put("credits", Value::Array(credits))
             .put("dimensions", Value::Array(dims))
             .build())

@@ -1468,6 +1468,9 @@ async fn ledger_and_plan_are_the_callers_own() {
     assert_eq!((m[0]["meterKey"].as_str(), num(&m[0]["hardCap"]), num(&m[0]["used"])), (Some("sites"), "2".into(), "4".into()));
     assert_eq!((m[1]["meterKey"].as_str(), m[1]["hardCap"].is_null(), num(&m[1]["used"])), (Some("leads"), true, "0".into()));
     assert_eq!((plan["plan"]["code"].as_str(), plan["plan"]["periodEnd"].as_str()), (Some("starter"), Some("2026-11-01")));
+    // The same rows by meter key (for pages that cannot filter), and whether billing is on for the app.
+    assert_eq!((plan["meterByKey"]["sites"]["used"].clone(), plan["meterByKey"]["leads"]["meterKey"].as_str(), plan["active"].as_bool()), (m[0]["used"].clone(), Some("leads"), Some(true)));
+    assert!(plan["meterByKey"].get("gone").is_none());
     let plans: Vec<(&str, bool)> = plan["plans"].as_array().unwrap().iter().map(|p| (p["code"].as_str().unwrap(), p["current"].as_bool().unwrap())).collect();
     assert_eq!(plans, [("starter", true), ("pro", false)]);
     assert_eq!(plan["plans"][0]["limits"][0]["hardCap"], true);
