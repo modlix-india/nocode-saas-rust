@@ -338,6 +338,18 @@ impl Internal {
         }
     }
 
+    /// A client that has just signed up for the app gets its wallet at once, on the config's default
+    /// plan (Free) with the plan's credits, so its plan shows from the first screen. Only where the
+    /// app has an ACTIVE billing config, and never for a client created before the config was switched
+    /// on (it stays credits only until it joins). `true` when a wallet was made.
+    pub async fn start_wallet_on_sign_up(&self, ca: &ContextAuth, client_id: u64, app_id: u64) -> AuthResult<bool> {
+        let Some(config) = self.governing_config(app_id, client_id).await? else { return Ok(false) };
+        if !config.is_active() || self.billing.wallet(client_id, app_id).await?.is_some() {
+            return Ok(false);
+        }
+        Ok(self.wallet_ready(ca, client_id, app_id, Some(&config), false).await?.is_some())
+    }
+
     /// The client's wallet on the app, created (at zero) when absent. A new wallet goes on the
     /// governing config's default plan, with its credits.
     ///

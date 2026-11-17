@@ -643,3 +643,10 @@ Also (2026-11-17, walk through on dev): a new invite counts the invites still wa
 Free organisation cannot send more invites than it has seats; accepting an invite does not count the others.
 `SEC.BILLING_USER_LIMIT` carries "Upgrade your plan to add more users" in its text (pages show only the text).
 Tests: `internal_billing::pending_invites_take_a_seat_when_a_new_invite_is_sent`.
+
+A new organisation gets its wallet at sign up (2026-11-17, walk through on dev): after `register` makes the client and its
+owner, `Internal::start_wallet_on_sign_up` creates the wallet on the app's default plan (Free, with its credit) when the app's
+billing config is ACTIVE, so the plan cards and the Users note show Free from the first screen (before, the wallet came with the
+first billable action). A client created before the config was switched on (`ACTIVATED_AT`) gets nothing and stays credits only;
+an INACTIVE config or an app with no config does nothing; a failure is logged and the sign up carries on.
+Tests: `internal_billing::a_new_organisation_gets_its_free_wallet_at_sign_up`, `sign_up_makes_no_wallet_for_old_clients_inactive_or_unconfigured_apps`.

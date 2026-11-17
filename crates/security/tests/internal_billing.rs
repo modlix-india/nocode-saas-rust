@@ -2107,3 +2107,52 @@ async fn pending_invites_take_a_seat_when_a_new_invite_is_sent() {
     w.b().plans.push(plan(31, "starter", "Starter"));
     assert!(w.internal.refuse_user_over_limit(Some(APP), M_CLIENT, None, true).await.is_ok());
 }
+
+#[tokio::test]
+async fn a_new_organisation_gets_its_free_wallet_at_sign_up() {
+    let w = world();
+    {
+        let mut b = w.b();
+        b.configs.push(config());
+        b.meters.push(Meter { charge_mode: "INVOICE".into(), ..gauge(12, "users", "USERS", "10", "5") });
+        b.plans.push(Plan { is_default: true, included_tokens: d("1"), included_recurring: false, ..plan(30, "free", "Free") });
+    }
+    // An ACTIVE config and a client made after it was switched on: wallet on the default plan, its credit given.
+    assert!(w.internal.start_wallet_on_sign_up(&system(), M_CLIENT, APP).await.unwrap());
+    {
+        let b = w.b();
+        assert_eq!(b.wallets.len(), 1);
+        let plans: Vec<(u64, &str)> = b.wallet_plans.iter().map(|p| (p.plan_id, p.status.as_str())).collect();
+        assert_eq!(plans, vec![(30, "ACTIVE")]);
+        same(b.wallets[0].balance, "1");
+    }
+    // Asked again: nothing more.
+    assert!(!w.internal.start_wallet_on_sign_up(&system(), M_CLIENT, APP).await.unwrap());
+    assert_eq!(w.b().wallets.len(), 1);
+}
+
+#[tokio::test]
+async fn sign_up_makes_no_wallet_for_old_clients_inactive_or_unconfigured_apps() {
+    let setup = |status: &str| {
+        let w = world();
+        {
+            let mut b = w.b();
+            b.configs.push(BillingConfig { status: status.into(), ..config() });
+            b.plans.push(Plan { is_default: true, included_tokens: d("1"), included_recurring: false, ..plan(30, "free", "Free") });
+        }
+        w
+    };
+    // Config INACTIVE: nothing.
+    let w = setup("INACTIVE");
+    assert!(!w.internal.start_wallet_on_sign_up(&system(), M_CLIENT, APP).await.unwrap());
+    assert!(w.b().wallets.is_empty());
+    // A client from before the config was switched on stays credits only: no wallet, no plan.
+    let w = setup("ACTIVE");
+    w.b().predates.push(M_CLIENT);
+    assert!(!w.internal.start_wallet_on_sign_up(&system(), M_CLIENT, APP).await.unwrap());
+    assert!(w.b().wallets.is_empty() && w.b().wallet_plans.is_empty());
+    // An app with no config at all.
+    let w = world();
+    assert!(!w.internal.start_wallet_on_sign_up(&system(), M_CLIENT, APP).await.unwrap());
+    assert!(w.b().wallets.is_empty());
+}
