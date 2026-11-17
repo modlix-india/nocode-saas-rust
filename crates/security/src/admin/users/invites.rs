@@ -534,7 +534,7 @@ impl Admin {
         if existing.is_empty() {
             // A new user takes a seat of the plan once they hold a profile: a capped plan (Free) says no now.
             if i.profile_id.is_some() {
-                self.refuse_user_over_limit(profile_app, client_id, None).await?;
+                self.refuse_user_over_limit(profile_app, client_id, None, true).await?;
             }
             return self.invite_new(ca, i).await;
         }
@@ -549,7 +549,7 @@ impl Admin {
             if !self.has_access_to_profiles(u.client_id, &[p]).await? {
                 return Err(refused());
             }
-            self.refuse_user_over_limit(profile_app, u.client_id, Some(u.id)).await?;
+            self.refuse_user_over_limit(profile_app, u.client_id, Some(u.id), false).await?;
             self.db.add_profile_to_user(u.id, p).await?.ok_or_else(refused)?;
             self.raise_invited(ca, &i, Some(u)).await;
             // `Map.of`: its order is the JVM's (any order is Java's).
@@ -680,7 +680,7 @@ impl Admin {
         // Invites sent before the plan filled up can outnumber its seats: the last ones are refused here.
         if i.profile_id.is_some() {
             let profile_app = self.profile_app_id(i.profile_id).await?;
-            self.refuse_user_over_limit(profile_app, u.client_id, None).await?;
+            self.refuse_user_over_limit(profile_app, u.client_id, None, false).await?;
         }
         if let Some(p) = password.as_deref().filter(|p| !p.trim().is_empty()) {
             self.check_policy_for(u.client_id, app.id, pass_type, p).await?;
@@ -976,7 +976,7 @@ impl Admin {
         if !self.has_access_to_profiles(r.client_id.unwrap_or_default(), &[pid]).await? {
             return Err(profile_refused());
         }
-        self.refuse_user_over_limit(profile.app_id, r.client_id.unwrap_or_default(), r.user_id).await?;
+        self.refuse_user_over_limit(profile.app_id, r.client_id.unwrap_or_default(), r.user_id, false).await?;
         if self.db.add_profile_to_user(r.user_id.unwrap_or_default(), pid).await?.is_none() {
             return Err(forbidden("forbidden_update", &["User Request"]));
         }
