@@ -156,8 +156,11 @@ impl Auth {
         if req.resend && req.with_user {
             self.dir.store.increase_resend_attempts(req.user_id.unwrap_or_default()).await?;
         }
-        let hash = bcrypt::hash_with_result(&otp, 10)
-            .map(|h| h.format_for_version(bcrypt::Version::TwoA))
+        // bcrypt takes tens of milliseconds of CPU: off the async workers, so it does not hold up the
+        // requests queued behind it (CXZ-1921: the password reset request answers before this runs).
+        let hash = tokio::task::spawn_blocking(move || bcrypt::hash_with_result(&otp, 10).map(|h| h.format_for_version(bcrypt::Version::TwoA)))
+            .await
+            .map_err(AuthError::internal)?
             .map_err(AuthError::internal)?;
         let now = self.clock.local();
         self.dir
@@ -251,17 +254,36 @@ impl Auth {
         self.use_otp(latest, otp, purpose).await
     }
 
-    /// The private `verifyOtp(latestOtp, otp, purpose)`.
-    async fn use_otp(&self, latest: Option<OtpRow>, otp: Option<&str>, purpose: OtpPurpose) -> AuthResult<bool> {
-        let Some(latest) = latest else { return Ok(false) };
+    /// The user's latest unexpired `purpose` code for the app, if `otp` matches it, and nothing
+    /// else: the code is neither used nor counted (the password reset checks it here before it
+    /// looks at the account, then spends it with [`Auth::verify_user_otp`]).
+    pub async fn peek_user_otp(&self, app_code: Option<&str>, user_id: u64, purpose: OtpPurpose, otp: Option<&str>) -> AuthResult<bool> {
+        let Some(app_code) = app_code.filter(|a| !a.trim().is_empty()) else { return Ok(false) };
+        let Some(app) = self.dir.app_by_code(app_code).await? else { return Ok(false) };
+        let latest = self.dir.store.latest_otp(app.id, user_id, purpose.name()).await?;
+        Ok(self.matching_otp(latest, otp)?.is_some())
+    }
+
+    /// The code `otp` matches: the latest one, when it has not expired. No code, or an expired
+    /// one, is refused only after the bcrypt work a wrong code costs, so the answer's timing does
+    /// not tell whether the user ever asked for a code (CXZ-1921).
+    fn matching_otp(&self, latest: Option<OtpRow>, otp: Option<&str>) -> AuthResult<Option<OtpRow>> {
+        let Some(latest) = latest else {
+            spend_bcrypt(otp);
+            return Ok(None);
+        };
         if latest.expires_at < self.clock.local() {
-            return Ok(false);
+            spend_bcrypt(otp);
+            return Ok(None);
         }
         // BCryptPasswordEncoder.matches refuses a null raw password.
         let otp = otp.ok_or_else(|| AuthError::internal("rawPassword cannot be null"))?;
-        if !bcrypt::verify(otp, &latest.unique_code).unwrap_or(false) {
-            return Ok(false);
-        }
+        Ok(bcrypt::verify(otp, &latest.unique_code).unwrap_or(false).then_some(latest))
+    }
+
+    /// The private `verifyOtp(latestOtp, otp, purpose)`.
+    async fn use_otp(&self, latest: Option<OtpRow>, otp: Option<&str>, purpose: OtpPurpose) -> AuthResult<bool> {
+        let Some(latest) = self.matching_otp(latest, otp)? else { return Ok(false) };
         if latest.verify_legs_counts == purpose.verify_legs() {
             self.dir.store.delete_otp(latest.id).await?;
         } else {
@@ -271,12 +293,37 @@ impl Auth {
     }
 }
 
+/// A cost-10 bcrypt hash of a constant, the price of checking a code that does not exist.
+fn decoy_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| bcrypt::hash_with_result("decoy-otp", 10).map(|h| h.format_for_version(bcrypt::Version::TwoA)).unwrap_or_default())
+}
+
+/// Does the bcrypt check a stored code would get (against a decoy) and returns `false`, the answer
+/// for a code that cannot match. Nothing is read from `otp` beyond feeding bcrypt.
+fn spend_bcrypt(otp: Option<&str>) -> bool {
+    if let Some(otp) = otp {
+        let _ = bcrypt::verify(otp, decoy_hash());
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn policy() -> OtpPolicy {
         PassType::Otp.default_policy().otp.unwrap()
+    }
+
+    /// CXZ-1921: a code that cannot exist still costs a bcrypt check, and never matches.
+    #[test]
+    fn a_missing_code_costs_a_check_and_never_matches() {
+        assert!(!decoy_hash().is_empty());
+        assert!(bcrypt::verify("decoy-otp", decoy_hash()).unwrap());
+        assert!(!spend_bcrypt(Some("decoy-otp")), "even the decoy's own text is refused");
+        assert!(!spend_bcrypt(Some("")));
+        assert!(!spend_bcrypt(None));
     }
 
     #[test]
