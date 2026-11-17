@@ -796,7 +796,7 @@ async fn purchases_are_refused_before_anything_is_written() {
     w.books.put(config_rec("18").with("id", Val::Id(52)).with("paymentGatewayConfig", Val::Json(json!({"keyId": " "}))));
     w.books.put(bundle_rec("FIXED").with("id", Val::Id(72)).with("billingConfigId", Val::Id(52)).with("price", Val::Dec(d("1"))));
     let e = b.purchase(&buyer(), &PurchaseRequest { bundle_id: Some(72), ..Default::default() }).await.unwrap_err();
-    assert_eq!(e.to_string(), "500 Internal Server Error: Razorpay keyId/keySecret missing in billing config");
+    assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "Online payment is not set up for this app yet. Please contact support.".into()));
     assert!(w.outside.calls.lock().unwrap().is_empty());
 }
 

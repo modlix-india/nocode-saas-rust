@@ -6,6 +6,7 @@
 //! seller's webhook secret (HMAC-SHA256 of the raw body, hex) before anything changes, and is
 //! the only path that credits a wallet.
 
+use axum::http::StatusCode;
 use hmac::{Hmac, Mac};
 use serde_json::{Map, Value};
 use sha2::Sha256;
@@ -17,6 +18,9 @@ use crate::decimal::Dec;
 use crate::errors::{AuthError, AuthResult};
 use crate::jackson::{opt, Obj};
 use crate::model::{Client, ContextAuth};
+
+/// What a buyer is told when the seller has not set up online payment (no Razorpay keys).
+const PAYMENT_NOT_SET_UP: &str = "Online payment is not set up for this app yet. Please contact support.";
 
 /// `PurchaseRequest`.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -297,12 +301,13 @@ impl Billing<'_> {
         self.store.by_id(&INVOICE, id).await
     }
 
-    /// The seller's Razorpay key id and secret (`IllegalStateException` when either is blank).
+    /// The seller's Razorpay key id and secret. Blank keys are a refusal the buyer can read (400,
+    /// `SEC.BILLING_PAYMENT_NOT_SET_UP`), not Java's `IllegalStateException` 500 (2026-11-17).
     fn razorpay_keys(config: &Rec) -> AuthResult<(String, String)> {
         let gw = config.map("paymentGatewayConfig");
         let (id, secret) = (map_str(&gw, "keyId"), map_str(&gw, "keySecret"));
         if blank(&id) || blank(&secret) {
-            return Err(AuthError::internal("Razorpay keyId/keySecret missing in billing config"));
+            return Err(AuthError::literal(StatusCode::BAD_REQUEST, "SEC.BILLING_PAYMENT_NOT_SET_UP", PAYMENT_NOT_SET_UP));
         }
         Ok((id.unwrap_or_default(), secret.unwrap_or_default()))
     }
