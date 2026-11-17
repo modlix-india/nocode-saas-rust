@@ -1365,7 +1365,12 @@ async fn hosting_serves_the_suspend_target_for_a_suspended_builder_wallet() {
     assert_eq!(w.internal.hosting("crm", "BUS").await.unwrap(), pass("crm", "BUS"));
     w.b().configs[0].suspend_app_code = Some("suspended".into());
     w.b().configs[0].suspend_client_code = Some("SYSTEM".into());
+    // A suspend target alone does not block: the config must be in BLOCK_APP mode.
+    assert_eq!(w.internal.hosting("crm", "BUS").await.unwrap(), pass("crm", "BUS"));
+    w.b().configs[0].suspend_mode = "BLOCK_APP".into();
     assert_eq!(w.internal.hosting("crm", "BUS").await.unwrap(), json!({"suspended": true, "serveAppCode": "suspended", "serveClientCode": "SYSTEM"}));
+    // The builder itself is never swapped: the client signs in there to pay.
+    assert_eq!(w.internal.hosting("appbuilder", "BUS").await.unwrap(), pass("appbuilder", "BUS"));
     // A site without a sitezump wallet falls back to the appbuilder one.
     assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap()["suspended"], true);
     // With an active sitezump wallet, that one decides.
@@ -1400,6 +1405,38 @@ async fn block_app_serves_the_suspend_target_on_an_overdue_invoice_or_a_suspende
     // AI_AND_BANNER never blocks the app.
     w.b().configs[0].suspend_mode = "AI_AND_BANNER".into();
     assert_eq!(w.internal.hosting("crm", "BUS").await.unwrap(), pass);
+}
+
+#[tokio::test]
+async fn a_site_is_paused_when_its_owner_owes_sitezump_but_sitezump_itself_stays_up() {
+    let w = world();
+    let pass = |app: &str| json!({"suspended": false, "serveAppCode": app, "serveClientCode": "BUS"});
+    let paused = json!({"suspended": true, "serveAppCode": "paused", "serveClientCode": "SYSTEM"});
+    w.b().configs.push(BillingConfig {
+        app_id: 4,
+        suspend_mode: "BLOCK_APP".into(),
+        suspend_app_code: Some("paused".into()),
+        suspend_client_code: Some("SYSTEM".into()),
+        ..config()
+    });
+    // No sitezump wallet and nothing owed.
+    assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap(), pass("site1"));
+    // An overdue SiteZump invoice pauses the site even before any wallet exists.
+    let mut inv = monthly_invoice(9, "OVERDUE", date(2026, 10, 1));
+    inv.set("appId", Val::Id(4));
+    w.b().invoices.push(inv);
+    assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap(), paused);
+    // Paid: the site is back.
+    w.b().invoices[0].set("status", Val::Str("PAID".into()));
+    assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap(), pass("site1"));
+    // Credits below zero pause it too.
+    w.b().wallets.push(Wallet { id: 8, app_id: 4, ..wallet("-1", "SUSPENDED", 0) });
+    assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap(), paused);
+    // SiteZump itself is never swapped, even under the owner's own URL.
+    assert_eq!(w.internal.hosting("sitezump", "BUS").await.unwrap(), pass("sitezump"));
+    // An inactive config pauses nothing.
+    w.b().configs[0].status = "INACTIVE".into();
+    assert_eq!(w.internal.hosting("site1", "BUS").await.unwrap(), pass("site1"));
 }
 
 #[tokio::test]
