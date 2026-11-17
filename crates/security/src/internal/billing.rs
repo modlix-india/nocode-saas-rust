@@ -338,6 +338,18 @@ impl Internal {
         }
     }
 
+    /// A client that has just signed up for the app gets its wallet at once, on the config's default
+    /// plan (Free) with the plan's credits, so its plan shows from the first screen. Only where the
+    /// app has an ACTIVE billing config, and never for a client created before the config was switched
+    /// on (it stays credits only until it joins). `true` when a wallet was made.
+    pub async fn start_wallet_on_sign_up(&self, ca: &ContextAuth, client_id: u64, app_id: u64) -> AuthResult<bool> {
+        let Some(config) = self.governing_config(app_id, client_id).await? else { return Ok(false) };
+        if !config.is_active() || self.billing.wallet(client_id, app_id).await?.is_some() {
+            return Ok(false);
+        }
+        Ok(self.wallet_ready(ca, client_id, app_id, Some(&config), false).await?.is_some())
+    }
+
     /// The client's wallet on the app, created (at zero) when absent. A new wallet goes on the
     /// governing config's default plan, with its credits.
     ///
@@ -800,6 +812,12 @@ impl Internal {
     /// `count` is the app's own current count, for a meter security cannot count itself (a
     /// storage's rows); without it such a cap is not checked.
     pub async fn allowed(&self, app_code: &str, client_code: &str, meter_key: Option<&str>, model: Option<&str>, count: Option<Dec>) -> AuthResult<Value> {
+        self.allowed_with_extra(app_code, client_code, meter_key, model, count, 0).await
+    }
+
+    /// [`Self::allowed`] with `extra` more units counted on a security gauge (users, apps, sites):
+    /// seats already promised but not yet in the count, such as pending invites.
+    pub async fn allowed_with_extra(&self, app_code: &str, client_code: &str, meter_key: Option<&str>, model: Option<&str>, count: Option<Dec>, extra: i64) -> AuthResult<Value> {
         let yes = || allowed_json(true, None);
         let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(yes()) };
         let Some(client) = self.client_by_code(client_code).await? else { return Ok(yes()) };
@@ -858,7 +876,7 @@ impl Internal {
         if let Some(cap) = t.hard_cap {
             let used = if meter.is_gauge() {
                 match (meter.source.as_str(), count) {
-                    ("USERS" | "APPS" | "SITES", _) => self.gauge_count(meter, client.id(), app.id).await?,
+                    ("USERS" | "APPS" | "SITES", _) => self.gauge_count(meter, client.id(), app.id).await?.add(Dec::from_i64(extra)),
                     (_, Some(c)) => c,
                     (_, None) => {
                         tracing::warn!(meter = meter.key, "hard cap not checked: the app sent no count");
@@ -888,6 +906,11 @@ impl Internal {
     /// when it may: no governing ACTIVE config, no ACTIVE meter of that source, or within the
     /// plan's limit (see [`Self::allowed`]).
     pub async fn gauge_refusal(&self, app_code: &str, client_id: u64, source: &str) -> AuthResult<Option<String>> {
+        self.gauge_refusal_with_extra(app_code, client_id, source, 0).await
+    }
+
+    /// [`Self::gauge_refusal`] counting `extra` more units already promised (pending invites).
+    pub async fn gauge_refusal_with_extra(&self, app_code: &str, client_id: u64, source: &str, extra: i64) -> AuthResult<Option<String>> {
         let Some(app) = self.dir().app_by_code(app_code).await? else { return Ok(None) };
         let Some(config) = self.governing_config(app.id, client_id).await? else { return Ok(None) };
         if !config.is_active() {
@@ -897,7 +920,7 @@ impl Internal {
             return Ok(None);
         };
         let Some(client) = self.dir().client(client_id).await? else { return Ok(None) };
-        let v = self.allowed(app_code, client.code(), Some(&meter.key), None, None).await?;
+        let v = self.allowed_with_extra(app_code, client.code(), Some(&meter.key), None, None, extra).await?;
         Ok((v["allowed"] == Value::Bool(false)).then(|| v["reason"].as_str().unwrap_or(LIMIT_REACHED_REASON).to_string()))
     }
 
@@ -906,7 +929,7 @@ impl Internal {
     /// is an existing user: someone already holding a profile of the app is already counted, so
     /// nothing is refused for them. Plans without a cap never refuse (extra users are invoiced),
     /// nor does an app with no ACTIVE config, no USERS meter, or a client that predates billing.
-    pub async fn refuse_user_over_limit(&self, app_id: Option<u64>, client_id: u64, user_id: Option<u64>) -> AuthResult<()> {
+    pub async fn refuse_user_over_limit(&self, app_id: Option<u64>, client_id: u64, user_id: Option<u64>, count_pending_invites: bool) -> AuthResult<()> {
         let Some(app_id) = app_id else { return Ok(()) };
         let app = self.dir().app_by_id(app_id).await?;
         if let Some(user_id) = user_id {
@@ -914,7 +937,10 @@ impl Internal {
                 return Ok(());
             }
         }
-        match self.gauge_refusal(&app.app_code, client_id, "USERS").await? {
+        // A new invite takes a seat the moment it is sent: invites still waiting count with the users,
+        // or a Free organisation could send any number and only fail when they are accepted.
+        let pending = if count_pending_invites { self.billing.pending_invites_with_profile(client_id, app_id).await? } else { 0 };
+        match self.gauge_refusal_with_extra(&app.app_code, client_id, "USERS", pending).await? {
             None => Ok(()),
             Some(why) => Err(AuthError::literal(axum::http::StatusCode::BAD_REQUEST, "SEC.BILLING_USER_LIMIT", USER_LIMIT_REACHED.to_string()).with_param("reason", why)),
         }
