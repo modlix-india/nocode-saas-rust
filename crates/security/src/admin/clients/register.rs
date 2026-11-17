@@ -892,6 +892,10 @@ pub async fn register(s: &AdminState, files: &dyn Files, info: &RequestInfo, ca:
     if add_files_access_path(s, files, &ca, &client, ca.url_app_code.as_deref()).await?.is_none() {
         return Ok(None);
     }
+    // Billing: the new organisation starts on the app's default plan (Free) now, not at its first billable action.
+    if let Err(e) = s.start_wallet_on_sign_up(&ca, client.id(), app.id).await {
+        tracing::warn!(error = %e, client = client.id(), app = app.id, "billing: wallet not started at sign up");
+    }
     registration_events(s, info, &ca, &client, &sub_domain, &user, &token, Some(&pass)).await?;
     let auth = sign_in(s, info, &ca, &r, user.id, Some(&pass)).await?;
     let mut redirect = String::new();

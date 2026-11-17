@@ -843,7 +843,7 @@ impl Admin {
         }
         let Some(profile) = self.db.profile(profile_id).await? else { return Err(refused()) };
         // A user's first profile of an app takes a seat of the plan: a capped plan (Free) says no.
-        self.refuse_user_over_limit(profile.app_id, u.client_id, Some(user_id)).await?;
+        self.refuse_user_over_limit(profile.app_id, u.client_id, Some(user_id), false).await?;
         let Some(n) = self.db.add_profile_to_user(user_id, profile_id).await? else { return Err(refused()) };
         let assigned = n != 0;
         if assigned {
