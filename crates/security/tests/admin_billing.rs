@@ -1016,7 +1016,7 @@ async fn an_amount_mismatch_is_held_for_review() {
 #[tokio::test]
 async fn a_failed_payment_fails_its_invoice_and_says_so() {
     let w = webhook_world(None);
-    let body = r#"{"event":"payment.failed","payload":{"payment":{"entity":{"id":"pay_9","order_id":"plink_1"}}}}"#;
+    let body = r#"{"event":"payment.failed","payload":{"payment":{"entity":{"id":"pay_9","order_id":"plink_1","email":" typed@example.com "}}}}"#;
     w.billing().webhook(&ContextAuth::default(), body, Some(&sign(body))).await.unwrap();
     assert_eq!(w.books.all(&PAYMENT).pop().unwrap().str("status"), Some("FAILED"));
     assert_eq!(w.books.one(&INVOICE, INVOICE_ID).unwrap().str("status"), Some("FAILED"));
@@ -1024,6 +1024,8 @@ async fn a_failed_payment_fails_its_invoice_and_says_so() {
     assert_eq!(events[0].event_name, "INVOICE_PAYMENT_FAILED");
     let data: HashMap<String, Value> = events[0].data.iter().cloned().collect();
     assert_eq!((data["status"].as_str(), data["paidOn"].as_str()), (Some("FAILED"), Some("")));
+    // LZT-2003: the failed webhook is saved, so the mail knows the billing e-mail typed at checkout.
+    assert_eq!(data["billingEmail"].as_str(), Some("typed@example.com"));
     // An order.paid of the Checkout flow settles by the order id.
     let w = webhook_world(None);
     let body = r#"{"event":"order.paid","payload":{"order":{"entity":{"id":"plink_1"}},"payment":{"entity":{"id":"pay_o","amount":0}}}}"#;
