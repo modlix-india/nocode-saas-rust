@@ -465,7 +465,7 @@ impl Billing<'_> {
             return Ok(());
         }
         if !is_paid_event(event.as_deref()) {
-            return self.mark_failed_if_needed(ca, event.as_deref(), payment, invoice).await;
+            return self.mark_failed_if_needed(ca, event.as_deref(), payment, invoice, &payload).await;
         }
         self.apply_paid(ca, payment, invoice, rzp_payment_id, &payload).await
     }
@@ -522,10 +522,15 @@ impl Billing<'_> {
     }
 
     /// `markFailedIfNeeded`: an expired, cancelled or failed payment fails its invoice.
-    async fn mark_failed_if_needed(&self, ca: &ContextAuth, event: Option<&str>, mut payment: Rec, mut invoice: Rec) -> AuthResult<()> {
+    async fn mark_failed_if_needed(&self, ca: &ContextAuth, event: Option<&str>, mut payment: Rec, mut invoice: Rec, payload: &Map<String, Value>) -> AuthResult<()> {
         if !is_failed_event(event) {
             return Ok(());
         }
+        // LZT-2003: keep the failed webhook on the payment, as a paid one does: it carries the
+        // e-mail the buyer typed at checkout, which the failed-payment mail goes to.
+        let mut response = payment.map("response");
+        response.insert("webhook".into(), Value::Object(payload.clone()));
+        payment.set("response", Val::Json(Value::Object(response)));
         payment.set("status", Val::Str("FAILED".into()));
         invoice.set("status", Val::Str("FAILED".into()));
         self.update_row(&payment).await?;
