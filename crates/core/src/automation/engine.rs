@@ -359,8 +359,9 @@ impl Engine {
     }
 
     /// A test run started by `user`, on the draft surface.
-    pub async fn start_test(&self, app: &str, client: &str, automation: &Value, trigger: &Value, user: u64) -> Result<Option<Run>, CoreError> {
-        self.start_as(app, client, true, automation, trigger, true, Some(user)).await
+    /// A test run on the live (`draft` false) or the draft data, waits cut short, kept to the tester.
+    pub async fn start_test(&self, app: &str, client: &str, draft: bool, automation: &Value, trigger: &Value, user: u64) -> Result<Option<Run>, CoreError> {
+        self.start_as(app, client, draft, automation, trigger, true, Some(user)).await
     }
 
     #[allow(clippy::too_many_arguments)]
