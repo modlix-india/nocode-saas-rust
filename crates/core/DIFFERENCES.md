@@ -142,6 +142,12 @@ nothing runs them. `Automation` (`crate::automation`) is a tenant's flow: a trig
   authority), through the same path as `SendNotification`, sent as the run's client, so only
   that client's people are reached. A test run sends it only to the user who started the test
   (`testUser`, also passed to function actions in their `automation` argument).
+- **Any function in a step, for builders.** The catalog with `functions=all` adds, for a
+  builder (the SYSTEM client or a holder of `Authorities.Function_UPDATE`), every function of
+  the app the client can see, with its own parameters and `"offered": false`. Saving an
+  automation checks its steps: a builder may run any function; anyone else only the built-ins
+  and the functions that carry the `automation` block (else 400, naming the step). The engine
+  itself runs whatever a saved step names, as the client's event runner.
 - **An action's `error` event** fails the step: a 5xx `status` in it is retried like any
   failure, any other answer fails at once and its `onFail` applies.
 
