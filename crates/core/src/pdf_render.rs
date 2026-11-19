@@ -124,6 +124,24 @@ pub async fn render_docx(file: String, data: &serde_json::Map<String, serde_json
     }
 }
 
+/// A Word template's file (from [`docx_file`]) filled with `data`, answered as the .docx itself (not converted to a PDF),
+/// by the sidecar (`/docx/fill`).
+pub async fn fill_docx(file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
+    match RENDERER.get() {
+        Some(r) => r.fill_docx(file, data).await,
+        None => Err(NO_DOCX_RENDERER.into()),
+    }
+}
+
+/// `html` (a rendered template) as an editable Word file, by the sidecar (`/docx/from-html`). No text fallback: a
+/// Word file of plain text is no stand-in for the document.
+pub async fn html_to_docx(html: String) -> Result<Vec<u8>, String> {
+    match RENDERER.get() {
+        Some(r) => r.html_to_docx(html).await,
+        None => Err(NO_DOCX_RENDERER.into()),
+    }
+}
+
 /// What [`seal`] did.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sealed {
@@ -476,6 +494,44 @@ impl PdfRenderer {
             Err(e) => e.to_string(),
         };
         Err(format!("pdf-render failed on the Word template: {failure}"))
+    }
+
+    /// `/docx/fill`: the Word template and the data as JSON; the filled .docx comes back (a zip, `PK`).
+    pub async fn fill_docx(&self, file: String, data: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<u8>, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref() else { return Err(NO_DOCX_RENDERER.into()) };
+        let body = serde_json::json!({"file": file, "data": data});
+        let sent = upstream.send("/docx/fill", |base| http.post(format!("{base}/docx/fill")).json(&body)).await;
+        Self::docx_answer(sent, "fill the Word template").await
+    }
+
+    /// `/docx/from-html`: the rendered HTML as the body (UTF-8); the Word file comes back.
+    pub async fn html_to_docx(&self, html: String) -> Result<Vec<u8>, String> {
+        let Some((upstream, http)) = self.sidecar.as_ref().filter(|_| !html.trim().is_empty()) else {
+            return Err(NO_DOCX_RENDERER.into());
+        };
+        let sent = upstream
+            .send("/docx/from-html", |base| {
+                http.post(format!("{base}/docx/from-html")).header(reqwest::header::CONTENT_TYPE, "text/html; charset=utf-8").body(html.clone())
+            })
+            .await;
+        Self::docx_answer(sent, "make the Word file").await
+    }
+
+    async fn docx_answer(sent: Result<reqwest::Response, impl std::fmt::Display>, what: &str) -> Result<Vec<u8>, String> {
+        let failure = match sent {
+            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(b) if b.starts_with(b"PK") => return Ok(b.to_vec()),
+                Ok(_) => "the answer is not a Word file".to_string(),
+                Err(e) => e.to_string(),
+            },
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                format!("{status}: {}", text.chars().take(300).collect::<String>())
+            }
+            Err(e) => e.to_string(),
+        };
+        Err(format!("pdf-render failed to {what}: {failure}"))
     }
 
     /// See [`edit`].

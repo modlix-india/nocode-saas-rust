@@ -24,7 +24,7 @@ RUN fc-cache -f
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py docx_render.py docx_edit.py docx_filters.py pdf_stamp.py pdf_seal.py media_remux.py test_app.py test_docx.py test_docx_edit.py test_pdf_seal.py test_media.py ./
+COPY app.py docx_render.py docx_html.py docx_edit.py docx_filters.py pdf_stamp.py pdf_seal.py media_remux.py test_app.py test_docx.py test_docx_html.py test_docx_edit.py test_pdf_seal.py test_media.py ./
 
 RUN useradd --system --uid 65532 --no-create-home render
 USER 65532
