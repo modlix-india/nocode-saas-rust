@@ -93,6 +93,58 @@ org is. The client (and every client nested in it: owners' client, managing clie
 security sends none. LeadZumpV2 reads it to pick the deal duplicate check default for orgs
 created from 2026-11-12 (IST). Every other field is unchanged.
 
+## Automations: a new document kind and its engine (2026-11-19, Rust only)
+
+Java has nothing like it: its `Workflow` and `Action` documents can be saved and read, and
+nothing runs them. `Automation` (`crate::automation`) is a tenant's flow: a trigger, the steps
+(`ACTION`, `WAIT`, `CHECK`, `SPLIT`, `JOIN`, `END`) and how they follow each other.
+
+- **The document** (core-editor): `/api/core/automations` with everything the other kinds have,
+  guarded by `Authorities.Automation_CREATE` / `_READ` / `_UPDATE` / `_DELETE`
+  (`sql/security/V92`, role `Automation Manager`; no profile carries it yet). A document is
+  whole: a client's copy is never merged onto its parent's. Publish-all ends with it; the app
+  delete, the purges, transport (after EventAction) and both indexes include it.
+- **`POST /api/core/automations/check`**: whether an automation can run as drawn, as
+  `{ok, errors, warnings}` in plain words. A draft with errors can still be saved.
+- **The catalog**, `GET /api/core/automations/catalog?appCode=`: EventDefinitions and functions
+  now keep an `automation` block (inherited like `executeAuth`); the ones that carry it are the
+  app's triggers and actions, after the built-ins `core:sendEmail`, `core:postWebhook` and
+  `core:raiseEvent`.
+- **Storage triggers**: the catalog lists `Storage.<name>.Create` for every storage of the app
+  with `storages=all` (a site's forms). Saving an automation on a storage event switches that
+  storage's `generateEvents` on and creates the EventDefinition, through the same services and
+  authorities as by hand; a storage the client does not own is refused unless its events are
+  already on. Every function action also gets the argument `automation`
+  (`{ runId, step, test, name }`), which a function that does not declare it never sees.
+- **The engine** runs in core-events. Every event is also offered to the client's automations;
+  an event no EventAction takes but an automation does is no longer logged as unhandled.
+  Runs live in Mongo `automation_run` (kept 90 days after they finish). A wait parks the run and
+  schedules a one-off `_AUTOMATION_WAKE`, which core-events hands to the engine instead of
+  looking for an EventAction. Actions run as the client's event runner, whoever raised the event.
+  A failed action is tried again three times (1, 2, 4 minutes), then its `onFail` applies.
+  An action often causes the event the next wait listens for, and the event can reach
+  core-events before the run is saved as waiting (seen on the local stack: 3 ms). So a run
+  listens before the action runs, an early event is kept in Mongo `automation_inbox` (one day),
+  and the wait reads it once parked. A wake-up or event that loses a versioned save to another
+  delivery reads the run again (5 tries) instead of dropping the event.
+- **Run routes** (core-exec, under `/api/core/eventRuns` so no gateway changes):
+  `GET /api/core/eventRuns/automations`, `GET .../{id}`, `POST .../{id}/cancel`,
+  `POST /api/core/eventRuns/automations/test` (draft surface, waits cut to a minute).
+- **One client never sets another's automations going** (tested across FIN and FIN2 on local):
+  only automations the client owns start on its events (an inherited one, such as the app
+  owner's that is not a template, never does); an event a user raised for another client
+  (`CreateEvent` allows any `clientCode`) reaches the client's automations only when the user's
+  own client or signed-in site is that client, or the user is SYSTEM; `_AUTOMATION_WAKE` is
+  taken only from the scheduler (no user on it) and only for a run of the same app, client and
+  surface. The run routes show and stop only the caller's own runs (SYSTEM may name a client).
+- **`core:sendNotification`** (built-in): one of the app's notifications (the catalog offers
+  them as `choices`) to user ids and/or everyone in the business (optionally only holders of an
+  authority), through the same path as `SendNotification`, sent as the run's client, so only
+  that client's people are reached. A test run sends it only to the user who started the test
+  (`testUser`, also passed to function actions in their `automation` argument).
+- **An action's `error` event** fails the step: a 5xx `status` in it is retried like any
+  failure, any other answer fails at once and its `onFail` applies.
+
 ## D: this unit
 
 - **D1 number representation** (`D1-number-repr`). Mostly gone since 2026-10-17: kirun-rust's

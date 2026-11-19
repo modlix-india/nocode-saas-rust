@@ -192,6 +192,7 @@ pub fn notification_template_diff(incoming: &JValue, existing: &JValue) -> Optio
 pub fn function(mut this: JMap, base: &JMap) -> Option<JMap> {
     extract_into(&mut this, base, "definition");
     null_if_set_and_same(&mut this, base, "executeAuth");
+    null_if_same(&mut this, base, "automation");
     Some(this)
 }
 
@@ -241,6 +242,7 @@ pub fn connection(this: JMap, _base: &JMap) -> Option<JMap> {
 pub fn event_definition(mut this: JMap, base: &JMap) -> Option<JMap> {
     extract_into(&mut this, base, "schema");
     null_if_same(&mut this, base, "includeContextAuthentication");
+    null_if_same(&mut this, base, "automation");
     let derived = this.get("schedule").and_then(crate::scheduler::EventSchedule::from_j);
     let base_schedule = base.get("schedule").and_then(crate::scheduler::EventSchedule::from_j);
     let diff = crate::scheduler::EventSchedule::difference(derived.as_ref(), base_schedule.as_ref());
