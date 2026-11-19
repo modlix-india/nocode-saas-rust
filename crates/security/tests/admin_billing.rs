@@ -792,11 +792,80 @@ async fn purchases_are_refused_before_anything_is_written() {
     assert_eq!(e.message(), "AppBillingConfig with id 51 not found");
     let e = b.quote(&PurchaseRequest::default()).await.unwrap_err();
     assert_eq!(e.message(), "AppBillingBundle with id null not found");
-    // A config without credentials: the invoice is made, then Java's IllegalStateException.
+    // A config without credentials: refused before any invoice is made (ADZ-2097).
     w.books.put(config_rec("18").with("id", Val::Id(52)).with("paymentGatewayConfig", Val::Json(json!({"keyId": " "}))));
     w.books.put(bundle_rec("FIXED").with("id", Val::Id(72)).with("billingConfigId", Val::Id(52)).with("price", Val::Dec(d("1"))));
     let e = b.purchase(&buyer(), &PurchaseRequest { bundle_id: Some(72), ..Default::default() }).await.unwrap_err();
     assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "Online payment is not set up for this app yet. Please contact support.".into()));
+    assert!(invoices(&w).is_empty());
+    assert!(w.outside.calls.lock().unwrap().is_empty());
+}
+
+/// ADZ-2097: a seller without gateway keys is refused (400 `SEC.BILLING_PAYMENT_NOT_SET_UP`)
+/// BEFORE the invoice is created, on both purchase routes, so no invoice, payment or gateway call
+/// is left behind. The price refusals still come first, and a seller with keys is untouched.
+#[tokio::test]
+async fn a_seller_without_gateway_keys_leaves_no_invoice_behind() {
+    const MSG: &str = "Online payment is not set up for this app yet. Please contact support.";
+    let w = world();
+    let blank_gateways = [json!({}), json!({"keyId": "rzp_test_key"}), json!({"keySecret": "s"}), json!({"keyId": " ", "keySecret": "s"}), json!({"keyId": "rzp_test_key", "keySecret": ""})];
+    for (n, gw) in blank_gateways.into_iter().enumerate() {
+        let cfg = 60 + n as u64;
+        w.books.put(config_rec("18").with("id", Val::Id(cfg)).with("paymentGatewayConfig", Val::Json(gw)));
+        w.books.put(bundle_rec("FIXED").with("id", Val::Id(cfg + 100)).with("billingConfigId", Val::Id(cfg)).with("price", Val::Dec(d("100"))));
+        let req = PurchaseRequest { bundle_id: Some(cfg + 100), ..Default::default() };
+        let e = w.billing().purchase(&buyer(), &req).await.unwrap_err();
+        assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, MSG.into()), "link, gateway {n}");
+        let e = w.billing().purchase_order(&buyer(), &req).await.unwrap_err();
+        assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, MSG.into()), "order, gateway {n}");
+    }
+    // A config with no gateway section at all.
+    w.books.put(config_rec("18").with("id", Val::Id(70)).with("paymentGatewayConfig", Val::Null));
+    w.books.put(bundle_rec("FIXED").with("id", Val::Id(170)).with("billingConfigId", Val::Id(70)).with("price", Val::Dec(d("100"))));
+    let e = w.billing().purchase_order(&buyer(), &PurchaseRequest { bundle_id: Some(170), ..Default::default() }).await.unwrap_err();
+    assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, MSG.into()));
+    assert!(invoices(&w).is_empty());
+    assert!(w.books.all(&PAYMENT).is_empty());
+    assert!(w.outside.calls.lock().unwrap().is_empty());
+    // The price refusal of a custom bundle still wins over the missing keys.
+    w.books.put(config_rec("18").with("id", Val::Id(71)).with("paymentGatewayConfig", Val::Json(json!({}))));
+    w.books.put(bundle_rec("CUSTOM").with("id", Val::Id(171)).with("billingConfigId", Val::Id(71)).with("pricePerToken", Val::Dec(d("0.9"))).with("minTokens", Val::Dec(d("500"))));
+    let e = w.billing().purchase(&buyer(), &PurchaseRequest { bundle_id: Some(171), tokens: Some(d("100")), ..Default::default() }).await.unwrap_err();
+    assert_eq!(e.message(), "Required params {tokens (below minimum)} for $ not found");
+    assert!(invoices(&w).is_empty());
+    // A seller with keys: the same purchase goes on to the gateway and makes its invoice and payment.
+    w.books.put(config_rec("18"));
+    w.books.put(bundle_rec("FIXED").with("price", Val::Dec(d("100"))));
+    let r = w.billing().purchase_order(&buyer(), &PurchaseRequest { bundle_id: Some(BUNDLE_ID), ..Default::default() }).await.unwrap().unwrap();
+    assert_eq!(r["orderId"], "order_new");
+    assert_eq!((invoices(&w).len(), w.books.all(&PAYMENT).len(), w.outside.calls.lock().unwrap().len()), (1, 1, 1));
+    let r = w.billing().purchase(&buyer(), &PurchaseRequest { bundle_id: Some(BUNDLE_ID), ..Default::default() }).await.unwrap().unwrap();
+    assert_eq!(r["paymentUrl"], "https://rzp.io/i/short");
+    assert_eq!((invoices(&w).len(), w.books.all(&PAYMENT).len(), w.outside.calls.lock().unwrap().len()), (2, 2, 2));
+}
+
+/// ADZ-2097: Pay on a PENDING invoice whose seller has no keys fails with the same 400 and leaves
+/// the invoice exactly as it was: no new invoice, no payment, no gateway call.
+#[tokio::test]
+async fn repay_without_gateway_keys_changes_nothing() {
+    let w = world();
+    w.books.put(config_rec("18").with("paymentGatewayConfig", Val::Json(json!({"keyId": "", "keySecret": ""}))));
+    w.books.put(bundle_rec("FIXED").with("price", Val::Dec(d("10"))));
+    let pending = Rec::new(&INVOICE)
+        .with("id", Val::Id(1))
+        .with("clientId", Val::Id(M_CLIENT))
+        .with("sellerClientId", Val::Id(C_CLIENT))
+        .with("appId", Val::Id(APP))
+        .with("bundleId", Val::Id(BUNDLE_ID))
+        .with("invoiceNumber", Val::Str("INV/1".into()))
+        .with("status", Val::Str("PENDING".into()))
+        .with("totalAmount", Val::Dec(d("11.80")));
+    w.books.put(pending);
+    let before = format!("{:?}", invoices(&w));
+    let e = w.billing().repay(&buyer(), Some(1)).await.unwrap_err();
+    assert_eq!((e.status(), e.message()), (StatusCode::BAD_REQUEST, "Online payment is not set up for this app yet. Please contact support.".into()));
+    assert_eq!(format!("{:?}", invoices(&w)), before);
+    assert!(w.books.all(&PAYMENT).is_empty());
     assert!(w.outside.calls.lock().unwrap().is_empty());
 }
 
