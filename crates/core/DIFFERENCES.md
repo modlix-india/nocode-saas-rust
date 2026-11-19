@@ -93,6 +93,22 @@ org is. The client (and every client nested in it: owners' client, managing clie
 security sends none. LeadZumpV2 reads it to pick the deal duplicate check default for orgs
 created from 2026-11-12 (IST). Every other field is unchanged.
 
+## Field encryption: `CoreServices.Crypto.EncryptField` / `DecryptField` (2026-11-19, Rust only, CXZ-1961)
+
+Java has no way to keep a value in app data encrypted. Two functions (`crate::field_crypto`,
+`crate::functions::field_crypto`), the same AES-256-GCM pattern as the seal certificates:
+
+- **`EncryptField(value, clientCode, appCode, field)`** gives `result`, `v1.` + base64url of nonce +
+  ciphertext + tag. An empty `value` gives an empty `result`. The client, the app and the field label are
+  bound in as associated data: a value copied to another client, app or field does not open.
+- **`DecryptField(value, clientCode, appCode, field, authority)`** gives the plain text only to a signed-in
+  caller who holds `authority` (an authority expression, as `HasAuthority` takes; an empty one is refused,
+  403). A value that does not open is a 400 with a plain message; no key is a 503.
+- **Config**: `[crypto] field_key`, 32 bytes as base64, one per environment, never changed once a value has
+  been encrypted with it (`MODLIX__CRYPTO__FIELD_KEY` in the environment works too). A key that is not
+  base64 or not 32 bytes stops the start; an empty one only turns the two functions off (503).
+- Never logged: no plaintext, ciphertext or key in a log line or an error. `CryptoConfig`'s `Debug` hides the key.
+
 ## Automations: a new document kind and its engine (2026-11-19, Rust only)
 
 Java has nothing like it: its `Workflow` and `Action` documents can be saved and read, and

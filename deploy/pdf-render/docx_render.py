@@ -139,17 +139,28 @@ class Converter:
                    timeout=float(os.environ.get("DOCX_TIMEOUT_SECONDS", "90")))
 
     def to_pdf(self, docx_bytes):
+        return self.convert(docx_bytes, "docx", "pdf")
+
+    def convert(self, data, src_ext, target, infilter=None):
+        """`data` (a file of type `src_ext`) saved by LibreOffice as `target` (`pdf`, or `docx:MS Word 2007 XML`
+        for HTML to Word, with the HTML import filter as `infilter`)."""
+        out_ext = target.split(":")[0]
         try:
             profile = self.profiles.get(timeout=self.timeout)
         except queue.Empty:
             raise Busy("no converter free") from None
         work = tempfile.mkdtemp(prefix="docx-")
         try:
-            src = os.path.join(work, "doc.docx")
+            src = os.path.join(work, f"doc.{src_ext}")
             with open(src, "wb") as f:
-                f.write(docx_bytes)
+                f.write(data)
             cmd = [self.soffice, f"-env:UserInstallation=file://{profile}", "--headless", "--norestore",
-                   "--nologo", "--nolockcheck", "--convert-to", "pdf", "--outdir", work, src]
+                   "--nologo", "--nolockcheck"]
+            if infilter:
+                cmd += [f"--infilter={infilter}"]
+            outdir = os.path.join(work, "out")
+            os.mkdir(outdir)
+            cmd += ["--convert-to", target, "--outdir", outdir, src]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     env={**os.environ, "HOME": work}, start_new_session=True)
             try:
@@ -158,10 +169,10 @@ class Converter:
                 os.killpg(proc.pid, signal.SIGKILL)
                 proc.communicate()
                 raise Busy(f"conversion took longer than {self.timeout:.0f} s") from None
-            pdf_path = os.path.join(work, "doc.pdf")
-            if proc.returncode != 0 or not os.path.exists(pdf_path):
+            out_path = os.path.join(outdir, f"doc.{out_ext}")
+            if proc.returncode != 0 or not os.path.exists(out_path):
                 raise BadTemplate(f"conversion failed: {err.decode(errors='replace')[-200:]}")
-            with open(pdf_path, "rb") as f:
+            with open(out_path, "rb") as f:
                 return f.read()
         finally:
             shutil.rmtree(work, ignore_errors=True)

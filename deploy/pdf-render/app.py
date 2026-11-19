@@ -220,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         route = urllib.parse.urlsplit(self.path)
         if route.path == "/media/remux":
             return self._media(route.query)
-        if self.path not in ("/render", "/docx/render", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal", "/seal/inspect", "/seal/issue"):
+        if self.path not in ("/render", "/docx/render", "/docx/fill", "/docx/from-html", "/docx/inspect", "/docx/prepare", "/pdf/stamp", "/pdf/seal", "/seal/inspect", "/seal/issue"):
             return self._send(404, b"not found")
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -230,6 +230,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(413, b"body too large")
         if self.path == "/docx/render":
             return self._docx(self.rfile.read(length))
+        if self.path == "/docx/fill":
+            return self._docx_fill(self.rfile.read(length))
+        if self.path == "/docx/from-html":
+            return self._docx_from_html(self.rfile.read(length))
         if self.path == "/pdf/seal":
             return self._seal(self.rfile.read(length))
         if self.path in ("/seal/inspect", "/seal/issue"):
@@ -395,6 +399,51 @@ class Handler(BaseHTTPRequestHandler):
             LOG.exception("docx render failed")
             return self._send(500, f"docx render failed: {type(e).__name__}".encode())
         self._send(200, pdf, "application/pdf")
+
+
+    def _docx_fill(self, body):
+        """A Word template filled with its data and answered as the .docx (not converted): `docx_render.fill`."""
+        import docx_render
+
+        try:
+            req = json.loads(body)
+            if not isinstance(req, dict) or not isinstance(req.get("file"), str) or not req["file"]:
+                raise docx_render.BadTemplate("body: `file` (the .docx URL) is required")
+            data = req.get("data") or {}
+            if not isinstance(data, dict):
+                raise docx_render.BadTemplate("body: `data` must be an object")
+            filled = docx_render.fill(docx_render._read_file(req["file"], self.policy), data, self.policy)
+        except ValueError:
+            return self._send(400, b"docx: body: not JSON")
+        except (docx_render.BadTemplate, Refused) as e:
+            return self._send(400, f"docx: {e}".encode())
+        except Exception as e:
+            LOG.exception("docx fill failed")
+            return self._send(500, f"docx fill failed: {type(e).__name__}".encode())
+        self._send(200, filled, DOCX_TYPE)
+
+    def _docx_from_html(self, body):
+        """A rendered HTML template as an editable Word file (docx_html.py): the HTML as the body (UTF-8)."""
+        import docx_html
+        import docx_render
+
+        html = body.decode("utf-8", errors="replace")
+        if not html.strip():
+            return self._send(400, b"empty body")
+        if self.converter is None:
+            Handler.converter = docx_render.Converter.from_env()
+        started = time.monotonic()
+        try:
+            out = docx_html.to_docx(html, self.policy, self.converter)
+        except (docx_render.BadTemplate, Refused) as e:
+            return self._send(400, f"docx: {e}".encode())
+        except docx_render.Busy as e:
+            return self._send(504, f"docx: {e}".encode())
+        except Exception as e:
+            LOG.exception("docx from html failed")
+            return self._send(500, f"docx from html failed: {type(e).__name__}".encode())
+        LOG.info("HTML %d bytes into a Word file of %d bytes in %.0f ms", len(body), len(out), (time.monotonic() - started) * 1000)
+        self._send(200, out, DOCX_TYPE)
 
 
 def main():
