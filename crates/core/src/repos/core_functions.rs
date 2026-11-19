@@ -65,6 +65,9 @@ impl CoreFunctions {
             Arc::new(Core(Signer::new())),
             Arc::new(Core(SignatureValidator::new())),
             Arc::new(Core(HashData::new())),
+            // Rust only (CXZ-1961): a value kept encrypted in app data.
+            Arc::new(Core(crate::functions::field_crypto::EncryptField::new())),
+            Arc::new(Core(crate::functions::field_crypto::DecryptField::new())),
         ]);
         functions.extend(crate::functions::integration_fns::notification(&deps.integrations));
         functions.extend(crate::functions::integration_fns::ai(&deps.integrations));
@@ -124,15 +127,15 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 104);
+        assert_eq!(core.names().len(), 106);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
-        // The platform family comes last, after the 72 Java has, SendDataNotification,
+        // The platform family comes last, after the 72 Java has (and the Rust-only EncryptField / DecryptField, CXZ-1961), SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
         // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852), and the HRMS
         // ones: Security.GetUsersOrg / GetClientOrg / SetUserActive, File.CreateSecuredKey / SaveSecuredFile.
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[93..],
+            core.names()[95..],
             [
                 "CoreServices.Security.SendContactCode",
                 "CoreServices.Security.VerifyContactCode",
@@ -149,7 +152,7 @@ mod tests {
             "the contact codes, the connection signature check, the token info, the Word template functions, billing, then SendSms, come last"
         );
         assert_eq!(
-            core.names()[85..93],
+            core.names()[87..95],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",
@@ -173,6 +176,8 @@ mod tests {
             "CoreServices.Security.GetAppUrl",
             "CoreServices.Crypto.Signer",
             "CoreServices.Crypto.SignatureValidator",
+            "CoreServices.Crypto.EncryptField",
+            "CoreServices.Crypto.DecryptField",
             "CoreServices.Hash.HashData",
             "CoreServices.Storage.Create",
             "CoreServices.Storage.CreateMany",
@@ -195,6 +200,6 @@ mod tests {
             assert!(core.find(Some(ns), name).await.unwrap().is_some(), "{full}");
         }
         assert!(core.find(None, "HashData").await.unwrap().is_none());
-        assert_eq!(core.filter("CRYPTO").await.unwrap().len(), 2);
+        assert_eq!(core.filter("CRYPTO").await.unwrap().len(), 4);
     }
 }

@@ -41,6 +41,8 @@ pub struct CoreConfig {
     pub pdf: crate::pdf_render::PdfConfig,
     /// `[seal]`: clients' own PDF seal certificates (`crate::seal_certs`).
     pub seal: crate::seal_certs::SealConfig,
+    /// `[crypto]`: the key for `CoreServices.Crypto.EncryptField` / `DecryptField` (`crate::field_crypto`).
+    pub crypto: crate::field_crypto::CryptoConfig,
     /// `[anonymous]`: what callers who are not signed in may do.
     pub anonymous: AnonymousSection,
     /// `[ratelimit]`: how many function runs a minute one address may make without signing in
@@ -70,6 +72,7 @@ impl Default for CoreConfig {
             runs: crate::run_pool::RunsSection::default(),
             pdf: crate::pdf_render::PdfConfig::default(),
             seal: crate::seal_certs::SealConfig::default(),
+            crypto: crate::field_crypto::CryptoConfig::default(),
             anonymous: AnonymousSection::default(),
             ratelimit: platform::ratelimit::RateLimitConfig::default(),
         }
