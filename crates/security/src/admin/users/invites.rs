@@ -513,6 +513,9 @@ impl Admin {
     pub async fn invite_create(&self, ca: &ContextAuth, mut i: Invite) -> AuthResult<Value> {
         pre_authorize(ca, &["Authorities.User_CREATE"])?;
         let refused = || forbidden("forbidden_create", &["User Invite"]);
+        // The same refusal (status 403, Java key `forbidden_create`), said plainly for the person:
+        // the invited client cannot hold the profile's app (ADZ-798).
+        let no_app_access = || refused().with_code("SEC.INVITE_PROFILE_NO_APP_ACCESS");
         match i.client_id {
             None => i.client_id = Some(ca.user.client_id()),
             Some(c) if !self.caller_manages_client(ca, c).await? => return Err(refused()),
@@ -537,7 +540,7 @@ impl Admin {
                 // `invite_accept` applies to the new user. Without it the accept makes a dead
                 // account (no profile, sign-in refused). The caller's own access was checked above.
                 if !self.has_access_to_profiles(client_id, &[p]).await? {
-                    return Err(refused());
+                    return Err(no_app_access());
                 }
                 // A new user takes a seat of the plan once they hold a profile: a capped plan (Free) says no now.
                 self.refuse_user_over_limit(profile_app, client_id, None, true).await?;
@@ -553,7 +556,7 @@ impl Admin {
             // `addUserProfile`.
             let Some(p) = i.profile_id else { return Err(refused()) };
             if !self.has_access_to_profiles(u.client_id, &[p]).await? {
-                return Err(refused());
+                return Err(no_app_access());
             }
             self.refuse_user_over_limit(profile_app, u.client_id, Some(u.id), false).await?;
             self.db.add_profile_to_user(u.id, p).await?.ok_or_else(refused)?;
@@ -1405,6 +1408,19 @@ mod live {
         let refused = s.invite_create(&sys, Invite { client_id: Some(c), profile_id: Some(other), ..new(&mail("n1")) }).await;
         assert_eq!(err(refused), (StatusCode::FORBIDDEN, "Cannot create User Invite for the selected client".to_string()), "no access to the profile's app");
         assert!(s.db.invite_with_identity(Some(c), Some(&mail("n1")), None).await.unwrap().is_none(), "no invite written");
+        // The code and the person's text say what is wrong; status and Java key stay as they were.
+        let e = s.invite_create(&sys, Invite { client_id: Some(c), profile_id: Some(other), ..new(&mail("n1")) }).await.unwrap_err();
+        assert_eq!(e.code(), "SEC.INVITE_PROFILE_NO_APP_ACCESS");
+        let (st, v) = fx.http("POST", "/users/invite", Some(json!({"clientId": c, "emailId": mail("n1"), "profileId": other}))).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{v}");
+        assert_eq!(v["message"], "You can't invite someone into this organisation with that profile: it does not have access to the app yet.");
+        assert_eq!(v["action"], "Choose a profile the organisation can use, or give the organisation access to the app first.");
+        assert!(v["debugMessage"].as_str().unwrap().starts_with("[forbidden_create]"), "{v}");
+        // The existing person's branch says the same (ZZRUL's own user, a profile it cannot hold).
+        let again = Invite { client_id: Some(c), email_id: a.email_id.clone(), profile_id: Some(other), ..Default::default() };
+        assert_eq!(s.invite_create(&sys, again).await.unwrap_err().code(), "SEC.INVITE_PROFILE_NO_APP_ACCESS");
+        // The caller's own reach stays the generic refusal.
+        assert_eq!(s.invite_create(&in_c, Invite { profile_id: Some(p2), ..new(&mail("n5")) }).await.unwrap_err().code(), "SEC.FORBIDDEN_CREATE");
         let granted = s.invite_create(&sys, Invite { client_id: Some(c), profile_id: Some(p1), ..new(&mail("n2")) }).await.unwrap();
         assert_eq!(granted["existingUser"], false);
         assert!(s.invite_revoke(&sys, granted["userRequest"]["inviteCode"].as_str().unwrap()).await.unwrap());

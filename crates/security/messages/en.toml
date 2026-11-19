@@ -372,6 +372,14 @@ java = "forbidden_create"
 when = "Creating a user, role, profile, app, invitation, client or policy for a client the caller does not manage."
 audience = "signed-in"
 
+[SEC.INVITE_PROFILE_NO_APP_ACCESS]
+status = 403
+text = "You can't invite someone into this organisation with that profile: it does not have access to the app yet."
+action = "Choose a profile the organisation can use, or give the organisation access to the app first."
+java = "forbidden_create"
+when = "Inviting a person (new or existing) with a profile of an app the invited client neither owns nor has access to, or one restricted for it."
+audience = "signed-in"
+
 [SEC.FORBIDDEN_UPDATE]
 status = 403
 params = ["what:entity"]
