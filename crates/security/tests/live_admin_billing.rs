@@ -843,14 +843,26 @@ async fn write_routes_inside_one_rolled_back_session() {
         assert_eq!((s, v.as_array().map(Vec::len)), (StatusCode::OK, Some(1)));
         let (s, v) = call("POST", "/billing/quote".into(), Some(json!({"bundleId": bid})), vec![]).await;
         assert_eq!((s, v["totalAmount"].as_f64()), (StatusCode::OK, Some(118.0)));
-        // The purchase stops at the seller's missing keys (after its PENDING invoice).
+        // The purchase stops at the seller's missing keys, before any invoice is made (ADZ-2097).
         let (s, v) = call("POST", "/billing/purchase".into(), Some(json!({"bundleId": bid})), vec![]).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
         let (s, v) = call("POST", "/billing/purchase/order".into(), Some(json!({"bundleId": bid})), vec![]).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+        let made: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM security_invoice WHERE SELLER_CLIENT_ID = {seller}")).fetch_one(&pool).await.unwrap();
+        assert_eq!(made, 0);
+        // Pay on a PENDING invoice of that seller (made by hand: the purchase makes none) fails the same way and changes nothing.
+        sqlx::query(&format!(
+            "INSERT INTO security_invoice (INVOICE_NUMBER, INVOICE_DATE, STATUS, SELLER_CLIENT_ID, CLIENT_ID, APP_ID, BUNDLE_ID, BASE_AMOUNT, GST_PERCENTAGE, GST_AMOUNT, TOTAL_AMOUNT, CURRENCY) \
+             VALUES ('ADZ2097/1', NOW(), 'PENDING', {seller}, 1, {app}, {bid}, 100, 18, 18, 118, 'INR')"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         let invoice: u64 = sqlx::query_scalar(&format!("SELECT MAX(ID) FROM security_invoice WHERE SELLER_CLIENT_ID = {seller}")).fetch_one(&pool).await.unwrap();
         let (s, v) = call("POST", "/billing/repay".into(), Some(json!({"invoiceId": invoice})), vec![]).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+        let (n, st): (i64, String) = sqlx::query_as(&format!("SELECT COUNT(*), MAX(STATUS) FROM security_invoice WHERE SELLER_CLIENT_ID = {seller}")).fetch_one(&pool).await.unwrap();
+        assert_eq!((n, st.as_str()), (1, "PENDING"));
         // The wallet routes only read here.
         let (s, v) = call("GET", "/wallets/plan".into(), None, vec![]).await;
         assert_eq!(s, StatusCode::OK, "{v}");
