@@ -397,6 +397,12 @@ impl Billing<'_> {
     async fn start_purchase(&self, ca: &ContextAuth, req: &PurchaseRequest) -> AuthResult<Option<(std::sync::Arc<Client>, Rec, Rec)>> {
         let Some(buyer) = self.resolve_buyer(ca, req.client_id).await? else { return Ok(None) };
         let (bundle, config) = self.bundle_and_config(req.bundle_id).await?;
+        // ADZ-2097: every refusal that needs no write comes before the invoice, so a purchase that
+        // cannot go on leaves nothing behind. The price refusals keep their place first (as
+        // `create_invoice` raised them); then a seller without gateway keys is the same 400 that
+        // `payment_link` / `checkout_order` would raise after an unpayable PENDING invoice.
+        price(&bundle, &config, req.tokens)?;
+        Self::razorpay_keys(&config)?;
         let Some(invoice) = self.create_invoice(ca.user.id, &buyer, &bundle, &config, req.tokens).await? else { return Ok(None) };
         Ok(Some((buyer, config, invoice)))
     }
