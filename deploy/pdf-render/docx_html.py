@@ -38,7 +38,7 @@ DROP = {
     "justify-content", "align-self", "box-sizing", "overflow", "overflow-x", "overflow-y", "opacity", "table-layout",
     "page-break-inside", "break-inside", "orphans", "widows", "border-spacing", "max-width", "max-height", "min-width",
     "min-height", "text-overflow", "float", "clear", "cursor", "transform", "word-break", "hyphens", "outline",
-    "-webkit-print-color-adjust", "print-color-adjust", "text-transform", "font-display",
+    "column-count", "column-gap", "column-width", "columns", "column-rule", "-webkit-print-color-adjust", "print-color-adjust", "text-transform", "font-display",
 }
 COLOR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|\b(?:white|black|red|green|blue|gray|grey|silver|yellow|orange|navy|teal|maroon|purple|transparent)\b")
 LEN = re.compile(r"^(-?[0-9.]+)\s*(mm|cm|in|pt|px|em|%)?$")
@@ -46,18 +46,23 @@ PX_PER = {"px": 1.0, "mm": 96 / 25.4, "cm": 96 / 2.54, "in": 96.0, "pt": 96 / 72
 MM_PER = {"mm": 1.0, "cm": 10.0, "in": 25.4, "pt": 25.4 / 72, "px": 25.4 / 96}
 
 
+# the browser's own margins (px) of block elements that have some, top and bottom; others are 0
+UA_MARGIN = {"div": (0, 0), "p": (12, 12), "h1": (21, 21), "h2": (20, 20), "h3": (19, 19), "h4": (21, 21), "h5": (22, 22),
+             "h6": (25, 25), "ul": (12, 12), "ol": (12, 12), "li": (0, 0), "blockquote": (12, 12), "pre": (12, 12)}
+
+
 def _px(value):
     m = LEN.match((value or "").strip())
-    if not m or m.group(2) in (None, "%", "em"):
+    if not m or m.group(2) in ("%", "em"):
         return None
-    return float(m.group(1)) * PX_PER[m.group(2)]
+    return float(m.group(1)) * PX_PER[m.group(2) or "px"]
 
 
 def _mm(value):
     m = LEN.match((value or "").strip())
-    if not m or m.group(2) in (None, "%", "em"):
+    if not m or m.group(2) in ("%", "em"):
         return None
-    return float(m.group(1)) * MM_PER[m.group(2)]
+    return float(m.group(1)) * MM_PER[m.group(2) or "px"]
 
 
 def _decls(text):
@@ -98,7 +103,7 @@ def _page_rule(css):
         mg = d.get("margin", ("", False))[0].split()
         vals = [_mm(v) for v in mg]
         if vals and all(v is not None for v in vals):
-            page["margin"] = {1: vals * 4, 2: vals * 2, 3: vals + [vals[1]], 4: vals}[len(vals)][:4]
+            page["margin"] = _four(vals)
         for side, key in (("top", "margin-top"), ("right", "margin-right"), ("bottom", "margin-bottom"), ("left", "margin-left")):
             if key in d and _mm(d[key][0]) is not None:
                 page["margin"]["trbl".index(side[0])] = _mm(d[key][0])
@@ -182,8 +187,13 @@ def _transform(el, how):
 
 
 class Prepared:
-    def __init__(self, html, page, header, footer):
+    def __init__(self, html, page, header, footer, pads=(), marks=()):
         self.html, self.page, self.header, self.footer = html, page, header, footer
+        # paragraphs given a rule or a shading after the conversion (LibreOffice turns a div's border and
+        # background into a box around its characters): index -> {"bottom": (pt, hex), "top": ..., "box": ..., "fill": hex}
+        self.marks = list(marks)
+        # per table, in document order: the cell padding (top, right, bottom, left) in twips, or None
+        self.pads = list(pads)
 
 
 def prepare(html, policy):
@@ -261,7 +271,11 @@ def prepare(html, policy):
 
     body = root.find("body")
     _convert_layout(body, styles, page, policy)
-    _write(body, styles, policy, "")
+    _table_spacers(body, styles)
+    _inherit_fonts(body, styles, root)
+    pads = [_table_padding(t, styles) for t in body.iter("table")]
+    marks = []
+    _write(body, styles, policy, "", marks)
 
     for tag in ("style", "link", "script"):
         for el in list(root.iter(tag)):
@@ -274,32 +288,163 @@ def prepare(html, policy):
         head.remove(m)
     etree.SubElement(head, "meta", charset="utf-8")
     out = lh.tostring(root, encoding="unicode", doctype="<!DOCTYPE html>")
-    return Prepared(out, page, header_parts, footer_parts)
+    return Prepared(out, page, header_parts, footer_parts, pads, marks)
+
+
+def _border(value):
+    """`1px solid #111` as (pt, hex), None for none/0."""
+    if not value or value.strip() in ("0", "none") or "none" in value or "hidden" in value:
+        return None
+    w = _px(next((t for t in value.split() if LEN.match(t)), "1px")) or 1.0
+    if w <= 0:
+        return None
+    m = COLOR.search(value)
+    color = m.group(0) if m else "#000"
+    if color.startswith("rgb"):
+        n = [int(float(x)) for x in re.findall(r"[0-9.]+", color)[:3]]
+        color = "#%02x%02x%02x" % tuple(n)
+    if len(color) == 4:
+        color = "#" + "".join(c * 2 for c in color[1:])
+    return (max(0.25, w * 0.75), color.lstrip("#").upper()[:6])
+
+
+def _mark_of(st):
+    """What a block's border and background ask of the paragraph (see Prepared.marks), or None."""
+    mark = {}
+    for side in ("top", "bottom", "left", "right"):
+        b = _border(st.get(f"border-{side}", ("", 0))[0])
+        if b:
+            mark[side] = b
+    allb = _border(st.get("border", ("", 0))[0])
+    if allb:
+        for side in ("top", "bottom", "left", "right"):
+            mark.setdefault(side, allb)
+    bg = st.get("background-color", ("", 0))[0] or st.get("background", ("", 0))[0]
+    m = COLOR.search(bg or "")
+    if m and m.group(0) != "transparent" and "gradient" not in bg:
+        c = m.group(0)
+        if c.startswith("rgb"):
+            n = [int(float(x)) for x in re.findall(r"[0-9.]+", c)[:3]]
+            c = "#%02x%02x%02x" % tuple(n)
+        if len(c) == 4:
+            c = "#" + "".join(x * 2 for x in c[1:])
+        mark["fill"] = c.lstrip("#").upper()[:6]
+    return mark or None
+
+
+def _four(parts):
+    """CSS's one to four values as (top, right, bottom, left)."""
+    n = len(parts)
+    if n == 1:
+        return parts * 4
+    if n == 2:
+        return parts * 2
+    if n == 3:
+        return parts + [parts[1]]
+    return (parts + [0.0] * 4)[:4]
+
+
+def _box(st, prop):
+    """(top, right, bottom, left) in px of `margin` or `padding` (shorthand, then the longhands)."""
+    vals = [None] * 4
+    parts = [_px(v) if v != "auto" else 0.0 for v in st.get(prop, ("", 0))[0].split()]
+    if parts and all(v is not None for v in parts):
+        vals = _four(parts)
+    for i, side in enumerate(("top", "right", "bottom", "left")):
+        v = _px(st.get(f"{prop}-{side}", ("", 0))[0])
+        if v is not None:
+            vals[i] = v
+    return [v or 0.0 for v in vals]
+
+
+def _table_padding(table, styles):
+    """The padding most of the table's cells have, in twips, with half of a `border-spacing` row gap added above
+    and below (Word has no row gap): LibreOffice reads cell padding only from the table, and a cell that
+    names its own padding loses the table's, so the padding is put back on the table by `finish`."""
+    counts = {}
+    for td in table.iter("td", "th"):
+        pad = tuple(_box(styles.get(td, {}), "padding"))
+        counts[pad] = counts.get(pad, 0) + 1
+    if not counts:
+        return None
+    top, right, bottom, left = max(counts, key=counts.get)
+    spacing = styles.get(table, {}).get("border-spacing", ("", 0))[0].split()
+    gap = (_px(spacing[-1]) or 0.0) / 2 if spacing and styles.get(table, {}).get("border-collapse", ("", 0))[0] != "collapse" else 0.0
+    tw = lambda px: int(round((px + 0) * 15))
+    return [tw(top + gap), tw(right), tw(bottom + gap), tw(left)]
+
+
+def _inherit_fonts(body, styles, root):
+    """A heading has LibreOffice's own heading font unless its style names one: give it the page's (body's) font."""
+    for el in body.iter("h1", "h2", "h3", "h4", "h5", "h6"):
+        st = styles.setdefault(el, {})
+        if "font-family" in st:
+            continue
+        node = el.getparent()
+        while node is not None:
+            ff = styles.get(node, {}).get("font-family")
+            if ff:
+                st["font-family"] = ff
+                break
+            node = node.getparent()
+
+
+def _table_spacers(body, styles):
+    """A table's `margin-top`/`margin-bottom` as an empty paragraph with that space (LibreOffice drops it)."""
+    from lxml import html as lh
+
+    for table in list(body.iter("table")):
+        mt, _r, mb, _l = _box(styles.get(table, {}), "margin")
+        for px, before in ((mt, True), (mb, False)):
+            if px < 10 or table.getparent() is None:
+                continue
+            sp = lh.Element("p")
+            sp.text = "\u00a0"
+            styles[sp] = {"margin-top": (f"{max(0.0, px - 9.5):.0f}px", False), "margin-bottom": ("0px", False), "margin-left": ("0px", False),
+                          "margin-right": ("0px", False), "font-size": ("1pt", False), "line-height": ("1pt", False)}
+            parent = table.getparent()
+            if before:
+                parent.insert(parent.index(table), sp)
+            else:
+                sp.tail = table.tail
+                table.tail = None
+                parent.insert(parent.index(table) + 1, sp)
 
 
 def _running_parts(el, styles, policy):
-    """A running header/footer as {text lines, images (bytes, w_px, h_px), right text}: what python-docx can place."""
-    lines, images = [], []
-    for node in el.iter():
-        if not isinstance(node.tag, str):
-            continue
-        if node.tag == "img":
-            raw = _image(node.get("src", ""), policy)
+    """A running header/footer as a list of paragraphs python-docx can place: {images [(bytes, w_px, h_px)], text, right,
+    bold, size (pt), color, fill, rule}: each top-level table (a logo row) or block of the element becomes one."""
+    paras = []
+
+    def one(node):
+        st = styles.get(node, {})
+        images = []
+        for im in node.iter("img"):
+            raw = _image(im.get("src", ""), policy)
             if raw and _ctype(raw):
-                sz = _size_image(raw, styles.get(node, {}))
+                sz = _size_image(raw, styles.get(im, {}))
                 if sz:
                     images.append((raw, sz[0], sz[1]))
-    right = ""
-    for td in el.iter("td"):
-        if "text-align" in styles.get(td, {}) and styles[td]["text-align"][0] == "right":
-            right = " ".join(td.text_content().split())
-    text = " ".join(el.text_content().split())
-    if right and text.endswith(right):
-        text = text[: -len(right)].strip()
-    if text:
-        lines.append(text)
-    rule = any("border-bottom" in styles.get(n, {}) for n in el.iter() if isinstance(n.tag, str))
-    return {"lines": lines, "images": images, "right": right, "rule": rule}
+        right = ""
+        for td in node.iter("td"):
+            if styles.get(td, {}).get("text-align", ("", 0))[0] == "right":
+                right = " ".join(td.text_content().split())
+        text = " ".join(node.text_content().split())
+        if right and text.endswith(right):
+            text = text[: -len(right)].strip()
+        fs = _px(st.get("font-size", ("", 0))[0])
+        mark = _mark_of(st) if node.tag != "table" else None
+        color = COLOR.search(st.get("color", ("", 0))[0] or "")
+        if images or text or right:
+            paras.append({"images": images, "text": text, "right": right, "bold": "bold" in st.get("font-weight", ("", 0))[0],
+                          "size": fs * 0.75 if fs else None, "color": color.group(0) if color else None, "mark": mark})
+
+    kids = [c for c in el if isinstance(c.tag, str)]
+    if not kids:
+        one(el)
+    for c in kids:
+        one(c)
+    return paras
 
 
 def _display(st):
@@ -312,6 +457,7 @@ def _is_text_ws(s):
 
 def _convert_layout(body, styles, page, policy):
     """Flex rows and rows of inline-blocks become tables; fixed/absolute boxes are dropped."""
+    from lxml import etree
     from lxml import html as lh
 
     content_mm = page["w"] - page["margin"][1] - page["margin"][3]
@@ -322,23 +468,23 @@ def _convert_layout(body, styles, page, policy):
         styles[table] = st
         rows = [children[i:i + ncols] for i in range(0, len(children), ncols)] or [[]]
         for row in rows:
-            tr = lh.SubElement(table, "tr")
+            tr = etree.SubElement(table, "tr")
             styles[tr] = {}
             for idx, child in enumerate(row):
-                td = lh.SubElement(tr, "td")
+                td = etree.SubElement(tr, "td")
                 tst = {"vertical-align": ("top", False)}
                 w = widths_mm.get(child)
                 if w:
-                    tst["width"] = (f"{w:.1f}mm", False)
-                elif len(row) > 1:
-                    tst["width"] = (f"{100.0 / ncols:.1f}%", False)
+                    tst["width"] = (f"{min(100.0, w / content_mm * 100):.1f}%", False)
+                elif ncols > 1:
+                    tst["width"] = (f"{max(5.0, (content_mm - (gap_mm or 0) * (ncols - 1)) / ncols / content_mm * 100):.1f}%", False)
                 if justify_right_last and idx == len(row) - 1 and idx > 0:
                     tst["text-align"] = ("right", False)
                 styles[td] = tst
                 td.append(child)
                 if gap_mm and idx < len(row) - 1:
-                    gap = lh.SubElement(tr, "td")
-                    styles[gap] = {"width": (f"{gap_mm:.1f}mm", False)}
+                    gap = etree.SubElement(tr, "td")
+                    styles[gap] = {"width": (f"{gap_mm / content_mm * 100:.1f}%", False)}
                     gap.text = ""
         return table
 
@@ -365,6 +511,26 @@ def _convert_layout(body, styles, page, policy):
             st = styles.get(child, {})
             kids = child_elements(child)
             disp = _display(st)
+            ncol = st.get("column-count", ("", 0))[0]
+            if ncol.isdigit() and int(ncol) > 1 and len(kids) > 1 and child.tag not in ("table", "tr", "td"):
+                n = int(ncol)
+                per = -(-len(kids) // n)
+                gap = _mm(st.get("column-gap", ("", 0))[0]) or 0
+                for k in kids:
+                    child.remove(k)
+                    k.tail = None
+                chunks = []
+                for i in range(n):
+                    holder = lh.Element("div")
+                    styles[holder] = {}
+                    for k in kids[i * per:(i + 1) * per]:
+                        holder.append(k)
+                    chunks.append(holder)
+                chunks = [c for c in chunks if len(c)]
+                child.text = None
+                child.append(build_table(chunks, gap, {}, len(chunks), False))
+                st["display"] = ("block", False)
+                continue
             if disp == "flex" and child.tag not in ("table", "tr", "td"):
                 gap = _mm(st.get("gap", ("", 0))[0] or st.get("column-gap", ("", 0))[0] or "")
                 wrap = st.get("flex-wrap", ("", 0))[0] == "wrap"
@@ -399,11 +565,15 @@ def _convert_layout(body, styles, page, policy):
                     styles[k]["display"] = ("block", False)
                 table = lh.Element("table")
                 styles[table] = {"width": ("100%", False), "border-collapse": ("collapse", False)}
-                tr = lh.SubElement(table, "tr")
+                tr = etree.SubElement(table, "tr")
                 styles[tr] = {}
+                # the row's own border and padding (a key/value line with a rule under it) go on its cells
+                carried = {k2: v2 for k2, v2 in st.items() if k2.startswith("border-bottom") or k2.startswith("border-top") or k2 == "border" or k2.startswith("padding")}
+                for k2 in carried:
+                    st.pop(k2, None)
                 for k in kids:
-                    td = lh.SubElement(tr, "td")
-                    tst = {"vertical-align": ("top", False)}
+                    td = etree.SubElement(tr, "td")
+                    tst = {"vertical-align": ("top", False), **carried}
                     if widths.get(k):
                         tst["width"] = (widths[k], False)
                     styles[td] = tst
@@ -413,7 +583,7 @@ def _convert_layout(body, styles, page, policy):
     walk(body)
 
 
-def _write(el, styles, policy, inherited_transform):
+def _write(el, styles, policy, inherited_transform, marks):
     """The merged styles as the `style` attribute (and table/cell attributes), images embedded, text-transform applied."""
     import base64
 
@@ -435,7 +605,49 @@ def _write(el, styles, policy, inherited_transform):
                 continue
             if k in ("padding", "margin") and "auto" in v:
                 continue
+            if k.startswith("padding"):
+                continue
+            if k == "margin" or k.startswith("margin-"):
+                continue
             out[k] = v
+        # LibreOffice's CSS parser stops at a value it cannot read and drops the rest of the style: no `.5` without a
+        # leading zero, no em letter spacing
+        if "letter-spacing" in out:
+            ls = out.pop("letter-spacing")
+            m = re.match(r"^(-?[0-9.]+)em$", ls.strip())
+            if m:
+                fs_pt = (_px(out.get("font-size", "")) or _px(st.get("font-size", ("", 0))[0]) or 13.0) * 0.75
+                ls = f"{float(m.group(1)) * fs_pt:.2f}pt"
+            if _px(ls) is not None:
+                out["letter-spacing"] = ls
+        out = {k: re.sub(r"(?<![0-9.])\.([0-9])", r"0.\1", v) for k, v in out.items()}
+        if el.tag in UA_MARGIN and el.tag != "li":
+            mark = _mark_of(st)
+            for k in [k for k in out if k.startswith("border")] + (["background-color"] if "background-color" in out else []):
+                out.pop(k, None)
+            if mark:
+                marks.append(mark)
+                el.text = f"%%M{len(marks) - 1}%%" + (el.text or "")
+        elif el.tag not in ("td", "th", "table", "tr", "img", "li"):
+            for k in [k for k in out if k.startswith("border")]:
+                out.pop(k, None)
+        if el.tag not in ("td", "th", "table", "tr", "img") and "background-color" in out:
+            pt, _pr, pb, _pl = _box(st, "padding")
+            fs = _px(out.get("font-size", "")) or (_px(st.get("font-size", ("", 0))[0]) or 13.0)
+            if pt + pb >= 2:
+                out["line-height"] = f"{fs * 1.2 + pt + pb:.0f}px"
+        if el.tag in UA_MARGIN:
+            # LibreOffice gives every paragraph 7pt after unless told: say each side, from the template, else the browser default
+            has = {side: (st.get("margin", ("", 0))[0] != "" or f"margin-{side}" in st) for side in ("top", "bottom")}
+            top, right, bottom, left = _box(st, "margin")
+            dtop, dbottom = UA_MARGIN[el.tag]
+            top = top if has["top"] else dtop
+            bottom = bottom if has["bottom"] else dbottom
+            out["margin-top"], out["margin-bottom"] = f"{top:.0f}px", f"{bottom:.0f}px"
+            if left:
+                out["margin-left"] = f"{left:.0f}px"
+            if right:
+                out["margin-right"] = f"{right:.0f}px"
         # a size cap is not a size: the image gets its real one
         if el.tag == "img":
             raw = _image(el.get("src", ""), policy)
@@ -455,7 +667,8 @@ def _write(el, styles, policy, inherited_transform):
                 el.set("bgcolor", out["background-color"])
             w = out.get("width")
             if w:
-                el.set("width", w.replace("mm", "mm"))
+                px = _px(w)
+                el.set("width", w if w.endswith("%") else (str(int(px)) if px else w))
             va = out.get("vertical-align")
             if va in ("top", "middle", "bottom"):
                 el.set("valign", va)
@@ -470,26 +683,20 @@ def _write(el, styles, policy, inherited_transform):
             spacing = st.get("border-spacing", ("", 0))[0].split()
             el.set("cellspacing", "0" if collapse else str(int(round(_px(spacing[-1]) or 0)) if spacing else 0))
             el.set("border", "0")
-            pad = None
-            for td in el.iter("td", "th"):
-                p = styles.get(td, {}).get("padding", ("", 0))[0].split()
-                if p:
-                    pad = p
-                    break
-            if pad:
-                v = _px(pad[0]) if len(pad) in (1, 2) else _px(pad[0])
-                if v is not None:
-                    el.set("cellpadding", str(int(round(v))))
-        if "font-size" in out and out["font-size"].endswith("pt") is False:
-            pass
+            el.set("cellpadding", "0")
         if out:
             el.set("style", ";".join(f"{k}:{v}" for k, v in out.items()))
         elif "style" in el.attrib:
             del el.attrib["style"]
         for att in ("class", "id"):
             el.attrib.pop(att, None)
+        # `margin-right` between inline boxes (the meta line of a cost sheet): spaces, as Word has no such margin
+        if el.tag in ("span", "b", "i", "strong", "em", "a") and styles.get(el):
+            mr = _mm(styles[el].get("margin-right", ("", 0))[0] or "")
+            if mr and mr >= 1:
+                el.tail = ("\u00a0" * max(1, int(round(mr / 1.4)))) + (el.tail or "")
     for child in list(el):
-        _write(child, styles, policy, transform)
+        _write(child, styles, policy, transform, marks)
     if isinstance(el.tag, str):
         _transform_own(el, transform)
 
@@ -549,39 +756,36 @@ def finish(docx_bytes, prepared):
         s.header_distance = Mm(min(9.0, max(4.0, top / 3)))
         s.footer_distance = Mm(min(9.0, max(4.0, bottom / 3)))
         text_w = Mm(page["w"] - left - right)
-        for part, spec in ((s.header, prepared.header), (s.footer, None)):
-            pass
-        if prepared.header:
-            h = s.header
-            h.is_linked_to_previous = False
-            p = h.paragraphs[0]
-            for raw, w, hh in prepared.header["images"][:2]:
-                p.add_run().add_picture(io.BytesIO(raw), width=Pt(w * 0.75), height=Pt(hh * 0.75))
-            if prepared.header["lines"]:
-                r = p.add_run((" " if prepared.header["images"] else "") + prepared.header["lines"][0])
-                r.font.size = Pt(8)
-            if prepared.header["right"]:
-                p.paragraph_format.tab_stops.add_tab_stop(text_w, WD_TAB_ALIGNMENT.RIGHT)
-                r = p.add_run("\t" + prepared.header["right"])
-                r.font.size = Pt(8)
-                r.font.color.rgb = RGBColor(0xAA, 0, 0)
-            if prepared.header["rule"]:
-                ppr = p._p.get_or_add_pPr()
-                bdr = OxmlElement("w:pBdr")
-                b = OxmlElement("w:bottom")
-                for k, v in (("val", "single"), ("sz", "6"), ("space", "1"), ("color", "111111")):
-                    b.set(qn(f"w:{k}"), v)
-                bdr.append(b)
-                ppr.append(bdr)
-        if prepared.footer or page["numbers"]:
-            f = s.footer
-            f.is_linked_to_previous = False
-            p = f.paragraphs[0]
-            if prepared.footer and prepared.footer["lines"]:
-                r = p.add_run(prepared.footer["lines"][0])
-                r.font.size = Pt(7.5)
-                r.font.color.rgb = RGBColor(0x77, 0x77, 0x77)
-            if page["numbers"]:
+
+        def fill_part(part, paras, with_numbers):
+            part.is_linked_to_previous = False
+            first = True
+            for spec in paras or []:
+                p = part.paragraphs[0] if first else part.add_paragraph()
+                first = False
+                for raw, w, hh in spec["images"][:3]:
+                    p.add_run().add_picture(io.BytesIO(raw), width=Pt(w * 0.75), height=Pt(hh * 0.75))
+                if spec["text"] and not spec["images"]:
+                    r = p.add_run(spec["text"])
+                    r.bold = spec["bold"] or None
+                    r.font.size = Pt(spec["size"] or 9)
+                    _tint(r, spec["color"])
+                elif spec["text"]:
+                    p.add_run(" ")
+                    r = p.add_run(spec["text"])
+                    r.font.size = Pt(spec["size"] or 8)
+                    _tint(r, spec["color"])
+                if spec["right"]:
+                    p.paragraph_format.tab_stops.add_tab_stop(text_w, WD_TAB_ALIGNMENT.RIGHT)
+                    r = p.add_run("\t" + spec["right"])
+                    r.font.size = Pt(spec["size"] or 7.5)
+                    _tint(r, spec["color"])
+                if spec["mark"]:
+                    _style_paragraph(p._p, spec["mark"])
+            if with_numbers:
+                p = part.paragraphs[-1] if paras else part.paragraphs[0]
+                if paras and (paras[-1]["text"] or paras[-1]["images"]) and paras[-1]["right"]:
+                    p = part.add_paragraph()
                 p.paragraph_format.tab_stops.add_tab_stop(text_w, WD_TAB_ALIGNMENT.RIGHT)
                 r = p.add_run("\tPage ")
                 r.font.size = Pt(8)
@@ -589,9 +793,142 @@ def finish(docx_bytes, prepared):
                 r = p.add_run(" of ")
                 r.font.size = Pt(8)
                 _field(p, "NUMPAGES").font.size = Pt(8)
+
+        if prepared.header:
+            fill_part(s.header, prepared.header, False)
+        if prepared.footer or page["numbers"]:
+            fill_part(s.footer, prepared.footer, page["numbers"])
+    _apply_table_padding(doc, prepared.pads)
+    _apply_marks(doc, prepared.marks)
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+MARK = re.compile(r"%%M(\d+)%%")
+# what may follow `pBdr` and `shd` in a paragraph's properties (the schema is ordered; Word refuses a misplaced one)
+_AFTER_SHD = ("tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct", "autoSpaceDE", "autoSpaceDN",
+              "bidi", "adjustRightInd", "snapToGrid", "spacing", "ind", "contextualSpacing", "mirrorIndents", "suppressOverlap",
+              "jc", "textDirection", "textAlignment", "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange")
+
+
+def _tint(run, color):
+    from docx.shared import RGBColor
+
+    if color and color.startswith("#") and len(color) in (4, 7):
+        h = color.lstrip("#")
+        h = "".join(c * 2 for c in h) if len(h) == 3 else h
+        run.font.color.rgb = RGBColor.from_string(h.upper())
+
+
+def _style_paragraph(para, mark):
+    """`mark`'s borders and fill on the paragraph element (in schema order)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    ppr = para.find(qn("w:pPr"))
+    if ppr is None:
+        ppr = OxmlElement("w:pPr")
+        para.insert(0, ppr)
+
+    def put(el):
+        for child in ppr:
+            if child.tag.split("}")[1] in _AFTER_SHD:
+                child.addprevious(el)
+                return
+        ppr.append(el)
+
+    for old in ("w:pBdr", "w:shd"):
+        e = ppr.find(qn(old))
+        if e is not None:
+            ppr.remove(e)
+    sides = [side for side in ("top", "left", "bottom", "right") if side in mark]
+    if sides:
+        bdr = OxmlElement("w:pBdr")
+        for side in sides:
+            pt, color = mark[side]
+            e = OxmlElement(f"w:{side}")
+            e.set(qn("w:val"), "single")
+            e.set(qn("w:sz"), str(max(2, int(round(pt * 8)))))
+            e.set(qn("w:space"), "1")
+            e.set(qn("w:color"), color)
+            bdr.append(e)
+        put(bdr)
+    if "fill" in mark:
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), mark["fill"])
+        put(shd)
+
+
+def _take_marker(para):
+    """The mark index named by the `%%M<n>%%` token in the paragraph's text (which LibreOffice may have split over
+    runs), with the token removed; None when there is none."""
+    from docx.oxml.ns import qn
+
+    ts = [t for t in para.iter(qn("w:t")) if t.text]
+    full = "".join(t.text for t in ts)
+    m = MARK.search(full)
+    if not m:
+        return None
+    start, end = m.span()
+    pos = 0
+    for t in ts:
+        a, b = pos, pos + len(t.text)
+        lo, hi = max(a, start) - a, min(b, end) - a
+        if lo < hi:
+            t.text = t.text[:lo] + t.text[hi:]
+        pos = b
+    return int(m.group(1))
+
+
+def _apply_marks(doc, marks):
+    """The rules and shading the HTML blocks asked for, on the paragraphs carrying their marker (the marker is removed)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    for para in list(doc.element.body.iter(qn("w:p"))):
+        hit = _take_marker(para)
+        if hit is None or hit >= len(marks):
+            continue
+        _style_paragraph(para, marks[hit])
+        # LibreOffice also drew them around the characters: take that off
+        for r in para.iter(qn("w:rPr")):
+            for tag in ("w:shd", "w:bdr"):
+                e = r.find(qn(tag))
+                if e is not None:
+                    r.remove(e)
+
+
+def _apply_table_padding(doc, pads):
+    """Each table's cell margins from the HTML table in the same place (tables are 1:1 in document order)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbls = list(doc.element.body.iter(qn("w:tbl")))
+    if len(tbls) != len(pads):
+        LOG.info("table count differs (%d in the file, %d in the HTML): cell padding left as converted", len(tbls), len(pads))
+        return
+    for tbl, pad in zip(tbls, pads):
+        if not pad:
+            continue
+        pr = tbl.find(qn("w:tblPr"))
+        old = pr.find(qn("w:tblCellMar"))
+        if old is not None:
+            pr.remove(old)
+        mar = OxmlElement("w:tblCellMar")
+        for side, v in zip(("top", "left", "bottom", "right"), (pad[0], pad[3], pad[2], pad[1])):
+            e = OxmlElement(f"w:{side}")
+            e.set(qn("w:w"), str(v))
+            e.set(qn("w:type"), "dxa")
+            mar.append(e)
+        pr.append(mar)
+        # a cell LibreOffice gave its own margin (the padding it read as default) follows the table
+        for tc in tbl.iter(qn("w:tc")):
+            pr_tc = tc.find(qn("w:tcPr"))
+            if pr_tc is not None and pr_tc.find(qn("w:tcMar")) is not None:
+                pr_tc.remove(pr_tc.find(qn("w:tcMar")))
 
 
 def to_docx(html, policy, converter):
