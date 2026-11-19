@@ -509,6 +509,15 @@ nothing runs them. `Automation` (`crate::automation`) is a tenant's flow: a trig
   client, start with its code, or be the file's `/api/files/secured/file/...` URL; another client,
   another app's folder, `.`, `..` or empty segments are refused (`CORE.FILE_PATH_OUTSIDE_APP`). Only
   inside a server function, for a signed-in user.
+- **D60 `CoreServices.File.TemplateToDocx`** (2026-11-19, Rust only, CXZ-1959). `TemplateToPdf`'s
+  arguments without `seal`; the file is written as an editable Word document (give `fileName` a
+  `.docx` ending) and `fileData` is answered as `TemplateToPdf`'s is (with `sha256`). The template is
+  found and rendered exactly as for a PDF (`TemplateToPdf::source`). A Word template (`templateType`
+  `docx`, D51) is its .docx filled with the data, returned as it is (pdf-render `/docx/fill`); any
+  other template's rendered HTML is turned into Word by pdf-render `/docx/from-html`
+  (`deploy/pdf-render/docx_html.py`: CSS inlined, flex and columns as tables, `@page` as the page,
+  the running header and footer as Word headers and footers, "Page x of y" as fields). Close to the
+  PDF, not identical: no text fallback, so a sidecar that is down or cannot convert is an error.
 
 ### Step 4: core-scheduler and core-events (the Java `worker` retired)
 

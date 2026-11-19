@@ -200,6 +200,12 @@ fn extract_file_name(location: &str, template_name: &str, client_code: &str) -> 
     Ok(if name.is_empty() { format!("{template_name}_{client_code}") } else { name })
 }
 
+/// What a template renders to (see `TemplateToPdf::source`).
+enum Source {
+    Word(String),
+    Html(String),
+}
+
 /// A template rendered with the data given and written to the files service as a PDF. Output
 /// `fileData`: the files service's details of the file.
 pub struct TemplateToPdf {
@@ -222,27 +228,56 @@ impl TemplateToPdf {
         if output_format != "pdf" {
             return Err(CoreError::msg(StatusCode::NOT_FOUND, FILE_FORMAT_INVALID, &[output_format]));
         }
-        let Some(doc) = self.templates.template(template_name, &app, &client).await? else {
+        match self.source(template_name, &app, &client, data).await? {
+            // Rust only: a Word template (templateType docx) is its .docx filled by the sidecar.
+            Source::Word(file) => {
+                let pdf = crate::pdf_render::render_docx(file, data).await.map_err(CoreError::unknown)?;
+                Ok(Some(pdf))
+            }
+            Source::Html(html) => {
+                let pdf = crate::pdf_render::render(html).await.map_err(CoreError::unknown)?;
+                Ok(Some(pdf))
+            }
+        }
+    }
+
+    /// What a template renders to before any conversion: a Word template's file, or the HTML of its body.
+    async fn source(&self, template_name: &str, app: &str, client: &str, data: &serde_json::Map<String, Value>) -> Result<Source, CoreError> {
+        let Some(doc) = self.templates.template(template_name, app, client).await? else {
             return Err(CoreError::msg(StatusCode::NOT_FOUND, TEMPLATE_DETAILS_MISSING, &[template_name]));
         };
         let json = serde_json::to_value(JValue::Object(doc)).map_err(|e| CoreError::unknown(e.to_string()))?;
-        // Rust only: a Word template (templateType docx) is its .docx filled by the sidecar.
         if let Some(file) = crate::pdf_render::docx_file(&json) {
             let file = file.map_err(|why| CoreError::coded(StatusCode::BAD_REQUEST, "CORE.TEMPLATE_DOCX_FILE_INVALID", why))?;
-            let pdf = crate::pdf_render::render_docx(file, data).await.map_err(CoreError::unknown)?;
-            return Ok(Some(pdf));
+            return Ok(Source::Word(file));
         }
         let template = EmailTemplate::from_json(json).map_err(conn_error)?;
         // AbstractTemplateConversionService.convertTemplate: the language, the parts, the format.
         let language = email::language(&template, data).map_err(conn_error)?;
         let parts = email::processed_parts(language.as_deref(), &template, data).map_err(conn_error)?;
-        let html = match parts.get("body").and_then(Value::as_str) {
-            Some(body) if !is_blank(body) => body.to_string(),
+        match parts.get("body").and_then(Value::as_str) {
+            Some(body) if !is_blank(body) => Ok(Source::Html(body.to_string())),
             // PdfConversionService sends the message key itself.
-            _ => return Err(CoreError::coded(StatusCode::INTERNAL_SERVER_ERROR, "CORE.TEMPLATE_BODY_MISSING", "template_details_missing")),
+            _ => Err(CoreError::coded(StatusCode::INTERNAL_SERVER_ERROR, "CORE.TEMPLATE_BODY_MISSING", "template_details_missing")),
+        }
+    }
+
+    /// Rust only (CXZ-1959): the template as an editable Word file. A Word template is its .docx filled with the
+    /// data; any other is its rendered HTML turned into Word by the sidecar. `None` without a security context, as
+    /// [`Self::convert`].
+    pub async fn convert_docx(
+        &self,
+        template_name: &str,
+        app_code: &str,
+        client_code: &str,
+        data: &serde_json::Map<String, Value>,
+    ) -> Result<Option<Vec<u8>>, CoreError> {
+        let Some((app, client)) = resolve_app_and_client(app_code, client_code)? else { return Ok(None) };
+        let bytes = match self.source(template_name, &app, &client, data).await? {
+            Source::Word(file) => crate::pdf_render::fill_docx(file, data).await,
+            Source::Html(html) => crate::pdf_render::html_to_docx(html).await,
         };
-        let pdf = crate::pdf_render::render(html).await.map_err(CoreError::unknown)?;
-        Ok(Some(pdf))
+        bytes.map(Some).map_err(CoreError::unknown)
     }
 
     /// `makeFileInFiles`: the PDF written under the location, named `fileName`, else the
@@ -346,12 +381,61 @@ impl JavaFunction for TemplateToPdf {
     }
 }
 
+// -------------------------------------------------------------------------------------------
+// TemplateToDocx (Rust only, CXZ-1959)
+
+const TEMPLATE_TO_DOCX: &str = "CoreServices.File.TemplateToDocx";
+
+/// `CoreServices.File.TemplateToDocx`: `TemplateToPdf`'s arguments (no `seal`), the file written as an editable Word
+/// document instead (give `fileName` a `.docx` ending). The same template lookup and rendering; the Word file is made
+/// by the pdf-render sidecar, so layout is close to the PDF but not identical (see deploy/pdf-render/docx_html.py).
+/// Output `fileData`, as `TemplateToPdf`'s.
+pub struct TemplateToDocx {
+    pub templates: Arc<dyn TemplateSource>,
+    pub files: Arc<FilesCalls>,
+}
+
+#[async_trait]
+impl JavaFunction for TemplateToDocx {
+    fn full_name(&self) -> &'static str {
+        TEMPLATE_TO_DOCX
+    }
+
+    async fn run(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
+        let app_code = arg_string(args, "appCode")?;
+        let client_code = arg_string(args, "clientCode")?;
+        let template_name = arg_string(args, "templateName")?;
+        let data = data_of(args, "templateData")?;
+        let file_name = arg_string(args, "fileName")?;
+        let file_location = arg_string(args, "fileLocation")?;
+        let file_type = arg_string(args, "fileType")?;
+        let overwrite = arg_bool(args, "fileOverride")?;
+        require_context_key()?;
+
+        let inner = TemplateToPdf { templates: self.templates.clone(), files: self.files.clone() };
+        let Some((app, client)) = resolve_app_and_client(&app_code, &client_code)? else {
+            return Err(empty_result(TEMPLATE_TO_DOCX));
+        };
+        let Some(bytes) = inner.convert_docx(&template_name, &app, &client, &data).await? else {
+            return Err(empty_result(TEMPLATE_TO_DOCX));
+        };
+        let sha256 = sha256_hex(&bytes);
+        let Some(mut details) = inner.make_file_in_files(&client, &template_name, &file_name, &file_location, &file_type, overwrite, bytes).await? else {
+            return Err(empty_result(TEMPLATE_TO_DOCX));
+        };
+        details.insert("sha256".into(), Value::String(sha256));
+        Ok(output("fileData", gson_tree(Value::Object(details))))
+    }
+}
+
 /// `makeFileFunctions`: FileToBase64, then TemplateToPdf; then the Rust-only CreateSecuredKey and
 /// SaveSecuredFile.
 pub fn all(deps: &Deps) -> Vec<Arc<dyn kirun::function::Function>> {
     vec![
         Java::function(FileToBase64 { files: deps.files.clone() }),
         Java::function(TemplateToPdf { templates: deps.defs.clone(), files: deps.files.clone() }),
+        // Rust only (CXZ-1959): the same template as an editable Word file.
+        Java::function(TemplateToDocx { templates: deps.defs.clone(), files: deps.files.clone() }),
     ]
     .into_iter()
     // Rust only (HRMS): a secured file of the caller's client opened or written by a server function.
@@ -593,6 +677,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn template_to_docx_looks_the_template_up_as_to_pdf_does() {
+        let f = fixture().await;
+        let t = TemplateToPdf { templates: f.templates.clone(), files: f.files.clone() };
+        let none = serde_json::Map::new();
+        // No security context: blank codes resolve to nothing.
+        assert_eq!(t.convert_docx("invoice", "", "", &none).await.unwrap(), None);
+        // A template that is not there is the same 404 as for a PDF.
+        let e = t.convert_docx("nope", "a", "c", &none).await.err().unwrap();
+        assert_eq!((e.status(), e.text()), (StatusCode::NOT_FOUND, "Template details missing : nope".to_string()));
+        // A template without a body fails as it does for a PDF.
+        let e = t.convert_docx("blank", "a", "c", &none).await.err().unwrap();
+        assert_eq!((e.status(), e.text()), (StatusCode::INTERNAL_SERVER_ERROR, "template_details_missing".to_string()));
+        // The function is registered next to TemplateToPdf with its own signature.
+        let docx = Java::new(TemplateToDocx { templates: f.templates.clone(), files: f.files.clone() });
+        let sig = docx.signature();
+        assert_eq!(sig.get_full_name(), "CoreServices.File.TemplateToDocx");
+        assert!(sig.get_parameters().contains_key("templateName") && !sig.get_parameters().contains_key("seal"));
+    }
+
+    #[tokio::test]
     async fn only_inside_a_definition_and_a_security_context() {
         let f = fixture().await;
         let pdf = f.to_pdf();
@@ -655,7 +759,10 @@ mod tests {
         deps.files = f.files.clone();
         let all = all(&deps);
         let names: Vec<String> = all.iter().map(|x| x.get_signature().get_full_name()).collect();
-        assert_eq!(names, ["CoreServices.File.FileToBase64", "CoreServices.File.TemplateToPdf", "CoreServices.File.CreateSecuredKey", "CoreServices.File.SaveSecuredFile"]);
+        assert_eq!(
+            names,
+            ["CoreServices.File.FileToBase64", "CoreServices.File.TemplateToPdf", "CoreServices.File.TemplateToDocx", "CoreServices.File.CreateSecuredKey", "CoreServices.File.SaveSecuredFile"]
+        );
         let fep = |a: Map<Value>| {
             FunctionExecutionParameters::new(Arc::new(KIRunFunctionRepository::new()), Arc::new(KIRunSchemaRepository::new())).set_arguments(a)
         };
