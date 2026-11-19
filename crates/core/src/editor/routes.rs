@@ -49,6 +49,7 @@ pub struct CoreEditor {
     pub event_actions: OverridableService<CoreKind>,
     pub workflows: OverridableService<CoreKind>,
     pub actions: OverridableService<CoreKind>,
+    pub automations: OverridableService<CoreKind>,
     pub fillers: OverridableService<Filler>,
     pub transports: Arc<TransportService>,
     pub storage: Arc<StorageOps>,
@@ -71,7 +72,8 @@ impl CoreEditor {
     }
 
     /// `CorePublishService`: storage, connection, template, notification, eventDefinition,
-    /// eventAction, action, workflow, function, schema, filler.
+    /// eventAction, action, workflow, function, schema, filler. Automations (Rust only) go
+    /// last, after everything they name.
     pub fn publish_services(&self) -> Vec<Arc<dyn AnyService>> {
         vec![
             Self::any(&self.storages),
@@ -85,6 +87,7 @@ impl CoreEditor {
             Self::any(&self.functions),
             Self::any(&self.schemas),
             Arc::new(self.fillers.clone()),
+            Self::any(&self.automations),
         ]
     }
 
@@ -103,11 +106,13 @@ impl CoreEditor {
             Self::any(&self.connections),
             Arc::new(self.transports.documents().clone()),
             Self::any(&self.workflows),
+            Self::any(&self.automations),
         ]
     }
 
     /// core's `TransportService`, in import order: schema, storage, function, template,
     /// eventDefinition, eventAction, filler (no connection, notification, action or workflow).
+    /// Automations (Rust only) follow the events and functions they name.
     pub fn transport_services(
         schemas: &OverridableService<CoreKind>,
         storages: &OverridableService<CoreKind>,
@@ -115,6 +120,7 @@ impl CoreEditor {
         templates: &OverridableService<CoreKind>,
         event_definitions: &OverridableService<CoreKind>,
         event_actions: &OverridableService<CoreKind>,
+        automations: &OverridableService<CoreKind>,
         fillers: &OverridableService<Filler>,
     ) -> Vec<Arc<dyn AnyService>> {
         vec![
@@ -124,12 +130,13 @@ impl CoreEditor {
             Self::any(templates),
             Self::any(event_definitions),
             Self::any(event_actions),
+            Self::any(automations),
             Arc::new(fillers.clone()),
         ]
     }
 
     /// `CoreIndexService`'s sources, in order.
-    fn index_sources(&self) -> [(&'static str, &OverridableService<CoreKind>); 10] {
+    fn index_sources(&self) -> [(&'static str, &OverridableService<CoreKind>); 11] {
         [
             ("storages", &self.storages),
             ("schemas", &self.schemas),
@@ -141,6 +148,7 @@ impl CoreEditor {
             ("notifications", &self.notifications),
             ("workflows", &self.workflows),
             ("actions", &self.actions),
+            ("automations", &self.automations),
         ]
     }
 }
@@ -160,6 +168,7 @@ pub fn router(st: St) -> Router {
         .merge(lib::overridable_router("/api/core/eventActions", st.event_actions.clone(), callers.clone()))
         .merge(lib::overridable_router("/api/core/workflows", st.workflows.clone(), callers.clone()))
         .merge(lib::overridable_router("/api/core/workflow/actions", st.actions.clone(), callers.clone()))
+        .merge(lib::overridable_router("/api/core/automations", st.automations.clone(), callers.clone()))
         .merge(lib::overridable_router("/api/core/filler", st.fillers.clone(), callers.clone()))
         .merge(lib::transport_router("/api/core/transports", st.transports.clone(), callers.clone()))
         .merge(lib::version_router("/api/core/versions", st.cx.versions.clone(), callers.clone()))
@@ -176,6 +185,8 @@ fn own_routes(st: St) -> Router {
         .route("/api/core/eventDefinitions/schedule/toCron", post(to_cron))
         .route("/api/core/eventDefinitions/schedule/fromCron", post(from_cron))
         .route("/api/core/eventDefinitions/schedule/zones", get(zones))
+        .route("/api/core/automations/check", post(automation_check))
+        .route("/api/core/automations/catalog", get(automation_catalog))
         .route("/api/core/templates/preview", post(template_preview))
         .route("/api/core/templates/preview/pdf", post(template_preview_pdf))
         .route("/api/core/notifications/internal/{name}", get(internal_notification))
@@ -347,6 +358,148 @@ fn read_body(body: &[u8]) -> AppResult<JValue> {
         return Err(bad_request("Failed to read HTTP message"));
     }
     parse(body).map_err(|_| bad_request("Failed to read HTTP message"))
+}
+
+// ── Automations (Rust only) ──────────────────────────────────────────
+
+const AUTOMATION_READ: &str = "Authorities.Automation_READ";
+
+/// `POST /api/core/automations/check`: whether the automation in the body can run as drawn
+/// ([`crate::automation::check`]). Nothing is read or saved, so the editor can ask on every
+/// change.
+async fn automation_check(State(st): State<St>, h: HeaderMap, body: Bytes) -> Response {
+    const R: &str = "/api/core/automations/check";
+    let ca = match caller(&st, &h, R).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    let doc = match read_body(&body) {
+        Ok(JValue::Object(m)) => m,
+        Ok(_) | Err(_) => return respond(R, Err(bad_request("Failed to read HTTP message"))),
+    };
+    if let Err(r) = pre_authorize(&ca, AUTOMATION_READ) {
+        return with_route(r, R);
+    }
+    respond(R, Ok(json(crate::automation::check::check(&doc).to_json())))
+}
+
+/// The documents of `svc` in `app` that carry an automation block, as `client` sees them on
+/// the live or the draft surface. Names come from every copy that carries the block; each is
+/// then read through the client's chain, so a copy the client cannot see is never listed.
+async fn with_block(svc: &OverridableService<CoreKind>, ca: &ContextAuthentication, app: &str, client: &str, draft: bool) -> AppResult<Vec<JMap>> {
+    use mongodb::bson::doc;
+    use overridable::backend::Find;
+    let filter = doc! { "appCode": app, crate::automation::catalog::BLOCK: { "$exists": true, "$ne": null } };
+    let rows = svc.commons().backend().find(svc.collection(), Find::new(filter)).await.map_err(AppError::Internal)?;
+    let names: std::collections::BTreeSet<String> = rows.iter().filter_map(|d| d.get_str("name").ok().map(str::to_string)).collect();
+    let mut out = Vec::new();
+    for name in names {
+        if let Some(r) = svc.read_resolved(ca, &name, app, client, draft).await? {
+            out.push(r.entity.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// Every live document of `svc` in `app` the client can see, in one query: the copies of the
+/// clients it inherits from (never another tenant's), the nearest copy of each name winning.
+async fn visible_documents(svc: &OverridableService<CoreKind>, ca: &ContextAuthentication, app: &str, client: &str) -> AppResult<Vec<JMap>> {
+    use mongodb::bson::doc;
+    use overridable::backend::Find;
+    let url = ca.url_client_code.as_deref().unwrap_or(client);
+    let order = svc.commons().store.inheritance_order(app, url, client).await.map_err(AppError::Internal)?;
+    let mut clients: Vec<String> = order.iter().cloned().collect();
+    if !clients.iter().any(|c| c == client) {
+        clients.push(client.to_string());
+    }
+    let rows = svc
+        .commons()
+        .backend()
+        .find(svc.collection(), Find::new(doc! { "appCode": app, "clientCode": { "$in": clients.clone() } }))
+        .await
+        .map_err(AppError::Internal)?;
+    let rank = |c: &str| clients.iter().position(|x| x == c).unwrap_or(0);
+    let mut nearest: std::collections::BTreeMap<String, (usize, JMap)> = std::collections::BTreeMap::new();
+    for d in &rows {
+        let (Ok(name), Ok(owner)) = (d.get_str("name"), d.get_str("clientCode")) else { continue };
+        let r = rank(owner);
+        if nearest.get(name).is_none_or(|(have, _)| r > *have) {
+            nearest.insert(name.to_string(), (r, overridable::bson_conv::doc_to_j(d)));
+        }
+    }
+    Ok(nearest.into_values().map(|(_, m)| m).collect())
+}
+
+/// Every document of `svc` in `app`, as `client` sees it (names from any copy, each read
+/// through the client's chain, so a copy the client cannot see is never listed).
+async fn app_documents(svc: &OverridableService<CoreKind>, ca: &ContextAuthentication, app: &str, client: &str, draft: bool) -> AppResult<Vec<JMap>> {
+    use mongodb::bson::doc;
+    use overridable::backend::Find;
+    let rows = svc.commons().backend().find(svc.collection(), Find::new(doc! { "appCode": app })).await.map_err(AppError::Internal)?;
+    let names: std::collections::BTreeSet<String> = rows.iter().filter_map(|d| d.get_str("name").ok().map(str::to_string)).collect();
+    let mut out = Vec::new();
+    for name in names {
+        if let Some(r) = svc.read_resolved(ca, &name, app, client, draft).await? {
+            out.push(r.entity.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// `GET /api/core/automations/catalog?appCode=&clientCode=&draft=&storages=all&functions=all`: the triggers and the
+/// actions an automation in the app can use ([`crate::automation::catalog`]). Listing the app
+/// needs read access to it, as the index does.
+async fn automation_catalog(State(st): State<St>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    const R: &str = "/api/core/automations/catalog";
+    let ca = match caller(&st, &h, R).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    if let Err(r) = pre_authorize(&ca, AUTOMATION_READ) {
+        return with_route(r, R);
+    }
+    let p = Params::from_query(q.as_deref());
+    let r = async {
+        let app = required(&p, "appCode")?.to_string();
+        let client = p.first("clientCode").filter(|c| !c.trim().is_empty()).unwrap_or(ca.client_code()).to_string();
+        let draft = c::bool_param(&p, "draft", false)?;
+        // The list access check: refuses an app or a client the caller may not read.
+        st.event_definitions.read_index_lro(&ca, &app, Some(&client)).await?;
+        let events = with_block(&st.event_definitions, &ca, &app, &client, draft).await?;
+        let functions = with_block(&st.functions, &ca, &app, &client, draft).await?;
+        // Storages: the ones that declare a block, or every one with `storages=all` (a site's
+        // forms, which declare nothing).
+        let storages = if p.first("storages") == Some("all") {
+            let mut all = Vec::new();
+            for row in st.storages.read_index_lro(&ca, &app, Some(&client)).await?.content {
+                if let Some(name) = row.get("name").and_then(JValue::as_str) {
+                    if let Some(r) = st.storages.read_resolved(&ca, name, &app, &client, draft).await? {
+                        all.push(r.entity.clone());
+                    }
+                }
+            }
+            all
+        } else {
+            with_block(&st.storages, &ca, &app, &client, draft).await?
+        };
+        // The app's notifications, for "Send a notification". The picker is a convenience: if
+        // they cannot be read, it is empty and the name can still be typed.
+        let notifications = app_documents(&st.notifications, &ca, &app, &client, draft).await.unwrap_or_else(|e| {
+            tracing::warn!("Notifications of {app} for the automation catalog could not be read: {e}");
+            vec![]
+        });
+        let mut cat = crate::automation::catalog::catalog(&app, &events, &functions, &storages, &notifications);
+        // With `functions=all`, a builder's step picker lists every function of the app too: a
+        // builder may run any of them in a step (see automation::guard). Asked for, so the AI
+        // tools' catalog stays small; ignored for anyone else.
+        if p.first("functions") == Some("all") && crate::automation::guard::builder(&ca) {
+            let all = visible_documents(&st.functions, &ca, &app, &client).await?;
+            crate::automation::catalog::add_function_steps(&mut cat, &all);
+        }
+        Ok(json(cat))
+    }
+    .await;
+    respond(R, r)
 }
 
 async fn to_cron(State(st): State<St>, RawQuery(q): RawQuery, h: HeaderMap, body: Bytes) -> Response {

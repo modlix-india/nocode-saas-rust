@@ -17,6 +17,8 @@ pub const FUNCTION: Pojo = Pojo {
         &[
             Field::new("definition", K::MapObject, C::MapObject),
             Field::new("executeAuth", K::Str, C::Copy),
+            // Rust only: declares the function an automation action (`crate::automation::catalog`).
+            Field::new("automation", K::MapObject, C::MapObject),
         ],
     ],
 };
@@ -85,6 +87,8 @@ pub const EVENT_DEFINITION: Pojo = Pojo {
             Field::new("schema", K::MapObject, C::MapObject),
             Field::new("includeContextAuthentication", K::BoxBool, C::Copy),
             Field::new("schedule", K::MapObject, C::Copy),
+            // Rust only: declares the event an automation trigger (`crate::automation::catalog`).
+            Field::new("automation", K::MapObject, C::MapObject),
         ],
     ],
 };
@@ -93,6 +97,26 @@ pub const EVENT_DEFINITION: Pojo = Pojo {
 pub const EVENT_ACTION: Pojo = Pojo {
     name: "EventAction",
     parts: &[OVERRIDABLE_BASE, &[Field::new("tasks", K::MapObject, C::MapObject)]],
+};
+
+/// `Automation` (Rust only, see [`crate::automation`]): the trigger, the steps and how they
+/// follow each other. `exitWhen` and `transitions` are lists, kept as they are given.
+pub const AUTOMATION: Pojo = Pojo {
+    name: "Automation",
+    parts: &[
+        OVERRIDABLE_BASE,
+        &[
+            Field::new("isTemplate", K::BoxBool, C::Copy),
+            Field::new("category", K::Str, C::Copy),
+            Field::new("paused", K::BoxBool, C::Copy),
+            Field::new("trigger", K::MapObject, C::MapObject),
+            Field::new("entry", K::MapObject, C::MapObject),
+            Field::new("exitWhen", K::Object, C::Copy),
+            Field::new("start", K::Str, C::Copy),
+            Field::new("nodes", K::MapObject, C::MapObject),
+            Field::new("transitions", K::Object, C::Copy),
+        ],
+    ],
 };
 
 /// `Template`.
@@ -135,6 +159,10 @@ pub struct StorageDoc;
 pub struct ConnectionDoc;
 pub struct EventDefinitionDoc;
 pub struct EventActionDoc;
+pub struct AutomationDoc;
+
+/// `Automation`'s collection.
+pub const AUTOMATION_COLLECTION: &str = "automation";
 
 /// `EventDefinition`'s collection.
 pub const EVENT_DEFINITION_COLLECTION: &str = "eventDefinition";
@@ -181,6 +209,7 @@ impl DocType for EventDefinitionDoc {
         let schema = apply_map(map_field(&this, "schema"), map_field(base, "schema")).unwrap_or_default();
         this.insert("schema".into(), JValue::Object(schema));
         fallback(&mut this, base, "includeContextAuthentication");
+        fallback(&mut this, base, "automation");
         let schedule = crate::scheduler::EventSchedule::merge_j(this.get("schedule"), base.get("schedule"));
         this.insert("schedule".into(), schedule);
         Some(this)
@@ -206,6 +235,27 @@ impl DocType for EventActionDoc {
     }
 }
 
+impl DocType for AutomationDoc {
+    fn object_name(&self) -> &'static str {
+        "Automation"
+    }
+    fn collection(&self) -> &'static str {
+        AUTOMATION_COLLECTION
+    }
+    fn pojo(&self) -> &'static Pojo {
+        &AUTOMATION
+    }
+    /// An automation neither merges nor extracts: a flow with some steps taken from another
+    /// client's copy and some from this one has no meaning, so each document is whole. A
+    /// tenant's copy of a gallery template is a full copy.
+    fn apply_override(&self, this: JMap, _base: &JMap) -> Option<JMap> {
+        Some(this)
+    }
+    fn extract_difference(&self, this: JMap, _base: &JMap) -> Option<JMap> {
+        Some(this)
+    }
+}
+
 impl DocType for FunctionDoc {
     fn object_name(&self) -> &'static str {
         "Function"
@@ -219,6 +269,7 @@ impl DocType for FunctionDoc {
     fn apply_override(&self, this: JMap, base: &JMap) -> Option<JMap> {
         let mut this = apply_definition(this, base)?;
         fallback(&mut this, base, "executeAuth");
+        fallback(&mut this, base, "automation");
         Some(this)
     }
 }

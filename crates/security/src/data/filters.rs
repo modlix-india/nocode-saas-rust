@@ -212,6 +212,9 @@ pub fn user_hook(f: &Filter, _: &Table) -> Option<Result<Option<Sql>, Invalid>> 
             Some(exists(profile_user, conds))
         }));
     }
+    if field == "phoneDigits" {
+        return Some(Ok(Some(maybe_not(phone_digits_condition(f), f.negate))));
+    }
     if field != "appId" && field != "appCode" {
         return None;
     }
@@ -225,6 +228,30 @@ pub fn user_hook(f: &Filter, _: &Table) -> Option<Result<Option<Sql>, Invalid>> 
         id_or_code_condition("security_app.APP_CODE", Str, f).map(|c| exists(&from, vec![own(), maybe_not(c, f.negate)]))
     };
     Some(r.map(Some))
+}
+
+/// Virtual user field `phoneDigits` (LZT-2591): the typed value is reduced to its digits and
+/// matched as a part of the stored phone number with every non digit removed, so
+/// `+91 91084 87003`, `091084 87003`, `9108487003` and `91-084-87003` all find the same user.
+/// Leading zeros are dropped, fewer than 3 digits (or none) matches nothing, and a value longer
+/// than 10 digits also matches on its last 10 (a number typed with its country code finds one
+/// stored without it). The operator is ignored: the match is always "contains".
+fn phone_digits_condition(f: &Filter) -> Sql {
+    let typed = f.value.as_ref().map(java_string).unwrap_or_default();
+    let digits: String = typed.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits = digits.trim_start_matches('0');
+    if digits.len() < 3 {
+        return Sql::text("1 = 0");
+    }
+    let stored = "REGEXP_REPLACE(security_user.PHONE_NUMBER, '[^0-9]', '')";
+    let mut s = Sql::text(format!("({stored} LIKE "));
+    s.push_bind(Bind::Str(format!("%{digits}%")));
+    if digits.len() > 10 {
+        s.push_text(format!(" OR {stored} LIKE "));
+        s.push_bind(Bind::Str(format!("%{}%", &digits[digits.len() - 10..])));
+    }
+    s.push_text(")");
+    s
 }
 
 /// `ClientDAO.filterConditionFilter`.
@@ -323,6 +350,26 @@ mod tests {
         assert_eq!(user(json!({"fieldExpr": {"function": "UPPER", "fields": ["userName"]}, "value": "A"})), "UPPER(CAST(security_user.USER_NAME AS CHAR)) = {Str(\"A\")}");
         assert_eq!(user(json!({"field": "appId", "value": null})), format!("{PU} AND security_profile.APP_ID IS NULL)"));
         assert_eq!(user(json!({"field": "appId", "operator": "IN"})), format!("{PU} AND 1 = 0)"));
+    }
+
+    #[test]
+    fn user_phone_digits() {
+        let like = |v: &str| format!("(REGEXP_REPLACE(security_user.PHONE_NUMBER, '[^0-9]', '') LIKE {{Str(\"%{v}%\")}})");
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "9108487003"})), like("9108487003"));
+        // Formatting and leading zeros are ignored.
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "091084 87003"})), like("9108487003"));
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "91-084-87003"})), like("9108487003"));
+        // A part of a number.
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "7003"})), like("7003"));
+        // Too short or no digits: matches nothing.
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "70"})), "1 = 0");
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "Ram"})), "1 = 0");
+        assert_eq!(user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": ""})), "1 = 0");
+        // With a country code the last 10 digits also match.
+        assert_eq!(
+            user(json!({"field": "phoneDigits", "operator": "STRING_LOOSE_EQUAL", "value": "+91 91084 87003"})),
+            "(REGEXP_REPLACE(security_user.PHONE_NUMBER, '[^0-9]', '') LIKE {Str(\"%919108487003%\")} OR REGEXP_REPLACE(security_user.PHONE_NUMBER, '[^0-9]', '') LIKE {Str(\"%9108487003%\")})"
+        );
     }
 
     #[test]

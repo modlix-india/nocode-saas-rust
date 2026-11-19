@@ -88,6 +88,7 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
         OverridableService::new(CoreKind::new(o, ops.clone()).with_block_private_targets(block_private_targets), cx.clone())
     };
     let functions = svc(CoreObject::Function);
+    let _ = ops.functions.set(functions.clone());
     let schemas = svc(CoreObject::Schema);
     let storages = svc(CoreObject::Storage);
     let _ = ops.storages.set(storages.clone());
@@ -95,11 +96,13 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
     let templates = svc(CoreObject::Template);
     let notifications = svc(CoreObject::Notification);
     let event_definitions = svc(CoreObject::EventDefinition);
+    let _ = ops.event_definitions.set(event_definitions.clone());
     let event_actions = svc(CoreObject::EventAction);
     let workflows = svc(CoreObject::Workflow);
     let actions = svc(CoreObject::Action);
+    let automations = svc(CoreObject::Automation);
     let fillers = OverridableService::new(core_filler(&cache), cx.clone());
-    let transport_list = CoreEditor::transport_services(&schemas, &storages, &functions, &templates, &event_definitions, &event_actions, &fillers);
+    let transport_list = CoreEditor::transport_services(&schemas, &storages, &functions, &templates, &event_definitions, &event_actions, &automations, &fillers);
     let transports = Arc::new(TransportService::new(cx.clone(), transport_list, "core", "cmodl"));
     let schedules = (parts.schedules)(event_definitions.clone(), cx.clone());
     Arc::new(CoreEditor {
@@ -115,6 +118,7 @@ pub fn state(store: Store, cache: CacheService, callers: Arc<dyn CallerSource>, 
         event_actions,
         workflows,
         actions,
+        automations,
         fillers,
         transports,
         storage: ops,

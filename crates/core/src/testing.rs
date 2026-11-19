@@ -821,6 +821,7 @@ pub async fn offline_state_limited(
             deps.security.clone(),
         )),
         ratelimit,
+        automations: Default::default(),
     });
     deps.integrations.attach(&state);
     state

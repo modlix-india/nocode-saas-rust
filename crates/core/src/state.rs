@@ -32,6 +32,9 @@ pub struct Inner {
     /// `[ratelimit]` over the unit's Redis: anonymous runs of the execute routes
     /// (`crate::ratelimit`).
     pub ratelimit: platform::ratelimit::RateLimiter,
+    /// Rust only: the automation engine and its run store, set once by core-exec at start
+    /// (`crate::automation::routes`); unset elsewhere, where those routes answer 503.
+    pub automations: std::sync::OnceLock<crate::automation::routes::Services>,
 }
 
 #[derive(Clone)]
