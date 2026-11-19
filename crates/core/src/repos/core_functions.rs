@@ -127,15 +127,16 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 106);
+        assert_eq!(core.names().len(), 107);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has (and the Rust-only EncryptField / DecryptField, CXZ-1961), SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
         // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852), and the HRMS
-        // ones: Security.GetUsersOrg / GetClientOrg / SetUserActive, File.CreateSecuredKey / SaveSecuredFile.
+        // ones: Security.GetUsersOrg / GetClientOrg / SetUserActive, File.CreateSecuredKey / SaveSecuredFile, and
+        // File.TemplateToDocx (CXZ-1959), which sits with the file functions, before the platform family.
         assert!(core.names().iter().any(|n| n == "CoreServices.Event.GetScheduleState"));
         assert_eq!(
-            core.names()[95..],
+            core.names()[96..],
             [
                 "CoreServices.Security.SendContactCode",
                 "CoreServices.Security.VerifyContactCode",
@@ -152,7 +153,7 @@ mod tests {
             "the contact codes, the connection signature check, the token info, the Word template functions, billing, then SendSms, come last"
         );
         assert_eq!(
-            core.names()[87..95],
+            core.names()[88..96],
             [
                 "CoreServices.Platform.RenewCertificates",
                 "CoreServices.Platform.CleanupTokens",

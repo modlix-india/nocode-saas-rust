@@ -674,6 +674,124 @@
    }
   }
  },
+ "CoreServices.File.TemplateToDocx": {
+  "namespace": "CoreServices.File",
+  "name": "TemplateToDocx",
+  "parameters": {
+   "fileName": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "fileName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "templateName": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateName",
+     "version": 1,
+     "type": "STRING"
+    },
+    "parameterName": "templateName",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "clientCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "clientCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "clientCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "templateData": {
+    "schema": {
+     "namespace": "_",
+     "name": "templateData",
+     "version": 1,
+     "type": "OBJECT",
+     "defaultValue": {}
+    },
+    "parameterName": "templateData",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileOverride": {
+    "schema": {
+     "namespace": "_",
+     "name": "fileOverride",
+     "version": 1,
+     "type": "BOOLEAN",
+     "defaultValue": false
+    },
+    "parameterName": "fileOverride",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileLocation": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "/"
+    },
+    "parameterName": "fileLocation",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "appCode": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": ""
+    },
+    "parameterName": "appCode",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   },
+   "fileType": {
+    "schema": {
+     "namespace": "_",
+     "name": "appCode",
+     "version": 1,
+     "type": "STRING",
+     "defaultValue": "secured",
+     "enums": [
+      "static",
+      "secured"
+     ]
+    },
+    "parameterName": "fileType",
+    "variableArgument": false,
+    "type": "EXPRESSION"
+   }
+  },
+  "events": {
+   "output": {
+    "name": "output",
+    "parameters": {
+     "fileData": {
+      "namespace": "_",
+      "name": "fileData",
+      "version": 1,
+      "type": "OBJECT"
+     }
+    }
+   }
+  }
+ },
  "CoreServices.Message.GetWhatsappPairingCode": {
   "namespace": "CoreServices.Message",
   "name": "GetWhatsappPairingCode",
