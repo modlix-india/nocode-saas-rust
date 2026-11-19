@@ -534,3 +534,128 @@ async fn a_plain_event_passes_through_the_completion_and_numbers_read_as_text() 
         Arc::new(crate::clients::SecurityCalls::new(platform::upstream::Upstream::fixed(&["http://127.0.0.1:1"])).unwrap());
     assert!(s.client_by_code("FIN").await.is_err());
 }
+
+// ---------------------------------------------------------------- automations (Rust only)
+
+mod automations {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::automation::engine as auto;
+
+    struct OneAutomation;
+
+    #[async_trait]
+    impl auto::Automations for OneAutomation {
+        async fn triggered_by(&self, _app: &str, _client: &str, _draft: bool, event: &str) -> Result<Vec<Value>, CoreError> {
+            Ok(if event == "leadCreated" {
+                vec![json!({"name": "hello", "trigger": {"key": "leadCreated"}, "start": "a",
+                    "nodes": {"a": {"type": "ACTION", "action": "Ns.welcome"}, "w": {"type": "WAIT", "for": "PT1H"}},
+                    "transitions": [{"from": "a", "to": "w"}]})]
+            } else {
+                vec![]
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct Runs(Mutex<HashMap<String, auto::Run>>);
+
+    #[async_trait]
+    impl auto::RunStore for Runs {
+        async fn insert(&self, run: &auto::Run) -> Result<bool, CoreError> {
+            self.0.lock().insert(run.id.clone(), run.clone());
+            Ok(true)
+        }
+        async fn get(&self, id: &str) -> Result<Option<auto::Run>, CoreError> {
+            Ok(self.0.lock().get(id).cloned())
+        }
+        async fn save(&self, run: &auto::Run, _expected: i64) -> Result<bool, CoreError> {
+            self.0.lock().insert(run.id.clone(), run.clone());
+            Ok(true)
+        }
+        async fn listening(&self, _a: &str, _c: &str, _d: bool, _e: &str) -> Result<Vec<auto::Run>, CoreError> {
+            Ok(vec![])
+        }
+        async fn inbox_put(&self, _r: &str, _n: &str, _e: &str, _d: &Value) -> Result<(), CoreError> {
+            Ok(())
+        }
+        async fn inbox_take(&self, _r: &str, _n: &str) -> Result<Vec<Value>, CoreError> {
+            Ok(vec![])
+        }
+    }
+
+    /// Records the authorities each action ran with.
+    #[derive(Default)]
+    struct Seen(Mutex<Vec<Vec<String>>>);
+
+    #[async_trait]
+    impl auto::Actions for Seen {
+        async fn run(&self, _action: &str, _node: &str, _params: Map<String, Value>, _run: &auto::Run) -> Result<Value, CoreError> {
+            self.0.lock().push(context::authentication().authorities().to_vec());
+            Ok(json!({}))
+        }
+    }
+
+    #[derive(Default)]
+    struct Timers(Mutex<Vec<Map<String, Value>>>);
+
+    #[async_trait]
+    impl auto::Timers for Timers {
+        async fn set(&self, _run: &auto::Run, _key: &str, _at: i64, data: Map<String, Value>) -> Result<(), CoreError> {
+            self.0.lock().push(data);
+            Ok(())
+        }
+        async fn cancel(&self, _run: &auto::Run, _key: &str) -> Result<(), CoreError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_event_with_only_automations_is_handled_and_a_wake_up_reaches_the_engine() {
+        let (seen, timers, runs) = (Arc::new(Seen::default()), Arc::new(Timers::default()), Arc::new(Runs::default()));
+        let engine = Arc::new(auto::Engine {
+            automations: Arc::new(OneAutomation),
+            runs: runs.clone(),
+            actions: seen.clone(),
+            timers: timers.clone(),
+            clock: Arc::new(|| 1_000),
+        });
+        let (l, log, _) = logged(Ok(None), fin());
+        let l = l.with_automations(engine);
+
+        assert_eq!(l.run(&message()).await.unwrap(), None);
+        assert!(log.calls.lock().is_empty(), "an automation took the event, so it is not logged as unhandled: {:?}", log.calls.lock());
+        let auths = seen.0.lock().clone();
+        assert_eq!(auths.len(), 1);
+        assert!(auths[0].iter().any(|a| a == EVENT_RUNNER_AUTHORITY), "{auths:?}");
+
+        // The wait set a wake-up; delivering it finishes the run. No EventAction is looked for
+        // (the fake EventActions only answers `leadCreated`).
+        let data = timers.0.lock()[0].clone();
+        let wake = EventMessage { event_name: Some(auto::WAKE_EVENT.into()), data: Some(data), ..message() };
+        assert_eq!(l.run(&wake).await.unwrap(), Some(true));
+        let run = runs.0.lock().values().next().unwrap().clone();
+        assert_eq!(run.status, auto::RunStatus::Done);
+
+        // Without automations a wake-up is nothing to do.
+        let (plain, _, _) = logged(Ok(None), fin());
+        assert_eq!(plain.run(&wake).await.unwrap(), None);
+    }
+}
+
+// --- who may set a client's automations going ---------------------------------------------------
+
+#[test]
+fn only_the_client_its_site_or_system_reaches_its_automations() {
+    let auth = |client: &str, url: &str, kind: &str| {
+        json!({"user": {"id": 1, "clientId": 7, "stringAuthorities": []}, "isAuthenticated": true,
+               "clientCode": client, "urlClientCode": url, "clientTypeCode": kind})
+    };
+    assert!(raiser_may_reach(None, "FIN"), "a scheduler tick or an automation's own raise");
+    assert!(raiser_may_reach(Some(&auth("FIN", "FIN", "BUS")), "FIN"));
+    assert!(raiser_may_reach(Some(&auth("CP17", "FIN", "BUS")), "FIN"), "a partner signed in on the client's site");
+    assert!(raiser_may_reach(Some(&auth("SYSTEM", "SYSTEM", "SYS")), "FIN"));
+    assert!(!raiser_may_reach(Some(&auth("FIN", "FIN", "BUS")), "FIN2"), "one tenant raising another's event");
+    assert!(!raiser_may_reach(Some(&json!("not an object")), "FIN"));
+}

@@ -33,6 +33,7 @@ const CORE_TYPES: &[(&str, &str)] = &[
     ("notifications", "notification"),
     ("workflows", "workflow"),
     ("actions", "action"),
+    ("automations", "automation"),
 ];
 
 /// `type=page,storage` to a set; blank means every type.

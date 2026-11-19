@@ -22,7 +22,7 @@ use overridable::{DocType, JMap, JValue};
 use platform::error::{AppError, AppResult};
 use platform::security::ContextAuthentication;
 
-use crate::docs::{ConnectionDoc, EventActionDoc, EventDefinitionDoc, FunctionDoc, SchemaDoc, StorageDoc, TemplateDoc};
+use crate::docs::{AutomationDoc, ConnectionDoc, EventActionDoc, EventDefinitionDoc, FunctionDoc, SchemaDoc, StorageDoc, TemplateDoc};
 use crate::editor::beans::{self, T};
 use crate::editor::docs::{self as edocs, ActionDoc, NotificationDoc, WorkflowDoc};
 use crate::editor::secrets;
@@ -64,6 +64,7 @@ pub fn core_messages() -> Messages {
 /// (see `DIFFERENCES.md`), leaving them out would hide their history from everyone.
 pub const EDITOR_AUTH_NAMES: &[(&str, &str)] = &[
     ("ACTION", "Action"),
+    ("AUTOMATION", "Automation"),
     ("CONNECTION", "Connection"),
     ("FUNCTION", "Function"),
     ("SCHEMA", "Schema"),
@@ -89,6 +90,8 @@ pub enum CoreObject {
     EventAction,
     Workflow,
     Action,
+    /// Rust only: [`crate::automation`].
+    Automation,
 }
 
 impl CoreObject {
@@ -104,6 +107,7 @@ impl CoreObject {
             CoreObject::EventAction => &EventActionDoc,
             CoreObject::Workflow => &WorkflowDoc,
             CoreObject::Action => &ActionDoc,
+            CoreObject::Automation => &AutomationDoc,
         }
     }
 
@@ -118,7 +122,7 @@ impl CoreObject {
             CoreObject::Notification => edocs::notification(this, base),
             CoreObject::EventDefinition => edocs::event_definition(this, base),
             CoreObject::EventAction => edocs::event_action(this, base),
-            CoreObject::Workflow | CoreObject::Action => self.doc().extract_difference(this, base),
+            CoreObject::Workflow | CoreObject::Action | CoreObject::Automation => self.doc().extract_difference(this, base),
         }
     }
 
@@ -171,9 +175,10 @@ impl CoreObject {
                 "channelConnections",
                 "channelEnabled",
             ],
-            CoreObject::EventDefinition => &["schema", "schedule"],
+            CoreObject::EventDefinition => &["schema", "schedule", "automation"],
             CoreObject::EventAction => &["tasks"],
             CoreObject::Action => &["functionName", "functionNamespace", "properties"],
+            CoreObject::Automation => &["isTemplate", "category", "paused", "trigger", "entry", "exitWhen", "start", "nodes", "transitions"],
             CoreObject::Connection => &["connectionSubType", "connectionDetails", "isAppLevel", "onlyThruKIRun", "consentAuth"],
             _ => &[],
         }
@@ -345,6 +350,10 @@ impl Kind for CoreKind {
             },
             CoreObject::Storage => self.storage.before_create(cx, ca, e).await?,
             CoreObject::Connection => outbound_check(e, self.block_private_targets).await?,
+            CoreObject::Automation => {
+                crate::automation::guard::check_steps(self.storage.functions.get(), ca, e).await?;
+                crate::automation::storage_trigger::ensure(self.storage.storages.get(), self.storage.event_definitions.get(), ca, e).await?
+            }
             CoreObject::Workflow => {
                 if e.get("trigger").is_none_or(JValue::is_null) {
                     return Err(cx.error(StatusCode::INTERNAL_SERVER_ERROR, WORKFLOW_TRIGGER_MISSING, &[]));
@@ -367,6 +376,10 @@ impl Kind for CoreKind {
         if self.object == CoreObject::Storage {
             self.storage.before_update(cx, ca, e).await?;
         }
+        if self.object == CoreObject::Automation {
+            crate::automation::guard::check_steps(self.storage.functions.get(), ca, e).await?;
+            crate::automation::storage_trigger::ensure(self.storage.storages.get(), self.storage.event_definitions.get(), ca, e).await?;
+        }
         Ok(())
     }
 
@@ -379,7 +392,7 @@ impl Kind for CoreKind {
                 if Some(name.as_str()) != str_field(existing, "name") {
                     return Err(cx.error(StatusCode::BAD_REQUEST, msg::NAME_CHANGE, &[]));
                 }
-                for f in ["executeAuth", "definition", "permission"] {
+                for f in ["executeAuth", "definition", "permission", "automation"] {
                     existing.insert(f.into(), incoming.get(f).cloned().unwrap_or_default());
                 }
             }
@@ -610,6 +623,7 @@ mod tests {
             CoreObject::EventAction,
             CoreObject::Workflow,
             CoreObject::Action,
+            CoreObject::Automation,
         ] {
             assert!(!o.doc().object_name().is_empty());
             let _ = o.typed_fields();

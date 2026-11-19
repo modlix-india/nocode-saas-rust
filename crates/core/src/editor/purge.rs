@@ -511,7 +511,7 @@ async fn purge_rows(rows: &dyn RowStore, target: &Target, dry_run: bool, r: &mut
 /// reference caches.
 async fn evict(st: &CoreEditor, apps: &BTreeSet<String>, deleted: &[Deleted], storages: &[String]) {
     crate::editor::cache::evict_all(&st.cx.cache, st.redis.as_ref(), &st.eviction_channel).await;
-    let services: [&dyn CacheNames; 11] = [
+    let services: [&dyn CacheNames; 12] = [
         &st.functions,
         &st.schemas,
         &st.storages,
@@ -522,6 +522,7 @@ async fn evict(st: &CoreEditor, apps: &BTreeSet<String>, deleted: &[Deleted], st
         &st.event_actions,
         &st.workflows,
         &st.actions,
+        &st.automations,
         &st.fillers,
     ];
     let mut names: BTreeSet<String> = BTreeSet::new();
