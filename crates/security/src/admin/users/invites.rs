@@ -532,8 +532,14 @@ impl Admin {
         let existing = self.db.users_with_any_identity(client_id, i.user_name.as_deref(), i.email_id.as_deref(), i.phone_number.as_deref(), None).await?;
         let profile_app = self.profile_app_id(i.profile_id).await?;
         if existing.is_empty() {
-            // A new user takes a seat of the plan once they hold a profile: a capped plan (Free) says no now.
-            if i.profile_id.is_some() {
+            if let Some(p) = i.profile_id {
+                // ADZ-798: the invited client must be able to hold the profile, the very rule
+                // `invite_accept` applies to the new user. Without it the accept makes a dead
+                // account (no profile, sign-in refused). The caller's own access was checked above.
+                if !self.has_access_to_profiles(client_id, &[p]).await? {
+                    return Err(refused());
+                }
+                // A new user takes a seat of the plan once they hold a profile: a capped plan (Free) says no now.
                 self.refuse_user_over_limit(profile_app, client_id, None, true).await?;
             }
             return self.invite_new(ca, i).await;
@@ -677,6 +683,16 @@ impl Admin {
             return Err(unknown());
         };
         self.invite_user_check(ca, &app, u.client_id, u.user_name.as_deref(), u.email_id.as_deref(), u.phone_number.as_deref()).await?;
+        // ADZ-798: an invite whose profile the client cannot hold (no access to its app, or the
+        // profile is restricted) is refused BEFORE the user is made and the invite consumed, so it
+        // stays pending (the inviter can revoke it) instead of leaving a dead account.
+        let addable = match i.profile_id {
+            Some(p) => self.has_access_to_profiles(u.client_id, &[p]).await?,
+            None => false,
+        };
+        if i.profile_id.is_some() && !addable {
+            return Err(forbidden("forbidden_create", &["User Invitation Error"]));
+        }
         // Invites sent before the plan filled up can outnumber its seats: the last ones are refused here.
         if i.profile_id.is_some() {
             let profile_app = self.profile_app_id(i.profile_id).await?;
@@ -706,10 +722,6 @@ impl Admin {
         if !set {
             return Err(unknown());
         }
-        let addable = match i.profile_id {
-            Some(p) => self.has_access_to_profiles(u.client_id, &[p]).await?,
-            None => false,
-        };
         // The owner's cached sub-org (`<client>:owner`) lists every user of the client, so it has to
         // drop too, or an Owner cannot hand work to the new user until the cache expires (LZT-1716).
         self.evict_owner_cache(created.client_id, created.reporting_to).await;
@@ -1384,6 +1396,44 @@ mod live {
         s.user_create(&sys, User { client_id: c, email_id: Some(mail("k3")), status_code: "ACTIVE".into(), ..Default::default() }).await.unwrap();
         assert_eq!(err(s.invite_accept(&on_c, &reg(&twin, json!({"passType": "PASSWORD", "password": PASSWORD})), &info()).await).0, StatusCode::CONFLICT);
         on_c.url_app_code = Some("appbuilder".into());
+
+        // ADZ-798: a new person cannot be invited into a client that has no access to the
+        // profile's app (ZZRUL reaches appbuilder only), so no dead account is made; the same
+        // invite into a client that has the access (p1, appbuilder) still goes through.
+        let other = fx.ids("SELECT ID FROM security_profile WHERE APP_ID IS NOT NULL AND APP_ID <> 2 ORDER BY ID LIMIT 1").await;
+        let other = *other.first().expect("a profile of another app");
+        let refused = s.invite_create(&sys, Invite { client_id: Some(c), profile_id: Some(other), ..new(&mail("n1")) }).await;
+        assert_eq!(err(refused), (StatusCode::FORBIDDEN, "Cannot create User Invite for the selected client".to_string()), "no access to the profile's app");
+        assert!(s.db.invite_with_identity(Some(c), Some(&mail("n1")), None).await.unwrap().is_none(), "no invite written");
+        let granted = s.invite_create(&sys, Invite { client_id: Some(c), profile_id: Some(p1), ..new(&mail("n2")) }).await.unwrap();
+        assert_eq!(granted["existingUser"], false);
+        assert!(s.invite_revoke(&sys, granted["userRequest"]["inviteCode"].as_str().unwrap()).await.unwrap());
+        // No profile on the invite: unchanged, whatever the client reaches.
+        let bare = s.invite_create(&sys, Invite { client_id: Some(c), ..new(&mail("n3")) }).await.unwrap();
+        assert!(s.invite_revoke(&sys, bare["userRequest"]["inviteCode"].as_str().unwrap()).await.unwrap());
+        // A client with no apps at all does NOT pass `has_access_to_profiles` for a profile of an
+        // app (an empty app list filters nothing, so the profile counts as outside; unchanged), and
+        // so cannot hold one: create and accept now agree with that. It passes for no profile.
+        assert!(!s.has_access_to_profiles(NONE, &[other]).await.unwrap(), "an empty app list holds no profile");
+        assert!(s.has_access_to_profiles(NONE, &[]).await.unwrap());
+        assert!(!s.has_access_to_profiles(c, &[other]).await.unwrap(), "ZZRUL does not reach that app");
+        // An invite made before the access went (a row written as the old create did) is refused at
+        // accept, BEFORE any user is made; it stays pending until revoked.
+        let old = Invite {
+            client_id: Some(c),
+            email_id: Some(mail("n4")),
+            profile_id: Some(other),
+            invite_code: Some(format!("{:032x}", rand::random::<u128>())),
+            created_by: Some(sys.user.id()),
+            ..Default::default()
+        };
+        s.db.entity_insert(&INVITE, &invite_values(&old)).await.unwrap();
+        let old_code = old.invite_code.clone().unwrap();
+        let dead = s.invite_accept(&on_c, &reg(&old_code, json!({"passType": "PASSWORD", "password": PASSWORD})), &info()).await;
+        assert_eq!(err(dead), (StatusCode::FORBIDDEN, "Cannot create User Invitation Error for the selected client".to_string()));
+        assert!(fx.ids(&format!("SELECT ID FROM security_user WHERE CLIENT_ID = {c} AND EMAIL_ID = '{}'", mail("n4"))).await.is_empty(), "no dead account");
+        assert!(s.db.invite_by_code(&old_code).await.unwrap().is_some(), "the invite is not consumed");
+        assert!(s.invite_revoke(&sys, &old_code).await.unwrap());
 
         // An invite whose password is blank: the user is made with Java's "null" secret, and the
         // sign-in that follows fails.
