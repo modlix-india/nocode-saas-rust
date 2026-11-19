@@ -53,7 +53,7 @@ fn all_for(object: &str) -> Vec<String> {
 }
 
 fn everything() -> Vec<String> {
-    ["Function", "Schema", "Storage", "Connection", "Template", "Notification", "EventDefinition", "EventAction", "Workflow", "Action", "Application", "Transport"]
+    ["Function", "Schema", "Storage", "Connection", "Template", "Notification", "EventDefinition", "EventAction", "Workflow", "Action", "Automation", "Application", "Transport"]
         .iter()
         .flat_map(|o| all_for(o))
         .collect()
@@ -1210,6 +1210,104 @@ async fn the_other_kinds_read_their_classes_as_java_does() {
     assert_eq!(r.obj().get("toExpression"), Some(&s("x")));
 }
 
+// ── Automations (Rust only) ─────────────────────────────────────────
+
+#[tokio::test]
+async fn an_automation_is_kept_whole_and_checked() {
+    let e = env();
+    let body = r#"{"name":"welcome","title":"Welcome a new deal","appCode":"testapp","clientCode":"SYSTEM","junk":1,
+        "trigger":{"key":"DEAL_CREATED"},"start":"send","paused":false,
+        "nodes":{"send":{"type":"ACTION","action":"Ns.send","params":{"template":"hello"}},"hold":{"type":"WAIT","for":"P2D"}},
+        "transitions":[{"from":"send","to":"hold"}]}"#;
+    let a = e.call("POST", "/api/core/automations", body).await;
+    assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+    let saved = a.obj();
+    assert_eq!(path(&saved, &["nodes", "hold", "for"]), Some(&s("P2D")));
+    assert_eq!(path(&saved, &["trigger", "key"]), Some(&s("DEAL_CREATED")));
+    assert!(matches!(saved.get("transitions"), Some(JValue::Array(t)) if t.len() == 1), "{}", a.text());
+    assert!(saved.get("junk").is_none(), "an unknown field is not kept");
+
+    // An update replaces the flow: a step left out is gone, not merged back.
+    let mut next = saved.clone();
+    next.insert("nodes".into(), JValue::Object(obj(r#"{"send":{"type":"ACTION","action":"Ns.send"}}"#)));
+    next.insert("transitions".into(), JValue::Array(vec![]));
+    next.insert("paused".into(), JValue::Bool(true));
+    let r = e.call("PUT", &format!("/api/core/automations/{}", a.id()), &to_body(&next)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(path(&r.obj(), &["nodes", "hold"]).is_none());
+    assert_eq!(r.obj().get("paused"), Some(&JValue::Bool(true)));
+
+    let ok = e.call("POST", "/api/core/automations/check", body).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    assert_eq!(ok.obj().get("ok"), Some(&JValue::Bool(true)));
+    let bad = e.call("POST", "/api/core/automations/check", r#"{"nodes":{"w":{"type":"WAIT","title":"Hold on"}},"start":"w"}"#).await;
+    let report = bad.obj();
+    assert_eq!(report.get("ok"), Some(&JValue::Bool(false)));
+    assert!(bad.text().contains("TRIGGER_MISSING") && bad.text().contains("WAIT_EMPTY") && bad.text().contains("Hold on"), "{}", bad.text());
+    assert_eq!(e.call("POST", "/api/core/automations/check", "[]").await.status, StatusCode::BAD_REQUEST);
+
+    assert_eq!(e.call("DELETE", &format!("/api/core/automations/{}", a.id()), "").await.text(), "true");
+}
+
+#[tokio::test]
+async fn an_automation_on_a_storage_switches_its_events_on() {
+    let e = env();
+    let st = e.call("POST", "/api/core/storages", r#"{"name":"contactForm","title":"Contact form","appCode":"testapp","clientCode":"SYSTEM","schema":{"type":"OBJECT","properties":{"email":{"type":"STRING"}}}}"#).await;
+    assert_eq!(st.status, StatusCode::OK, "{}", st.text());
+    assert_ne!(st.obj().get("generateEvents"), Some(&JValue::Bool(true)));
+
+    let c = e.call("GET", "/api/core/automations/catalog?appCode=testapp&storages=all", "").await;
+    assert!(c.text().contains("Storage.contactForm.Create") && c.text().contains("dataObject.email"), "{}", c.text());
+    assert!(!e.call("GET", "/api/core/automations/catalog?appCode=testapp", "").await.text().contains("Storage.contactForm"));
+
+    let a = e.call("POST", "/api/core/automations", r#"{"name":"thanks","appCode":"testapp","clientCode":"SYSTEM","trigger":{"key":"Storage.contactForm.Create"},"start":"e","nodes":{"e":{"type":"END"}}}"#).await;
+    assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+    let read = e.call("GET", &format!("/api/core/storages/{}", st.id()), "").await;
+    assert_eq!(read.obj().get("generateEvents"), Some(&JValue::Bool(true)), "{}", read.text());
+    let defs = e.call("GET", "/api/core/eventDefinitions?appCode=testapp", "").await;
+    assert!(defs.text().contains("Storage.contactForm.Create"), "{}", defs.text());
+
+    // Saving again changes nothing more; a storage that does not exist is refused.
+    let mut again = a.obj();
+    again.insert("title".into(), s("Say thanks"));
+    assert_eq!(e.call("PUT", &format!("/api/core/automations/{}", a.id()), &to_body(&again)).await.status, StatusCode::OK);
+    let missing = e.call("POST", "/api/core/automations", r#"{"name":"lost","appCode":"testapp","clientCode":"SYSTEM","trigger":{"key":"Storage.nope.Create"},"start":"e","nodes":{"e":{"type":"END"}}}"#).await;
+    assert_eq!(missing.status, StatusCode::BAD_REQUEST, "{}", missing.text());
+    assert!(missing.text().contains("no storage"), "{}", missing.text());
+}
+
+#[tokio::test]
+async fn the_catalog_lists_what_the_app_declares() {
+    let e = env();
+    e.call("POST", "/api/core/eventDefinitions", r#"{"name":"DEAL_CREATED","appCode":"testapp","clientCode":"SYSTEM","title":"Deal created",
+        "automation":{"sentence":"a deal is created","subjectPath":"dealId"}}"#).await;
+    e.call("POST", "/api/core/eventDefinitions", r#"{"name":"QUIET","appCode":"testapp","clientCode":"SYSTEM"}"#).await;
+    let f = e.call("POST", "/api/core/functions", r#"{"appCode":"testapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"send","parameters":{"to":{"schema":{"type":"STRING"}}}},
+        "automation":{"title":"Send a note"}}"#).await;
+    assert_eq!(path(&f.obj(), &["automation", "title"]), Some(&s("Send a note")), "{}", f.text());
+    e.call("POST", "/api/core/functions", r#"{"appCode":"testapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"plain"}}"#).await;
+    e.call("POST", "/api/core/functions", r#"{"appCode":"otherapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"elsewhere"},"automation":{}}"#).await;
+
+    let c = e.call("GET", "/api/core/automations/catalog?appCode=testapp", "").await;
+    assert_eq!(c.status, StatusCode::OK, "{}", c.text());
+    let keys = |k: &str| match c.obj().get(k) {
+        Some(JValue::Array(l)) => l.iter().map(|x| x.as_object().unwrap()["key"].java_to_string()).collect::<Vec<_>>(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(keys("triggers"), vec!["DEAL_CREATED"]);
+    assert_eq!(keys("actions"), vec!["core:sendEmail", "core:postWebhook", "core:raiseEvent", "core:sendNotification", "Ns.send"]);
+    assert!(c.text().contains("\"name\" : \"to\""), "the function's parameters are its params: {}", c.text());
+
+    // Taking the block off a function takes it off the catalog.
+    let mut fb = f.obj();
+    fb.insert("automation".into(), JValue::Null);
+    let r = e.call("PUT", &format!("/api/core/functions/{}", f.id()), &to_body(&fb)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let c = e.call("GET", "/api/core/automations/catalog?appCode=testapp", "").await;
+    assert!(!c.text().contains("Ns.send"), "{}", c.text());
+    assert_eq!(e.call("GET", "/api/core/automations/catalog", "").await.status, StatusCode::BAD_REQUEST);
+}
+
 // ── CoreDraftableIntegrationTest ────────────────────────────────────
 
 #[tokio::test]
@@ -1242,11 +1340,11 @@ async fn every_draftable_core_kind_is_published_and_the_lists_are_javas() {
     let names = |l: Vec<Arc<dyn overridable::write::AnyService>>| l.iter().map(|s| s.object_name().to_string()).collect::<Vec<_>>();
     assert_eq!(
         names(e.st.publish_services()),
-        vec!["Storage", "Connection", "Template", "Notification", "EventDefinition", "EventAction", "Action", "Workflow", "Function", "Schema", "Filler"]
+        vec!["Storage", "Connection", "Template", "Notification", "EventDefinition", "EventAction", "Action", "Workflow", "Function", "Schema", "Filler", "Automation"]
     );
     assert_eq!(
         names(e.st.deletion_services()),
-        vec!["Action", "Template", "Storage", "Function", "Schema", "EventAction", "EventDefinition", "Filler", "Connection", "Transport", "Workflow"]
+        vec!["Action", "Template", "Storage", "Function", "Schema", "EventAction", "EventDefinition", "Filler", "Connection", "Transport", "Workflow", "Automation"]
     );
 }
 
@@ -1256,7 +1354,7 @@ async fn every_draftable_core_kind_is_published_and_the_lists_are_javas() {
 async fn transport_versions_and_the_app_wipe() {
     let e = env();
     let types = e.call("GET", "/api/core/transports/transportTypes", "").await;
-    assert_eq!(types.json(), JValue::Array(["Schema", "Storage", "Function", "Template", "EventDefinition", "EventAction", "Filler"].iter().map(|t| s(t)).collect()));
+    assert_eq!(types.json(), JValue::Array(["Schema", "Storage", "Function", "Template", "EventDefinition", "EventAction", "Automation", "Filler"].iter().map(|t| s(t)).collect()));
     let f = e.call("POST", "/api/core/functions", r#"{"appCode":"testapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"f"}}"#).await;
     let v = e.call("POST", &format!("/api/core/versions/{}/query", f.id()), "{}").await;
     assert_eq!(v.obj()["content"].clone().as_object().is_none(), true);
@@ -1286,7 +1384,7 @@ async fn the_index_lists_every_type_in_order() {
     let idx = e.call("GET", "/api/core/index?appCode=testapp", "").await.obj();
     assert_eq!(
         idx.keys().cloned().collect::<Vec<_>>(),
-        vec!["appCode", "clientCode", "storages", "schemas", "functions", "templates", "connections", "eventDefinitions", "eventActions", "notifications", "workflows", "actions"]
+        vec!["appCode", "clientCode", "storages", "schemas", "functions", "templates", "connections", "eventDefinitions", "eventActions", "notifications", "workflows", "actions", "automations"]
     );
     assert_eq!(idx["clientCode"], s(SYSTEM));
     let row = match &idx["functions"] {
@@ -1842,4 +1940,38 @@ mod purge_routes {
         assert!(to_compact(&errors).contains("core.version"), "{}", a.text());
         assert_eq!(names(&e, "function"), ["f3", "f4"]);
     }
+}
+
+#[tokio::test]
+async fn only_a_builder_may_run_any_function_in_a_step() {
+    let e = env();
+    e.call("POST", "/api/core/functions", r#"{"appCode":"testapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"send"},"automation":{"title":"Send"}}"#).await;
+    e.call("POST", "/api/core/functions", r#"{"appCode":"testapp","clientCode":"SYSTEM","definition":{"namespace":"Ns","name":"inner","parameters":{"x":{"schema":{"type":"STRING"}}}}}"#).await;
+    let doc = |name: &str, action: &str| {
+        format!(r#"{{"name":"{name}","appCode":"testapp","clientCode":"SYSTEM","trigger":{{"key":"E"}},"start":"a","nodes":{{"a":{{"type":"ACTION","title":"Do it","action":"{action}"}},"b":{{"type":"ACTION","action":"core:sendEmail"}}}},"transitions":[{{"from":"a","to":"b"}}]}}"#)
+    };
+    let tenant = [("x-test-auth", "Authorities.Automation_CREATE,Authorities.Automation_UPDATE,Authorities.Automation_READ,Authorities.Logged_IN")];
+    let builder = [("x-test-auth", "Authorities.Automation_CREATE,Authorities.Automation_READ,Authorities.Function_UPDATE,Authorities.Logged_IN")];
+
+    // A tenant's admin: offered actions and built-ins only.
+    let ok = e.send("POST", "/api/core/automations", Some("CLIA"), &tenant, &doc("offered", "Ns.send").replace("\"SYSTEM\"", "\"CLIA\"")).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text());
+    let no = e.send("POST", "/api/core/automations", Some("CLIA"), &tenant, &doc("inner", "Ns.inner").replace("\"SYSTEM\"", "\"CLIA\"")).await;
+    assert_eq!(no.status, StatusCode::BAD_REQUEST, "{}", no.text());
+    assert!(no.text().contains("Do it") && no.text().contains("does not offer"), "{}", no.text());
+    // Nor by changing a saved one.
+    let mut changed = ok.obj();
+    changed.insert("nodes".into(), JValue::Object(obj(r#"{"a":{"type":"ACTION","action":"Ns.inner"}}"#)));
+    assert_eq!(e.send("PUT", &format!("/api/core/automations/{}", ok.id()), Some("CLIA"), &tenant, &to_body(&changed)).await.status, StatusCode::BAD_REQUEST);
+
+    // A builder: any function, and the catalog lists them all.
+    let b = e.send("POST", "/api/core/automations", Some("CLIA"), &builder, &doc("anyFn", "Ns.inner").replace("\"SYSTEM\"", "\"CLIA\"")).await;
+    assert_eq!(b.status, StatusCode::OK, "{}", b.text());
+    let tenant_cat = e.send("GET", "/api/core/automations/catalog?appCode=testapp", Some("CLIA"), &tenant, "").await.text();
+    assert!(tenant_cat.contains("Ns.send") && !tenant_cat.contains("Ns.inner"), "{tenant_cat}");
+    let asked = e.send("GET", "/api/core/automations/catalog?appCode=testapp&functions=all", Some("CLIA"), &tenant, "").await.text();
+    assert!(!asked.contains("Ns.inner"), "a tenant's admin asking for every function gets the offered ones: {asked}");
+    assert!(!e.call("GET", "/api/core/automations/catalog?appCode=testapp", "").await.text().contains("Ns.inner"), "only when asked");
+    let builder_cat = e.call("GET", "/api/core/automations/catalog?appCode=testapp&functions=all", "").await.text();
+    assert!(builder_cat.contains("Ns.inner") && builder_cat.contains("\"offered\" : false"), "{builder_cat}");
 }

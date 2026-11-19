@@ -86,6 +86,18 @@ pub fn authentication_of(raw: &Value) -> Result<Authentication, CoreError> {
     Ok(Authentication { ca, raw: map.clone() })
 }
 
+/// Whether an event may start or move on the automations of `client`. `CreateEvent` lets any
+/// server function raise any client's event, carrying the raiser's authentication; an
+/// automation acts on the client's data as its event runner, so one client must not set
+/// another's going. Allowed: no raiser (a scheduler tick, a one-off, an automation's own
+/// raise), the SYSTEM client, a user of the client, and a user signed in on the client's own
+/// site (a partner or a customer of the client, whose own client differs).
+pub fn raiser_may_reach(authentication: Option<&Value>, client: &str) -> bool {
+    let Some(raw) = authentication else { return true };
+    let Ok(a) = authentication_of(raw) else { return false };
+    a.ca.is_system_client() || a.ca.client_code() == client || a.ca.url_client_code.as_deref() == Some(client)
+}
+
 /// `makeAnonymousContextAuth(appCode, clientCode, client)`: the user `_Anonymous` of the
 /// client, with the anonymous and event-runner authorities, the URL codes from the event.
 pub fn anonymous_authentication(app_code: Option<&str>, client_code: Option<&str>, client: &Value) -> Result<Authentication, CoreError> {
@@ -420,11 +432,21 @@ pub struct EventsListener {
     completion: Option<Arc<RunCompletion>>,
     runs: Option<Arc<dyn EventRunLog>>,
     unhandled: UnhandledEventLog,
+    /// Rust only: the client's automations ([`crate::automation`]), told of every event.
+    automations: Option<Arc<crate::automation::engine::Engine>>,
 }
 
 impl EventsListener {
     pub fn new(actions: Arc<dyn EventActions>, clients: Arc<dyn ClientLookup>) -> Self {
-        Self { actions, clients, executors: HashMap::new(), completion: None, runs: None, unhandled: UnhandledEventLog::default() }
+        Self {
+            actions,
+            clients,
+            executors: HashMap::new(),
+            completion: None,
+            runs: None,
+            unhandled: UnhandledEventLog::default(),
+            automations: None,
+        }
     }
 
     pub fn with_executor(mut self, task_type: &'static str, executor: Arc<dyn TaskExecutor>) -> Self {
@@ -440,6 +462,56 @@ impl EventsListener {
     pub fn with_run_log(mut self, runs: Arc<dyn EventRunLog>) -> Self {
         self.runs = Some(runs);
         self
+    }
+
+    pub fn with_automations(mut self, engine: Arc<crate::automation::engine::Engine>) -> Self {
+        self.automations = Some(engine);
+        self
+    }
+
+    /// Runs `fut` as the client's event runner. An event raised by a user carries the user;
+    /// an automation's actions never run as that user, so one that works before a wait also
+    /// works after it, when no user is there.
+    async fn as_event_runner<T, F>(&self, qob: &EventMessage, fut: F) -> Result<T, CoreError>
+    where
+        F: std::future::Future<Output = Result<T, CoreError>>,
+    {
+        if qob.authentication.is_none() {
+            return fut.await;
+        }
+        let Some(client) = self.clients.client_by_code(qob.client_code.as_deref().unwrap_or("")).await? else {
+            return Err(CoreError::unknown(format!("The client '{}' could not be found", qob.client_code.as_deref().unwrap_or("null"))));
+        };
+        let auth = anonymous_authentication(qob.app_code.as_deref(), qob.client_code.as_deref(), &client)?;
+        let ctx = Arc::new(RequestContext {
+            auth: Arc::new(auth),
+            app_code: qob.app_code.clone(),
+            client_code: qob.client_code.clone(),
+            draft: qob.draft,
+            debug: qob.x_debug.clone(),
+            ..Default::default()
+        });
+        context::with_request(ctx, fut).await
+    }
+
+    /// Tells the client's automations of the event. True when it started or moved on a run.
+    /// A failure is logged: the event's EventAction still runs.
+    async fn tell_automations(&self, qob: &EventMessage) -> bool {
+        let Some(engine) = &self.automations else { return false };
+        let (Some(app), Some(client), Some(event)) = (qob.app_code.as_deref(), qob.client_code.as_deref(), qob.event_name.as_deref()) else {
+            return false;
+        };
+        if !raiser_may_reach(qob.authentication.as_ref(), client) {
+            tracing::warn!("Event {event} of {app} for {client} was raised by another client; the client's automations are not told of it.");
+            return false;
+        }
+        match self.as_event_runner(qob, engine.on_event(app, client, qob.draft, event, qob.data.as_ref())).await {
+            Ok(h) => h.any(),
+            Err(e) => {
+                tracing::warn!("Automations of {app} for {client} could not take event {event}: {}", e.text());
+                false
+            }
+        }
     }
 
     /// `run(qob)`: the event's tasks under the context it was raised with; their outcome.
@@ -498,6 +570,22 @@ impl EventsListener {
     }
 
     async fn received(&self, qob: &EventMessage, logged: &AtomicBool) -> Result<Option<bool>, CoreError> {
+        // A parked automation run's wake-up: no EventAction is looked for. A failure is passed
+        // on, so the scheduler tries the wake-up again.
+        if qob.event_name.as_deref() == Some(crate::automation::engine::WAKE_EVENT) {
+            logged.store(true, Ordering::SeqCst);
+            let Some(engine) = &self.automations else { return Ok(None) };
+            // Only the scheduler wakes a run: it raises the one-off with no user on it. A
+            // wake-up some user raised is dropped, whatever run it names.
+            if qob.authentication.is_some() {
+                tracing::warn!("A user raised {}; ignored.", crate::automation::engine::WAKE_EVENT);
+                return Ok(None);
+            }
+            let (app, client) = (qob.app_code.as_deref().unwrap_or(""), qob.client_code.as_deref().unwrap_or(""));
+            return Box::pin(self.as_event_runner(qob, engine.wake(app, client, qob.draft, qob.data.as_ref()))).await.map(|_| Some(true));
+        }
+        // Boxed: the engine's future is large, and the consumer's stack is not.
+        let automations = Box::pin(self.tell_automations(qob)).await;
         let action = self
             .actions
             .read(
@@ -509,6 +597,9 @@ impl EventsListener {
             .await?;
         let Some(action) = action else {
             logged.store(true, Ordering::SeqCst);
+            if automations {
+                return Ok(None);
+            }
             if let Some(w) = self.unhandled.warning(Some(qob), now_millis()) {
                 tracing::warn!("{w}");
             }

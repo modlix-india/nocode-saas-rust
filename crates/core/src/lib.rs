@@ -18,6 +18,7 @@
 
 pub mod auth;
 pub mod authorities;
+pub mod automation;
 pub mod catalogue;
 pub mod catch_policy;
 pub mod clients;
@@ -196,6 +197,7 @@ pub async fn connect(cfg: &CoreConfig) -> Result<Exec> {
         event_runs,
         debug_runs,
         ratelimit: platform::ratelimit::RateLimiter::configured(&cfg.ratelimit, &cache),
+        automations: Default::default(),
     });
     appdata.attach(&state);
     integrations.attach(&state);
@@ -296,6 +298,7 @@ pub async fn run_exec() -> Result<()> {
     tracing::info!(max_execution_seconds = cfg.kirun.seconds(), max_steps = cfg.kirun.max_steps, "function execution limits");
     let exec = connect(&cfg).await?;
     exec.cache.spawn_eviction_listener();
+    let _ = exec.state.inner().automations.set(automation_services(&exec, &cfg));
 
     let runs = run_pool::exec_pool(&cfg)?;
 
@@ -385,18 +388,41 @@ pub fn event_scheduler_of(
     event_scheduler::EventScheduler::new(definitions, security_calls, mq, schedule_store, one_offs, settings).with_run_log(run_log)
 }
 
+/// The automation engine over a connected core, its wake-ups on `one_offs`.
+fn automation_services_on(exec: &Exec, one_offs: Arc<scheduler::ScheduledEventService>) -> automation::routes::Services {
+    let runs = Arc::new(automation::runtime::MongoRuns::new(exec.mongo.clone()));
+    let timers = Arc::new(automation::runtime::OneOffTimers(one_offs));
+    let engine = Arc::new(automation::engine::Engine {
+        automations: Arc::new(automation::runtime::StoreAutomations::new(exec.state.inner().definitions.store().clone(), Some(exec.mongo.clone()))),
+        runs: runs.clone(),
+        actions: Arc::new(automation::runtime::CoreActions { state: exec.state.clone() }),
+        timers: timers.clone(),
+        clock: Arc::new(events::now_millis),
+    });
+    automation::routes::Services { engine, runs, timers, clients: exec.security_calls.clone() }
+}
+
+/// [`automation_services_on`] with its own one-off service, for core-exec's run routes.
+fn automation_services(exec: &Exec, cfg: &CoreConfig) -> automation::routes::Services {
+    let settings = cfg.core.scheduler.clone();
+    let schedule_store = Arc::new(scheduler::ScheduleStore::new(exec.mongo.clone(), settings.clone()));
+    automation_services_on(exec, Arc::new(scheduler::ScheduledEventService::new(schedule_store, settings)))
+}
+
 /// The EventsListener core-events runs, over a connected core.
 pub fn events_listener_of(exec: &Exec, cfg: &CoreConfig) -> events::EventsListener {
     let s = exec.state.inner();
     let settings = cfg.core.scheduler.clone();
     let schedule_store = Arc::new(scheduler::ScheduleStore::new(exec.mongo.clone(), settings.clone()));
     let one_offs = Arc::new(scheduler::ScheduledEventService::new(schedule_store.clone(), settings));
-    let completion = Arc::new(event_scheduler::RunCompletion::new(schedule_store, one_offs));
+    let completion = Arc::new(event_scheduler::RunCompletion::new(schedule_store, one_offs.clone()));
+    let engine = automation_services_on(exec, one_offs).engine;
     events::EventsListener::new(Arc::new(events::StoreActions(s.definitions.store().clone())), exec.security_calls.clone())
         .with_executor(events::CALL_CORE_FUNCTION, Arc::new(events::CallCoreFunction { state: exec.state.clone() }))
         .with_executor(events::SEND_EMAIL, Arc::new(events::SendEmailTask { integrations: s.integrations.clone() }))
         .with_completion(completion)
         .with_run_log(s.event_runs.clone())
+        .with_automations(engine)
 }
 
 /// Starts core-events: consumes the events queues and runs each event's EventAction. Serves

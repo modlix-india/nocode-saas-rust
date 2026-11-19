@@ -271,6 +271,7 @@ async fn state(security_base: &str, calls: PlatformCalls, backend: Arc<MemBacken
             deps.security.clone(),
         )),
         ratelimit: platform::ratelimit::RateLimiter::default(),
+        automations: Default::default(),
     });
     deps.integrations.attach(&state);
     state

@@ -141,13 +141,19 @@ pub struct StorageOps {
     pub data: Arc<dyn DataStores>,
     pub triggers: Arc<dyn Triggers>,
     pub storages: OnceLock<OverridableService<CoreKind>>,
+    /// The event definitions, for an automation that starts on a storage event
+    /// ([`crate::automation::storage_trigger`]).
+    pub event_definitions: OnceLock<OverridableService<CoreKind>>,
+    /// The functions, for which ones an automation's steps may run
+    /// ([`crate::automation::guard`]).
+    pub functions: OnceLock<OverridableService<CoreKind>>,
     /// The stored storage an update started from, for its `AFTER_UPDATE_STORAGE` triggers.
     before_update: DashMap<String, JMap>,
 }
 
 impl StorageOps {
     pub fn new(catalog: Arc<dyn Catalog>, kirun_schemas: Arc<dyn SchemaSource>, core_schemas: Arc<dyn SchemaSource>, data: Arc<dyn DataStores>, triggers: Arc<dyn Triggers>) -> Self {
-        Self { catalog, kirun_schemas, core_schemas, data, triggers, storages: OnceLock::new(), before_update: DashMap::new() }
+        Self { catalog, kirun_schemas, core_schemas, data, triggers, storages: OnceLock::new(), event_definitions: OnceLock::new(), functions: OnceLock::new(), before_update: DashMap::new() }
     }
 
     fn storages(&self) -> AppResult<&OverridableService<CoreKind>> {
