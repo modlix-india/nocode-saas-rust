@@ -11,9 +11,13 @@
 //! Reading needs `Authorities.Automation_READ`; stopping and testing `Automation_UPDATE`. A
 //! caller sees its own client's runs; the SYSTEM client may name another with `clientCode`.
 //!
-//! A test run starts the automation as given (saved or not) on the draft surface, as the
-//! client's event runner, with every wait cut to a minute at most. It answers once the run
-//! first stops or parks, so the editor can draw how far it got.
+//! A test run starts the automation as given (saved or not), as the client's event runner, with
+//! every wait cut to a minute at most. Its steps read and write the data the body's `data` names:
+//! `"live"` (the app's real records, so a test can run on a real deal) or `"draft"` (the draft
+//! app's copy). Without `data`, the surface the request came from: the live app tests on live
+//! data, a draft host on draft data. A live test's steps really act (messages go out); only the
+//! built-in notification is kept to the tester. It answers once the run first stops or parks, so
+//! the editor can draw how far it got.
 
 use std::sync::Arc;
 
@@ -205,6 +209,12 @@ async fn test(State(st): State<AppState>, h: HeaderMap, body: Bytes) -> Response
             return Ok(coded(StatusCode::BAD_REQUEST, "Send the automation to test."));
         };
         let trigger = b.get("trigger").cloned().unwrap_or_else(|| json!({}));
+        let draft = match b.get("data").and_then(Value::as_str).map(str::trim) {
+            None | Some("") => ctx.draft,
+            Some(d) if d.eq_ignore_ascii_case("live") => false,
+            Some(d) if d.eq_ignore_ascii_case("draft") => true,
+            Some(_) => return Ok(coded(StatusCode::BAD_REQUEST, "Say \"live\" or \"draft\" for the data a test runs on.")),
+        };
         let Some(app) = automation.get("appCode").and_then(Value::as_str).map(str::to_string).or_else(|| ctx.app_code.clone()) else {
             return Ok(coded(StatusCode::BAD_REQUEST, "Say which app the automation is in."));
         };
@@ -226,11 +236,11 @@ async fn test(State(st): State<AppState>, h: HeaderMap, body: Bytes) -> Response
             Some(_) => return Ok(coded(StatusCode::FORBIDDEN, "You can only test your own automations.")),
             None => own,
         };
-        let runner = event_runner(s, &app, &client).await?;
+        let runner = event_runner(s, &app, &client, draft).await?;
         let engine = s.engine.clone();
         let auto = Value::Object(automation.clone());
         let user = ctx.auth.user_id();
-        let run = context::with_request(runner, async move { engine.start_test(&app, &client, &auto, &trigger, user).await }).await?;
+        let run = context::with_request(runner, async move { engine.start_test(&app, &client, draft, &auto, &trigger, user).await }).await?;
         Ok(match run {
             Some(run) => json_response(&run_json(&run)),
             None => coded(StatusCode::OK, "The trigger's filter does not hold for this record, so the automation would not start."),
@@ -240,8 +250,8 @@ async fn test(State(st): State<AppState>, h: HeaderMap, body: Bytes) -> Response
     finish(r, R)
 }
 
-/// The client's event runner on the draft surface: what a test run's actions run as.
-async fn event_runner(s: &Services, app: &str, client: &str) -> Result<Arc<RequestContext>, CoreError> {
+/// The client's event runner on the surface a test runs on: what a test run's actions run as.
+async fn event_runner(s: &Services, app: &str, client: &str, draft: bool) -> Result<Arc<RequestContext>, CoreError> {
     let found = s.clients.client_by_code(client).await?;
     let Some(found) = found else { return Err(CoreError::unknown(format!("The client '{client}' could not be found"))) };
     let auth = crate::events::anonymous_authentication(Some(app), Some(client), &found)?;
@@ -249,7 +259,7 @@ async fn event_runner(s: &Services, app: &str, client: &str) -> Result<Arc<Reque
         auth: Arc::new(auth),
         app_code: Some(app.to_string()),
         client_code: Some(client.to_string()),
-        draft: true,
+        draft,
         ..Default::default()
     }))
 }

@@ -99,11 +99,11 @@ Java has no way to keep a value in app data encrypted. Two functions (`crate::fi
 `crate::functions::field_crypto`), the same AES-256-GCM pattern as the seal certificates:
 
 - **`EncryptField(value, clientCode, appCode, field)`** gives `result`, `v1.` + base64url of nonce +
-  ciphertext + tag. An empty `value` gives an empty `result`. The client, the app and the field label are
+  ciphertext + tag. An empty `value` gives an empty `result` (no key needed). The client, the app and the field label are
   bound in as associated data: a value copied to another client, app or field does not open.
 - **`DecryptField(value, clientCode, appCode, field, authority)`** gives the plain text only to a signed-in
   caller who holds `authority` (an authority expression, as `HasAuthority` takes; an empty one is refused,
-  403). A value that does not open is a 400 with a plain message; no key is a 503.
+  403). An empty `value` gives an empty `result` for anyone, with no key or authority asked for. A value that does not open is a 400 with a plain message; no key is a 503.
 - **Config**: `[crypto] field_key`, 32 bytes as base64, one per environment, never changed once a value has
   been encrypted with it (`MODLIX__CRYPTO__FIELD_KEY` in the environment works too). A key that is not
   base64 or not 32 bytes stops the start; an empty one only turns the two functions off (503).
@@ -158,6 +158,10 @@ nothing runs them. `Automation` (`crate::automation`) is a tenant's flow: a trig
   authority), through the same path as `SendNotification`, sent as the run's client, so only
   that client's people are reached. A test run sends it only to the user who started the test
   (`testUser`, also passed to function actions in their `automation` argument).
+- **A test run's data** (2026-11-19): the test route takes `data`: `"live"` (the app's real
+  records, so a test can run on a real deal) or `"draft"` (the draft app's copy); without it, the
+  surface the request came from. Before, every test ran on the draft copy, where a live deal is
+  "not found". A live test's steps really act; its waits are still cut to a minute.
 - **Any function in a step, for builders.** The catalog with `functions=all` adds, for a
   builder (the SYSTEM client or a holder of `Authorities.Function_UPDATE`), every function of
   the app the client can see, with its own parameters and `"offered": false`. Saving an
