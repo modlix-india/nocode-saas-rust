@@ -407,6 +407,17 @@ async fn a_test_run_waits_a_minute_at_most() {
 }
 
 #[tokio::test]
+async fn a_test_run_can_use_the_live_data_or_the_draft_copy() {
+    let w = world(vec![]);
+    let live = w.engine.start_test("leadzumptwo", "FIN", false, &follow_up(), &json!({"dealId": 3}), 142).await.unwrap().unwrap();
+    assert!(live.test && !live.draft, "a live test reads and writes the real records");
+    assert_eq!(live.test_user, Some(142));
+    assert_eq!(live.waits["hold"].until, Some(T0 + TEST_WAIT_SECONDS * 1000), "its waits are still cut short");
+    let draft = w.engine.start_test("leadzumptwo", "FIN", true, &follow_up(), &json!({"dealId": 4}), 142).await.unwrap().unwrap();
+    assert!(draft.test && draft.draft);
+}
+
+#[tokio::test]
 async fn waits_until_a_time_and_broken_waits() {
     let at = "2027-01-15T10:00:00Z";
     let w = world(vec![json!({
