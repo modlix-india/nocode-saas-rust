@@ -61,6 +61,10 @@ impl CoreFunction for EncryptField {
     /// `result`: the stored form (`v1.` + base64url); an empty `value` gives an empty `result`.
     async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
         let value = arg_string(args, "value")?;
+        // nothing to protect: no key is needed (a caller may pass an empty value on every environment)
+        if value.is_empty() {
+            return Ok(output("result", Value::String(String::new())));
+        }
         let (client, app, field) = (arg_string(args, "clientCode")?, arg_string(args, "appCode")?, arg_string(args, "field")?);
         let key = installed()?;
         Ok(output("result", Value::String(encrypt_with(key, &client, &app, &field, &value)?)))
@@ -104,6 +108,10 @@ impl CoreFunction for DecryptField {
     /// value does not open for this client, app and field; 503 when this environment has no key.
     async fn internal_execute(&self, args: &Map<Value>) -> Result<FunctionOutput, CoreError> {
         let value = arg_string(args, "value")?;
+        // nothing stored: nothing to read, so neither a key nor the authority is asked for
+        if value.is_empty() {
+            return Ok(output("result", Value::String(String::new())));
+        }
         let (client, app, field) = (arg_string(args, "clientCode")?, arg_string(args, "appCode")?, arg_string(args, "field")?);
         let authority = arg_string(args, "authority")?;
         let auth = context::authentication();
@@ -151,5 +159,15 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.status(), axum::http::StatusCode::FORBIDDEN);
         assert!(!e.text().contains("123456789012"));
+        // an empty value is empty in and out for anyone, with or without a key or an authority
+        let none = text(
+            DecryptField::new()
+                .internal_execute(&args(&[("value", ""), ("clientCode", "FIN"), ("appCode", "cxzump"), ("field", "f"), ("authority", "")]))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(none, "");
+        let none = text(EncryptField::new().internal_execute(&args(&[("value", ""), ("clientCode", "FIN"), ("appCode", "cxzump"), ("field", "f")])).await.unwrap());
+        assert_eq!(none, "");
     }
 }
