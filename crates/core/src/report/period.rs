@@ -193,6 +193,57 @@ pub fn resolve(name: &str, today: NaiveDate, fy_start: u32, custom: Option<(&str
     Ok(Period { name: name.into(), range: Some(range), label })
 }
 
+pub const COMPARE_TO: [&str; 2] = ["PREVIOUS_PERIOD", "SAME_PERIOD_LAST_YEAR"];
+
+/// The period a report is compared with (`compare.to`, P1b).
+///
+/// - `PREVIOUS_PERIOD`: the period of equal length just before. A range of whole calendar months
+///   (this month, a quarter, an FY, the last 12 months, a CUSTOM range from a 1st to a month's last
+///   day) steps back by the same number of months (November against October, not 2 to 31
+///   October); any other range steps back by its number of days (a week against the week before).
+/// - `SAME_PERIOD_LAST_YEAR`: the same dates a year earlier (whole months stay whole months, so
+///   February ends on its own last day; 29 February is 28 February otherwise).
+///
+/// `Err` holds the reason: ALL_TIME has nothing to compare with, or the kind is unknown.
+pub fn compare_period(p: &Period, to: &str) -> Result<Period, String> {
+    let Some((from, end)) = p.range else { return Err(format!("{} has no dates to compare with; pick a period other than All time", p.label)) };
+    let whole_months = from.day() == 1 && (end + Duration::days(1)).day() == 1;
+    let months = (end.year() * 12 + end.month0() as i32) - (from.year() * 12 + from.month0() as i32) + 1;
+    let (range, label) = match to {
+        "PREVIOUS_PERIOD" if whole_months => ((add_months(from, -months), from - Duration::days(1)), "Previous period"),
+        "PREVIOUS_PERIOD" => {
+            let days = (end - from).num_days() + 1;
+            ((from - Duration::days(days), from - Duration::days(1)), "Previous period")
+        }
+        "SAME_PERIOD_LAST_YEAR" if whole_months => {
+            ((add_months(from, -12), add_months(month_start(end.year(), end.month()), -11) - Duration::days(1)), "Same period last year")
+        }
+        "SAME_PERIOD_LAST_YEAR" => ((year_before(from), year_before(end)), "Same period last year"),
+        other => return Err(format!("'{other}' is not a comparison: {}", COMPARE_TO.join(" or "))),
+    };
+    Ok(Period { name: to.to_string(), range: Some(range), label: label.to_string() })
+}
+
+/// The same day a year earlier; 29 February is 28 February.
+fn year_before(d: NaiveDate) -> NaiveDate {
+    NaiveDate::from_ymd_opt(d.year() - 1, d.month(), d.day())
+        .or_else(|| NaiveDate::from_ymd_opt(d.year() - 1, d.month(), d.day() - 1))
+        .unwrap_or(d)
+}
+
+/// The position of the bucket starting on `start` among the buckets of a period beginning on
+/// `from` (0 for the bucket `from` is in); none before it or past the bucket cap. Rows of two
+/// periods are aligned by it (October 2026 against October 2025, week 1 against week 1).
+pub fn bucket_index(b: Bucket, fy_start: u32, from: NaiveDate, start: NaiveDate) -> Option<usize> {
+    let mut d = b.start(from, fy_start);
+    let mut i = 0;
+    while d < start && i < 2 * 400 {
+        d = b.next(d);
+        i += 1;
+    }
+    (d == start).then_some(i)
+}
+
 /// A date bucket of the spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bucket {

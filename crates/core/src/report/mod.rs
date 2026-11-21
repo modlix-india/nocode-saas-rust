@@ -6,11 +6,15 @@
 //!   `{"ok": false, "error": {"code", "message", "path"}}` (CONTRACT section 3).
 //! - `CoreServices.Report.Validate(...)`: Run with `dryRun`.
 //! - `CoreServices.Report.ViewTypes()`: the "Show me" shape rules ([`shape`]) for the UI's picker.
+//! - `CoreServices.Report.Pdf(document)` (P1b): the caller's dashboard or widget as a PDF through
+//!   the pdf-render sidecar ([`pdf`]), answered as a `data:application/pdf;base64,` URL.
 //!
-//! Run and Validate are reachable only inside a KIRun definition (an app's `reportRun` wrapper,
-//! which adds the row scope), like the storages they read: a direct execute call is refused.
+//! Run, Validate and Pdf are reachable only inside a KIRun definition (an app's `reportRun` /
+//! `reportPdf` wrapper, which adds the row scope and decides who may export), like the storages
+//! they read: a direct execute call is refused.
 
 pub mod exec;
+pub mod pdf;
 pub mod period;
 pub mod shape;
 pub mod spec;
@@ -162,6 +166,45 @@ impl CoreFunction for ViewTypes {
     }
 }
 
+/// `CoreServices.Report.Pdf(document)`: see [`pdf`].
+pub struct PdfFunction {
+    signature: FunctionSignature,
+    renderer: Arc<dyn pdf::HtmlToPdf>,
+}
+
+impl PdfFunction {
+    pub fn new(renderer: Arc<dyn pdf::HtmlToPdf>) -> Self {
+        let signature = FunctionSignature::new("Pdf")
+            .set_namespace(NAMESPACE)
+            .set_parameters(vec![p("document", Schema::of_object("document"))].into_iter().collect())
+            .set_events(result_events());
+        Self { signature, renderer }
+    }
+}
+
+#[async_trait]
+impl Function for PdfFunction {
+    fn get_signature(&self) -> &FunctionSignature {
+        &self.signature
+    }
+
+    async fn execute(&self, context: &mut FunctionExecutionParameters) -> kirun::Result<FunctionOutput> {
+        let args = validate_arguments(
+            &self.signature,
+            context.get_arguments().cloned().unwrap_or_default(),
+            context.get_schema_repository().as_ref(),
+            context.get_statement_execution().map(|s| s.as_ref()),
+        )
+        .await?;
+        context.set_arguments_in_place(args.clone());
+        if !context::in_kirun() {
+            return Err(context::raise(server_function_only(&self.signature.get_full_name())));
+        }
+        let out = pdf::make(args.get("document").unwrap_or(&Value::Null), chrono::Utc::now(), self.renderer.as_ref()).await;
+        Ok(output("result", out))
+    }
+}
+
 /// Calls a definition through the running definition's own repositories.
 struct RepoCaller {
     functions: Arc<dyn Repository<dyn Function>>,
@@ -221,6 +264,30 @@ impl ReportBackend for LiveBackend {
         page.content.iter().map(|r| gson_object(r).map_err(|e| e.text())).collect()
     }
 
+    async fn read_records(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<(Vec<Obj>, i64), String> {
+        let condition = query.get("condition").cloned().unwrap_or(Value::Null);
+        let mut q = Query::from_value(&storage_value(&serde_json::json!({ "condition": condition })))?;
+        let n = |k: &str, d: i64| query.get(k).and_then(Value::as_i64).unwrap_or(d).clamp(0, i32::MAX as i64) as i32;
+        q.page = n("page", 0);
+        q.size = n("size", spec::RECORDS_PAGE as i64).max(1);
+        q.count = Some(true);
+        if let Some(Value::Array(orders)) = query.get("sort") {
+            if !orders.is_empty() {
+                q.sort = Sort::from_value(&storage_value(&Value::Array(orders.clone())))?;
+            }
+        }
+        if let Some(Value::Array(fields)) = query.get("fields") {
+            let names: Vec<String> = fields.iter().filter_map(|f| f.as_str().map(str::to_string)).collect();
+            if !names.is_empty() {
+                q.fields = Some(names);
+                q.exclude_fields = Some(false);
+            }
+        }
+        let page = self.storage.read_page(app, client, storage, &q).await.map_err(|e| e.text())?;
+        let rows = page.content.iter().map(|r| gson_object(r).map_err(|e| e.text())).collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, page.total))
+    }
+
     async fn user_names(&self, ids: &[u64]) -> Result<HashMap<u64, String>, String> {
         if ids.is_empty() {
             return Ok(HashMap::new());
@@ -267,5 +334,6 @@ pub fn all(storage: &Arc<AppDataService>, security: &Arc<SecurityCalls>, cache: 
         Arc::new(ReportFunction::run(backend.clone())),
         Arc::new(ReportFunction::validate(backend)),
         Arc::new(crate::functions::Core(ViewTypes::default())),
+        Arc::new(PdfFunction::new(Arc::new(pdf::LiveRenderer))),
     ]
 }

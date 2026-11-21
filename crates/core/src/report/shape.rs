@@ -37,6 +37,8 @@ const ONE_DIM: [Values; 3] = [None, ONE_PLUS, None];
 const TWO_DIMS: [Values; 3] = [None, None, ONE];
 const LINES: [Values; 3] = [None, ONE_PLUS, ONE_PLUS];
 const TWO_ANY_GROUPS: [Values; 3] = [TWO, TWO, TWO];
+const ONE_OR_TWO_DIMS_ONE_VALUE: [Values; 3] = [None, ONE, ONE];
+const ONE_DIM_ONE_VALUE: [Values; 3] = [None, ONE, None];
 
 const NUMBER_NEEDS: &str = "no group by (one row) and at least 1 measure";
 const ONE_DIM_NEEDS: &str = "exactly 1 group by and at least 1 measure";
@@ -44,7 +46,8 @@ const TWO_DIMS_NEEDS: &str = "2 group by and 1 measure";
 const LINE_NEEDS: &str = "1 group by (a date is best) or 2 (the second is the series), and at least 1 measure";
 const TWO_MEASURES_NEEDS: &str = "exactly 2 measures";
 
-/// Every P1a view type, in the order the picker lists them.
+/// Every view type (P1a, then the P1b HEATMAP, TREEMAP and WATERFALL), in the order the picker
+/// lists them.
 pub const VIEW_RULES: &[ViewRule] = &[
     ViewRule { ty: "KPI", label: "KPI", family: "number", by_groups: NUMBER, needs: NUMBER_NEEDS },
     ViewRule { ty: "GAUGE", label: "Gauge", family: "number", by_groups: NUMBER, needs: NUMBER_NEEDS },
@@ -74,6 +77,10 @@ pub const VIEW_RULES: &[ViewRule] = &[
     ViewRule { ty: "PIE", label: "Pie", family: "pie", by_groups: ONE_DIM, needs: ONE_DIM_NEEDS },
     ViewRule { ty: "DOUGHNUT", label: "Doughnut", family: "pie", by_groups: ONE_DIM, needs: ONE_DIM_NEEDS },
     ViewRule { ty: "FUNNEL", label: "Funnel", family: "pie", by_groups: ONE_DIM, needs: ONE_DIM_NEEDS },
+    // P1b (CONTRACT 8.1).
+    ViewRule { ty: "HEATMAP", label: "Heatmap", family: "other", by_groups: TWO_DIMS, needs: TWO_DIMS_NEEDS },
+    ViewRule { ty: "TREEMAP", label: "Treemap", family: "other", by_groups: ONE_OR_TWO_DIMS_ONE_VALUE, needs: "1 or 2 group by and 1 measure" },
+    ViewRule { ty: "WATERFALL", label: "Waterfall", family: "bar", by_groups: ONE_DIM_ONE_VALUE, needs: "exactly 1 group by and 1 measure" },
 ];
 
 /// A result's shape.
@@ -214,15 +221,40 @@ mod tests {
                 }
             }
         }
-        assert!(check("HEATMAP", s(2, 1)).unwrap_err().contains("not a view type"));
+        assert!(check("DONUT", s(1, 1)).unwrap_err().contains("not a view type"));
         // More than 2 group by (a FUNCTION source's columns): only TABLE and LIST.
         assert!(check("BAR", s(4, 1)).is_err());
     }
 
     #[test]
+    fn the_p1b_rules() {
+        // HEATMAP: 2 group by, 1 measure.
+        assert!(check("HEATMAP", s(2, 1)).is_ok());
+        for bad in [s(2, 2), s(1, 1), s(0, 1), s(2, 0)] {
+            assert!(check("HEATMAP", bad).is_err(), "{bad:?}");
+        }
+        // TREEMAP: 1 or 2 group by, 1 measure.
+        assert!(check("TREEMAP", s(1, 1)).is_ok());
+        assert!(check("TREEMAP", s(2, 1)).is_ok());
+        for bad in [s(1, 2), s(2, 2), s(0, 1), s(3, 1)] {
+            assert!(check("TREEMAP", bad).is_err(), "{bad:?}");
+        }
+        // WATERFALL: 1 group by, 1 measure.
+        assert!(check("WATERFALL", s(1, 1)).is_ok());
+        for bad in [s(1, 2), s(2, 1), s(0, 1)] {
+            assert!(check("WATERFALL", bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(check("WATERFALL", s(1, 2)).unwrap_err(), "Waterfall needs exactly 1 group by and 1 measure; this report has 1 group by and 2 measures.");
+        let j = rules_json();
+        let tree = j["types"].as_array().unwrap().iter().find(|t| t["type"] == "TREEMAP").unwrap().clone();
+        assert_eq!(tree["groupBy"], json!({"0": null, "1": {"min": 1, "max": 1}, "2": {"min": 1, "max": 1}}));
+        assert!(!is_number("HEATMAP") && !is_table("HEATMAP"));
+    }
+
+    #[test]
     fn the_table_is_exposed_whole() {
         let j = rules_json();
-        assert_eq!(j["types"].as_array().unwrap().len(), 22);
+        assert_eq!(j["types"].as_array().unwrap().len(), 25);
         let pie = j["types"].as_array().unwrap().iter().find(|t| t["type"] == "PIE").unwrap();
         assert_eq!(pie["groupBy"]["0"], Value::Null);
         assert_eq!(pie["groupBy"]["1"], json!({"min": 1, "max": null}));

@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use super::period::{self, Bucket};
 use super::shape;
-use super::spec::{self, Caller, Catalog, DerivedOp, FieldKind, Lookup, Obj, Plan, ReportError, SourceKind, R};
+use super::spec::{self, Caller, Catalog, DerivedOp, FieldKind, Lookup, Obj, Plan, ReportError, SourceKind, CMP_SUFFIX, DELTA_SUFFIX, R};
 
 /// How long one source call may take before the run answers TIMEOUT.
 pub const SOURCE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -31,6 +31,9 @@ const ROWS_ALIAS: &str = "_rows";
 pub trait ReportBackend: Send + Sync {
     async fn aggregate(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<Vec<Obj>, String>;
     async fn read_page(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<Vec<Obj>, String>;
+    /// One page of rows and the total count (View records): `query` has `condition`, `page`,
+    /// `size`, `sort` and `fields` (the columns to read).
+    async fn read_records(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<(Vec<Obj>, i64), String>;
     /// Display names of users by id.
     async fn user_names(&self, ids: &[u64]) -> Result<HashMap<u64, String>, String>;
     async fn cache_get(&self, key: &str) -> Option<String>;
@@ -89,7 +92,7 @@ async fn run_inner(req: RunRequest<'_>, backend: &dyn ReportBackend, functions: 
         return Ok(Value::Object(out));
     }
 
-    let key = cache_key(&plan, &catalog, req.spec, req.scope, app.as_deref(), client.as_deref());
+    let key = cache_key(&plan, &catalog, req.spec, req.scope, app.as_deref(), client.as_deref(), req.user_id);
     let fresh = if req.force {
         // One forced run per spec per user per window; otherwise the cached copy.
         backend.claim(&format!("report:force:{}:{}", req.user_id, key_hash(&key)), FORCE_WINDOW_SECS).await != Some(false)
@@ -107,22 +110,30 @@ async fn run_inner(req: RunRequest<'_>, backend: &dyn ReportBackend, functions: 
 
     let mut out = match plan.source.kind {
         SourceKind::Function => run_function(&plan, &catalog, backend, functions, app.as_deref(), client.as_deref()).await?,
+        SourceKind::Storage if plan.records_page.is_some() => run_record_page(&plan, &catalog, backend, app.as_deref(), client.as_deref()).await?,
         SourceKind::Storage if plan.records => run_records(&plan, &catalog, backend, app.as_deref(), client.as_deref()).await?,
         SourceKind::Storage => run_aggregate(&plan, &catalog, backend, app.as_deref(), client.as_deref(), req.now).await?,
     };
     out.insert("refreshedAt".into(), Value::String(req.now.format("%Y-%m-%dT%H:%M:%SZ").to_string()));
     out.insert("cached".into(), Value::Bool(false));
     let out = Value::Object(out);
-    backend.cache_put(&key, &out.to_string(), CACHE_TTL_SECS).await;
+    // An export (up to 5000 records) is read once, never kept in the cache.
+    if !plan.records_page.is_some_and(|p| p.export) {
+        backend.cache_put(&key, &out.to_string(), CACHE_TTL_SECS).await;
+    }
     Ok(out)
 }
 
-/// The cache key: app + client + a hash of everything the answer depends on (the spec, the
-/// scope, the resolved period, the source's catalog entry and the catalog's zone settings).
-pub fn cache_key(plan: &Plan, catalog: &Catalog, spec: &Value, scope: &Value, app: Option<&str>, client: Option<&str>) -> String {
+/// The cache key: app + client + the caller + a hash of everything the answer depends on (the
+/// spec, the scope, the resolved periods, the source's catalog entry and the catalog's zone
+/// settings). The caller's user id (from the security context, never a param) is part of every
+/// key: a FUNCTION source has no scope (it reads the caller itself, "my tasks"), and two users
+/// with the same scope must still never share an answer.
+pub fn cache_key(plan: &Plan, catalog: &Catalog, spec: &Value, scope: &Value, app: Option<&str>, client: Option<&str>, user_id: u64) -> String {
     let basis = json!({
-        "spec": spec, "scope": scope, "source": plan.source.raw,
+        "user": user_id, "spec": spec, "scope": scope, "source": plan.source.raw,
         "period": plan.period.as_ref().map(|p| p.to_json()),
+        "compare": plan.compare.as_ref().map(|c| json!({"to": c.to, "period": c.period.to_json()})),
         "tz": catalog.time_zone, "fy": catalog.fy_start, "currency": catalog.currency,
     });
     format!("report:{}:{}:{}", app.unwrap_or("-"), client.unwrap_or("-"), key_hash(&basis.to_string()))
@@ -143,6 +154,17 @@ fn base_output(plan: &Plan, catalog: &Catalog, columns: Vec<Value>) -> Obj {
     out.insert("fits".into(), shape::fits(plan.shape));
     out.insert("locale".into(), catalog.locale.clone().map(Value::String).unwrap_or(Value::Null));
     out.insert("timeZone".into(), Value::String(catalog.time_zone.clone()));
+    if let Some(c) = &plan.compare {
+        let mut cp = c.period.to_json();
+        cp["compare"] = json!(c.to);
+        out.insert("comparePeriod".into(), cp);
+    }
+    if !plan.links.is_empty() {
+        out.insert("links".into(), Value::Object(plan.links.clone()));
+    }
+    if let Some(p) = &plan.paging {
+        out.insert("paging".into(), p.clone());
+    }
     out
 }
 
@@ -156,6 +178,9 @@ pub fn predicted_columns(plan: &Plan, currency: Option<&str>, split: bool) -> Ve
             let mut c = json!({"key": f.key, "label": f.label, "kind": f.kind.name()});
             if let Some(fmt) = &f.format {
                 c["format"] = json!(fmt);
+            }
+            if f.pii {
+                c["pii"] = json!(true);
             }
             cols.push(c);
             if f.lookup.is_some() {
@@ -208,6 +233,22 @@ pub fn predicted_columns(plan: &Plan, currency: Option<&str>, split: bool) -> Ve
             c["currency"] = currency.map(|s| json!(s)).unwrap_or(Value::Null);
         }
         cols.push(c);
+    }
+    // compare: per value column, its value in the compare period and the change in percent.
+    if let Some(cmp) = &plan.compare {
+        let values: Vec<Value> = cols.iter().filter(|c| c["kind"] == "MEASURE" && c.get("hidden").is_none()).cloned().collect();
+        let when = if cmp.to == "SAME_PERIOD_LAST_YEAR" { "last year" } else { "previous period" };
+        for v in values {
+            let key = v["key"].as_str().unwrap_or_default().to_string();
+            let label = v["label"].as_str().unwrap_or(&key).to_string();
+            let mut c = v.clone();
+            c["key"] = json!(format!("{key}{CMP_SUFFIX}"));
+            c["label"] = json!(format!("{label} ({when})"));
+            c["compareOf"] = json!(key);
+            cols.push(c);
+            cols.push(json!({"key": format!("{key}{DELTA_SUFFIX}"), "label": format!("{label} change"), "kind": "MEASURE",
+                             "format": "PERCENT", "deltaOf": key}));
+        }
     }
     cols
 }
@@ -315,6 +356,16 @@ fn db_sort(plan: &Plan) -> Vec<(String, bool)> {
     effective_sort(plan).into_iter().filter(|(a, _)| !derived.contains(&a.as_str())).take(1).collect()
 }
 
+/// The rows of one aggregate run, through the derived measures (before sort and caps).
+struct Aggregated {
+    rows: Vec<Obj>,
+    truncated: bool,
+    /// The one currency of the money measures (none when split or unknown).
+    currency: Option<String>,
+    /// The currency column the rows are split by.
+    split: Option<String>,
+}
+
 async fn run_aggregate(
     plan: &Plan,
     catalog: &Catalog,
@@ -323,14 +374,99 @@ async fn run_aggregate(
     client: Option<&str>,
     now: DateTime<Utc>,
 ) -> R<Obj> {
+    let main = aggregate_rows(plan, catalog, backend, app, client, now, None).await?;
+    let mut rows = main.rows;
+    if let Some(cplan) = plan.for_compare() {
+        // The same currency handling as the report's, so the rows join on the same keys.
+        let cmp = aggregate_rows(&cplan, catalog, backend, app, client, now, Some((main.currency.clone(), main.split.clone()))).await?;
+        join_compare(plan, catalog, &mut rows, &cmp.rows, main.split.is_some());
+    }
+    sort_rows(&mut rows, &effective_sort(plan));
+    let truncated = main.truncated | apply_caps(plan, &mut rows);
+
+    let mut out = base_output(plan, catalog, predicted_columns(plan, main.currency.as_deref(), main.split.is_some()));
+    out.insert("rows".into(), Value::Array(rows.into_iter().map(Value::Object).collect()));
+    out.insert("truncated".into(), Value::Bool(truncated));
+    out.insert("currencySplit".into(), Value::Bool(main.split.is_some()));
+    Ok(out)
+}
+
+/// The key a row joins its compare row on: each group by's value, a date bucket by its position
+/// in its own period (so October 2026 meets October 2025, and week 1 meets week 1), and the
+/// currency when split.
+fn compare_key(plan: &Plan, catalog: &Catalog, r: &Obj, split: bool) -> String {
+    let from = plan.period.as_ref().and_then(|p| p.range).map(|(f, _)| f);
+    let mut parts: Vec<String> = plan
+        .group_by
+        .iter()
+        .map(|g| match (g.bucket, from) {
+            (Some(b), Some(from)) => {
+                let fy_start = if g.fy { catalog.fy_start } else { 1 };
+                r.get(&g.alias)
+                    .and_then(Value::as_str)
+                    .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                    .and_then(|d| period::bucket_index(b, fy_start, from, d))
+                    .map(|i| format!("#{i}"))
+                    .unwrap_or_else(|| "#-".into())
+            }
+            _ => r.get(&g.alias).map(|v| v.to_string()).unwrap_or_default(),
+        })
+        .collect();
+    if split {
+        parts.push(r.get("currency").map(|v| v.to_string()).unwrap_or_default());
+    }
+    parts.join("\u{1}")
+}
+
+/// Adds `<m>_cmp` and `<m>_delta_pct` for every measure and derived measure to each row of the
+/// report from the matching compare row (none: `_cmp` null, and the change null).
+pub fn join_compare(plan: &Plan, catalog: &Catalog, rows: &mut [Obj], cmp_rows: &[Obj], split: bool) {
+    let Some(cplan) = plan.for_compare() else { return };
+    let by_key: HashMap<String, &Obj> = cmp_rows.iter().map(|r| (compare_key(&cplan, catalog, r, split), r)).collect();
+    let values = plan.value_aliases();
+    for r in rows.iter_mut() {
+        let hit = by_key.get(&compare_key(plan, catalog, r, split));
+        for v in &values {
+            r.insert(format!("{v}{CMP_SUFFIX}"), hit.and_then(|h| h.get(v)).cloned().unwrap_or(Value::Null));
+        }
+        apply_deltas(plan, r);
+    }
+}
+
+/// `<m>_delta_pct` = 100 * (m - cmp) / |cmp|; null when cmp is 0 or missing, or m is missing.
+fn apply_deltas(plan: &Plan, r: &mut Obj) {
+    for v in plan.value_aliases() {
+        let (cur, cmp) = (num(r.get(&v)), num(r.get(&format!("{v}{CMP_SUFFIX}"))));
+        let d = match (cur, cmp) {
+            (Some(c), Some(p)) if p != 0.0 => number(100.0 * (c - p) / p.abs()),
+            _ => Value::Null,
+        };
+        r.insert(format!("{v}{DELTA_SUFFIX}"), d);
+    }
+}
+
+/// One aggregate run's rows. `decided`: the currency and split column to use (the compare run
+/// takes the report's), else they are probed.
+async fn aggregate_rows(
+    plan: &Plan,
+    catalog: &Catalog,
+    backend: &dyn ReportBackend,
+    app: Option<&str>,
+    client: Option<&str>,
+    now: DateTime<Utc>,
+    decided: Option<(Option<String>, Option<String>)>,
+) -> R<Aggregated> {
     let storage = plan.source.storage.clone().unwrap_or_default();
 
     // The currency of the money measures: pinned by a filter, read from the data, or split.
     let money = plan.measures.iter().find(|m| m.format == "MONEY").and_then(|m| m.field.clone());
     let mut currency: Option<String> = money.as_ref().and_then(|f| f.currency.clone()).or_else(|| catalog.currency.clone());
     let mut split: Option<String> = None;
-    // A fixed currency on the field is one currency: no probe, no split.
-    if let Some(cf) = money.as_ref().filter(|f| f.currency.is_none()).and_then(|f| f.currency_field.clone()) {
+    if let Some((c, s)) = decided {
+        currency = c;
+        split = s;
+    } else if let Some(cf) = money.as_ref().filter(|f| f.currency.is_none()).and_then(|f| f.currency_field.clone()) {
+        // A fixed currency on the field is one currency: no probe, no split.
         if let Some(pinned) = plan.pinned_currency.get(&cf) {
             currency = Some(pinned.clone());
         } else {
@@ -351,7 +487,7 @@ async fn run_aggregate(
 
     let query = aggregate_query(plan, catalog, now, split.as_deref());
     let mut rows = timed(backend.aggregate(app, client, &storage, &query)).await?;
-    let mut truncated = rows.len() >= spec::READ_GROUPS;
+    let truncated = rows.len() >= spec::READ_GROUPS;
     // Each `measures[].segment`: one more aggregate over the same groups, merged by group key.
     let mut segments: Vec<&str> = Vec::new();
     for m in &plan.measures {
@@ -406,14 +542,7 @@ async fn run_aggregate(
     }
     resolve_labels(plan, backend, app, client, &mut rows).await?;
     apply_derived(plan, &mut rows);
-    sort_rows(&mut rows, &effective_sort(plan));
-    truncated |= apply_caps(plan, &mut rows);
-
-    let mut out = base_output(plan, catalog, predicted_columns(plan, currency.as_deref(), split.is_some()));
-    out.insert("rows".into(), Value::Array(rows.into_iter().map(Value::Object).collect()));
-    out.insert("truncated".into(), Value::Bool(truncated));
-    out.insert("currencySplit".into(), Value::Bool(split.is_some()));
-    Ok(out)
+    Ok(Aggregated { rows, truncated, currency, split })
 }
 
 fn millis(encoding: &Option<String>) -> Option<bool> {
@@ -517,9 +646,14 @@ fn number(x: f64) -> Value {
 /// ratio a/b (null when b is 0 or missing), difference a-b (a missing side counts 0, both
 /// missing is null), percent 100*a/b.
 pub fn apply_derived(plan: &Plan, rows: &mut [Obj]) {
+    apply_derived_with(plan, rows, "");
+}
+
+/// [`apply_derived`] over the columns named with `suffix` (`_cmp`: the compare values).
+fn apply_derived_with(plan: &Plan, rows: &mut [Obj], suffix: &str) {
     for r in rows.iter_mut() {
         for d in &plan.derived {
-            let (a, b) = (num(r.get(&d.a)), num(r.get(&d.b)));
+            let (a, b) = (num(r.get(&format!("{}{suffix}", d.a))), num(r.get(&format!("{}{suffix}", d.b))));
             let v = match d.op {
                 DerivedOp::Ratio => match (a, b) {
                     (Some(a), Some(b)) if b != 0.0 => number(a / b),
@@ -534,7 +668,7 @@ pub fn apply_derived(plan: &Plan, rows: &mut [Obj]) {
                     (a, b) => number(a.unwrap_or(0.0) - b.unwrap_or(0.0)),
                 },
             };
-            r.insert(d.alias.clone(), v);
+            r.insert(format!("{}{suffix}", d.alias), v);
         }
     }
 }
@@ -643,14 +777,19 @@ pub fn apply_caps(plan: &Plan, rows: &mut Vec<Obj>) -> bool {
                 }
                 for m in &plan.measures {
                     o.insert(m.alias.clone(), Value::Null);
+                    if plan.compare.is_some() {
+                        o.insert(format!("{}{CMP_SUFFIX}", m.alias), Value::Null);
+                    }
                 }
                 others.push((series, o));
                 others.len() - 1
             }
         };
         let o = &mut others[slot].1;
-        for m in &plan.measures {
-            let (cur, add) = (num(o.get(&m.alias)), num(r.get(&m.alias)));
+        let suffixes: &[&str] = if plan.compare.is_some() { &["", CMP_SUFFIX] } else { &[""] };
+        for (m, suffix) in plan.measures.iter().flat_map(|m| suffixes.iter().map(move |s| (m, *s))) {
+            let key = format!("{}{suffix}", m.alias);
+            let (cur, add) = (num(o.get(&key)), num(r.get(&key)));
             let v = match m.func.as_str() {
                 "COUNT" | "SUM" => match (cur, add) {
                     (None, None) => Value::Null,
@@ -667,11 +806,17 @@ pub fn apply_caps(plan: &Plan, rows: &mut Vec<Obj>) -> bool {
                 // An average or a distinct count of a group of groups cannot be added up.
                 _ => Value::Null,
             };
-            o.insert(m.alias.clone(), v);
+            o.insert(key, v);
         }
     }
     let mut other_rows: Vec<Obj> = others.into_iter().map(|(_, o)| o).collect();
     apply_derived(plan, &mut other_rows);
+    if plan.compare.is_some() {
+        apply_derived_with(plan, &mut other_rows, CMP_SUFFIX);
+        for r in other_rows.iter_mut() {
+            apply_deltas(plan, r);
+        }
+    }
     rows.extend(other_rows);
     dropped
 }
@@ -706,6 +851,57 @@ async fn run_records(plan: &Plan, catalog: &Catalog, backend: &dyn ReportBackend
     let mut out = base_output(plan, catalog, predicted_columns(plan, None, false));
     out.insert("rows".into(), Value::Array(rows.into_iter().map(Value::Object).collect()));
     out.insert("truncated".into(), Value::Bool(truncated));
+    out.insert("currencySplit".into(), Value::Bool(false));
+    Ok(out)
+}
+
+/// View records (P1b): one page of the source's rows with the total, only the records fields
+/// (plus the hidden `_id` for the row link), labels resolved as for aggregates.
+async fn run_record_page(plan: &Plan, catalog: &Catalog, backend: &dyn ReportBackend, app: Option<&str>, client: Option<&str>) -> R<Obj> {
+    let storage = plan.source.storage.clone().unwrap_or_default();
+    let Some(page) = plan.records_page else { return Err(ReportError::new("SOURCE_FAILED", "records", "No records page was asked for.")) };
+    let sort: Vec<Value> = plan
+        .sort
+        .iter()
+        .filter_map(|(k, desc)| {
+            let col = plan.source.fields.get(k)?.column.clone();
+            Some(json!({"property": col, "direction": if *desc { "DESC" } else { "ASC" }}))
+        })
+        .collect();
+    // Only the columns shown are read (a JSON path reads its whole top column).
+    let mut fields: Vec<String> = Vec::new();
+    for f in &plan.list_fields {
+        let top = f.column.split('.').next().unwrap_or(&f.column).to_string();
+        if !fields.contains(&top) {
+            fields.push(top);
+        }
+    }
+    let q = json!({"condition": plan.condition, "page": page.page, "size": page.size, "sort": sort, "fields": fields});
+    let (found, total) = timed(backend.read_records(app, client, &storage, &q)).await?;
+    let mut rows: Vec<Obj> = found
+        .into_iter()
+        .take(page.size)
+        .map(|r| {
+            let row = Value::Object(r);
+            let mut o = Map::new();
+            o.insert("_id".into(), row.get("_id").cloned().unwrap_or(Value::Null));
+            for f in &plan.list_fields {
+                o.insert(f.key.clone(), lookup_path(&row, &f.column).cloned().unwrap_or(Value::Null));
+            }
+            o
+        })
+        .collect();
+    resolve_labels(plan, backend, app, client, &mut rows).await?;
+    let shown = rows.len();
+    let mut out = base_output(plan, catalog, predicted_columns(plan, None, false));
+    out.insert("rows".into(), Value::Array(rows.into_iter().map(Value::Object).collect()));
+    out.insert("total".into(), json!(total));
+    out.insert("page".into(), json!(page.page));
+    out.insert("size".into(), json!(page.size));
+    if page.export {
+        out.insert("export".into(), Value::Bool(true));
+    }
+    out.insert("truncated".into(), Value::Bool(((page.page * page.size + shown) as i64) < total));
     out.insert("currencySplit".into(), Value::Bool(false));
     Ok(out)
 }

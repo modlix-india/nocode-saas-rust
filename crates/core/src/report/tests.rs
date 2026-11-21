@@ -21,6 +21,8 @@ struct Fake {
     reads: Mutex<Vec<(String, Value)>>,
     answers: Mutex<VecDeque<Vec<Obj>>>,
     read_answers: Mutex<HashMap<String, Vec<Obj>>>,
+    records: Mutex<Vec<(String, Value)>>,
+    total: i64,
     users: HashMap<u64, String>,
     cache: Mutex<HashMap<String, String>>,
     claims: Mutex<HashSet<String>>,
@@ -49,6 +51,12 @@ impl ReportBackend for Fake {
     async fn read_page(&self, _: Option<&str>, _: Option<&str>, storage: &str, query: &Value) -> Result<Vec<Obj>, String> {
         self.reads.lock().push((storage.to_string(), query.clone()));
         Ok(self.read_answers.lock().get(storage).cloned().unwrap_or_default())
+    }
+    async fn read_records(&self, _: Option<&str>, _: Option<&str>, storage: &str, query: &Value) -> Result<(Vec<Obj>, i64), String> {
+        self.records.lock().push((storage.to_string(), query.clone()));
+        let found = self.read_answers.lock().get(storage).cloned().unwrap_or_default();
+        let total = if self.total > 0 { self.total } else { found.len() as i64 };
+        Ok((found, total))
     }
     async fn user_names(&self, ids: &[u64]) -> Result<HashMap<u64, String>, String> {
         Ok(ids.iter().filter_map(|i| self.users.get(i).map(|n| (*i, n.clone()))).collect())
@@ -80,6 +88,8 @@ impl FunctionCaller for Functions {
 
 fn catalog() -> Value {
     json!({"v": 1, "app": "cxzump", "timeZone": "Asia/Kolkata", "locale": "en-IN", "fyStartMonth": 4,
+        "hierarchies": {"stage": {"label": "Stage", "levels": ["stageGroup", "status"]}},
+        "defaults": [{"id": "totalBookings", "name": "Total bookings", "spec": {}, "countLink": {"path": "/cases?dash=BOOKING"}}],
         "sources": {
             "cases": {"kind": "STORAGE", "storage": "cxCase", "label": "Cases", "scope": "REQUIRED",
                 "fields": {
@@ -87,12 +97,18 @@ fn catalog() -> Value {
                     "assignedUserId": {"kind": "DIMENSION", "label": "RM", "lookup": {"type": "USER"}},
                     "status": {"kind": "DIMENSION", "label": "Status", "lookup": {"values": {"OPEN": "Open", "CLOSED": "Closed"}}},
                     "stageGroup": {"kind": "DIMENSION", "label": "Stage"},
+                    "caseNo": {"kind": "DIMENSION", "label": "Case no"},
                     "bookedAt": {"kind": "DATE", "label": "Booked on", "stringDate": true},
                     "agreementValue": {"kind": "MEASURE", "label": "Agreement value", "format": "MONEY", "currencyField": "currency",
                                        "fns": ["SUM", "AVG", "MIN", "MAX"], "authority": "Authorities.CXZUMP.ROLE_Report_READ"},
                     "paidAmount": {"kind": "MEASURE", "label": "Paid", "format": "MONEY", "currencyField": "payCurrency"},
                     "customerEmail": {"kind": "DIMENSION", "label": "Email", "pii": true}},
-                "segments": {"bookings": {"label": "Bookings", "condition": {"field": "milestone", "operator": "EQUALS", "value": "BOOKED"}},
+                "link": {"path": "/caseView/{_id}"}, "moreLink": {"path": "/cases", "label": "View all"},
+                "records": {"fields": ["caseNo", "status", "productId", "customerEmail", "agreementValue", "assignedUserId", "gone"],
+                            "sort": [{"by": "bookedAt", "dir": "DESC"}], "link": {"path": "/caseView/{_id}"},
+                            "authorityAny": ["Authorities.CXZUMP.ROLE_Case_READ", "Authorities.CXZUMP.ROLE_Case_READ_ASSIGNED"]},
+                "segments": {"bookings": {"label": "Bookings", "condition": {"field": "milestone", "operator": "EQUALS", "value": "BOOKED"},
+                                          "countLink": {"path": "/cases?dash=BOOKING&product={filter.productId}&from={period.from}&to={period.to}"}},
                              "eois": {"label": "EOIs", "dateField": "eoiAt", "condition": {"field": "milestones", "operator": "MATCH", "matchOperator": "EQUALS", "value": "EOI_PAID"}},
                              "converted": {"label": "Converted", "condition": {"field": "milestones", "operator": "MATCH", "matchOperator": "EQUALS", "value": "EOI_CONVERTED"}}}},
             "products": {"kind": "STORAGE", "storage": "cxProduct", "label": "Projects", "lookupOnly": true, "scope": "REQUIRED", "fields": {"name": {"label": "Name"}}},
@@ -100,6 +116,7 @@ fn catalog() -> Value {
                 "fields": {"agreementValue": {"kind": "MEASURE", "label": "Agreement value", "format": "MONEY", "currency": "INR"},
                            "assignedUserId": {"kind": "DIMENSION", "label": "RM"}}},
             "tasks": {"kind": "FUNCTION", "function": "CxZump.moneySummary", "resultPath": "page.content", "totalPath": "page.total", "label": "My tasks",
+                "link": {"path": "/caseView/{caseId}"}, "moreLink": {"path": "/approvals", "label": "View all"}, "paging": {"param": "page", "size": 20},
                 "params": {"mine": true, "page": 0}, "allowedParams": ["page"],
                 "columns": {"title": {"kind": "DIMENSION", "label": "Task"},
                             "caseId": {"kind": "DIMENSION", "label": "Case", "labelMapPath": "caseNumbers"},
@@ -633,6 +650,545 @@ async fn function_sources_take_only_allowed_params_and_keep_hidden_columns() {
     assert_eq!(code_of(json!({"source": "tasks", "params": {"mine": false}}), &[]).await, ("UNKNOWN_FIELD".into(), "params.mine".into()));
 }
 
+// --- P1b: catalog keys, View records, compare, PDF ---------------------------------------------
+
+const CASE_READ: &str = "Authorities.CXZUMP.ROLE_Case_READ";
+
+fn with_source_key(path: &str, v: Value) -> Value {
+    let mut c = catalog();
+    let (parent, key) = path.rsplit_once('/').unwrap();
+    let slot = c.pointer_mut(parent).unwrap();
+    match slot {
+        Value::Array(a) => a[key.parse::<usize>().unwrap()] = v,
+        other => {
+            other[key] = v;
+        }
+    }
+    c
+}
+
+async fn go_with(cat: Value, spec: Value, auths: &[&str], backend: &Fake) -> Value {
+    let auths: Vec<String> = auths.iter().map(|s| s.to_string()).collect();
+    exec::run(
+        RunRequest { spec: &spec, catalog: &cat, scope: &scope(), force: false, dry_run: false, app_code: None, client_code: None,
+                     user_id: 7, authorities: &auths, now: now() },
+        backend,
+        &Functions(json!({"summary": {"collected": 1, "pending": 2}})),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn catalog_links_paging_and_hierarchies_are_accepted_and_passed_through() {
+    let fake = Fake::answering(vec![json!([{"bookings": 4}])]);
+    let spec = json!({"source": "cases", "segment": "bookings", "measures": [{"fn": "COUNT", "as": "bookings"}], "view": {"type": "KPI"}});
+    let out = go(spec, &[], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["links"]["row"], json!({"path": "/caseView/{_id}"}));
+    assert_eq!(out["links"]["more"], json!({"path": "/cases", "label": "View all"}));
+    assert_eq!(out["links"]["count"]["path"], json!("/cases?dash=BOOKING&product={filter.productId}&from={period.from}&to={period.to}"));
+    // A function source passes its paging and links on.
+    let out = go(json!({"source": "tasks", "view": {"type": "TABLE"}}), &[], &Fake::default(), true, false, Value::Null).await;
+    assert_eq!(out["paging"], json!({"param": "page", "size": 20}), "{out}");
+    assert_eq!(out["links"]["row"], json!({"path": "/caseView/{caseId}"}));
+
+    // Shapes are checked: a bad one is the catalog's error, named by path.
+    let kpi = json!({"source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}});
+    for (path, bad, at) in [
+        ("/sources/cases/link", json!({"path": "https://evil.example/x"}), "catalog.sources.cases.link.path"),
+        ("/sources/cases/link", json!({"path": "//evil.example/x"}), "catalog.sources.cases.link.path"),
+        ("/sources/cases/link", json!({"path": "/x", "target": "_blank"}), "catalog.sources.cases.link.target"),
+        ("/sources/cases/moreLink", json!("/cases"), "catalog.sources.cases.moreLink"),
+        ("/sources/cases/paging", json!({"param": "page", "size": 0}), "catalog.sources.cases.paging.size"),
+        ("/sources/cases/records/fields", json!([]), "catalog.sources.cases.records.fields"),
+        ("/sources/cases/records/sort", json!([{"by": "nope"}]), "catalog.sources.cases.records.sort[0].by"),
+        ("/sources/cases/records/authorityAny", json!("x"), "catalog.sources.cases.records.authorityAny"),
+        ("/sources/cases/segments/bookings/countLink", json!({"label": "x"}), "catalog.sources.cases.segments.bookings.countLink.path"),
+        ("/hierarchies/stage/levels", json!(["stageGroup"]), "catalog.hierarchies.stage.levels"),
+        ("/hierarchies/stage/levels", json!(["status", "status"]), "catalog.hierarchies.stage.levels"),
+        ("/hierarchies/stage", json!({"levels": ["a", "b"], "lvl": 1}), "catalog.hierarchies.stage.lvl"),
+        ("/defaults/0/countLink", json!({"path": "cases"}), "catalog.defaults[0].countLink.path"),
+    ] {
+        let out = go_with(with_source_key(path, bad.clone()), kpi.clone(), &[], &Fake::default()).await;
+        assert_eq!((out["error"]["code"].as_str(), out["error"]["path"].as_str()), (Some("SOURCE_FAILED"), Some(at)), "{path} {bad}: {out}");
+    }
+}
+
+fn records_spec(page: Value) -> Value {
+    json!({"v": 1, "source": "cases", "segment": "bookings",
+           "filters": [{"field": "productId", "op": "IN", "values": ["P1"]}, {"field": "bookedAt", "period": "THIS_QUARTER"}],
+           "records": page})
+}
+
+#[tokio::test]
+async fn records_read_one_page_of_the_listed_fields_in_scope() {
+    let mut fake = Fake { total: 241, ..Default::default() };
+    fake.users = HashMap::from([(11, "Asha Rao".to_string())]);
+    fake.read_answers.lock().insert(
+        "cxCase".into(),
+        rows(json!([{"_id": "C1", "caseNo": "CX-1", "status": "OPEN", "productId": "P1", "customerEmail": "a@b.c", "agreementValue": 900,
+                     "assignedUserId": 11, "stageGroup": "Booking", "secret": "x"}])),
+    );
+    fake.read_answers.lock().insert("cxProduct".into(), rows(json!([{"_id": "P1", "name": "Tower A"}])));
+    let out = go(records_spec(json!({"page": 2, "size": 20})), &[CASE_READ], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let (storage, q) = fake.records.lock()[0].clone();
+    assert_eq!(storage, "cxCase");
+    // segment AND filters AND scope, one page, the default sort, only the listed columns.
+    let conds = q["condition"]["conditions"].as_array().unwrap();
+    assert_eq!(conds.len(), 4);
+    assert_eq!(conds[0]["value"], json!("BOOKED"));
+    assert_eq!(conds[3], scope());
+    assert_eq!((q["page"].clone(), q["size"].clone()), (json!(2), json!(20)));
+    assert_eq!(q["sort"], json!([{"property": "bookedAt", "direction": "DESC"}]));
+    assert_eq!(q["fields"], json!(["caseNo", "status", "productId", "customerEmail", "assignedUserId"]), "agreementValue needs Report_READ; 'gone' is not a field");
+    let row = out["rows"][0].as_object().unwrap();
+    let mut keys: Vec<&str> = row.keys().map(String::as_str).collect();
+    keys.sort();
+    assert_eq!(keys, ["_id", "assignedUserId", "assignedUserId_label", "caseNo", "customerEmail", "productId", "productId_label", "status", "status_label"]);
+    assert_eq!(row["productId_label"], json!("Tower A"));
+    assert_eq!(row["assignedUserId_label"], json!("Asha Rao"));
+    assert_eq!(row["customerEmail"], json!("a@b.c"), "personal data only because records lists it");
+    assert_eq!((out["total"].clone(), out["page"].clone(), out["size"].clone()), (json!(241), json!(2), json!(20)));
+    assert_eq!(out["truncated"], json!(true), "more pages after this one");
+    assert_eq!(out["links"]["row"], json!({"path": "/caseView/{_id}"}));
+    assert_eq!(out["period"]["from"], json!("2026-10-01"));
+    let email = out["columns"].as_array().unwrap().iter().find(|c| c["key"] == "customerEmail").unwrap().clone();
+    assert_eq!(email, json!({"key": "customerEmail", "label": "Email", "kind": "DIMENSION", "pii": true}));
+    assert_eq!(out["columns"][0], json!({"key": "_id", "hidden": true}));
+
+    // With Report_READ the money field comes too; a spec sort replaces the catalog's.
+    let fake2 = Fake::default();
+    let mut s = records_spec(json!({}));
+    s["sort"] = json!([{"by": "caseNo", "dir": "ASC"}]);
+    let out = go(s, &[CASE_READ, REPORT], &fake2, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let q = fake2.records.lock()[0].1.clone();
+    assert!(q["fields"].as_array().unwrap().contains(&json!("agreementValue")));
+    assert_eq!(q["size"], json!(100), "100 a page by default");
+    assert_eq!(q["sort"], json!([{"property": "caseNo", "direction": "ASC"}]));
+}
+
+#[tokio::test]
+async fn records_caps_scope_and_refusals() {
+    let r = &[CASE_READ];
+    let refused = |spec: Value, auths: &'static [&'static str]| async move {
+        let out = go(spec, auths, &Fake::default(), true, false, scope()).await;
+        assert_eq!(out["ok"], json!(false), "{out}");
+        (out["error"]["code"].as_str().unwrap().to_string(), out["error"]["path"].as_str().unwrap().to_string())
+    };
+    // The same scope rule as aggregates.
+    let out = go(records_spec(json!({})), r, &Fake::default(), true, false, Value::Null).await;
+    assert_eq!(out["error"]["code"], json!("SCOPE_REQUIRED"));
+    // 100 a page on screen, 5000 for an export.
+    assert_eq!(refused(records_spec(json!({"size": 101})), &[CASE_READ]).await, ("TOO_MANY".into(), "records.size".into()));
+    assert_eq!(refused(records_spec(json!({"size": 5001, "export": true})), &[CASE_READ]).await, ("TOO_MANY".into(), "records.size".into()));
+    assert_eq!(refused(records_spec(json!({"size": 0})), &[CASE_READ]).await.0, "BAD_KIND");
+    assert_eq!(refused(records_spec(json!({"page": -1})), &[CASE_READ]).await.0, "BAD_KIND");
+    assert_eq!(refused(records_spec(json!({"pages": 1})), &[CASE_READ]).await, ("BAD_KIND".into(), "records.pages".into()));
+    assert_eq!(refused(records_spec(json!({"export": "yes"})), &[CASE_READ]).await.0, "BAD_KIND");
+    // Records are their own run: no measures, group by or compare beside them.
+    let mut s = records_spec(json!({}));
+    s["measures"] = json!([{"fn": "COUNT"}]);
+    assert_eq!(refused(s, &[CASE_READ]).await, ("BAD_KIND".into(), "measures".into()));
+    // Who may see records at all, and which sources have them.
+    assert_eq!(refused(records_spec(json!({})), &[REPORT]).await, ("RECORDS_NOT_ALLOWED".into(), "records".into()));
+    let mut s = records_spec(json!({}));
+    s["source"] = json!("fixedCases");
+    s["segment"] = Value::Null;
+    s["filters"] = json!([]);
+    assert_eq!(refused(s, &[CASE_READ]).await.0, "RECORDS_NOT_ALLOWED");
+    assert_eq!(refused(json!({"source": "moneySummary", "records": {}}), &[CASE_READ]).await.0, "RECORDS_NOT_ALLOWED");
+    // A spec sort on a field the caller may not use.
+    let mut s = records_spec(json!({}));
+    s["sort"] = json!([{"by": "agreementValue"}]);
+    assert_eq!(refused(s, &[CASE_READ]).await, ("FORBIDDEN_FIELD".into(), "sort[0].by".into()));
+
+    // An export of 5000 is read in one page and never cached.
+    let fake = Fake::default();
+    let out = go(records_spec(json!({"size": 5000, "export": true})), r, &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["export"], json!(true));
+    assert_eq!(fake.records.lock()[0].1["size"], json!(5000));
+    assert!(fake.cache.lock().is_empty());
+    // A screen page is cached like any run.
+    let fake = Fake::default();
+    go(records_spec(json!({"size": 50})), r, &fake, false, false, scope()).await;
+    assert_eq!(fake.cache.lock().len(), 1);
+}
+
+#[test]
+fn compare_periods() {
+    let d = NaiveDate::from_ymd_opt(2026, 11, 17).unwrap();
+    let cmp = |name: &str, to: &str, custom: Option<(&str, &str)>| {
+        let p = period::resolve(name, d, 4, custom).unwrap();
+        period::compare_period(&p, to).map(|c| (period::iso_date(c.range.unwrap().0), period::iso_date(c.range.unwrap().1), c.label))
+    };
+    let pp = "PREVIOUS_PERIOD";
+    let ly = "SAME_PERIOD_LAST_YEAR";
+    assert_eq!(cmp("THIS_QUARTER", pp, None).unwrap(), ("2026-07-01".into(), "2026-09-30".into(), "Previous period".into()));
+    assert_eq!(cmp("THIS_QUARTER", ly, None).unwrap(), ("2025-10-01".into(), "2025-12-31".into(), "Same period last year".into()));
+    // Whole months step back by months: November against all of October.
+    assert_eq!(cmp("THIS_MONTH", pp, None).unwrap().0, "2026-10-01");
+    assert_eq!(cmp("THIS_MONTH", pp, None).unwrap().1, "2026-10-31");
+    assert_eq!(cmp("THIS_FY", pp, None).unwrap().0, "2025-04-01");
+    assert_eq!(cmp("LAST_12_MONTHS", pp, None).unwrap().0, "2024-12-01");
+    // Other ranges step back by their days.
+    assert_eq!(cmp("LAST_7_DAYS", pp, None).unwrap(), ("2026-11-04".into(), "2026-11-10".into(), "Previous period".into()));
+    assert_eq!(cmp("THIS_WEEK", pp, None).unwrap().0, "2026-11-09", "the week before, Monday to Sunday");
+    assert_eq!(cmp("TODAY", pp, None).unwrap().0, "2026-11-16");
+    assert_eq!(cmp("CUSTOM", pp, Some(("2026-11-05", "2026-11-14"))).unwrap(), ("2026-10-26".into(), "2026-11-04".into(), "Previous period".into()));
+    // Leap days: whole months keep February whole; a single 29 February is the 28th.
+    assert_eq!(cmp("CUSTOM", ly, Some(("2028-02-01", "2028-02-29"))).unwrap().1, "2027-02-28");
+    assert_eq!(cmp("CUSTOM", ly, Some(("2029-02-01", "2029-02-28"))).unwrap().1, "2028-02-29");
+    assert_eq!(cmp("CUSTOM", ly, Some(("2028-02-29", "2028-02-29"))).unwrap().0, "2027-02-28");
+    assert!(cmp("ALL_TIME", pp, None).is_err());
+    assert!(cmp("THIS_MONTH", "LAST_WEEK", None).is_err());
+}
+
+fn compare_spec(to: &str) -> Value {
+    let mut s = sales();
+    s["compare"] = json!({"to": to});
+    s["limit"] = Value::Null;
+    s
+}
+
+#[tokio::test]
+async fn compare_joins_the_previous_period_on_group_keys() {
+    let fake = Fake::answering(vec![
+        json!([{"currency": "INR", "n": 5}]),
+        json!([{"rm": 11, "bookings": 2, "value": 900.0}, {"rm": 12, "bookings": 3, "value": 600.0}, {"rm": 13, "bookings": 1, "value": 50.0}]),
+        // The compare run: no currency probe (the report's currency is used).
+        json!([{"rm": 11, "bookings": 1, "value": 600}, {"rm": 12, "bookings": 0, "value": 0}, {"rm": 99, "bookings": 7, "value": 1}]),
+    ]);
+    let out = go(compare_spec("PREVIOUS_PERIOD"), &[REPORT], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let aggs = fake.aggregates.lock().clone();
+    assert_eq!(aggs.len(), 3, "probe, report, compare");
+    // The compare run's period condition is the previous quarter; everything else the same.
+    let period_of = |q: &Value| q["condition"]["conditions"][2]["conditions"][0]["conditions"][1]["value"].clone();
+    assert_eq!(period_of(&aggs[1]), json!("2026-10-01"));
+    assert_eq!(period_of(&aggs[2]), json!("2026-07-01"));
+    assert_eq!(aggs[1]["condition"]["conditions"][0], aggs[2]["condition"]["conditions"][0]);
+    assert_eq!(aggs[1]["condition"]["conditions"][3], aggs[2]["condition"]["conditions"][3], "the same scope");
+    assert_eq!(out["comparePeriod"], json!({"from": "2026-07-01", "to": "2026-09-30", "label": "Previous period", "compare": "PREVIOUS_PERIOD"}));
+    let r = out["rows"].as_array().unwrap();
+    let by = |rm: i64| r.iter().find(|x| x["rm"] == json!(rm)).unwrap().clone();
+    let a = by(11);
+    assert_eq!((a["value_cmp"].clone(), a["value_delta_pct"].clone()), (json!(600), json!(50)));
+    assert_eq!((a["bookings_cmp"].clone(), a["bookings_delta_pct"].clone()), (json!(1), json!(100)));
+    // Derived measures for both periods: 450 a booking now, 600 then.
+    assert_eq!((a["avgTicket"].clone(), a["avgTicket_cmp"].clone(), a["avgTicket_delta_pct"].clone()), (json!(450), json!(600), json!(-25)));
+    let b = by(12);
+    assert_eq!((b["value_cmp"].clone(), b["value_delta_pct"].clone()), (json!(0), Value::Null), "a change from 0 is null");
+    let c = by(13);
+    assert_eq!((c["value_cmp"].clone(), c["value_delta_pct"].clone()), (Value::Null, Value::Null), "no compare row");
+    assert_eq!(r.len(), 3, "a group only in the compare period is not added");
+    let keys: Vec<&str> = out["columns"].as_array().unwrap().iter().map(|c| c["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["rm", "rm_label", "bookings", "value", "avgTicket", "bookings_cmp", "bookings_delta_pct", "value_cmp", "value_delta_pct", "avgTicket_cmp", "avgTicket_delta_pct"]);
+    let vc = out["columns"].as_array().unwrap().iter().find(|c| c["key"] == "value_cmp").unwrap().clone();
+    assert_eq!((vc["label"].clone(), vc["format"].clone(), vc["currency"].clone(), vc["compareOf"].clone()), (json!("Agreement value (previous period)"), json!("MONEY"), json!("INR"), json!("value")));
+    let vd = out["columns"].as_array().unwrap().iter().find(|c| c["key"] == "value_delta_pct").unwrap().clone();
+    assert_eq!(vd, json!({"key": "value_delta_pct", "label": "Agreement value change", "kind": "MEASURE", "format": "PERCENT", "deltaOf": "value"}));
+
+    // The cache key includes the comparison: the same spec without it is another run.
+    let without = go(sales(), &[REPORT], &fake, false, false, scope()).await;
+    assert_eq!(without["cached"], json!(false));
+    let again = go(compare_spec("PREVIOUS_PERIOD"), &[REPORT], &fake, false, false, scope()).await;
+    assert_eq!(again["cached"], json!(true));
+    let ly = go(compare_spec("SAME_PERIOD_LAST_YEAR"), &[REPORT], &fake, false, false, scope()).await;
+    assert_eq!(ly["cached"], json!(false));
+}
+
+#[tokio::test]
+async fn compare_aligns_date_buckets_by_position() {
+    // This quarter by month against the same quarter last year, and against the previous quarter.
+    let spec = |to: &str| {
+        json!({"source": "cases", "segment": "bookings", "measures": [{"fn": "COUNT", "as": "bookings"}],
+               "groupBy": [{"field": "bookedAt", "bucket": "MONTH", "as": "month"}],
+               "filters": [{"field": "bookedAt", "period": "THIS_QUARTER"}], "compare": {"to": to}, "view": {"type": "LINE"}})
+    };
+    let fake = Fake::answering(vec![
+        json!([{"month": "2026-09-30T18:30:00Z", "bookings": 3}, {"month": "2026-11-30T18:30:00Z", "bookings": 1}]),
+        json!([{"month": "2025-09-30T18:30:00Z", "bookings": 6}, {"month": "2025-10-31T18:30:00Z", "bookings": 2}]),
+    ]);
+    let out = go(spec("SAME_PERIOD_LAST_YEAR"), &[], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let r = out["rows"].as_array().unwrap();
+    let got: Vec<(Value, Value, Value)> = r.iter().map(|x| (x["month"].clone(), x["bookings_cmp"].clone(), x["bookings_delta_pct"].clone())).collect();
+    assert_eq!(got, [(json!("2026-10-01"), json!(6), json!(-50)), (json!("2026-11-01"), json!(2), json!(-100)), (json!("2026-12-01"), json!(0), Value::Null)]);
+
+    // The previous quarter: October meets July, by position.
+    let fake = Fake::answering(vec![json!([{"month": "2026-09-30T18:30:00Z", "bookings": 4}]), json!([{"month": "2026-06-30T18:30:00Z", "bookings": 2}])]);
+    let out = go(spec("PREVIOUS_PERIOD"), &[], &fake, false, false, scope()).await;
+    assert_eq!(out["rows"][0]["bookings_cmp"], json!(2), "{out}");
+    assert_eq!(out["rows"][0]["bookings_delta_pct"], json!(100));
+    assert_eq!(out["rows"][1]["bookings_cmp"], json!(0), "August was filled with 0");
+    assert_eq!(out["comparePeriod"]["from"], json!("2026-07-01"));
+
+    // A dry run predicts the compare columns and period without reading.
+    let fake = Fake::default();
+    let out = go(spec("PREVIOUS_PERIOD"), &[], &fake, true, false, scope()).await;
+    assert!(fake.aggregates.lock().is_empty());
+    assert_eq!(out["comparePeriod"]["to"], json!("2026-09-30"));
+    assert!(out["columns"].as_array().unwrap().iter().any(|c| c["key"] == "bookings_delta_pct"));
+}
+
+#[tokio::test]
+async fn compare_sums_the_other_row_too() {
+    let main: Vec<Value> = (0..5).map(|i| json!({"k": format!("S{i}"), "n": 10 - i})).collect();
+    let prev: Vec<Value> = (0..5).map(|i| json!({"k": format!("S{i}"), "n": 2})).collect();
+    let fake = Fake::answering(vec![Value::Array(main), Value::Array(prev)]);
+    let spec = json!({"source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "groupBy": [{"field": "stageGroup", "as": "k"}],
+                      "filters": [{"field": "bookedAt", "period": "THIS_MONTH"}], "compare": {"to": "PREVIOUS_PERIOD"},
+                      "view": {"type": "BAR", "style": {"topN": 2}}});
+    let out = go(spec, &[], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let other = out["rows"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(other["_other"], json!(true));
+    assert_eq!((other["n"].clone(), other["n_cmp"].clone(), other["n_delta_pct"].clone()), (json!(8 + 7 + 6), json!(6), json!(250)));
+}
+
+#[tokio::test]
+async fn compare_refusals() {
+    let r = &[REPORT];
+    let with_filters = |filters: Value, to: &str| {
+        let mut s = compare_spec(to);
+        s["filters"] = filters;
+        s
+    };
+    let bad = |s: Value| async move { code_of(s, &[REPORT]).await };
+    assert_eq!(bad(with_filters(json!([]), "PREVIOUS_PERIOD")).await, ("BAD_PERIOD".into(), "compare".into()));
+    assert_eq!(bad(with_filters(json!([{"field": "bookedAt", "period": "ALL_TIME"}]), "PREVIOUS_PERIOD")).await, ("BAD_PERIOD".into(), "compare".into()));
+    let two = json!([{"field": "bookedAt", "period": "THIS_FY"}, {"field": "bookedAt", "period": "THIS_QUARTER"}]);
+    assert_eq!(bad(with_filters(two, "PREVIOUS_PERIOD")).await, ("BAD_PERIOD".into(), "compare".into()));
+    assert_eq!(bad(compare_spec("LAST_WEEK")).await, ("BAD_PERIOD".into(), "compare.to".into()));
+    let mut s = compare_spec("PREVIOUS_PERIOD");
+    s["compare"] = json!({"to": "PREVIOUS_PERIOD", "shift": 1});
+    assert_eq!(bad(s).await, ("BAD_KIND".into(), "compare.shift".into()));
+    assert_eq!(code_of(json!({"source": "moneySummary", "compare": {"to": "PREVIOUS_PERIOD"}, "view": {"type": "KPI"}}), &[]).await.0, "BAD_PERIOD");
+    // A name the comparison's columns need is refused.
+    let mut s = compare_spec("PREVIOUS_PERIOD");
+    s["derived"] = json!([{"as": "value_cmp", "ratio": ["value", "bookings"]}]);
+    s["sort"] = Value::Null;
+    s["view"] = json!({"type": "TABLE"});
+    assert_eq!(bad(s).await.0, "BAD_KIND");
+    let out = go(compare_spec("PREVIOUS_PERIOD"), r, &Fake::default(), true, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+}
+
+#[tokio::test]
+async fn new_view_types_through_the_runner() {
+    let base = |ty: &str, groups: Value| json!({"source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "groupBy": groups, "view": {"type": ty}});
+    let one = json!([{"field": "stageGroup", "as": "s"}]);
+    let two = json!([{"field": "stageGroup", "as": "s"}, {"field": "status", "as": "t"}]);
+    for (ty, g, ok) in [
+        ("HEATMAP", two.clone(), true),
+        ("HEATMAP", one.clone(), false),
+        ("TREEMAP", one.clone(), true),
+        ("TREEMAP", two.clone(), true),
+        ("WATERFALL", one.clone(), true),
+        ("WATERFALL", two.clone(), false),
+    ] {
+        let out = go(base(ty, g.clone()), &[], &Fake::default(), true, false, scope()).await;
+        assert_eq!(out["ok"], json!(ok), "{ty} {g}: {out}");
+        if !ok {
+            assert_eq!(out["error"]["code"], json!("BAD_VIEW"));
+        }
+    }
+    let out = go(base("BAR", one), &[], &Fake::default(), true, false, scope()).await;
+    assert_eq!(out["fits"]["WATERFALL"], json!({"ok": true}));
+    assert_eq!(out["fits"]["TREEMAP"], json!({"ok": true}));
+    assert_eq!(out["fits"]["HEATMAP"]["ok"], json!(false));
+}
+
+mod pdf_doc {
+    use super::*;
+    use crate::report::pdf;
+
+    struct Renderer(parking_lot::Mutex<Vec<String>>, Result<Vec<u8>, String>);
+
+    #[async_trait]
+    impl pdf::HtmlToPdf for Renderer {
+        async fn render(&self, html: String) -> Result<Vec<u8>, String> {
+            self.0.lock().push(html);
+            self.1.clone()
+        }
+    }
+
+    /// A 1x1 PNG.
+    pub fn png() -> String {
+        let bytes: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63,
+            0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        use base64::Engine as _;
+        format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    pub fn doc() -> Value {
+        json!({"title": "Sales <dashboard> & \"more\"", "subtitle": "This quarter", "generatedAt": "2026-11-21T17:42:00+05:30", "locale": "en-IN",
+               "items": [
+                 {"name": "Sales by RM", "subtitle": "<b>bold</b>", "image": png(),
+                  "columns": [{"key": "rm", "label": "RM", "kind": "DIMENSION"}, {"key": "rm_label", "hidden": true},
+                              {"key": "value", "label": "Value", "kind": "MEASURE", "format": "MONEY", "currency": "INR"},
+                              {"key": "rate", "label": "Rate", "format": "PERCENT"}],
+                  "rows": [{"rm": "11", "rm_label": "Asha <script>alert(1)</script>", "value": 12345678.5, "rate": 12.345},
+                           {"rm": "12", "value": null, "rate": -3}]},
+                 {"name": "Plain", "columns": ["a", "b"], "rows": [["x & y", 1234567], [true, null]]},
+                 {"name": "Chart only", "image": png()}]})
+    }
+
+    #[test]
+    fn the_html_escapes_every_text_and_formats_numbers() {
+        let d = pdf::parse(&doc()).unwrap();
+        let h = pdf::html(&d, now());
+        assert!(h.contains("<title>Sales &lt;dashboard&gt; &amp; &quot;more&quot;</title>"), "{h}");
+        assert!(h.contains("<h1>Sales &lt;dashboard&gt; &amp; &quot;more&quot;</h1>"));
+        assert!(h.contains("&lt;b&gt;bold&lt;/b&gt;"));
+        assert!(!h.contains("<script>") && h.contains("Asha &lt;script&gt;alert(1)&lt;/script&gt;"), "a label is preferred and escaped");
+        assert!(h.contains("Generated on 21 Nov 2026, 17:42 (UTC+05:30)"));
+        assert!(h.contains("<th>RM</th>") && !h.contains("rm_label"), "hidden columns are left out");
+        assert!(h.contains("INR 1,23,45,678.5"), "en-IN groups digits in pairs");
+        assert!(h.contains("12.3%") && h.contains("-3%"));
+        assert!(h.contains("<td class=\"num\">12,34,567</td>"));
+        assert!(h.contains("x &amp; y") && h.contains(">Yes<"));
+        assert_eq!(h.matches("<img ").count(), 2);
+        assert!(h.contains("src=\"data:image/png;base64,iVBOR"));
+        assert_eq!(pdf::file_name(&d, now()), "Sales dashboard more 2026-11-21.pdf");
+        assert_eq!(pdf::group(1234567.0, 2, false), "1,234,567");
+        assert_eq!(pdf::group(-0.004, 2, false), "0");
+        assert_eq!(pdf::escape("a'b\u{7}"), "a&#39;b");
+    }
+
+    #[test]
+    fn the_limits() {
+        let code = |d: Value| pdf::parse(&d).map(|_| ()).unwrap_err();
+        let items: Vec<Value> = (0..25).map(|i| json!({"name": format!("w{i}")})).collect();
+        assert_eq!(code(json!({"items": items})).code, "TOO_MANY");
+        let items: Vec<Value> = (0..24).map(|i| json!({"name": format!("w{i}")})).collect();
+        assert!(pdf::parse(&json!({"items": items})).is_ok());
+        let rows: Vec<Value> = (0..201).map(|i| json!([i])).collect();
+        let e = code(json!({"items": [{"columns": ["n"], "rows": rows}]}));
+        assert_eq!((e.code, e.path.as_str()), ("TOO_MANY", "document.items[0].rows"));
+        let cols: Vec<Value> = (0..41).map(|i| json!(format!("c{i}"))).collect();
+        assert_eq!(code(json!({"items": [{"columns": cols}]})).code, "TOO_MANY");
+        let big = "x".repeat(8 * 1024 * 1024);
+        assert_eq!(code(json!({"title": big})).code, "TOO_LARGE");
+        // Images are PNG data URLs only.
+        for bad in ["https://cdn.example.com/a.png", "data:image/jpeg;base64,/9j/4AAQ", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,PHN2Zz4=", "data:image/png;base64,\"><script>"] {
+            let e = code(json!({"items": [{"image": bad}]}));
+            assert_eq!((e.code, e.path.as_str()), ("BAD_KIND", "document.items[0].image"), "{bad}");
+        }
+        assert_eq!(code(json!({"items": [{"rows": [[1]]}]})).path, "document.items[0].columns");
+        assert_eq!(code(json!({"titel": "x"})).path, "document.titel");
+        assert_eq!(code(json!({"items": [{"name": "x", "chart": 1}]})).path, "document.items[0].chart");
+        assert_eq!(code(json!({"title": 5})).code, "BAD_KIND");
+        assert_eq!(code(json!("x")).code, "BAD_KIND");
+    }
+
+    #[tokio::test]
+    async fn make_answers_a_downloadable_data_url() {
+        let r = Renderer(Default::default(), Ok(b"%PDF-1.7 fake".to_vec()));
+        let out = pdf::make(&doc(), now(), &r).await;
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert_eq!(out["fileName"], json!("Sales dashboard more 2026-11-21.pdf"));
+        assert_eq!(out["contentType"], json!("application/pdf"));
+        assert_eq!(out["size"], json!(13));
+        assert_eq!(out["data"], json!("data:application/pdf;base64,JVBERi0xLjcgZmFrZQ=="));
+        assert_eq!(out["sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(r.0.lock().len(), 1);
+        // A refusal renders nothing; a renderer failure is PDF_FAILED.
+        let out = pdf::make(&json!({"items": [{"image": "data:image/gif;base64,R0lG"}]}), now(), &r).await;
+        assert_eq!(out["error"]["code"], json!("BAD_KIND"));
+        assert_eq!(r.0.lock().len(), 1);
+        let failing = Renderer(Default::default(), Err("pdf-render failed: 500".into()));
+        let out = pdf::make(&doc(), now(), &failing).await;
+        assert_eq!(out["error"]["code"], json!("PDF_FAILED"));
+        assert!(out["error"]["message"].as_str().unwrap().contains("500"));
+    }
+
+    /// One local run through a real sidecar: `PDF_RENDER_URL=http://127.0.0.1:8120 cargo test ... -- --ignored`.
+    #[tokio::test]
+    #[ignore = "needs a running pdf-render: PDF_RENDER_URL (PDF_RENDER_OUT to keep the file)"]
+    async fn renders_through_a_running_sidecar() {
+        struct Sidecar(crate::pdf_render::PdfRenderer);
+        #[async_trait]
+        impl pdf::HtmlToPdf for Sidecar {
+            async fn render(&self, html: String) -> Result<Vec<u8>, String> {
+                self.0.render(html).await
+            }
+        }
+        let url = std::env::var("PDF_RENDER_URL").expect("PDF_RENDER_URL is not set");
+        let cfg = crate::pdf_render::PdfConfig { upstream: platform::config::UpstreamConfig::One(url), timeout_seconds: 30, fallback_on_error: false };
+        let r = Sidecar(crate::pdf_render::PdfRenderer::from_config(&cfg, None).unwrap());
+        let out = pdf::make(&doc(), now(), &r).await;
+        assert_eq!(out["ok"], json!(true), "{out}");
+        use base64::Engine as _;
+        let b64 = out["data"].as_str().unwrap().strip_prefix("data:application/pdf;base64,").unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        assert!(bytes.starts_with(b"%PDF") && !bytes.starts_with(b"%PDF-1.4"), "made by the sidecar, not the text renderer");
+        if let Ok(path) = std::env::var("PDF_RENDER_OUT") {
+            std::fs::write(path, &bytes).unwrap();
+        }
+        eprintln!("PDF {} bytes", bytes.len());
+    }
+}
+
+/// A cached answer is the caller's own: the user id from the security context is in every key.
+#[tokio::test]
+async fn two_users_never_share_a_cached_answer() {
+    struct Mine(parking_lot::Mutex<u32>);
+    #[async_trait]
+    impl FunctionCaller for Mine {
+        async fn call(&self, _: &str, _: Obj) -> Result<Obj, String> {
+            let mut n = self.0.lock();
+            *n += 1;
+            Ok(json!({"page": {"content": [{"_id": format!("T{n}"), "title": format!("task of call {n}"), "caseId": "C1"}], "total": 1}})
+                .as_object().unwrap().clone())
+        }
+    }
+    let cat = catalog();
+    let fake = Fake::default();
+    let calls = Mine(Default::default());
+    let auths = vec![CASE_READ.to_string()];
+    let run = |user: u64, spec: Value, scope: Value| {
+        let (cat, fake, calls, auths) = (&cat, &fake, &calls, &auths);
+        async move {
+            exec::run(
+                RunRequest { spec: &spec, catalog: cat, scope: &scope, force: false, dry_run: false, app_code: None, client_code: Some("FIN".into()),
+                             user_id: user, authorities: auths, now: now() },
+                fake,
+                calls,
+            )
+            .await
+        }
+    };
+    // A FUNCTION source (null scope): "my tasks" of user 110 is never served to user 4640.
+    let tasks = json!({"source": "tasks", "view": {"type": "TABLE"}});
+    let a = run(110, tasks.clone(), Value::Null).await;
+    let b = run(4640, tasks.clone(), Value::Null).await;
+    assert_eq!((a["cached"].clone(), b["cached"].clone()), (json!(false), json!(false)), "{b}");
+    assert_ne!(a["rows"], b["rows"]);
+    assert_eq!(*calls.0.lock(), 2);
+    let a2 = run(110, tasks.clone(), Value::Null).await;
+    assert_eq!((a2["cached"].clone(), a2["rows"].clone()), (json!(true), a["rows"].clone()), "the same user is served from the cache");
+    // The same for a storage report, View records and a comparison with the same scope.
+    for spec in [
+        json!({"source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}}),
+        json!({"source": "cases", "records": {}}),
+        json!({"source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "filters": [{"field": "bookedAt", "period": "THIS_MONTH"}],
+               "compare": {"to": "PREVIOUS_PERIOD"}, "view": {"type": "KPI"}}),
+    ] {
+        let x = run(110, spec.clone(), scope()).await;
+        let y = run(4640, spec.clone(), scope()).await;
+        assert_eq!((x["cached"].clone(), y["cached"].clone()), (json!(false), json!(false)), "{spec}: {y}");
+    }
+    let keys = fake.cache.lock().len();
+    assert_eq!(keys, 8, "one entry per user per spec");
+}
+
 // --- Through KIRun ----------------------------------------------------------------------------
 
 mod kirun_run {
@@ -738,6 +1294,46 @@ mod kirun_run {
             assert!(e.to_string().contains("can only be called from a server function"), "{e}");
             let raised = crate::context::request().and_then(|c| c.raised.lock().take()).unwrap();
             assert_eq!(raised.status(), axum::http::StatusCode::FORBIDDEN);
+        })
+        .await;
+    }
+
+    struct OkRenderer;
+
+    #[async_trait]
+    impl crate::report::pdf::HtmlToPdf for OkRenderer {
+        async fn render(&self, html: String) -> Result<Vec<u8>, String> {
+            assert!(html.contains("<h1>Board</h1>"));
+            Ok(b"%PDF-1.7".to_vec())
+        }
+    }
+
+    #[tokio::test]
+    async fn pdf_runs_inside_a_definition_and_is_refused_outside() {
+        let ctx = crate::testing::request(crate::testing::user(&[REPORT, "Authorities.Logged_IN"]), false, None);
+        crate::context::with_request(ctx, async {
+            let mut m: HashMap<String, Arc<dyn Function>> = HashMap::new();
+            m.insert("CoreServices.Report.Pdf".into(), Arc::new(PdfFunction::new(Arc::new(OkRenderer))));
+            let r: Arc<dyn Repository<dyn Function>> =
+                Arc::new(HybridRepository::new(vec![Arc::new(KIRunFunctionRepository::new()) as Arc<dyn Repository<dyn Function>>, Arc::new(Repo(m))]));
+            let def = json!({"name": "pdf", "namespace": "Test",
+                "events": {"output": {"name": "output", "parameters": {"report": {"type": "OBJECT"}}}},
+                "steps": {
+                    "pdf": {"statementName": "pdf", "namespace": "CoreServices.Report", "name": "Pdf",
+                            "parameterMap": {"document": value(json!({"title": "Board", "items": [{"name": "n", "columns": ["a"], "rows": [[1]]}]}))}},
+                    "out": {"statementName": "out", "namespace": "System", "name": "GenerateEvent",
+                            "parameterMap": {
+                                "eventName": value(json!("output")),
+                                "results": value(json!({"name": "report", "value": {"isExpression": true, "value": "Steps.pdf.output.result"}}))}}}});
+            let out = run_def(r, def).await.unwrap();
+            assert_eq!(out["ok"], json!(true), "{out}");
+            assert_eq!(out["data"], json!("data:application/pdf;base64,JVBERi0xLjc="));
+
+            let f = PdfFunction::new(Arc::new(OkRenderer));
+            let args: kirun::Map<Value> = json!({"document": {"title": "Board"}}).as_object().unwrap().clone().into_iter().collect();
+            let mut fep = FunctionExecutionParameters::new(Arc::new(KIRunFunctionRepository::new()), Arc::new(KIRunSchemaRepository::new())).set_arguments(args);
+            let e = f.execute(&mut fep).await.err().unwrap();
+            assert!(e.to_string().contains("can only be called from a server function"), "{e}");
         })
         .await;
     }

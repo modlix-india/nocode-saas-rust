@@ -129,7 +129,7 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 110);
+        assert_eq!(core.names().len(), 111);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has (and the Rust-only EncryptField / DecryptField, CXZ-1961), SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
@@ -153,7 +153,8 @@ mod tests {
                 "CoreServices.Messaging.SendSms",
                 "CoreServices.Report.Run",
                 "CoreServices.Report.Validate",
-                "CoreServices.Report.ViewTypes"
+                "CoreServices.Report.ViewTypes",
+                "CoreServices.Report.Pdf"
             ],
             "the contact codes, the connection signature check, the token info, the Word template functions, billing, SendSms, then the report runner, come last"
         );
