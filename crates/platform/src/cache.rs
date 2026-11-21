@@ -563,6 +563,52 @@ impl CacheService {
         None
     }
 
+    /// Rust only (CXZ-1780): the text kept under `<prefix>:<key>` (a plain Redis string, apart
+    /// from the Java cache hashes), `None` when there is none, no Redis, or Redis did not answer
+    /// in time (a failure pauses Redis as [`CacheService::incr_window`] does).
+    pub async fn get_text(&self, key: &str) -> Option<String> {
+        let full = format!("{}:{key}", self.inner.prefix);
+        self.redis_call(&full, redis::cmd("GET").arg(&full).clone()).await.flatten()
+    }
+
+    /// Rust only (CXZ-1780): keeps `value` under `<prefix>:<key>` for `ttl_secs`; `false` when it
+    /// could not be written.
+    pub async fn set_text(&self, key: &str, value: &str, ttl_secs: u64) -> bool {
+        let full = format!("{}:{key}", self.inner.prefix);
+        let cmd = redis::cmd("SET").arg(&full).arg(value).arg("EX").arg(ttl_secs.max(1)).clone();
+        self.redis_call::<Option<String>>(&full, cmd).await.is_some()
+    }
+
+    /// Rust only (CXZ-1780): claims `<prefix>:<key>` for `ttl_secs` if nobody holds it (SET NX).
+    /// `Some(true)` claimed, `Some(false)` held already, `None` no Redis or no answer.
+    pub async fn claim(&self, key: &str, ttl_secs: u64) -> Option<bool> {
+        let full = format!("{}:{key}", self.inner.prefix);
+        let cmd = redis::cmd("SET").arg(&full).arg("1").arg("EX").arg(ttl_secs.max(1)).arg("NX").clone();
+        self.redis_call::<Option<String>>(&full, cmd).await.map(|r| r.is_some())
+    }
+
+    async fn redis_call<T: redis::FromRedisValue>(&self, full: &str, cmd: redis::Cmd) -> Option<T> {
+        let client = self.inner.redis.as_ref()?;
+        if unix_millis() < self.inner.counter_paused_until.load(Ordering::Relaxed) {
+            return None;
+        }
+        let run = async {
+            let mut conn = self.counter_connection(client).await.map_err(|e| ("connect", e.to_string()))?;
+            let r: redis::RedisResult<T> = cmd.query_async(&mut conn).await;
+            r.map_err(|e| ("command", e.to_string()))
+        };
+        let failed = match tokio::time::timeout(COUNTER_TIMEOUT, run).await {
+            Ok(Ok(v)) => return Some(v),
+            Ok(Err(failed)) => failed,
+            Err(_) => ("timeout", format!("no answer in {} ms", COUNTER_TIMEOUT.as_millis())),
+        };
+        crate::meter::redis_error(failed.0);
+        tracing::warn!(key = full, error = failed.1, "redis unavailable, going on without it");
+        *self.inner.counter.lock().await = None;
+        self.inner.counter_paused_until.store(unix_millis() + COUNTER_PAUSE.as_millis() as u64, Ordering::Relaxed);
+        None
+    }
+
     async fn counter_connection(&self, client: &redis::Client) -> redis::RedisResult<redis::aio::MultiplexedConnection> {
         let mut slot = self.inner.counter.lock().await;
         if let Some(c) = slot.as_ref() {

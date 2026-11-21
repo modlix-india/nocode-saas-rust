@@ -460,6 +460,11 @@ fn is_date_type(t: &str) -> bool {
     t.starts_with("DATE") || t.starts_with("TIMESTAMP")
 }
 
+fn is_text_type(t: &str) -> bool {
+    let t = t.to_uppercase();
+    ["VARCHAR", "CHAR", "TEXT", "TINYTEXT", "MEDIUMTEXT", "LONGTEXT"].iter().any(|p| t.starts_with(p))
+}
+
 fn is_numeric_type(t: &str) -> bool {
     let t = t.to_uppercase();
     ["INT", "BIGINT", "TINYINT", "SMALLINT", "MEDIUMINT", "DOUBLE", "FLOAT", "DECIMAL"].iter().any(|p| t.starts_with(p))
@@ -1118,6 +1123,14 @@ impl MySqlAppDataService {
                 return Err(AppDataError::invalid_aggregation(&format!("storage {} declares no field '{field}'", storage.name)));
             };
             let Some(bucket) = g.bucket else { continue };
+            if g.iso_string {
+                if !is_text_type(t) {
+                    return Err(AppDataError::invalid_aggregation(&format!(
+                        "field '{field}' is {t}, not a text column, so it cannot be bucketed as an ISO text"
+                    )));
+                }
+                continue;
+            }
             let date = is_date_type(t);
             let numeric = is_numeric_type(t);
             if !date && !numeric {
