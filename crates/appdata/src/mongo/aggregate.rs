@@ -121,6 +121,12 @@ pub fn sort_doc(sort: &Sort) -> Option<BsonDocument> {
 /// The Mongo-only rule: a bucketed field needs an encoding, because dates here are numbers.
 pub fn bucket_encoding_problem(query: &AggregateQuery) -> Option<String> {
     for g in query.group_by.iter().flatten() {
+        if g.iso_string || g.year_start_month.is_some() {
+            return Some(format!(
+                "field '{}': isoString and yearStartMonth buckets are only supported on MySQL storages",
+                g.field.clone().unwrap_or_default()
+            ));
+        }
         if let (Some(bucket), None) = (g.bucket, g.encoding) {
             return Some(format!(
                 "field '{}' is bucketed by {} so it needs an encoding (EPOCH_SECONDS or EPOCH_MILLIS); dates are stored as numbers and seconds cannot be told from milliseconds",

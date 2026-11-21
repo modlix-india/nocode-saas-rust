@@ -98,7 +98,16 @@ fn check_group_by(g: &GroupByField, aliases: &mut IndexSet<String>) -> Option<St
         if g.encoding.is_some() {
             return Some(format!("encoding is only meaningful with a bucket, on field '{field}'"));
         }
+        if g.iso_string || g.year_start_month.is_some() {
+            return Some(format!("isoString and yearStartMonth are only meaningful with a bucket, on field '{field}'"));
+        }
         return None;
+    }
+    if g.iso_string && g.encoding.is_some() {
+        return Some(format!("field '{field}' is an ISO text, so it takes no epoch encoding"));
+    }
+    if g.year_start_month.is_some_and(|m| !(1..=12).contains(&m)) {
+        return Some(format!("yearStartMonth on field '{field}' must be 1 to 12"));
     }
 
     if !zone_id_ok(&g.resolved_timezone()) {
@@ -214,8 +223,17 @@ mod tests {
         let mut sorted = q(vec![GroupByField::new("region")], vec![count.clone()]);
         sorted.sort = Some(Sort::by(vec![Order::desc("amount")]));
         assert!(check(&sorted).unwrap().contains("cannot sort on 'amount'"));
-        let dup = q(vec![GroupByField::new("count")], vec![count]);
+        let dup = q(vec![GroupByField::new("count")], vec![count.clone()]);
         assert!(check(&dup).unwrap().contains("duplicate alias 'count'"));
+        // The ISO text and financial year options (CXZ-1780).
+        let iso = GroupByField { iso_string: true, ..GroupByField::new("bookedAt") };
+        assert!(check(&q(vec![iso.clone()], vec![count.clone()])).unwrap().contains("only meaningful with a bucket"));
+        let iso = GroupByField { bucket: Some(DateBucketUnit::Month), ..iso };
+        assert!(check(&q(vec![iso.clone()], vec![count.clone()])).is_none());
+        let epoch = GroupByField { encoding: Some(crate::model::DateEncoding::EpochSeconds), ..iso.clone() };
+        assert!(check(&q(vec![epoch], vec![count.clone()])).unwrap().contains("no epoch encoding"));
+        let fy = GroupByField { year_start_month: Some(13), ..iso };
+        assert!(check(&q(vec![fy], vec![count])).unwrap().contains("1 to 12"));
     }
 
     #[test]
