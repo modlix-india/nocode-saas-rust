@@ -936,6 +936,116 @@ pub async fn pre_register_check_one(s: &AdminState, ca: &ContextAuth, mut r: Reg
     Ok(true)
 }
 
+/// What the site's client already knows of a verified identity, for a social sign-up. Owners
+/// are looked up as sign-in's 409 looks for them (any status), so every 409 lands here.
+enum ExistingOwner {
+    /// No owner holds it under the site's client: a normal registration runs.
+    None,
+    /// An owner holds it, but joining would not help: their organisation already reaches the
+    /// app, or the owner or the organisation is not active.
+    AskForAccess,
+    /// An owner holds it and their organisation does not reach the app yet.
+    Join(User, Client),
+}
+
+/// The owner a social sign-up joins this app with: a verified identity that already owns an
+/// organisation under the site's client (any level, as sign-in looks). The lowest user id wins
+/// among several.
+async fn existing_owner(s: &AdminState, ca: &ContextAuth, app: &crate::model::App, identity: &str) -> AuthResult<ExistingOwner> {
+    let Some(url_client) = ca.url_client_code.as_deref().filter(|c| !c.trim().is_empty()) else { return Ok(ExistingOwner::None) };
+    let mut users = s
+        .dir()
+        .store
+        .users_by(&crate::store::UserQuery {
+            user_name: Some(identity.to_string()),
+            identifier: crate::store::IdentifierType::EmailId,
+            user_id: None,
+            client_code: Some(url_client.to_string()),
+            app_code: None,
+            active_client_only: false,
+            limit: 25,
+        })
+        .await?;
+    if users.is_empty() {
+        return Ok(ExistingOwner::None);
+    }
+    users.sort_by_key(|u| u.id);
+    let owners = s.dir().store.owner_user_ids(&users.iter().map(|u| u.id).collect::<Vec<_>>()).await?;
+    for user in users.into_iter().filter(|u| owners.contains(&u.id)) {
+        let Some(client) = s.dir().client(user.client_id).await? else { continue };
+        if user.status_code != "ACTIVE" || client.status_code.as_deref() != Some("ACTIVE") {
+            return Ok(ExistingOwner::AskForAccess);
+        }
+        let reachable = client.id() == app.client_id || app.app_access_type.as_deref() == Some("ANY") || {
+            let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_app_access WHERE APP_ID = ? AND CLIENT_ID = ?")
+                .bind(app.id)
+                .bind(client.id())
+                .fetch_one(&s.db.pool)
+                .await?;
+            n > 0
+        };
+        if reachable {
+            // This owner can already sign in here; anything still failing is not for a join to fix.
+            return Ok(ExistingOwner::AskForAccess);
+        }
+        return Ok(ExistingOwner::Join(user, (*client).clone()));
+    }
+    Ok(ExistingOwner::None)
+}
+
+/// A social sign-up by someone who already owns an organisation under the site's client: that
+/// organisation is registered on the site's app (`registerApp`: access, registration objects,
+/// file paths, the owner's default profiles, roles and designation, the app's starting plan)
+/// and the owner is signed in with the verified state. `None` when no owner holds the identity,
+/// leaving `register` to answer as it always has. An owner is never given a second
+/// organisation: when the app takes no registrations, or not from their kind of organisation,
+/// the answer is sign-in's 409 (ask for access).
+async fn join_with_existing_owner(
+    s: &AdminState,
+    files: &dyn Files,
+    info: &RequestInfo,
+    ca: &ContextAuth,
+    identity: &str,
+    state: &str,
+) -> AuthResult<Option<Registered>> {
+    let ca = registering_context(ca);
+    if ca.authenticated {
+        return Ok(None);
+    }
+    let Some(app) = app_by_code(s, ca.url_app_code.as_deref()).await? else { return Ok(None) };
+    let ask_for_access = || AuthError::msg(StatusCode::CONFLICT, crate::errors::ACCESS_REQUEST_REQUIRED, &[]);
+    let (owner, client) = match existing_owner(s, &ca, &app, identity).await? {
+        ExistingOwner::None => return Ok(None),
+        ExistingOwner::AskForAccess => return Err(ask_for_access()),
+        ExistingOwner::Join(owner, client) => (owner, client),
+    };
+    let lif = ca.logged_in_from_client_id.unwrap_or(0);
+    let reg_prop = app_prop(s, &ca, lif, None, Some(&app.app_code), REG_TYPE).await?;
+    if reg_prop_refuses(&reg_prop) {
+        return Err(ask_for_access());
+    }
+    let level = s.client_level_type(lif, app.id).await?;
+    if check_usage_type(app.app_usage_type.as_deref(), level, client.type_code.as_deref() == Some("BUS")).is_err() {
+        return Err(ask_for_access());
+    }
+    register_app(s, files, &ca, &app.app_code, client.id(), owner.id).await?;
+    s.caches().service.evict_everywhere(crate::caches::USER_ROLES, &owner.id.to_string()).await;
+    if let Err(e) = s.start_wallet_on_sign_up(&ca, client.id(), app.id).await {
+        tracing::warn!(error = %e, client = client.id(), app = app.id, "billing: wallet not started when an existing organisation joined");
+    }
+    tracing::info!(user = owner.id, client = client.id(), app = %app.app_code, "social sign-up joined an existing organisation to the app");
+    let body = AuthRequest {
+        user_name: Some(identity.to_string()),
+        social_register_state: Some(state.to_string()),
+        identifier_type: Some("EMAIL_ID".into()),
+        remember_me: true,
+        cookie: true,
+        ..Default::default()
+    };
+    let minted = s.auth.authenticate_social(&body, info, ca.user.id()).await?;
+    Ok(Some(Registered { body: response_json(owner.id, "", Some(&minted)), cookie: minted.cookie.clone() }))
+}
+
 /// `registerWSocial(request)`: `register` for a state the provider verified, which is spent
 /// once the registration is through.
 pub async fn register_social(s: &AdminState, files: &dyn Files, info: &RequestInfo, ca: &ContextAuth, r: RegRequest) -> AuthResult<Option<Registered>> {
@@ -951,6 +1061,11 @@ pub async fn register_social(s: &AdminState, files: &dyn Files, info: &RequestIn
     }
     if state_expired(&token, s.auth.clock.utc()) {
         return Err(err(StatusCode::BAD_REQUEST, SESSION_EXPIRED, &[]));
+    }
+    // An owner already under the site's client joins this app with the organisation they have;
+    // a new one is never made for them (sign-in's 409 sends the browser here).
+    if let Some(done) = join_with_existing_owner(s, files, info, ca, &verified, &state).await? {
+        return Ok(Some(done));
     }
     let Some(done) = register(s, files, info, ca, r).await? else { return Ok(None) };
     if let Some(st) = entity::str_of(&token, "state") {
