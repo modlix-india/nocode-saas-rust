@@ -89,7 +89,9 @@ impl FunctionCaller for Functions {
 fn catalog() -> Value {
     json!({"v": 1, "app": "cxzump", "timeZone": "Asia/Kolkata", "locale": "en-IN", "fyStartMonth": 4,
         "hierarchies": {"stage": {"label": "Stage", "levels": ["stageGroup", "status"]}},
-        "defaults": [{"id": "totalBookings", "name": "Total bookings", "spec": {}, "countLink": {"path": "/cases?dash=BOOKING"}}],
+        "groups": {"dashboard": {"label": "Dashboard", "order": 1}, "money": {"label": "Money", "order": 2, "authorityAny": ["Authorities.CXZUMP.ROLE_Report_READ"]}},
+        "defaults": [{"id": "totalBookings", "name": "Total bookings", "group": "dashboard", "spec": {}, "countLink": {"path": "/cases?dash=BOOKING"}},
+                     {"id": "noGroup", "name": "No group (= dashboard)", "spec": {}}],
         "sources": {
             "cases": {"kind": "STORAGE", "storage": "cxCase", "label": "Cases", "scope": "REQUIRED",
                 "fields": {
@@ -679,6 +681,23 @@ async fn go_with(cat: Value, spec: Value, auths: &[&str], backend: &Fake) -> Val
 }
 
 #[tokio::test]
+async fn catalog_groups_are_accepted_and_only_their_shape_is_checked() {
+    let kpi = json!({"source": "cases", "segment": "bookings", "measures": [{"fn": "COUNT", "as": "bookings"}], "view": {"type": "KPI"}});
+    // The fixture carries groups and grouped defaults: a run is unaffected.
+    let out = go_with(catalog(), kpi.clone(), &[], &Fake::answering(vec![json!([{"bookings": 4}])])).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    // No groups at all: any default group id is fine (the app's own name).
+    let mut cat = catalog();
+    cat.as_object_mut().unwrap().remove("groups");
+    cat["defaults"][0]["group"] = json!("anything");
+    let out = go_with(cat, kpi.clone(), &[], &Fake::answering(vec![json!([{"bookings": 4}])])).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    // groups: null is the same as none.
+    let out = go_with(with_source_key("/groups", Value::Null), kpi, &[], &Fake::answering(vec![json!([{"bookings": 4}])])).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+}
+
+#[tokio::test]
 async fn catalog_links_paging_and_hierarchies_are_accepted_and_passed_through() {
     let fake = Fake::answering(vec![json!([{"bookings": 4}])]);
     let spec = json!({"source": "cases", "segment": "bookings", "measures": [{"fn": "COUNT", "as": "bookings"}], "view": {"type": "KPI"}});
@@ -708,6 +727,18 @@ async fn catalog_links_paging_and_hierarchies_are_accepted_and_passed_through() 
         ("/hierarchies/stage/levels", json!(["status", "status"]), "catalog.hierarchies.stage.levels"),
         ("/hierarchies/stage", json!({"levels": ["a", "b"], "lvl": 1}), "catalog.hierarchies.stage.lvl"),
         ("/defaults/0/countLink", json!({"path": "cases"}), "catalog.defaults[0].countLink.path"),
+        ("/groups", json!(["dashboard"]), "catalog.groups"),
+        ("/groups/u_mine", json!({"label": "Mine"}), "catalog.groups.u_mine"),
+        ("/groups/dashboard", json!("Dashboard"), "catalog.groups.dashboard"),
+        ("/groups/dashboard", json!({"order": 1}), "catalog.groups.dashboard.label"),
+        ("/groups/dashboard", json!({"label": " "}), "catalog.groups.dashboard.label"),
+        ("/groups/dashboard", json!({"label": "x".repeat(41)}), "catalog.groups.dashboard.label"),
+        ("/groups/dashboard", json!({"label": "Dashboard", "order": "1"}), "catalog.groups.dashboard.order"),
+        ("/groups/dashboard", json!({"label": "Dashboard", "authorityAny": "x"}), "catalog.groups.dashboard.authorityAny"),
+        ("/groups/dashboard", json!({"label": "Dashboard", "icon": "x"}), "catalog.groups.dashboard.icon"),
+        ("/defaults/0/group", json!(3), "catalog.defaults[0].group"),
+        ("/defaults/0/group", json!(""), "catalog.defaults[0].group"),
+        ("/defaults/0/group", json!("nowhere"), "catalog.defaults[0].group"),
     ] {
         let out = go_with(with_source_key(path, bad.clone()), kpi.clone(), &[], &Fake::default()).await;
         assert_eq!((out["error"]["code"].as_str(), out["error"]["path"].as_str()), (Some("SOURCE_FAILED"), Some(at)), "{path} {bad}: {out}");

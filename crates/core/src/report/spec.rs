@@ -357,6 +357,39 @@ fn check_hierarchies(v: &Value) -> R<()> {
     Ok(())
 }
 
+/// `groups: {"dashboard": {"label": "Dashboard", "order": 1, "authorityAny": [...]}}`: the app's
+/// report groups. The app trims them to the caller; the runner checks only their shape. Ids that
+/// start with `u_` belong to user groups, so an app group may not use one.
+fn check_groups(v: &Value) -> R<Vec<String>> {
+    let path = "catalog.groups";
+    let Value::Object(o) = v else { return catalog_err(path, "The catalog's groups must be an object of named groups.") };
+    let mut ids = Vec::new();
+    for (id, g) in o {
+        let p = format!("{path}.{id}");
+        if id.trim().is_empty() || id.trim() != id || id.starts_with("u_") || id.chars().any(char::is_control) {
+            return catalog_err(p, format!("The group id '{id}' must be a plain name that does not start with u_ (user groups use u_)."));
+        }
+        let Value::Object(go) = g else { return catalog_err(p, format!("The group '{id}' must be an object with a label.")) };
+        catalog_keys(go, &["label", "order", "authorityAny"], &p)?;
+        match go.get("label") {
+            Some(Value::String(l)) if !l.trim().is_empty() && l.chars().count() <= 40 => {}
+            _ => return catalog_err(format!("{p}.label"), format!("The group '{id}' needs a label of 1 to 40 characters.")),
+        }
+        match go.get("order") {
+            None | Some(Value::Null) => {}
+            Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite) => {}
+            Some(_) => return catalog_err(format!("{p}.order"), format!("The group '{id}' order must be a number.")),
+        }
+        match go.get("authorityAny") {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(a)) if a.iter().all(|x| x.as_str().is_some_and(|s| !s.trim().is_empty())) => {}
+            Some(_) => return catalog_err(format!("{p}.authorityAny"), format!("The group '{id}' authorityAny must be a list of authorities.")),
+        }
+        ids.push(id.clone());
+    }
+    Ok(ids)
+}
+
 /// The catalog the app hands in (already trimmed to the caller).
 #[derive(Debug, Clone)]
 pub struct Catalog {
@@ -389,10 +422,24 @@ impl Catalog {
         if let Some(h) = o.get("hierarchies").filter(|h| !h.is_null()) {
             check_hierarchies(h)?;
         }
+        let groups = match o.get("groups").filter(|g| !g.is_null()) {
+            Some(g) => Some(check_groups(g)?),
+            None => None,
+        };
         if let Some(Value::Array(defaults)) = o.get("defaults") {
             for (i, d) in defaults.iter().enumerate() {
                 if let Some(l) = d.get("countLink").filter(|l| !l.is_null()) {
                     check_link(l, &format!("catalog.defaults[{i}].countLink"))?;
+                }
+                // A default's `group` (missing = "dashboard") names one of the catalog's groups.
+                match d.get("group") {
+                    None | Some(Value::Null) => {}
+                    Some(Value::String(g)) if !g.trim().is_empty() => {
+                        if groups.as_ref().is_some_and(|ids| !ids.iter().any(|x| x == g)) {
+                            return catalog_err(format!("catalog.defaults[{i}].group"), format!("The default's group '{g}' is not one of the catalog's groups."));
+                        }
+                    }
+                    Some(_) => return catalog_err(format!("catalog.defaults[{i}].group"), "A default's group must be a group id (text)."),
                 }
             }
         }
