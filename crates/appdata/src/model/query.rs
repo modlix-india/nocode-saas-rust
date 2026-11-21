@@ -338,11 +338,34 @@ pub struct GroupByField {
     pub bucket: Option<DateBucketUnit>,
     pub encoding: Option<DateEncoding>,
     pub timezone: Option<String>,
+    /// Rust only (CXZ-1780): the column holds an ISO-8601 text (`2026-11-17T06:13:26Z`, an
+    /// instant in UTC, or `2026-11-17`, a local date), not a DATE column or an epoch number.
+    /// MySQL only; the bucket then comes back as the ISO text of its start in UTC.
+    pub iso_string: bool,
+    /// Rust only (CXZ-1780): the month (1 to 12) a YEAR or QUARTER bucket starts on, for a
+    /// financial year (4 = April). None is January.
+    pub year_start_month: Option<u32>,
 }
 
 impl GroupByField {
     pub fn new(field: &str) -> GroupByField {
-        GroupByField { field: Some(field.into()), alias: None, bucket: None, encoding: None, timezone: None }
+        GroupByField {
+            field: Some(field.into()),
+            alias: None,
+            bucket: None,
+            encoding: None,
+            timezone: None,
+            iso_string: false,
+            year_start_month: None,
+        }
+    }
+
+    /// The months a YEAR or QUARTER bucket is moved by (0 for a calendar year).
+    pub fn year_shift_months(&self) -> u32 {
+        match (self.bucket, self.year_start_month) {
+            (Some(DateBucketUnit::Year | DateBucketUnit::Quarter), Some(m @ 2..=12)) => m - 1,
+            _ => 0,
+        }
     }
 
     pub fn resolved_alias(&self) -> Option<String> {
@@ -700,12 +723,18 @@ fn group_by_from(o: &Document) -> Result<GroupByField, String> {
         Some(Value::String(s)) if s == "EPOCH_MILLIS" => Some(DateEncoding::EpochMillis),
         Some(other) => return Err(format!("not a DateEncoding: {}", other.to_java_json())),
     };
+    let year_start_month = match o.get("yearStartMonth") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(u32::try_from(int_of(v, "yearStartMonth")?).map_err(|_| "yearStartMonth must be 1 to 12".to_string())?),
+    };
     Ok(GroupByField {
         field: opt_string(o.get("field")),
         alias: opt_string(o.get("alias")),
         bucket,
         encoding,
         timezone: opt_string(o.get("timezone")),
+        iso_string: opt_bool(o.get("isoString").unwrap_or(&Value::Null)).unwrap_or(false),
+        year_start_month,
     })
 }
 
@@ -763,5 +792,22 @@ mod tests {
         assert_eq!(Aggregation::new(AggregateFunction::Sum, Some("a.b")).resolved_alias().unwrap(), "sum_a_b");
         assert_eq!(Aggregation::new(AggregateFunction::Count, None).resolved_alias().unwrap(), "count");
         assert_eq!(GroupByField::new("a.b").resolved_alias().unwrap(), "a_b");
+    }
+
+    #[test]
+    fn iso_string_and_year_start_are_read() {
+        let a = AggregateQuery::from_value(
+            &Value::parse_json(r#"{"groupBy":[{"field":"bookedAt","bucket":"YEAR","isoString":true,"yearStartMonth":4},{"field":"x"}]}"#)
+                .unwrap(),
+        )
+        .unwrap();
+        let g = &a.group_by.as_ref().unwrap()[0];
+        assert!(g.iso_string);
+        assert_eq!((g.year_start_month, g.year_shift_months()), (Some(4), 3));
+        let plain = &a.group_by.as_ref().unwrap()[1];
+        assert!(!plain.iso_string);
+        assert_eq!((plain.year_start_month, plain.year_shift_months()), (None, 0));
+        let month = GroupByField { bucket: Some(DateBucketUnit::Month), year_start_month: Some(4), ..GroupByField::new("d") };
+        assert_eq!(month.year_shift_months(), 0, "only YEAR and QUARTER move");
     }
 }

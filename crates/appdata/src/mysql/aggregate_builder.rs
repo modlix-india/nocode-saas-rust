@@ -97,6 +97,7 @@ pub fn group_key(g: &GroupByField, resolver: &FieldResolver) -> FilterResult<Sql
     let Some(bucket) = g.bucket else { return Ok(raw) };
 
     let utc = match g.encoding {
+        None if g.iso_string => ISO_INSTANT.to_string(),
         None => "{0}".to_string(),
         Some(e) => format!("{EPOCH} + INTERVAL FLOOR({{0}} * {} / 1000) SECOND", e.to_millis()),
     };
@@ -104,15 +105,39 @@ pub fn group_key(g: &GroupByField, resolver: &FieldResolver) -> FilterResult<Sql
     let zone = g.resolved_timezone();
     let shifted = zone != "UTC";
 
-    let local = if shifted { format!("CONVERT_TZ({utc}, '+00:00', '{zone}')") } else { utc };
-    let truncated = truncate(bucket, &local);
+    let mut local = if shifted { format!("CONVERT_TZ({utc}, '+00:00', '{zone}')") } else { utc };
+    if g.iso_string {
+        // A bare date is already a local day: it is not moved by the zone.
+        local = format!("IF(LENGTH({{0}}) <= 10, {ISO_DATE}, {local})");
+    }
+    let truncated = truncate_from(bucket, &local, g.year_shift_months());
     let back_to_utc = if shifted { format!("CONVERT_TZ({truncated}, '{zone}', '+00:00')") } else { truncated };
+
+    if g.iso_string {
+        return Ok(Sql::template(&format!("DATE_FORMAT({back_to_utc}, '%Y-%m-%dT%H:%i:%sZ')"), &[raw]));
+    }
 
     let Some(encoding) = g.encoding else { return Ok(Sql::template(&back_to_utc, &[raw])) };
 
     let seconds = format!("TIMESTAMPDIFF(SECOND, {EPOCH}, {back_to_utc})");
     let value = if encoding == DateEncoding::EpochMillis { format!("({seconds}) * 1000") } else { seconds };
     Ok(Sql::template(&value, &[raw]))
+}
+
+/// An ISO-8601 instant text (`2026-11-17T06:13:26Z`, fraction and zone letter ignored) as a
+/// datetime in UTC; NULL when the text is not one.
+const ISO_INSTANT: &str = "STR_TO_DATE(LEFT({0}, 19), '%Y-%m-%dT%H:%i:%s')";
+/// The date part of an ISO-8601 text as a datetime at midnight.
+const ISO_DATE: &str = "STR_TO_DATE(LEFT({0}, 10), '%Y-%m-%d')";
+
+/// [`truncate`] for a year that starts `shift` months after January: the date is moved back
+/// by the shift, truncated, and moved forward again (QUARTER and YEAR only).
+pub fn truncate_from(unit: DateBucketUnit, d: &str, shift: u32) -> String {
+    if shift == 0 || !matches!(unit, DateBucketUnit::Year | DateBucketUnit::Quarter) {
+        return truncate(unit, d);
+    }
+    let moved = format!("DATE_SUB({d}, INTERVAL {shift} MONTH)");
+    format!("({}) + INTERVAL {shift} MONTH", truncate(unit, &moved))
 }
 
 /// Truncate a datetime expression to a boundary, as arithmetic that yields a datetime.
@@ -273,5 +298,33 @@ mod tests {
         a.timezone = Some("Asia/Kolkata".into());
         let zones = named_zones(&q(Some(vec![a, bucket("b", DateBucketUnit::Day)]), vec![agg(Count, None, "n")]));
         assert_eq!(zones.into_iter().collect::<Vec<_>>(), vec!["Asia/Kolkata".to_string()]);
+    }
+
+    #[test]
+    fn iso_text_buckets() {
+        // An ISO text in UTC, bucketed by month in a fixed offset: read as an instant, moved to
+        // the zone, truncated, moved back and written as ISO text again. A bare date is not moved.
+        let g = GroupByField { iso_string: true, timezone: Some("+05:30".into()), ..bucket("bookedAt", DateBucketUnit::Month) };
+        let s = sql(&q(Some(vec![g]), vec![agg(Count, None, "n")]));
+        assert!(s.contains("STR_TO_DATE(LEFT(`bookedAt`, 19), '%Y-%m-%dT%H:%i:%s')"), "{s}");
+        assert!(s.contains("IF(LENGTH(`bookedAt`) <= 10, STR_TO_DATE(LEFT(`bookedAt`, 10), '%Y-%m-%d')"), "{s}");
+        assert!(s.contains("'+00:00', '+05:30'") && s.contains("'+05:30', '+00:00'"), "{s}");
+        assert!(s.starts_with("select DATE_FORMAT(") && s.contains("'%Y-%m-%dT%H:%i:%sZ') as `bookedAt`"), "{s}");
+        // UTC: no zone conversion at all.
+        let u = GroupByField { iso_string: true, ..bucket("bookedAt", DateBucketUnit::Day) };
+        assert!(!sql(&q(Some(vec![u]), vec![agg(Count, None, "n")])).contains("CONVERT_TZ"));
+    }
+
+    #[test]
+    fn financial_year_buckets() {
+        assert_eq!(truncate_from(DateBucketUnit::Year, "d", 0), truncate(DateBucketUnit::Year, "d"));
+        assert_eq!(truncate_from(DateBucketUnit::Month, "d", 3), truncate(DateBucketUnit::Month, "d"));
+        assert_eq!(
+            truncate_from(DateBucketUnit::Year, "d", 3),
+            "(MAKEDATE(YEAR(DATE_SUB(d, INTERVAL 3 MONTH)), 1)) + INTERVAL 3 MONTH"
+        );
+        let g = GroupByField { year_start_month: Some(4), ..bucket("createdAt", DateBucketUnit::Quarter) };
+        let s = sql(&q(Some(vec![g]), vec![agg(Count, None, "n")]));
+        assert!(s.contains("QUARTER(DATE_SUB(`createdAt`, INTERVAL 3 MONTH))") && s.contains("+ INTERVAL 3 MONTH"), "{s}");
     }
 }
