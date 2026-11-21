@@ -22,7 +22,7 @@ pub const MAX_IN_VALUES: usize = 500;
 pub const RECORDS_PAGE: usize = 100;
 pub const RECORDS_EXPORT: usize = 5000;
 /// Fields a source's `records` may list.
-pub const MAX_RECORD_FIELDS: usize = 30;
+pub const MAX_RECORD_FIELDS: usize = 50;
 /// Chart groups kept before the rest is summed as "Other".
 pub const CHART_GROUPS: usize = 50;
 pub const TABLE_ROWS: usize = 500;
