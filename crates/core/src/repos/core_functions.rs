@@ -88,6 +88,8 @@ impl CoreFunctions {
         functions.extend(crate::functions::billing::all(&deps.security));
         // Rust only: a text message from a company's SMS template through its own provider.
         functions.extend(crate::functions::messaging::all(&deps.integrations));
+        // Rust only (CXZ-1780): the report runner (Run, Validate) and its view type rules.
+        functions.extend(crate::report::all(&deps.storage, &deps.security, &deps.cache));
         let mut map = HashMap::new();
         let mut names = Vec::new();
         for f in functions {
@@ -127,7 +129,7 @@ mod tests {
         let storage = crate::testing::offline_storage_service().await;
         let deps = crate::testing::offline_deps("http://127.0.0.1:1", storage).await;
         let core = CoreFunctions::new(&deps);
-        assert_eq!(core.names().len(), 107);
+        assert_eq!(core.names().len(), 110);
         assert_eq!(core.names()[0], "CoreServices.Storage.ClearDraft");
         // The platform family comes last, after the 72 Java has (and the Rust-only EncryptField / DecryptField, CXZ-1961), SendDataNotification,
         // Storage.GetFields, Storage.Batch / UpdateIf / NextSequence, Event.GetScheduleState and
@@ -148,9 +150,12 @@ mod tests {
                 "CoreServices.Billing.RecordUsage",
                 "CoreServices.Billing.ReverseUsage",
                 "CoreServices.Billing.Allowed",
-                "CoreServices.Messaging.SendSms"
+                "CoreServices.Messaging.SendSms",
+                "CoreServices.Report.Run",
+                "CoreServices.Report.Validate",
+                "CoreServices.Report.ViewTypes"
             ],
-            "the contact codes, the connection signature check, the token info, the Word template functions, billing, then SendSms, come last"
+            "the contact codes, the connection signature check, the token info, the Word template functions, billing, SendSms, then the report runner, come last"
         );
         assert_eq!(
             core.names()[88..96],

@@ -807,8 +807,9 @@ async fn listed_only_for_the_platform_app_but_resolvable_everywhere() {
     // File.DocxInspect / DocxPrepare / PdfStamp (Word templates and PDF seal) and
     // Security.GetUserManager (LZT-2411) and Security.GetUsersWithAuthority (CXZ-1852), Billing.RecordUsage /
     // ReverseUsage / Allowed and Messaging.SendSms, and the HRMS ones (Security.GetUsersOrg /
-    // GetClientOrg / SetUserActive, File.CreateSecuredKey / SaveSecuredFile) and File.TemplateToDocx (CXZ-1959), and the Rust-only Crypto.EncryptField / DecryptField (CXZ-1961).
-    assert_eq!(other.filter("").await.unwrap().len(), 99);
+    // GetClientOrg / SetUserActive, File.CreateSecuredKey / SaveSecuredFile) and File.TemplateToDocx (CXZ-1959), and the Rust-only Crypto.EncryptField / DecryptField (CXZ-1961), and
+    // Report.Run / Validate / ViewTypes (CXZ-1780).
+    assert_eq!(other.filter("").await.unwrap().len(), 102);
     for f in ["CoreServices.File.DocxInspect", "CoreServices.File.DocxPrepare", "CoreServices.File.PdfStamp"] {
         assert_eq!(other.filter(&f.to_lowercase()).await.unwrap(), [f]);
     }

@@ -51,6 +51,8 @@ pub mod seal_certs;
 pub mod platform_calls;
 pub mod ratelimit;
 pub mod repos;
+/// Rust only (CXZ-1780): the platform report runner, `CoreServices.Report.*`.
+pub mod report;
 pub mod run_pool;
 pub mod scheduler;
 #[cfg(test)]
