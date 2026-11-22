@@ -1378,3 +1378,521 @@ mod kirun_run {
         assert_eq!(ReportFunction::validate(Arc::new(Fake::default())).get_signature().get_full_name(), "CoreServices.Report.Validate");
     }
 }
+
+// --- CONTRACT 8.7: runner additions for AdZump and LeadZump -------------------------------------
+
+/// A scope in the object form, as LeadZump's lzAccessCondition writes it.
+fn join_scope() -> Value {
+    json!({"condition": {"field": "lzD.assignedUserId", "operator": "IN", "multiValue": [7, 8]},
+           "joins": [{"relation": "ticketId", "alias": "lzD"}]})
+}
+
+#[tokio::test]
+async fn a_flat_scope_reads_exactly_as_before() {
+    let fake = Fake::answering(vec![json!([{"currency": "INR", "n": 2}]), json!([{"rm": 11, "bookings": 2, "value": 900}])]);
+    let out = go(sales(), &[REPORT], &fake, false, false, scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    for q in fake.aggregates.lock().iter() {
+        assert!(q.get("joins").is_none() && q.get("subQueries").is_none(), "{q}");
+        assert_eq!(q["condition"]["conditions"].as_array().unwrap().last().unwrap(), &scope());
+    }
+}
+
+#[tokio::test]
+async fn a_join_scope_goes_with_every_read_of_the_source_but_not_the_label_lookups() {
+    // Grouped by project: the label lookup reads cxProduct without the scope's join.
+    let mut spec = sales();
+    spec["groupBy"] = json!([{"field": "productId", "as": "project"}]);
+    spec["view"] = json!({"type": "BAR"});
+    spec["compare"] = json!({"to": "PREVIOUS_PERIOD"});
+    spec["limit"] = Value::Null;
+    spec["sort"] = Value::Null;
+    let fake = Fake::answering(vec![
+        json!([{"currency": "INR", "n": 2}]),
+        json!([{"project": "P1", "bookings": 2, "value": 900}]),
+        json!([{"project": "P1", "bookings": 1, "value": 300}]),
+    ]);
+    fake.read_answers.lock().insert("cxProduct".into(), rows(json!([{"_id": "P1", "name": "Palm Grove"}])));
+    let out = go(spec, &[REPORT], &fake, false, false, join_scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let aggs = fake.aggregates.lock().clone();
+    assert_eq!(aggs.len(), 3, "probe, report, compare");
+    for q in &aggs {
+        assert_eq!(q["joins"], json!([{"relation": "ticketId", "alias": "lzD"}]), "{q}");
+        assert!(q.get("subQueries").is_none());
+        assert_eq!(q["condition"]["conditions"].as_array().unwrap().last().unwrap(), &join_scope()["condition"], "the scope's condition is ANDed in");
+    }
+    assert_eq!(out["rows"][0]["project_label"], json!("Palm Grove"));
+    assert_eq!(out["rows"][0]["value_cmp"], json!(300));
+    let reads = fake.reads.lock().clone();
+    assert!(!reads.is_empty());
+    assert!(reads.iter().all(|(st, q)| st == "cxProduct" && q.get("joins").is_none()), "a label lookup never carries the scope");
+
+    // View records: the page read carries the join too.
+    let fake = Fake::default();
+    fake.read_answers.lock().insert("cxCase".into(), rows(json!([{"_id": "C1", "caseNo": "CX-1"}])));
+    let out = go(records_spec(json!({"page": 0, "size": 10})), &[REPORT, CASE_READ], &fake, false, false, join_scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let rec = fake.records.lock().clone();
+    assert_eq!(rec[0].1["joins"], join_scope()["joins"]);
+
+    // A list (TABLE without measures) reads a page with the join.
+    let fake = Fake::default();
+    let list = json!({"v": 1, "source": "cases", "fields": ["caseNo"], "view": {"type": "LIST"}});
+    let out = go(list, &[REPORT], &fake, false, false, join_scope()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(fake.reads.lock()[0].1["joins"], join_scope()["joins"]);
+}
+
+#[tokio::test]
+async fn a_subquery_scope_reaches_the_aggregate() {
+    let scope = json!({"condition": {"operator": "OR", "conditions": [
+                            {"field": "createdBy", "operator": "IN", "multiValue": [7]},
+                            {"field": "lzVd.count", "operator": "GREATER_THAN", "value": 0}]},
+                       "subQueries": [{"storage": "deal", "relation": "ownerId", "alias": "lzVd", "required": false,
+                                       "condition": {"field": "assignedUserId", "operator": "IN", "multiValue": [7]}}]});
+    let spec = json!({"v": 1, "source": "fixedCases", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}});
+    let fake = Fake::answering(vec![json!([{"n": 4}])]);
+    let out = go(spec, &[], &fake, false, false, scope.clone()).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let q = fake.aggregates.lock()[0].clone();
+    assert_eq!(q["subQueries"], scope["subQueries"]);
+    assert!(q.get("joins").is_none());
+    assert_eq!(q["condition"], scope["condition"], "with no filters the scope's condition is the condition");
+    assert_eq!(out["rows"][0]["n"], json!(4));
+
+    // A different scope (same spec) is another cache entry.
+    let mut other = scope.clone();
+    other["subQueries"][0]["condition"]["multiValue"] = json!([8]);
+    let spec = json!({"v": 1, "source": "fixedCases", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}});
+    let cat = Catalog::parse(&catalog()).unwrap();
+    let caller = spec::Caller { authorities: &[], now: now() };
+    let p1 = spec::validate(&spec, &cat, &scope, &caller).unwrap();
+    let p2 = spec::validate(&spec, &cat, &other, &caller).unwrap();
+    assert_ne!(exec::cache_key(&p1, &cat, &spec, &scope, None, None, 7), exec::cache_key(&p2, &cat, &spec, &other, None, None, 7));
+}
+
+#[tokio::test]
+async fn scope_object_form_is_checked_with_paths() {
+    let spec = json!({"v": 1, "source": "cases", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}});
+    let code = |scope: Value| {
+        let spec = spec.clone();
+        async move {
+            let out = go(spec, &[REPORT], &Fake::default(), true, false, scope).await;
+            assert_eq!(out["ok"], json!(false), "{out}");
+            (out["error"]["code"].as_str().unwrap().to_string(), out["error"]["path"].as_str().unwrap().to_string())
+        }
+    };
+    let pair = |c: &str, p: &str| (c.to_string(), p.to_string());
+    // lzAccessCondition's whole answer is not a scope: denied / ruleIds must be handled by the app.
+    let mut whole = join_scope();
+    whole["denied"] = json!(false);
+    assert_eq!(code(whole).await, pair("BAD_KIND", "scope.denied"));
+    assert_eq!(code(json!({"joins": [{"relation": "ticketId"}]})).await, pair("BAD_KIND", "scope.condition"));
+    assert_eq!(code(json!({"condition": {}, "joins": [{"alias": "x"}]})).await, pair("BAD_KIND", "scope.joins[0].relation"));
+    assert_eq!(code(json!({"condition": {}, "joins": [{"relation": "ticketId", "alias": "status"}]})).await, pair("BAD_KIND", "scope.joins[0].alias"));
+    assert_eq!(code(json!({"condition": {}, "joins": [{"relation": "ticketId", "alias": "a b"}]})).await, pair("BAD_KIND", "scope.joins[0].alias"));
+    assert_eq!(code(json!({"condition": {}, "joins": [{"relation": "ticketId", "type": "FULL"}]})).await, pair("BAD_KIND", "scope.joins[0].type"));
+    assert_eq!(code(json!({"condition": {}, "joins": [{"relation": "a", "alias": "x"}], "subQueries": [{"storage": "deal", "relation": "ownerId", "alias": "x"}]})).await,
+               pair("BAD_KIND", "scope.subQueries[0].alias"));
+    assert_eq!(code(json!({"condition": {}, "subQueries": [{"relation": "ownerId"}]})).await, pair("BAD_KIND", "scope.subQueries[0].storage"));
+    assert_eq!(code(json!({"condition": {}, "subQueries": [{"storage": "deal", "relation": "ownerId", "select": 1}]})).await, pair("BAD_KIND", "scope.subQueries[0].select"));
+    assert_eq!(code(json!({"condition": {}, "subQueries": [{"storage": "deal", "relation": "ownerId", "required": "no"}]})).await, pair("BAD_KIND", "scope.subQueries[0].required"));
+    let six: Vec<Value> = (0..6).map(|i| json!({"relation": format!("r{i}"), "alias": format!("a{i}")})).collect();
+    assert_eq!(code(json!({"condition": {}, "joins": six})).await, pair("TOO_MANY", "scope.joins"));
+    assert_eq!(code(json!("productId = P1")).await, pair("BAD_KIND", "scope"));
+    // Scope stays required: null is refused; {condition: {}} (every row, like {}) is a scope.
+    let out = go(spec.clone(), &[REPORT], &Fake::default(), true, false, Value::Null).await;
+    assert_eq!(out["error"]["code"], json!("SCOPE_REQUIRED"));
+    let out = go(spec.clone(), &[REPORT], &Fake::default(), true, false, json!({"condition": {}})).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+}
+
+/// Records every call's args; answers one row.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<Obj>>);
+
+#[async_trait]
+impl FunctionCaller for Recorder {
+    async fn call(&self, _: &str, args: Obj) -> Result<Obj, String> {
+        self.0.lock().push(args);
+        Ok(json!({"summary": {"collected": 3, "pending": 1}}).as_object().unwrap().clone())
+    }
+}
+
+fn ad_catalog(tz: &str) -> Value {
+    json!({"v": 1, "app": "adzumptwo", "timeZone": tz,
+        "sources": {
+            "performance": {"kind": "STORAGE", "storage": "metricDaily", "label": "Performance", "scope": "REQUIRED",
+                "fields": {
+                    "metricDate": {"kind": "DATE", "label": "Day", "dateOnly": true},
+                    "syncedAt": {"kind": "DATE", "label": "Synced"},
+                    "platform": {"kind": "DIMENSION", "label": "Platform", "labels": {"META": "Meta", "META_CTWA": "Click to WhatsApp"}},
+                    "adGroupIdKey": {"kind": "DIMENSION", "label": "Ad group", "lookup": {"source": "adGroups"}, "labels": {"0": "Campaign level"}},
+                    "spend": {"kind": "MEASURE", "label": "Spend", "format": "MONEY", "currency": "USD"},
+                    "impressions": {"kind": "MEASURE", "label": "Impressions"},
+                    "clicks": {"kind": "MEASURE", "label": "Clicks"},
+                    "leads": {"kind": "MEASURE", "label": "Leads"},
+                    "reach": {"kind": "MEASURE", "label": "Reach"},
+                    "conversations": {"kind": "MEASURE", "label": "Conversations"},
+                    "videoViews": {"kind": "MEASURE", "label": "Video views"}},
+                "records": {"fields": ["platform", "metricDate", "spend"]}},
+            "adGroups": {"kind": "STORAGE", "storage": "adGroup", "label": "Ad groups", "lookupOnly": true, "fields": {"name": {}}},
+            "funnel": {"kind": "FUNCTION", "function": "AdZumpV2.rptFunnel", "resultPath": "summary", "label": "Funnel",
+                "params": {"scope": {}}, "periodParams": {"from": "dateFrom", "to": "dateTo"},
+                "columns": {"collected": {"kind": "MEASURE", "label": "Count"}}},
+            "calls": {"kind": "FUNCTION", "function": "LeadZumpV2.callStatsSummaryQuery", "resultPath": "summary", "label": "Calls",
+                "params": {"filter": {"directions": ["inbound"]}},
+                "periodParams": {"from": "filter.from", "to": "filter.to", "format": "EPOCH_SECONDS", "tzOffsetParam": "filter.tzOffset", "default": "LAST_30_DAYS"},
+                "columns": {"collected": {"kind": "MEASURE", "label": "Total"}, "pending": {"kind": "MEASURE", "label": "Missed"}}}}})
+}
+
+async fn ad_run(cat: &Value, spec: Value, backend: &Fake, f: &dyn FunctionCaller, dry: bool) -> Value {
+    let scope = json!({"field": "adAccountId", "operator": "IN", "multiValue": ["A1"]});
+    exec::run(
+        RunRequest { spec: &spec, catalog: cat, scope: &scope, force: false, dry_run: dry, app_code: None, client_code: Some("FIN".into()),
+                     user_id: 7, authorities: &[], now: now() },
+        backend,
+        f,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn period_params_put_the_period_into_a_function_source() {
+    let cat = ad_catalog("Asia/Kolkata");
+    let rec = Recorder::default();
+    let spec = json!({"v": 1, "source": "funnel", "filters": [{"field": "period", "period": "LAST_7_DAYS"}], "view": {"type": "KPI"}});
+    let out = ad_run(&cat, spec, &Fake::default(), &rec, false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let args = rec.0.lock()[0].clone();
+    assert_eq!((args["dateFrom"].clone(), args["dateTo"].clone()), (json!("2026-11-11"), json!("2026-11-17")), "DATE: local days, to inclusive");
+    assert_eq!(args["scope"], json!({}), "fixed params stay");
+    assert_eq!(out["period"], json!({"from": "2026-11-11", "to": "2026-11-17", "label": "Last 7 days"}));
+    assert_eq!(out["rows"][0]["collected"], json!(3));
+
+    // EPOCH_SECONDS into a nested param, the zone offset in minutes, and the default period.
+    let rec = Recorder::default();
+    let out = ad_run(&cat, json!({"v": 1, "source": "calls", "view": {"type": "KPI"}}), &Fake::default(), &rec, false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let f = rec.0.lock()[0]["filter"].clone();
+    let lo = Utc.with_ymd_and_hms(2026, 10, 18, 18, 30, 0).unwrap().timestamp();
+    let hi = Utc.with_ymd_and_hms(2026, 11, 17, 18, 30, 0).unwrap().timestamp();
+    assert_eq!(f, json!({"directions": ["inbound"], "from": lo, "to": hi, "tzOffset": 330}), "19 Oct to 17 Nov in Kolkata, to exclusive");
+    assert_eq!(out["period"]["label"], json!("Last 30 days"));
+
+    // ALL_TIME leaves from / to alone (the function's own default); the offset is still given.
+    let rec = Recorder::default();
+    let spec = json!({"v": 1, "source": "calls", "filters": [{"field": "period", "period": "ALL_TIME"}], "view": {"type": "KPI"}});
+    let out = ad_run(&cat, spec, &Fake::default(), &rec, false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(rec.0.lock()[0]["filter"], json!({"directions": ["inbound"], "tzOffset": 330}));
+
+    // The period goes into the cache key through the spec: another period is another run.
+    let fake = Fake::default();
+    let rec = Recorder::default();
+    for p in ["LAST_7_DAYS", "LAST_7_DAYS", "THIS_MONTH"] {
+        let spec = json!({"v": 1, "source": "funnel", "filters": [{"field": "period", "period": p}], "view": {"type": "KPI"}});
+        ad_run(&cat, spec, &fake, &rec, false).await;
+    }
+    assert_eq!(rec.0.lock().len(), 2, "the second LAST_7_DAYS run came from the cache");
+
+    // Refusals.
+    let code = |spec: Value| {
+        let cat = cat.clone();
+        async move {
+            let out = ad_run(&cat, spec, &Fake::default(), &Recorder::default(), true).await;
+            assert_eq!(out["ok"], json!(false), "{out}");
+            (out["error"]["code"].as_str().unwrap().to_string(), out["error"]["path"].as_str().unwrap().to_string())
+        }
+    };
+    let pair = |c: &str, p: &str| (c.to_string(), p.to_string());
+    assert_eq!(code(json!({"source": "funnel", "filters": [{"field": "day", "period": "TODAY"}]})).await, pair("UNKNOWN_FIELD", "filters[0].field"));
+    assert_eq!(code(json!({"source": "funnel", "filters": [{"field": "period", "op": "EQ", "value": 1}]})).await, pair("BAD_KIND", "filters[0].op"));
+    assert_eq!(code(json!({"source": "funnel", "filters": [{"field": "period"}]})).await, pair("BAD_PERIOD", "filters[0].period"));
+    assert_eq!(code(json!({"source": "funnel", "filters": [{"field": "period", "period": "TODAY"}, {"field": "period", "period": "TODAY"}]})).await,
+               pair("BAD_PERIOD", "filters"));
+    assert_eq!(code(json!({"source": "funnel", "filters": [{"field": "period", "period": "TODAY"}], "compare": {"to": "PREVIOUS_PERIOD"}})).await.0, "BAD_PERIOD");
+    // Without periodParams a function source still takes no filters (as before).
+    let out = go(json!({"source": "moneySummary", "filters": [{"field": "period", "period": "TODAY"}]}), &[], &Fake::default(), true, false, scope()).await;
+    assert_eq!((out["error"]["code"].clone(), out["error"]["path"].clone()), (json!("BAD_KIND"), json!("filters")));
+
+    // Catalog checks, with paths.
+    let bad = |pp: Value, kind: &str| {
+        let mut c = ad_catalog("UTC");
+        c["sources"]["funnel"]["kind"] = json!(kind);
+        if kind == "STORAGE" {
+            c["sources"]["funnel"]["storage"] = json!("x");
+        }
+        c["sources"]["funnel"]["periodParams"] = pp;
+        async move {
+            let out = ad_run(&c, json!({"source": "funnel"}), &Fake::default(), &Recorder::default(), true).await;
+            assert_eq!(out["error"]["code"], json!("SOURCE_FAILED"), "{out}");
+            out["error"]["path"].as_str().unwrap().to_string()
+        }
+    };
+    assert_eq!(bad(json!({"from": "dateFrom"}), "STORAGE").await, "catalog.sources.funnel.periodParams");
+    assert_eq!(bad(json!({"format": "DATE"}), "FUNCTION").await, "catalog.sources.funnel.periodParams");
+    assert_eq!(bad(json!({"from": "dateFrom", "format": "UNIX"}), "FUNCTION").await, "catalog.sources.funnel.periodParams.format");
+    assert_eq!(bad(json!({"from": "a.b.c.d"}), "FUNCTION").await, "catalog.sources.funnel.periodParams.from");
+    assert_eq!(bad(json!({"from": "filter", "to": "filter.to"}), "FUNCTION").await, "catalog.sources.funnel.periodParams.to");
+    assert_eq!(bad(json!({"from": "dateFrom", "default": "CUSTOM"}), "FUNCTION").await, "catalog.sources.funnel.periodParams.default");
+    assert_eq!(bad(json!({"from": "dateFrom", "when": 1}), "FUNCTION").await, "catalog.sources.funnel.periodParams.when");
+}
+
+#[tokio::test]
+async fn date_only_fields_filter_and_bucket_on_the_day_as_written() {
+    // Los Angeles is west of UTC: 17 Nov 04:30 UTC is still 16 Nov there.
+    let cat = ad_catalog("America/Los_Angeles");
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "groupBy": [{"field": "metricDate", "bucket": "DAY", "as": "day"}],
+                      "filters": [{"field": "metricDate", "period": "LAST_7_DAYS"}], "view": {"type": "LINE"}});
+    // The storage answers a DATE bucket as the day itself (a date or a midnight datetime).
+    let fake = Fake::answering(vec![json!([{"day": "2026-11-10", "spend": 5}, {"day": "2026-11-16 00:00:00", "spend": 7}])]);
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let q = fake.aggregates.lock()[0].clone();
+    assert_eq!(q["groupBy"][0]["timezone"], json!("UTC"), "no zone shift on a calendar date");
+    assert_eq!(q["condition"]["conditions"][0], json!({"operator": "AND", "conditions": [
+        {"field": "metricDate", "operator": "GREATER_THAN_EQUAL", "value": "2026-11-10"},
+        {"field": "metricDate", "operator": "LESS_THAN", "value": "2026-11-17"}]}));
+    assert_eq!(out["period"]["from"], json!("2026-11-10"));
+    let r = out["rows"].as_array().unwrap();
+    assert_eq!(r.len(), 7, "every day of the period, filled");
+    assert_eq!((r[0]["day"].clone(), r[0]["day_label"].clone(), r[0]["spend"].clone()), (json!("2026-11-10"), json!("10 Nov"), json!(5)));
+    assert_eq!((r[6]["day"].clone(), r[6]["spend"].clone()), (json!("2026-11-16"), json!(7)), "the last day is not moved to the 15th");
+
+    // The same on a plain DATE field (an instant) shifts by the zone, as before.
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "groupBy": [{"field": "syncedAt", "bucket": "DAY", "as": "day"}],
+                      "filters": [{"field": "syncedAt", "period": "LAST_7_DAYS"}], "view": {"type": "LINE"}});
+    let fake = Fake::answering(vec![json!([])]);
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let q = fake.aggregates.lock()[0].clone();
+    assert_eq!(q["groupBy"][0]["timezone"], json!("-08:00"));
+    assert_eq!(q["condition"]["conditions"][0]["conditions"][0]["value"], json!("2026-11-10 08:00:00"));
+
+    // Compare on a calendar date keeps the dates as written.
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "filters": [{"field": "metricDate", "period": "LAST_7_DAYS"}], "compare": {"to": "PREVIOUS_PERIOD"}, "view": {"type": "KPI"}});
+    let fake = Fake::answering(vec![json!([{"spend": 10}]), json!([{"spend": 8}])]);
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(fake.aggregates.lock()[1]["condition"]["conditions"][0]["conditions"][1]["value"], json!("2026-11-10"));
+    assert_eq!(out["rows"][0]["spend_delta_pct"], json!(25));
+
+    // Catalog checks.
+    for (field, path) in [
+        (json!({"kind": "DIMENSION", "dateOnly": true}), "catalog.sources.performance.fields.metricDate.dateOnly"),
+        (json!({"kind": "DATE", "dateOnly": true, "stringDate": true}), "catalog.sources.performance.fields.metricDate.dateOnly"),
+        (json!({"kind": "DATE", "dateOnly": "yes"}), "catalog.sources.performance.fields.metricDate.dateOnly"),
+    ] {
+        let mut c = ad_catalog("UTC");
+        c["sources"]["performance"]["fields"]["metricDate"] = field;
+        let out = ad_run(&c, json!({"source": "performance", "measures": [{"fn": "COUNT"}]}), &Fake::default(), &Recorder::default(), true).await;
+        assert_eq!((out["error"]["code"].clone(), out["error"]["path"].clone()), (json!("SOURCE_FAILED"), json!(path)), "{out}");
+    }
+}
+
+#[tokio::test]
+async fn periods_can_end_yesterday() {
+    let d = NaiveDate::from_ymd_opt(2026, 11, 17).unwrap();
+    let r = |name: &str, y: bool| period::resolve_with(name, d, 4, None, y).unwrap().to_json();
+    assert_eq!(r("LAST_7_DAYS", true), json!({"from": "2026-11-10", "to": "2026-11-16", "label": "Last 7 days"}));
+    assert_eq!(r("LAST_30_DAYS", true)["from"], json!("2026-10-18"));
+    assert_eq!(r("LAST_90_DAYS", true)["to"], json!("2026-11-16"));
+    assert_eq!(r("LAST_7_DAYS", false)["to"], json!("2026-11-17"));
+    for other in ["TODAY", "THIS_MONTH", "LAST_12_MONTHS", "THIS_WEEK"] {
+        assert_eq!(r(other, true), r(other, false), "{other} is unchanged");
+    }
+    // Previous period of 10 to 16 Nov: 3 to 9 Nov (rptScope.prev).
+    let p = period::resolve_with("LAST_7_DAYS", d, 4, None, true).unwrap();
+    assert_eq!(period::compare_period(&p, "PREVIOUS_PERIOD").unwrap().to_json()["from"], json!("2026-11-03"));
+    assert_eq!(period::compare_period(&p, "PREVIOUS_PERIOD").unwrap().to_json()["to"], json!("2026-11-09"));
+
+    // Catalog-wide, and a source may opt out.
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "filters": [{"field": "metricDate", "period": "LAST_7_DAYS"}], "view": {"type": "KPI"}});
+    let mut cat = ad_catalog("Asia/Kolkata");
+    cat["periodEndsYesterday"] = json!(true);
+    let out = ad_run(&cat, spec.clone(), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["period"], json!({"from": "2026-11-10", "to": "2026-11-16", "label": "Last 7 days"}), "{out}");
+    let fake = Fake::answering(vec![json!([{"spend": 1}])]);
+    ad_run(&cat, spec.clone(), &fake, &Recorder::default(), false).await;
+    assert_eq!(fake.aggregates.lock()[0]["condition"]["conditions"][0]["conditions"][1]["value"], json!("2026-11-17"), "LT the day after yesterday");
+    cat["sources"]["performance"]["periodEndsYesterday"] = json!(false);
+    let out = ad_run(&cat, spec.clone(), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["period"]["to"], json!("2026-11-17"));
+    // On a function source the period it is given ends yesterday too.
+    let mut cat = ad_catalog("Asia/Kolkata");
+    cat["sources"]["funnel"]["periodEndsYesterday"] = json!(true);
+    let rec = Recorder::default();
+    ad_run(&cat, json!({"source": "funnel", "filters": [{"field": "period", "period": "LAST_7_DAYS"}], "view": {"type": "KPI"}}), &Fake::default(), &rec, false).await;
+    assert_eq!(rec.0.lock()[0]["dateTo"], json!("2026-11-16"));
+
+    // The cache key: the catalog setting changes the key even for ALL_TIME.
+    let all = json!({"v": 1, "source": "performance", "measures": [{"fn": "COUNT", "as": "n"}], "view": {"type": "KPI"}});
+    let key = |c: &Value| {
+        let cat = Catalog::parse(c).unwrap();
+        let caller = spec::Caller { authorities: &[], now: now() };
+        let s = json!({});
+        let p = spec::validate(&all, &cat, &s, &caller).unwrap();
+        exec::cache_key(&p, &cat, &all, &s, None, None, 7)
+    };
+    let mut on = ad_catalog("UTC");
+    on["periodEndsYesterday"] = json!(true);
+    assert_ne!(key(&ad_catalog("UTC")), key(&on));
+
+    let mut badc = ad_catalog("UTC");
+    badc["periodEndsYesterday"] = json!("yes");
+    let out = ad_run(&badc, spec.clone(), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!((out["error"]["code"].clone(), out["error"]["path"].clone()), (json!("SOURCE_FAILED"), json!("catalog.periodEndsYesterday")));
+    let mut bads = ad_catalog("UTC");
+    bads["sources"]["performance"]["periodEndsYesterday"] = json!(1);
+    let out = ad_run(&bads, spec, &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["error"]["path"], json!("catalog.sources.performance.periodEndsYesterday"));
+}
+
+#[tokio::test]
+async fn a_ratio_may_carry_a_scale() {
+    let cat = ad_catalog("UTC");
+    let spec = json!({"v": 1, "source": "performance",
+                      "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}, {"fn": "SUM", "field": "impressions", "as": "imps"}],
+                      "derived": [{"as": "cpm", "label": "CPM", "ratio": ["spend", "imps"], "scale": 1000}],
+                      "groupBy": [{"field": "platform", "as": "platform"}],
+                      "filters": [{"field": "metricDate", "period": "THIS_MONTH"}], "compare": {"to": "PREVIOUS_PERIOD"},
+                      "view": {"type": "TABLE"}});
+    let fake = Fake::answering(vec![
+        json!([{"platform": "META", "spend": 250, "imps": 2000}, {"platform": "GOOGLE", "spend": 10, "imps": 0}]),
+        json!([{"platform": "META", "spend": 120, "imps": 1500}]),
+    ]);
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let r = out["rows"].as_array().unwrap();
+    let meta = r.iter().find(|x| x["platform"] == "META").unwrap();
+    assert_eq!(meta["cpm"], json!(125), "250 / 2000 x 1000");
+    assert_eq!(meta["cpm_cmp"], json!(80), "the compare side is scaled too");
+    assert_eq!(meta["cpm_delta_pct"], json!(56.25));
+    assert_eq!(r.iter().find(|x| x["platform"] == "GOOGLE").unwrap().get("cpm").cloned().unwrap_or(Value::Null), Value::Null, "no impressions: null");
+    let col = out["columns"].as_array().unwrap().iter().find(|c| c["key"] == "cpm").unwrap().clone();
+    assert_eq!((col["format"].clone(), col["currency"].clone()), (json!("MONEY"), json!("USD")));
+
+    let code = |derived: Value| {
+        let cat = cat.clone();
+        async move {
+            let spec = json!({"source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}, {"fn": "SUM", "field": "impressions", "as": "imps"}],
+                              "derived": [derived], "view": {"type": "KPI"}});
+            let out = ad_run(&cat, spec, &Fake::default(), &Recorder::default(), true).await;
+            (out["error"]["code"].clone(), out["error"]["path"].clone())
+        }
+    };
+    assert_eq!(code(json!({"as": "x", "percent": ["spend", "imps"], "scale": 10})).await, (json!("BAD_KIND"), json!("derived[0].scale")));
+    assert_eq!(code(json!({"as": "x", "ratio": ["spend", "imps"], "scale": 0})).await, (json!("BAD_KIND"), json!("derived[0].scale")));
+    assert_eq!(code(json!({"as": "x", "ratio": ["spend", "imps"], "scale": "1000"})).await, (json!("BAD_KIND"), json!("derived[0].scale")));
+    // A function source's derived ratio scales the same way.
+    let rec = Recorder::default();
+    let spec = json!({"source": "calls", "derived": [{"as": "perK", "ratio": ["pending", "collected"], "scale": 1000}], "view": {"type": "TABLE"}});
+    let out = ad_run(&cat, spec, &Fake::default(), &rec, false).await;
+    assert_eq!(out["rows"][0]["perK"], json!(333.3333333333333), "{out}");
+}
+
+#[tokio::test]
+async fn inline_labels_name_codes_and_win_over_a_lookup() {
+    let cat = ad_catalog("UTC");
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "groupBy": [{"field": "platform", "as": "platform"}], "view": {"type": "BAR"}});
+    let fake = Fake::answering(vec![json!([{"platform": "META", "spend": 3}, {"platform": "META_CTWA", "spend": 2}, {"platform": "TIKTOK", "spend": 1}, {"spend": 1}])]);
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let labels: Vec<Value> = out["rows"].as_array().unwrap().iter().map(|r| r["platform_label"].clone()).collect();
+    assert_eq!(labels, vec![json!("Meta"), json!("Click to WhatsApp"), json!("TIKTOK"), json!("Not set")]);
+    assert!(fake.reads.lock().is_empty(), "an inline map reads nothing");
+    let keys: Vec<&str> = out["columns"].as_array().unwrap().iter().map(|c| c["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["platform", "platform_label", "spend"]);
+
+    // With a lookup: the "0" key is named inline (a number 0 too), the rest are looked up.
+    let spec = json!({"v": 1, "source": "performance", "measures": [{"fn": "SUM", "field": "spend", "as": "spend"}],
+                      "groupBy": [{"field": "adGroupIdKey", "as": "ag"}], "sort": [{"by": "spend", "dir": "DESC"}], "view": {"type": "TABLE"}});
+    let fake = Fake::answering(vec![json!([{"ag": "0", "spend": 9}, {"ag": "G1", "spend": 5}, {"ag": 0, "spend": 1}, {"ag": "G2", "spend": 0}])]);
+    fake.read_answers.lock().insert("adGroup".into(), rows(json!([{"_id": "G1", "name": "Retargeting"}])));
+    let out = ad_run(&cat, spec, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    let labels: Vec<Value> = out["rows"].as_array().unwrap().iter().map(|r| r["ag_label"].clone()).collect();
+    assert_eq!(labels, vec![json!("Campaign level"), json!("Retargeting"), json!("Campaign level"), json!("G2")]);
+    let reads = fake.reads.lock().clone();
+    assert_eq!(reads[0].1["condition"]["multiValue"], json!(["G1", "G2"]), "the lookup reads only keys the map lacks");
+
+    // View records label the field too.
+    let fake = Fake::default();
+    fake.read_answers.lock().insert("metricDaily".into(), rows(json!([{"_id": "M1", "platform": "META", "metricDate": "2026-11-10", "spend": 4}])));
+    let out = ad_run(&cat, json!({"v": 1, "source": "performance", "records": {"page": 0, "size": 10}}), &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["rows"][0]["platform_label"], json!("Meta"));
+    assert!(out["columns"].as_array().unwrap().iter().any(|c| c["key"] == "platform_label" && c["hidden"] == json!(true)));
+
+    // Catalog checks.
+    for (labels, path) in [
+        (json!("META=Meta"), "catalog.sources.performance.fields.platform.labels"),
+        (json!({"META": 1}), "catalog.sources.performance.fields.platform.labels.META"),
+        (json!({"META": " "}), "catalog.sources.performance.fields.platform.labels.META"),
+    ] {
+        let mut c = ad_catalog("UTC");
+        c["sources"]["performance"]["fields"]["platform"]["labels"] = labels;
+        let out = ad_run(&c, json!({"source": "performance", "measures": [{"fn": "COUNT"}]}), &Fake::default(), &Recorder::default(), true).await;
+        assert_eq!((out["error"]["code"].clone(), out["error"]["path"].clone()), (json!("SOURCE_FAILED"), json!(path)), "{out}");
+    }
+    let mut c = ad_catalog("UTC");
+    c["sources"]["performance"]["fields"]["spend"]["labels"] = json!({"0": "None"});
+    let out = ad_run(&c, json!({"source": "performance", "measures": [{"fn": "COUNT"}]}), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["error"]["path"], json!("catalog.sources.performance.fields.spend.labels"));
+}
+
+#[tokio::test]
+async fn a_table_takes_six_measures_and_charts_keep_three() {
+    let cat = ad_catalog("UTC");
+    let m = |n: usize| -> Value {
+        let fields = ["spend", "leads", "clicks", "impressions", "reach", "conversations", "videoViews"];
+        Value::Array(fields.iter().take(n).map(|f| json!({"fn": "SUM", "field": f, "as": f})).collect())
+    };
+    let spec = |n: usize, ty: Option<&str>| {
+        let mut s = json!({"v": 1, "source": "performance", "measures": m(n), "groupBy": [{"field": "platform", "as": "platform"}]});
+        if let Some(t) = ty {
+            s["view"] = json!({"type": t});
+        }
+        s
+    };
+    let out = ad_run(&cat, spec(6, Some("TABLE")), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["fits"]["TABLE"], json!({"ok": true}));
+    assert_eq!(out["fits"]["BAR"], json!({"ok": false, "reason": "Only a table takes more than 3 measures; this report has 6."}));
+    assert_eq!(out["fits"]["LIST"]["ok"], json!(false));
+    let out = ad_run(&cat, spec(5, None), &Fake::default(), &Recorder::default(), true).await;
+    assert_eq!(out["ok"], json!(true), "no view is a TABLE: {out}");
+    // A real run with six measures and two derived (Campaign performance).
+    let mut s = spec(6, Some("TABLE"));
+    s["derived"] = json!([{"as": "cpl", "ratio": ["spend", "leads"]}, {"as": "ctr", "percent": ["clicks", "impressions"]}]);
+    let fake = Fake::answering(vec![json!([{"platform": "META", "spend": 100, "leads": 4, "clicks": 50, "impressions": 1000, "reach": 1, "conversations": 2}])]);
+    let out = ad_run(&cat, s, &fake, &Recorder::default(), false).await;
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!((out["rows"][0]["cpl"].clone(), out["rows"][0]["ctr"].clone()), (json!(25), json!(5)));
+    assert_eq!(fake.aggregates.lock()[0]["aggregations"].as_array().unwrap().len(), 6);
+
+    let code = |s: Value| {
+        let cat = cat.clone();
+        async move {
+            let out = ad_run(&cat, s, &Fake::default(), &Recorder::default(), true).await;
+            (out["error"]["code"].clone(), out["error"]["path"].clone(), out["error"]["message"].clone())
+        }
+    };
+    let (c, p, msg) = code(spec(7, Some("TABLE"))).await;
+    assert_eq!((c, p), (json!("TOO_MANY"), json!("measures")));
+    assert!(msg.as_str().unwrap().contains("at most 6"), "{msg}");
+    let (c, p, msg) = code(spec(4, Some("BAR"))).await;
+    assert_eq!((c, p), (json!("TOO_MANY"), json!("measures")));
+    assert_eq!(msg, json!("Only a table takes more than 3 measures (up to 6); this bar has 4."));
+    assert_eq!(code(spec(4, Some("LIST"))).await.0, json!("TOO_MANY"));
+    assert_eq!(code(spec(3, Some("BAR"))).await.0, Value::Null, "3 measures on a chart are fine");
+    // The rule table tells the UI.
+    assert_eq!(shape::rules_json()["measureCaps"], json!({"TABLE": 6, "other": 3}));
+}

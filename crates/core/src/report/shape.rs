@@ -144,6 +144,23 @@ pub fn fits(shape: Shape) -> Value {
     Value::Object(m)
 }
 
+/// [`fits`] for a storage report with `measures` spec measures: more than 3 fit only a TABLE (up to
+/// 6, CONTRACT 8.7), so every other type says why.
+pub fn fits_with_measures(shape: Shape, measures: usize) -> Value {
+    let mut v = fits(shape);
+    if measures > super::spec::MAX_MEASURES {
+        if let Value::Object(m) = &mut v {
+            for (ty, verdict) in m.iter_mut() {
+                if ty != "TABLE" {
+                    *verdict = json!({"ok": false, "reason": format!(
+                        "Only a table takes more than {} measures; this report has {measures}.", super::spec::MAX_MEASURES)});
+                }
+            }
+        }
+    }
+    v
+}
+
 /// The table itself, for the UI to mirror: each type with, per group by count ("0", "1", "2"),
 /// `{"min": n, "max": n|null}` or null when that many group by entries never fit.
 pub fn rules_json() -> Value {
@@ -159,7 +176,8 @@ pub fn rules_json() -> Value {
         .collect();
     json!({"v": 1, "types": types, "valuesAre": "measures plus derived measures",
            "groupByIs": "spec group by entries; for a FUNCTION source its visible dimension columns (not hidden, not currency)",
-           "anyShape": ["TABLE", "LIST"]})
+           "anyShape": ["TABLE", "LIST"],
+           "measureCaps": {"TABLE": super::spec::MAX_TABLE_MEASURES, "other": super::spec::MAX_MEASURES}})
 }
 
 #[cfg(test)]

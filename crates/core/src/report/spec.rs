@@ -12,6 +12,15 @@ use super::shape::{self, Shape};
 pub type Obj = Map<String, Value>;
 
 pub const MAX_MEASURES: usize = 3;
+/// A TABLE view takes up to 6 measures (CONTRACT 8.7, AdZump's Campaign performance); every other
+/// view keeps [`MAX_MEASURES`].
+pub const MAX_TABLE_MEASURES: usize = 6;
+/// A row scope's joins and subQueries (CONTRACT 8.7, R1).
+pub const MAX_SCOPE_JOINS: usize = 5;
+pub const MAX_SCOPE_SUB_QUERIES: usize = 5;
+/// Entries in one field's inline `labels` map, and the longest label.
+pub const MAX_LABELS: usize = 1000;
+pub const MAX_LABEL_CHARS: usize = 200;
 pub const MAX_GROUP_BY: usize = 2;
 pub const MAX_FILTERS: usize = 8;
 pub const MAX_DERIVED: usize = 3;
@@ -106,6 +115,13 @@ pub struct Field {
     pub hidden: bool,
     /// A FUNCTION column whose labels come from a map in the function's answer (`caseNumbers`).
     pub label_map_path: Option<String>,
+    /// CONTRACT 8.7 (R3): a calendar date (MySQL DATE holding a local day): periods compare the
+    /// dates as written and buckets are cut with no zone shift.
+    pub date_only: bool,
+    /// CONTRACT 8.7 (R6): an inline map from value to label (`{"META": "Meta", "0": "Campaign
+    /// level"}`); a key it has wins over the field's `lookup`, a key it lacks is looked up (or shown
+    /// as is).
+    pub labels: Option<Obj>,
 }
 
 fn s_of(o: &Obj, k: &str) -> Option<String> {
@@ -158,6 +174,50 @@ impl Field {
             Some(Value::Array(a)) => Some(a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect()),
             _ => None,
         };
+        let date_only = match o.get("dateOnly") {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+            Some(Value::Bool(true)) => {
+                if kind != FieldKind::Date {
+                    return err("SOURCE_FAILED", format!("{path}.dateOnly"), format!("The catalog field '{key}' has dateOnly, which only a DATE field takes."));
+                }
+                if b_of(o, "stringDate") || s_of(o, "encoding").is_some() {
+                    return err(
+                        "SOURCE_FAILED",
+                        format!("{path}.dateOnly"),
+                        format!("The catalog field '{key}' has dateOnly with stringDate or encoding; dateOnly is for a DATE column, so it takes neither."),
+                    );
+                }
+                true
+            }
+            Some(_) => return err("SOURCE_FAILED", format!("{path}.dateOnly"), format!("The catalog field '{key}' dateOnly must be true or false.")),
+        };
+        let labels = match o.get("labels") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(m)) => {
+                if kind == FieldKind::Measure {
+                    return err("SOURCE_FAILED", format!("{path}.labels"), format!("The catalog field '{key}' is a measure; labels go on a dimension."));
+                }
+                if m.len() > MAX_LABELS {
+                    return err("SOURCE_FAILED", format!("{path}.labels"), format!("The catalog field '{key}' labels have more than {MAX_LABELS} entries."));
+                }
+                for (k, v) in m {
+                    match v {
+                        Value::String(t) if !t.trim().is_empty() && t.chars().count() <= MAX_LABEL_CHARS => {}
+                        _ => {
+                            return err(
+                                "SOURCE_FAILED",
+                                format!("{path}.labels.{k}"),
+                                format!("The catalog field '{key}' label for '{k}' must be a text of 1 to {MAX_LABEL_CHARS} characters."),
+                            )
+                        }
+                    }
+                }
+                Some(m.clone())
+            }
+            Some(_) => {
+                return err("SOURCE_FAILED", format!("{path}.labels"), format!("The catalog field '{key}' labels must be an object like {{\"META\": \"Meta\"}}."))
+            }
+        };
         Ok(Field {
             key: key.to_string(),
             column: s_of(o, "column").unwrap_or_else(|| key.to_string()),
@@ -175,6 +235,8 @@ impl Field {
             path: s_of(o, "path"),
             hidden: b_of(o, "hidden"),
             label_map_path: s_of(o, "labelMapPath"),
+            date_only,
+            labels,
         })
     }
 
@@ -218,7 +280,121 @@ pub struct Source {
     pub paging: Option<Value>,
     /// P1b (CONTRACT 8.1): what View records may show.
     pub records: Option<RecordsDef>,
+    /// CONTRACT 8.7 (R2): where a FUNCTION source takes the resolved period.
+    pub period_params: Option<PeriodParams>,
+    /// CONTRACT 8.7 (R4): LAST_7/30/90_DAYS end yesterday (the source's `periodEndsYesterday`, else
+    /// the catalog's).
+    pub period_ends_yesterday: bool,
     pub raw: Value,
+}
+
+/// How a period is written into a FUNCTION source's params (`periodParams.format`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodFormat {
+    /// `YYYY-MM-DD` local dates; `to` is the last day (inclusive).
+    Date,
+    /// `YYYY-MM-DD HH:MM:SS` in UTC; `from` is the first local midnight, `to` the local midnight
+    /// after the last day (exclusive). The same bounds for the three below.
+    DateTime,
+    /// `YYYY-MM-DDTHH:MM:SSZ` in UTC.
+    Iso,
+    EpochSeconds,
+    EpochMillis,
+}
+
+impl PeriodFormat {
+    pub const NAMES: [&'static str; 5] = ["DATE", "DATETIME", "ISO", "EPOCH_SECONDS", "EPOCH_MILLIS"];
+
+    fn parse(s: &str) -> Option<PeriodFormat> {
+        Some(match s {
+            "DATE" => PeriodFormat::Date,
+            "DATETIME" => PeriodFormat::DateTime,
+            "ISO" => PeriodFormat::Iso,
+            "EPOCH_SECONDS" => PeriodFormat::EpochSeconds,
+            "EPOCH_MILLIS" => PeriodFormat::EpochMillis,
+            _ => return None,
+        })
+    }
+}
+
+/// `periodParams: {"from": "dateFrom", "to": "dateTo", "format": "DATE", "tzOffsetParam":
+/// "filter.tzOffset", "field": "period", "default": "LAST_30_DAYS"}` on a FUNCTION source: the
+/// param paths (`a` or `a.b`, at most 3 parts) the runner writes the resolved period into.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeriodParams {
+    pub from: Option<Vec<String>>,
+    pub to: Option<Vec<String>>,
+    /// Receives the zone's offset from UTC in minutes, east positive (Asia/Kolkata 330).
+    pub tz_offset: Option<Vec<String>>,
+    pub format: PeriodFormat,
+    /// The name a spec's period filter uses on this source (`{"field": "period", "period": ...}`).
+    pub field: String,
+    /// The period used when the spec has none; none leaves the params alone.
+    pub default: Option<String>,
+}
+
+fn param_path(v: &Value, path: &str) -> R<Vec<String>> {
+    let parts: Vec<String> = match v {
+        Value::String(t) => t.split('.').map(str::to_string).collect(),
+        _ => Vec::new(),
+    };
+    if parts.is_empty() || parts.len() > 3 || !parts.iter().all(|p| is_alias(p)) {
+        return catalog_err(path, format!("The catalog's {path} must be a param name, or a path like filter.from (at most 3 parts, letters, digits and _)."));
+    }
+    Ok(parts)
+}
+
+fn check_period_params(v: &Value, scope_param: Option<&str>, path: &str) -> R<PeriodParams> {
+    let Value::Object(o) = v else {
+        return catalog_err(path, format!("The catalog's {path} must be an object like {{\"from\": \"dateFrom\", \"to\": \"dateTo\"}}."));
+    };
+    catalog_keys(o, &["from", "to", "format", "tzOffsetParam", "field", "default"], path)?;
+    let opt = |k: &str| -> R<Option<Vec<String>>> {
+        match o.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(p) => param_path(p, &format!("{path}.{k}")).map(Some),
+        }
+    };
+    let (from, to, tz_offset) = (opt("from")?, opt("to")?, opt("tzOffsetParam")?);
+    if from.is_none() && to.is_none() {
+        return catalog_err(path, format!("The catalog's {path} names neither from nor to."));
+    }
+    let named: Vec<(&str, &Vec<String>)> = [("from", &from), ("to", &to), ("tzOffsetParam", &tz_offset)].into_iter().filter_map(|(k, p)| p.as_ref().map(|p| (k, p))).collect();
+    for (i, (k, p)) in named.iter().enumerate() {
+        if named[..i].iter().any(|(_, q)| q.starts_with(p) || p.starts_with(q)) {
+            return catalog_err(format!("{path}.{k}"), format!("The catalog's {path}.{k} '{}' overlaps another period param.", p.join(".")));
+        }
+        if scope_param.is_some_and(|sp| p[0] == sp) {
+            return catalog_err(format!("{path}.{k}"), format!("The catalog's {path}.{k} would write into the scope param '{}'.", p[0]));
+        }
+    }
+    let format = match o.get("format") {
+        None | Some(Value::Null) => PeriodFormat::Date,
+        Some(Value::String(f)) => match PeriodFormat::parse(f) {
+            Some(x) => x,
+            None => return catalog_err(format!("{path}.format"), format!("The catalog's {path}.format '{f}' is not one of {}.", PeriodFormat::NAMES.join(", "))),
+        },
+        Some(_) => return catalog_err(format!("{path}.format"), format!("The catalog's {path}.format must be one of {}.", PeriodFormat::NAMES.join(", "))),
+    };
+    let field = match o.get("field") {
+        None | Some(Value::Null) => "period".to_string(),
+        Some(Value::String(f)) if is_alias(f) => f.clone(),
+        Some(_) => return catalog_err(format!("{path}.field"), format!("The catalog's {path}.field must be a name (letters, digits and _).")),
+    };
+    let default = match o.get("default") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(d)) if period::PERIODS.contains(&d.as_str()) && d != "CUSTOM" => Some(d.clone()),
+        Some(_) => return catalog_err(format!("{path}.default"), format!("The catalog's {path}.default must be a named period other than CUSTOM.")),
+    };
+    Ok(PeriodParams { from, to, tz_offset, format, field, default })
+}
+
+fn opt_bool(o: &Obj, k: &str, path: &str) -> R<Option<bool>> {
+    match o.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => catalog_err(format!("{path}.{k}"), format!("The catalog's {path}.{k} must be true or false.")),
+    }
 }
 
 /// A source's `records`: the fields View records shows, its default sort, the row link, and who
@@ -401,6 +577,8 @@ pub struct Catalog {
     pub fy_start: u32,
     pub currency: Option<String>,
     pub sources: Obj,
+    /// CONTRACT 8.7 (R4): the default for every source's `periodEndsYesterday`.
+    pub period_ends_yesterday: bool,
 }
 
 impl Catalog {
@@ -419,6 +597,7 @@ impl Catalog {
             Some(Value::Object(s)) => s.clone(),
             _ => Obj::new(),
         };
+        let period_ends_yesterday = opt_bool(o, "periodEndsYesterday", "catalog")?.unwrap_or(false);
         if let Some(h) = o.get("hierarchies").filter(|h| !h.is_null()) {
             check_hierarchies(h)?;
         }
@@ -452,6 +631,7 @@ impl Catalog {
             fy_start,
             currency: s_of(o, "currency"),
             sources,
+            period_ends_yesterday,
         })
     }
 
@@ -520,6 +700,15 @@ impl Catalog {
                 check_link(l, &format!("{path}.segments.{k}.countLink"))?;
             }
         }
+        let scope_param = s_of(o, "scopeParam");
+        let period_params = match o.get("periodParams") {
+            None | Some(Value::Null) => None,
+            Some(_) if kind != SourceKind::Function => {
+                return catalog_err(format!("{path}.periodParams"), format!("The source '{name}' is a storage; periodParams are for function sources (a storage source takes period filters)."))
+            }
+            Some(pp) => Some(check_period_params(pp, scope_param.as_deref(), &format!("{path}.periodParams"))?),
+        };
+        let period_ends_yesterday = opt_bool(o, "periodEndsYesterday", &path)?.unwrap_or(self.period_ends_yesterday);
         Ok(Source {
             name: name.to_string(),
             kind,
@@ -533,7 +722,7 @@ impl Catalog {
             result_path: s_of(o, "resultPath"),
             columns,
             params,
-            scope_param: s_of(o, "scopeParam"),
+            scope_param,
             allowed_params,
             total_path: s_of(o, "totalPath"),
             lookup_only: b_of(o, "lookupOnly"),
@@ -541,6 +730,8 @@ impl Catalog {
             more_link,
             paging,
             records,
+            period_params,
+            period_ends_yesterday,
             raw: Value::Object(o.clone()),
         })
     }
@@ -574,6 +765,8 @@ pub struct Derived {
     pub b: String,
     pub label: String,
     pub format: String,
+    /// CONTRACT 8.7 (R5): a ratio's multiplier (CPM: spend / impressions x 1000).
+    pub scale: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -587,7 +780,7 @@ pub struct Group {
 impl Group {
     /// A label column (`<as>_label`) goes with it.
     pub fn labelled(&self) -> bool {
-        self.bucket.is_some() || self.field.lookup.is_some() || self.field.label_map_path.is_some()
+        self.bucket.is_some() || self.field.lookup.is_some() || self.field.label_map_path.is_some() || self.field.labels.is_some()
     }
 }
 
@@ -623,6 +816,10 @@ pub struct Plan {
     pub links: Obj,
     /// A function source's `paging`, passed through.
     pub paging: Option<Value>,
+    /// CONTRACT 8.7 (R1): the row scope's joins and subQueries, sent with every read of the
+    /// source (aggregate, currency probe, list, records; never with a label lookup).
+    pub joins: Vec<Value>,
+    pub sub_queries: Vec<Value>,
 }
 
 /// `compare: {"to": "PREVIOUS_PERIOD" | "SAME_PERIOD_LAST_YEAR"}`, resolved.
@@ -661,6 +858,121 @@ impl Plan {
         p.compare = None;
         Some(p)
     }
+}
+
+/// The app wrapper's row scope (CONTRACT 3, 8.7 R1): a flat AbstractCondition (as before), or
+/// `{"condition": {...}, "joins": [...], "subQueries": [...]}` as the storage query and the apps'
+/// access helpers (LeadZump `lzAccessCondition`) write them. Null is no scope.
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    pub given: bool,
+    pub condition: Value,
+    pub joins: Vec<Value>,
+    pub sub_queries: Vec<Value>,
+}
+
+/// The keys that make a scope the object form (an AbstractCondition never has them).
+const SCOPE_KEYS: [&str; 3] = ["condition", "joins", "subQueries"];
+
+fn scope_err<T>(path: impl Into<String>, message: impl Into<String>) -> R<T> {
+    err("BAD_KIND", path, message)
+}
+
+/// A storage or relation name in a scope: plain text, no spaces or control characters.
+fn is_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 100 && !s.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+pub fn parse_scope(scope: &Value, source: &Source) -> R<Scope> {
+    let o = match scope {
+        Value::Null => return Ok(Scope::default()),
+        Value::Object(o) => o,
+        _ => return scope_err("scope", "The scope must be a condition object, {condition, joins, subQueries}, or null."),
+    };
+    if !o.keys().any(|k| SCOPE_KEYS.contains(&k.as_str())) {
+        return Ok(Scope { given: true, condition: scope.clone(), ..Default::default() });
+    }
+    if let Some(k) = o.keys().find(|k| !SCOPE_KEYS.contains(&k.as_str())) {
+        return scope_err(format!("scope.{k}"), format!("'{k}' is not something a scope takes (condition, joins, subQueries)."));
+    }
+    let condition = match o.get("condition") {
+        Some(c @ Value::Object(_)) => c.clone(),
+        _ => return scope_err("scope.condition", "A scope with joins or subQueries still needs its condition (an object; {} for every row)."),
+    };
+    let list = |k: &str, max: usize| -> R<Vec<Value>> {
+        match o.get(k) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(a)) if a.len() <= max => Ok(a.clone()),
+            Some(Value::Array(_)) => err("TOO_MANY", format!("scope.{k}"), format!("A scope takes at most {max} {k}.")),
+            Some(_) => scope_err(format!("scope.{k}"), format!("scope.{k} must be a list.")),
+        }
+    };
+    let joins = list("joins", MAX_SCOPE_JOINS)?;
+    let sub_queries = list("subQueries", MAX_SCOPE_SUB_QUERIES)?;
+    let mut aliases: Vec<String> = Vec::new();
+    let mut take = |alias: String, path: String| -> R<()> {
+        if source.fields.contains_key(&alias) {
+            return scope_err(path, format!("The scope alias '{alias}' is also a field of {}; pick another alias.", source.label));
+        }
+        if aliases.contains(&alias) {
+            return scope_err(path, format!("The scope alias '{alias}' is used twice."));
+        }
+        aliases.push(alias);
+        Ok(())
+    };
+    for (i, j) in joins.iter().enumerate() {
+        let p = format!("scope.joins[{i}]");
+        let Value::Object(jo) = j else { return scope_err(p, "A join is an object like {\"relation\": \"ticketId\", \"alias\": \"lzD\"}.") };
+        if let Some(k) = jo.keys().find(|k| !["relation", "alias", "type"].contains(&k.as_str())) {
+            return scope_err(format!("{p}.{k}"), format!("'{k}' is not something a join takes (relation, alias, type)."));
+        }
+        let Some(relation) = s_of(jo, "relation").filter(|r| is_name(r)) else {
+            return scope_err(format!("{p}.relation"), "A join names the relation of the source's storage it follows.");
+        };
+        let alias = match jo.get("alias") {
+            None | Some(Value::Null) => relation.clone(),
+            Some(Value::String(a)) if is_alias(a) => a.clone(),
+            Some(_) => return scope_err(format!("{p}.alias"), "A join alias is a name: letters, digits and _."),
+        };
+        match jo.get("type") {
+            None => {}
+            Some(Value::String(t)) if t == "LEFT" || t == "INNER" => {}
+            Some(_) => return scope_err(format!("{p}.type"), "A join type is LEFT or INNER."),
+        }
+        take(alias, format!("{p}.alias"))?;
+    }
+    for (i, q) in sub_queries.iter().enumerate() {
+        let p = format!("scope.subQueries[{i}]");
+        let Value::Object(qo) = q else { return scope_err(p, "A subquery is an object like {\"storage\": \"deal\", \"relation\": \"ownerId\", \"alias\": \"lzVd\"}.") };
+        let known = ["storage", "relation", "alias", "condition", "aggregations", "having", "required"];
+        if let Some(k) = qo.keys().find(|k| !known.contains(&k.as_str())) {
+            return scope_err(format!("{p}.{k}"), format!("'{k}' is not something a subquery takes ({}).", known.join(", ")));
+        }
+        let Some(storage) = s_of(qo, "storage").filter(|r| is_name(r)) else {
+            return scope_err(format!("{p}.storage"), "A subquery names the storage it reads.");
+        };
+        if !s_of(qo, "relation").is_some_and(|r| is_name(&r)) {
+            return scope_err(format!("{p}.relation"), "A subquery names the relation that ties its rows to the source's rows.");
+        }
+        let alias = match qo.get("alias") {
+            None | Some(Value::Null) => storage.clone(),
+            Some(Value::String(a)) if is_alias(a) => a.clone(),
+            Some(_) => return scope_err(format!("{p}.alias"), "A subquery alias is a name: letters, digits and _."),
+        };
+        for k in ["condition", "having"] {
+            if qo.get(k).is_some_and(|c| !c.is_null() && !c.is_object()) {
+                return scope_err(format!("{p}.{k}"), format!("A subquery's {k} is a condition object."));
+            }
+        }
+        if qo.get("aggregations").is_some_and(|a| !a.is_null() && !a.as_array().is_some_and(|a| a.iter().all(Value::is_object))) {
+            return scope_err(format!("{p}.aggregations"), "A subquery's aggregations are a list of objects.");
+        }
+        if qo.get("required").is_some_and(|r| !r.is_null() && !r.is_boolean()) {
+            return scope_err(format!("{p}.required"), "A subquery's required is true or false.");
+        }
+        take(alias, format!("{p}.alias"))?;
+    }
+    Ok(Scope { given: true, condition, joins, sub_queries })
 }
 
 /// What validation needs beyond the spec and the catalog.
@@ -827,6 +1139,8 @@ fn where_of(spec: &Obj, source: &Source, catalog: &Catalog, caller: &Caller) -> 
                 path: None,
                 hidden: false,
                 label_map_path: None,
+                date_only: false,
+                labels: None,
             }
         } else {
             field(&key, &format!("{path}.field"))?
@@ -840,7 +1154,7 @@ fn where_of(spec: &Obj, source: &Source, catalog: &Catalog, caller: &Caller) -> 
                 (Some(a), Some(b)) => Some((a, b)),
                 _ => None,
             };
-            let resolved = period::resolve(&p, today, catalog.fy_start, custom.as_ref().map(|(a, b)| (a.as_str(), b.as_str())))
+            let resolved = period::resolve_with(&p, today, catalog.fy_start, custom.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), source.period_ends_yesterday)
                 .map_err(|why| ReportError::new("BAD_PERIOD", format!("{path}.period"), why))?;
             let slot = match period_condition(&f, &resolved, &catalog.zone) {
                 Some(c) => {
@@ -987,11 +1301,9 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
     if !caller.allowed(source.authority.as_deref()) {
         return err("FORBIDDEN_FIELD", "source", format!("You cannot report on {}.", source.label));
     }
-    let scope_given = !scope.is_null();
-    if scope_given && !scope.is_object() {
-        return err("BAD_KIND", "scope", "The scope must be a condition object or null.");
-    }
-    if source.scope_required && !scope_given {
+    let raw_scope = scope;
+    let scope = parse_scope(raw_scope, &source)?;
+    if source.scope_required && !scope.given {
         return err("SCOPE_REQUIRED", "scope", format!("The source {} needs a row scope from the app, and none was given.", source.label));
     }
 
@@ -1001,7 +1313,7 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
     let derived_in = array(spec, "derived")?;
     let sort_in = array(spec, "sort")?;
     for (key, n, max) in [
-        ("measures", measures_in.len(), MAX_MEASURES),
+        ("measures", measures_in.len(), MAX_TABLE_MEASURES),
         ("groupBy", group_in.len(), MAX_GROUP_BY),
         ("filters", filters_in.len(), MAX_FILTERS),
         ("derived", derived_in.len(), MAX_DERIVED),
@@ -1013,7 +1325,7 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
     }
 
     if spec.get("records").is_some_and(|r| !r.is_null()) {
-        return validate_records(spec, source, catalog, scope, caller);
+        return validate_records(spec, source, catalog, &scope, caller);
     }
 
     let view = match spec.get("view") {
@@ -1023,6 +1335,17 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
     let view_type = view.get("type").and_then(Value::as_str).unwrap_or("TABLE").to_string();
     if shape::rule(&view_type).is_none() {
         return err("BAD_VIEW", "view.type", shape::check(&view_type, Shape { group_by: 0, values: 0 }).unwrap_err());
+    }
+    if measures_in.len() > MAX_MEASURES && view_type != "TABLE" {
+        return err(
+            "TOO_MANY",
+            "measures",
+            format!(
+                "Only a table takes more than {MAX_MEASURES} measures (up to {MAX_TABLE_MEASURES}); this {} has {}.",
+                shape::rule(&view_type).map(|r| r.label.to_lowercase()).unwrap_or_else(|| "view".into()),
+                measures_in.len()
+            ),
+        );
     }
     let top_n = match view.pointer("/style/topN") {
         None | Some(Value::Null) => None,
@@ -1039,7 +1362,7 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
         if spec.get("compare").is_some_and(|c| !c.is_null()) {
             return err("BAD_PERIOD", "compare", format!("{} is a function source: it has no period filter to compare.", source.label));
         }
-        return validate_function_source(spec, source, catalog, scope, caller, view, view_type, top_n, limit, derived_in, sort_in);
+        return validate_function_source(spec, source, catalog, raw_scope, caller, view, view_type, top_n, limit, derived_in, sort_in);
     }
 
     let field = |key: &str, path: &str| source_field(&source, caller, key, path);
@@ -1147,7 +1470,7 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
     for (i, d) in derived_in.iter().enumerate() {
         let path = format!("derived[{i}]");
         let o = obj(d, &path)?;
-        known_keys(o, &["as", "label", "ratio", "difference", "percent"], &path, "a derived measure")?;
+        known_keys(o, &["as", "label", "ratio", "difference", "percent", "scale"], &path, "a derived measure")?;
         let ops: Vec<(DerivedOp, &str)> = [(DerivedOp::Ratio, "ratio"), (DerivedOp::Difference, "difference"), (DerivedOp::Percent, "percent")]
             .into_iter()
             .filter(|(_, k)| o.contains_key(*k))
@@ -1176,7 +1499,8 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
             DerivedOp::Ratio if fa == "MONEY" && fb != "MONEY" => "MONEY".into(),
             DerivedOp::Ratio => "NUMBER".into(),
         };
-        derived.push(Derived { label: s_of(o, "label").unwrap_or_else(|| humanize(&alias)), alias, op: *op, a: pair.0, b: pair.1, format });
+        let scale = derived_scale(o, *op, &path)?;
+        derived.push(Derived { label: s_of(o, "label").unwrap_or_else(|| humanize(&alias)), alias, op: *op, a: pair.0, b: pair.1, format, scale });
     }
 
     // Records (a list of rows) or an aggregate.
@@ -1208,11 +1532,11 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
         }
     }
 
-    let compare = compare_of(spec, &w, catalog, scope)?;
+    let compare = compare_of(spec, &w, catalog, &scope.condition)?;
     if compare.is_some() && records {
         return err("BAD_KIND", "compare", "A comparison needs measures; a list of rows has none.");
     }
-    let condition = and_all(w.conditions.clone(), scope);
+    let condition = and_all(w.conditions.clone(), &scope.condition);
 
     // Sort.
     let output_aliases: Vec<String> = if records {
@@ -1284,14 +1608,26 @@ pub fn validate(spec: &Value, catalog: &Catalog, scope: &Value, caller: &Caller)
         records_page: None,
         links,
         paging: None,
+        joins: scope.joins,
+        sub_queries: scope.sub_queries,
     })
+}
+
+/// `scale` on a derived measure: a ratio only, a finite number other than 0.
+fn derived_scale(o: &Obj, op: DerivedOp, path: &str) -> R<Option<f64>> {
+    match o.get("scale") {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) if op != DerivedOp::Ratio => err("BAD_KIND", format!("{path}.scale"), "scale goes with ratio only (like CPM: ratio [spend, impressions], scale 1000)."),
+        Some(Value::Number(n)) if n.as_f64().is_some_and(|x| x.is_finite() && x != 0.0) => Ok(n.as_f64()),
+        Some(_) => err("BAD_KIND", format!("{path}.scale"), "scale must be a number other than 0 (1000 for a per-thousand rate)."),
+    }
 }
 
 /// View records (P1b): a page of the source's rows, segment AND filters AND scope, only the
 /// source's `records.fields` (personal data only when listed there; a field whose authority the
 /// caller lacks, or that the trimmed catalog no longer has, is left out), plus `_id` always, once,
 /// as a hidden column (for the row link; the catalog need not list it).
-fn validate_records(spec: &Obj, source: Source, catalog: &Catalog, scope: &Value, caller: &Caller) -> R<Plan> {
+fn validate_records(spec: &Obj, source: Source, catalog: &Catalog, scope: &Scope, caller: &Caller) -> R<Plan> {
     let def = match (&source.records, source.kind) {
         (Some(d), SourceKind::Storage) => d.clone(),
         _ => return err("RECORDS_NOT_ALLOWED", "records", format!("{} has no records to show.", source.label)),
@@ -1358,7 +1694,7 @@ fn validate_records(spec: &Obj, source: Source, catalog: &Catalog, scope: &Value
         Some(v) => Value::Object(obj(v, "view")?.clone()),
     };
     let w = where_of(spec, &source, catalog, caller)?;
-    let condition = and_all(w.conditions.clone(), scope);
+    let condition = and_all(w.conditions.clone(), &scope.condition);
     let links = links_of(def.link.as_ref().or(source.link.as_ref()), &source, w.segment_count_link.as_ref());
     Ok(Plan {
         segment_label: w.segment_label,
@@ -1381,6 +1717,8 @@ fn validate_records(spec: &Obj, source: Source, catalog: &Catalog, scope: &Value
         records_page: Some(RecordsPage { page, size, export }),
         links,
         paging: None,
+        joins: scope.joins.clone(),
+        sub_queries: scope.sub_queries.clone(),
         source,
     })
 }
@@ -1407,7 +1745,7 @@ fn check_view_refs(view: &Value, aliases: &[String]) -> R<()> {
 fn validate_function_source(
     spec: &Obj,
     source: Source,
-    _catalog: &Catalog,
+    catalog: &Catalog,
     scope: &Value,
     caller: &Caller,
     view: Value,
@@ -1417,9 +1755,11 @@ fn validate_function_source(
     derived_in: &[Value],
     sort_in: &[Value],
 ) -> R<Plan> {
-    for k in ["measures", "groupBy", "filters", "segment", "fields"] {
-        if spec.get(k).is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) {
-            return err("BAD_KIND", k, format!("{} is a function source: it takes params, not {k}.", source.label));
+    // A source with periodParams takes one period filter (CONTRACT 8.7, R2); otherwise no filters.
+    let refused: &[&str] = if source.period_params.is_some() { &["measures", "groupBy", "segment", "fields"] } else { &["measures", "groupBy", "filters", "segment", "fields"] };
+    for k in refused {
+        if spec.get(*k).is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) {
+            return err("BAD_KIND", *k, format!("{} is a function source: it takes params, not {k}.", source.label));
         }
     }
     let mut params = source.params.clone();
@@ -1435,6 +1775,10 @@ fn validate_function_source(
     if let Some(sp) = &source.scope_param {
         params.insert(sp.clone(), scope.clone());
     }
+    let period = match &source.period_params {
+        Some(pp) => function_period(spec, &source, pp, catalog, caller, &mut params)?,
+        None => None,
+    };
     for (k, c) in &source.columns {
         if !caller.allowed(c.authority.as_deref()) {
             return err("FORBIDDEN_FIELD", format!("columns.{k}"), format!("You cannot report on {}.", c.label));
@@ -1463,7 +1807,7 @@ fn validate_function_source(
     for (i, d) in derived_in.iter().enumerate() {
         let path = format!("derived[{i}]");
         let o = obj(d, &path)?;
-        known_keys(o, &["as", "label", "ratio", "difference", "percent"], &path, "a derived measure")?;
+        known_keys(o, &["as", "label", "ratio", "difference", "percent", "scale"], &path, "a derived measure")?;
         let (op, key) = if o.contains_key("ratio") {
             (DerivedOp::Ratio, "ratio")
         } else if o.contains_key("difference") {
@@ -1487,7 +1831,8 @@ fn validate_function_source(
             return err("BAD_KIND", format!("{path}.as"), format!("The name '{alias}' is not usable or is used twice."));
         }
         let format = if op == DerivedOp::Percent { "PERCENT".into() } else { "NUMBER".into() };
-        derived.push(Derived { label: s_of(o, "label").unwrap_or_else(|| humanize(&alias)), alias, op, a: x, b: y, format });
+        let scale = derived_scale(o, op, &path)?;
+        derived.push(Derived { label: s_of(o, "label").unwrap_or_else(|| humanize(&alias)), alias, op, a: x, b: y, format, scale });
     }
     let aliases: Vec<String> = source.columns.keys().cloned().chain(derived.iter().map(|d| d.alias.clone())).collect();
     let mut sort = Vec::new();
@@ -1515,7 +1860,7 @@ fn validate_function_source(
         derived,
         group_by: groups,
         condition: Value::Null,
-        period: None,
+        period,
         sort,
         limit,
         view_type,
@@ -1530,7 +1875,82 @@ fn validate_function_source(
         records_page: None,
         links,
         paging,
+        joins: Vec::new(),
+        sub_queries: Vec::new(),
     })
+}
+
+/// A FUNCTION source's period (CONTRACT 8.7, R2): the spec's one period filter on
+/// `periodParams.field`, else `periodParams.default`, resolved in the catalog zone (ends yesterday
+/// when the source says so) and written into the params. ALL_TIME (or no period and no default)
+/// leaves the from / to params as they are; the offset param is always written.
+fn function_period(spec: &Obj, source: &Source, pp: &PeriodParams, catalog: &Catalog, caller: &Caller, params: &mut Obj) -> R<Option<Period>> {
+    let filters = array(spec, "filters")?;
+    if filters.len() > 1 {
+        return err("BAD_PERIOD", "filters", format!("{} takes one period filter; this report has {}.", source.label, filters.len()));
+    }
+    let today = catalog.zone.today(caller.now);
+    let resolved = match filters.first() {
+        Some(fv) => {
+            let fo = obj(fv, "filters[0]")?;
+            known_keys(fo, &["field", "period", "from", "to", "label"], "filters[0]", "a period filter")?;
+            if s_of(fo, "field").as_deref() != Some(pp.field.as_str()) {
+                return err("UNKNOWN_FIELD", "filters[0].field", format!("{} takes only a period filter on '{}'.", source.label, pp.field));
+            }
+            let Some(p) = s_of(fo, "period") else { return err("BAD_PERIOD", "filters[0].period", format!("{} takes only a period filter.", source.label)) };
+            let custom = match (s_of(fo, "from"), s_of(fo, "to")) {
+                (Some(a), Some(b)) => Some((a, b)),
+                _ => None,
+            };
+            Some(
+                period::resolve_with(&p, today, catalog.fy_start, custom.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), source.period_ends_yesterday)
+                    .map_err(|why| ReportError::new("BAD_PERIOD", "filters[0].period", why))?,
+            )
+        }
+        None => match &pp.default {
+            Some(d) => Some(period::resolve_with(d, today, catalog.fy_start, None, source.period_ends_yesterday).map_err(|why| ReportError::new("SOURCE_FAILED", "periodParams.default", why))?),
+            None => None,
+        },
+    };
+    let offset_at = match resolved.as_ref().and_then(|p| p.range) {
+        Some((f, t)) => catalog.zone.midnight_utc(f + (t - f) / 2),
+        None => caller.now,
+    };
+    if let Some(path) = &pp.tz_offset {
+        set_param(params, path, json!(catalog.zone.offset_at(offset_at).local_minus_utc() / 60));
+    }
+    if let Some((from, to)) = resolved.as_ref().and_then(|p| p.range) {
+        let (lo, hi) = (catalog.zone.midnight_utc(from), catalog.zone.midnight_utc(to + chrono::Duration::days(1)));
+        let (vf, vt) = match pp.format {
+            PeriodFormat::Date => (json!(period::iso_date(from)), json!(period::iso_date(to))),
+            PeriodFormat::DateTime => (json!(period::datetime_bound(lo)), json!(period::datetime_bound(hi))),
+            PeriodFormat::Iso => (json!(lo.format("%Y-%m-%dT%H:%M:%SZ").to_string()), json!(hi.format("%Y-%m-%dT%H:%M:%SZ").to_string())),
+            PeriodFormat::EpochSeconds => (json!(lo.timestamp()), json!(hi.timestamp())),
+            PeriodFormat::EpochMillis => (json!(lo.timestamp_millis()), json!(hi.timestamp_millis())),
+        };
+        if let Some(path) = &pp.from {
+            set_param(params, path, vf);
+        }
+        if let Some(path) = &pp.to {
+            set_param(params, path, vt);
+        }
+    }
+    Ok(resolved)
+}
+
+/// Writes `v` at `path` in the params, making the objects on the way (a non-object there is replaced).
+fn set_param(params: &mut Obj, path: &[String], v: Value) {
+    let Some((last, parents)) = path.split_last() else { return };
+    let mut cur = params;
+    for p in parents {
+        let slot = cur.entry(p.clone()).or_insert_with(|| Value::Object(Obj::new()));
+        if !slot.is_object() {
+            *slot = Value::Object(Obj::new());
+        }
+        let Value::Object(next) = slot else { return };
+        cur = next;
+    }
+    cur.insert(last.clone(), v);
 }
 
 /// The condition a period puts on a date field; none for ALL_TIME.
@@ -1543,6 +1963,12 @@ pub fn period_condition(f: &Field, p: &Period, zone: &Zone) -> Option<Value> {
     let start = zone.midnight_utc(from);
     let end = zone.midnight_utc(to + chrono::Duration::days(1));
     let c = &f.column;
+    if f.date_only {
+        // A calendar date: the local days as written, no zone (CONTRACT 8.7, R3).
+        return Some(json!({"operator": "AND", "conditions": [
+            {"field": c, "operator": "GREATER_THAN_EQUAL", "value": period::iso_date(from)},
+            {"field": c, "operator": "LESS_THAN", "value": period::iso_date(to + chrono::Duration::days(1))}]}));
+    }
     if f.string_date {
         return Some(json!({"operator": "OR", "conditions": [
             {"operator": "AND", "conditions": [
