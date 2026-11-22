@@ -250,8 +250,7 @@ impl ReportBackend for LiveBackend {
     }
 
     async fn read_page(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<Vec<Obj>, String> {
-        let condition = query.get("condition").cloned().unwrap_or(Value::Null);
-        let mut q = Query::from_value(&storage_value(&serde_json::json!({ "condition": condition })))?;
+        let mut q = Query::from_value(&storage_value(&scoped_query(query)))?;
         q.page = 0;
         q.size = query.get("size").and_then(Value::as_i64).unwrap_or(10) as i32;
         q.count = Some(false);
@@ -265,8 +264,7 @@ impl ReportBackend for LiveBackend {
     }
 
     async fn read_records(&self, app: Option<&str>, client: Option<&str>, storage: &str, query: &Value) -> Result<(Vec<Obj>, i64), String> {
-        let condition = query.get("condition").cloned().unwrap_or(Value::Null);
-        let mut q = Query::from_value(&storage_value(&serde_json::json!({ "condition": condition })))?;
+        let mut q = Query::from_value(&storage_value(&scoped_query(query)))?;
         let n = |k: &str, d: i64| query.get(k).and_then(Value::as_i64).unwrap_or(d).clamp(0, i32::MAX as i64) as i32;
         q.page = n("page", 0);
         q.size = n("size", spec::RECORDS_PAGE as i64).max(1);
@@ -307,6 +305,18 @@ impl ReportBackend for LiveBackend {
     async fn claim(&self, key: &str, ttl_secs: u64) -> Option<bool> {
         self.cache.claim(key, ttl_secs).await
     }
+}
+
+/// The condition of a page read plus the row scope's joins and subQueries when the runner sent
+/// them (CONTRACT 8.7, R1; label lookups never carry them).
+fn scoped_query(query: &Value) -> Value {
+    let mut q = serde_json::json!({ "condition": query.get("condition").cloned().unwrap_or(Value::Null) });
+    for k in ["joins", "subQueries"] {
+        if let Some(v) = query.get(k).filter(|v| v.as_array().is_some_and(|a| !a.is_empty())) {
+            q[k] = v.clone();
+        }
+    }
+    q
 }
 
 fn user_id(u: &Value) -> Option<u64> {
