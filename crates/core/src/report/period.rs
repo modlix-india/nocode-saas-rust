@@ -153,7 +153,19 @@ pub fn fy_start_of(d: NaiveDate, fy_start: u32) -> NaiveDate {
 /// Resolves a named period on `today`. `custom` holds CUSTOM's `from` / `to`. `Err` holds the
 /// reason a CUSTOM range or an unknown name is refused.
 pub fn resolve(name: &str, today: NaiveDate, fy_start: u32, custom: Option<(&str, &str)>) -> Result<Period, String> {
+    resolve_with(name, today, fy_start, custom, false)
+}
+
+/// The rolling periods `ends_yesterday` moves (CONTRACT 8.7, AdZump's rule: today is partial).
+pub const ROLLING_PERIODS: [&str; 3] = ["LAST_7_DAYS", "LAST_30_DAYS", "LAST_90_DAYS"];
+
+/// [`resolve`], with `ends_yesterday` (the catalog's or source's `periodEndsYesterday`): LAST_7_DAYS,
+/// LAST_30_DAYS and LAST_90_DAYS end yesterday instead of today (still 7, 30, 90 days long). Every
+/// other period is unchanged.
+pub fn resolve_with(name: &str, today: NaiveDate, fy_start: u32, custom: Option<(&str, &str)>, ends_yesterday: bool) -> Result<Period, String> {
     let d = today;
+    // The last day of a rolling period.
+    let r = if ends_yesterday { d - Duration::days(1) } else { d };
     let month = month_start(d.year(), d.month());
     let q = quarter_start(d, fy_start);
     let fy = fy_start_of(d, fy_start);
@@ -167,9 +179,9 @@ pub fn resolve(name: &str, today: NaiveDate, fy_start: u32, custom: Option<(&str
         }
         "THIS_MONTH" => ((month, last_day(add_months(month, 1))), "This month".into()),
         "LAST_MONTH" => ((add_months(month, -1), last_day(month)), "Last month".into()),
-        "LAST_7_DAYS" => ((d - Duration::days(6), d), "Last 7 days".into()),
-        "LAST_30_DAYS" => ((d - Duration::days(29), d), "Last 30 days".into()),
-        "LAST_90_DAYS" => ((d - Duration::days(89), d), "Last 90 days".into()),
+        "LAST_7_DAYS" => ((r - Duration::days(6), r), "Last 7 days".into()),
+        "LAST_30_DAYS" => ((r - Duration::days(29), r), "Last 30 days".into()),
+        "LAST_90_DAYS" => ((r - Duration::days(89), r), "Last 90 days".into()),
         "THIS_QUARTER" => ((q, last_day(add_months(q, 3))), "This quarter".into()),
         "LAST_QUARTER" => ((add_months(q, -3), last_day(q)), "Last quarter".into()),
         "THIS_FY" => ((fy, last_day(add_months(fy, 12))), "This FY".into()),
