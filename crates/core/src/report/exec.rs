@@ -130,12 +130,18 @@ async fn run_inner(req: RunRequest<'_>, backend: &dyn ReportBackend, functions: 
 /// key: a FUNCTION source has no scope (it reads the caller itself, "my tasks"), and two users
 /// with the same scope must still never share an answer.
 pub fn cache_key(plan: &Plan, catalog: &Catalog, spec: &Value, scope: &Value, app: Option<&str>, client: Option<&str>, user_id: u64) -> String {
-    let basis = json!({
+    let mut basis = json!({
         "user": user_id, "spec": spec, "scope": scope, "source": plan.source.raw,
         "period": plan.period.as_ref().map(|p| p.to_json()),
         "compare": plan.compare.as_ref().map(|c| json!({"to": c.to, "period": c.period.to_json()})),
         "tz": catalog.time_zone, "fy": catalog.fy_start, "currency": catalog.currency,
     });
+    // CONTRACT 8.7: the catalog-wide periodEndsYesterday changes the answer without being in the
+    // source's entry (the resolved period above already differs; this keeps the key honest for
+    // ALL_TIME and a function source's params). Only when set, so older keys stay as they were.
+    if catalog.period_ends_yesterday {
+        basis["endsYesterday"] = json!(true);
+    }
     format!("report:{}:{}:{}", app.unwrap_or("-"), client.unwrap_or("-"), key_hash(&basis.to_string()))
 }
 
@@ -151,7 +157,8 @@ fn base_output(plan: &Plan, catalog: &Catalog, columns: Vec<Value>) -> Obj {
     out.insert("period".into(), plan.period.as_ref().map(|p| p.to_json()).unwrap_or(Value::Null));
     out.insert("view".into(), plan.view.clone());
     out.insert("shape".into(), json!({"groupBy": plan.shape.group_by, "values": plan.shape.values, "records": plan.records}));
-    out.insert("fits".into(), shape::fits(plan.shape));
+    let measures = if plan.source.kind == SourceKind::Storage && !plan.records { plan.measures.len() } else { 0 };
+    out.insert("fits".into(), shape::fits_with_measures(plan.shape, measures));
     out.insert("locale".into(), catalog.locale.clone().map(Value::String).unwrap_or(Value::Null));
     out.insert("timeZone".into(), Value::String(catalog.time_zone.clone()));
     if let Some(c) = &plan.compare {
@@ -183,7 +190,7 @@ pub fn predicted_columns(plan: &Plan, currency: Option<&str>, split: bool) -> Ve
                 c["pii"] = json!(true);
             }
             cols.push(c);
-            if f.lookup.is_some() {
+            if f.lookup.is_some() || f.labels.is_some() {
                 cols.push(json!({"key": format!("{}_label", f.key), "hidden": true}));
             }
         }
@@ -272,7 +279,8 @@ pub fn aggregate_query_for(plan: &Plan, catalog: &Catalog, now: DateTime<Utc>, c
             let mut o = json!({"field": g.field.column, "alias": g.alias});
             if let Some(b) = g.bucket {
                 o["bucket"] = json!(b.query_name());
-                o["timezone"] = json!(offset);
+                // A calendar date is a local day already: cut with no zone (CONTRACT 8.7, R3).
+                o["timezone"] = json!(if g.field.date_only { "UTC".to_string() } else { offset.clone() });
                 if g.field.string_date {
                     o["isoString"] = json!(true);
                 } else if let Some(e) = &g.field.encoding {
@@ -317,8 +325,20 @@ pub fn aggregate_query_for(plan: &Plan, catalog: &Catalog, now: DateTime<Utc>, c
             sort = db_sort(plan).into_iter().map(|(p, desc)| json!({"property": p, "direction": if desc { "DESC" } else { "ASC" }})).collect();
         }
     }
-    json!({"condition": condition, "groupBy": groups, "aggregations": aggs, "sort": sort,
-           "page": 0, "size": spec::READ_GROUPS, "count": false})
+    with_scope_reads(plan, json!({"condition": condition, "groupBy": groups, "aggregations": aggs, "sort": sort,
+           "page": 0, "size": spec::READ_GROUPS, "count": false}))
+}
+
+/// Adds the row scope's joins and subQueries (CONTRACT 8.7, R1) to a read of the report's source;
+/// a scope without them leaves the query exactly as before.
+pub fn with_scope_reads(plan: &Plan, mut q: Value) -> Value {
+    if !plan.joins.is_empty() {
+        q["joins"] = Value::Array(plan.joins.clone());
+    }
+    if !plan.sub_queries.is_empty() {
+        q["subQueries"] = Value::Array(plan.sub_queries.clone());
+    }
+    q
 }
 
 /// The fixed offset buckets are cut in: the zone's offset in the middle of the period (now for
@@ -470,8 +490,8 @@ async fn aggregate_rows(
         if let Some(pinned) = plan.pinned_currency.get(&cf) {
             currency = Some(pinned.clone());
         } else {
-            let probe = json!({"condition": plan.condition, "groupBy": [{"field": cf, "alias": "currency"}],
-                               "aggregations": [{"function": "COUNT", "alias": "n"}], "page": 0, "size": 3, "count": false});
+            let probe = with_scope_reads(plan, json!({"condition": plan.condition, "groupBy": [{"field": cf, "alias": "currency"}],
+                               "aggregations": [{"function": "COUNT", "alias": "n"}], "page": 0, "size": 3, "count": false}));
             let found = timed(backend.aggregate(app, client, &storage, &probe)).await?;
             let codes: BTreeSet<String> = found.iter().filter_map(|r| r.get("currency").and_then(Value::as_str).map(str::to_string)).collect();
             match codes.len() {
@@ -524,6 +544,8 @@ async fn aggregate_rows(
     for g in plan.group_by.iter().filter(|g| g.bucket.is_some()) {
         let b = g.bucket.unwrap_or(Bucket::Day);
         let fy = g.fy && catalog.fy_start != 1;
+        // A calendar date came back uncut by any zone.
+        let offset = if g.field.date_only { chrono::FixedOffset::east_opt(0).unwrap_or(offset) } else { offset };
         for r in rows.iter_mut() {
             let local = r.get(&g.alias).and_then(|v| period::bucket_local_date(v, offset, millis(&g.field.encoding)));
             match local {
@@ -584,19 +606,25 @@ fn key_text(v: &Value) -> Option<String> {
     }
 }
 
-/// `<as>_label` for every dimension with a lookup: one read per lookup, by the keys present.
+/// `<as>_label` for every dimension with a lookup or inline `labels`: one read per lookup, by the
+/// keys present the inline map does not already name.
 async fn resolve_labels(plan: &Plan, backend: &dyn ReportBackend, app: Option<&str>, client: Option<&str>, rows: &mut [Obj]) -> R<()> {
-    let targets: Vec<(String, Lookup)> = if plan.records {
-        plan.list_fields.iter().filter_map(|f| f.lookup.clone().map(|l| (f.key.clone(), l))).collect()
+    type Target = (String, Option<Lookup>, Option<Obj>);
+    let targets: Vec<Target> = if plan.records {
+        plan.list_fields.iter().filter(|f| f.lookup.is_some() || f.labels.is_some()).map(|f| (f.key.clone(), f.lookup.clone(), f.labels.clone())).collect()
     } else {
-        plan.group_by.iter().filter(|g| g.bucket.is_none()).filter_map(|g| g.field.lookup.clone().map(|l| (g.alias.clone(), l))).collect()
+        plan.group_by
+            .iter()
+            .filter(|g| g.bucket.is_none() && (g.field.lookup.is_some() || g.field.labels.is_some()))
+            .map(|g| (g.alias.clone(), g.field.lookup.clone(), g.field.labels.clone()))
+            .collect()
     };
-    for (alias, lookup) in targets {
-        let keys: BTreeSet<String> = rows.iter().filter_map(|r| r.get(&alias).and_then(key_text)).filter(|k| k != OTHER_KEY).collect();
-        let labels: HashMap<String, String> = if keys.is_empty() {
-            HashMap::new()
-        } else {
-            match &lookup {
+    for (alias, lookup, inline) in targets {
+        let inline: HashMap<String, String> = inline.iter().flatten().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect();
+        let keys: BTreeSet<String> = rows.iter().filter_map(|r| r.get(&alias).and_then(key_text)).filter(|k| k != OTHER_KEY && !inline.contains_key(k)).collect();
+        let mut labels: HashMap<String, String> = match (&lookup, keys.is_empty()) {
+            (None, _) | (_, true) => HashMap::new(),
+            (Some(lookup), false) => match lookup {
                 Lookup::Values(m) => m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect(),
                 Lookup::User => {
                     let ids: Vec<u64> = keys.iter().filter_map(|k| k.parse().ok()).collect();
@@ -613,8 +641,9 @@ async fn resolve_labels(plan: &Plan, backend: &dyn ReportBackend, app: Option<&s
                         .filter_map(|r| Some((r.get(key).and_then(key_text)?, r.get(label).and_then(key_text)?)))
                         .collect()
                 }
-            }
+            },
         };
+        labels.extend(inline);
         for r in rows.iter_mut() {
             let text = match r.get(&alias).and_then(key_text) {
                 Some(k) if k == OTHER_KEY => "Other".to_string(),
@@ -656,7 +685,7 @@ fn apply_derived_with(plan: &Plan, rows: &mut [Obj], suffix: &str) {
             let (a, b) = (num(r.get(&format!("{}{suffix}", d.a))), num(r.get(&format!("{}{suffix}", d.b))));
             let v = match d.op {
                 DerivedOp::Ratio => match (a, b) {
-                    (Some(a), Some(b)) if b != 0.0 => number(a / b),
+                    (Some(a), Some(b)) if b != 0.0 => number(a * d.scale.unwrap_or(1.0) / b),
                     _ => Value::Null,
                 },
                 DerivedOp::Percent => match (a, b) {
@@ -832,7 +861,7 @@ async fn run_records(plan: &Plan, catalog: &Catalog, backend: &dyn ReportBackend
             Some(json!({"property": col, "direction": if *desc { "DESC" } else { "ASC" }}))
         })
         .collect();
-    let q = json!({"condition": plan.condition, "page": 0, "size": size + 1, "sort": sort});
+    let q = with_scope_reads(plan, json!({"condition": plan.condition, "page": 0, "size": size + 1, "sort": sort}));
     let found = timed(backend.read_page(app, client, &storage, &q)).await?;
     let truncated = found.len() > size;
     let mut rows: Vec<Obj> = found
@@ -876,7 +905,7 @@ async fn run_record_page(plan: &Plan, catalog: &Catalog, backend: &dyn ReportBac
             fields.push(top);
         }
     }
-    let q = json!({"condition": plan.condition, "page": page.page, "size": page.size, "sort": sort, "fields": fields});
+    let q = with_scope_reads(plan, json!({"condition": plan.condition, "page": page.page, "size": page.size, "sort": sort, "fields": fields}));
     let (found, total) = timed(backend.read_records(app, client, &storage, &q)).await?;
     let mut rows: Vec<Obj> = found
         .into_iter()
