@@ -79,7 +79,7 @@ impl IndexNow {
             .and_then(|r| map_field(&r.entity, "properties").cloned())
             .unwrap_or_default();
         let app_info = AppInfo::of(&props);
-        if !info.listed(&app_info) || !app_info.visibility().allow_search_bots {
+        if !info.eligible(&app_info) || !app_info.visibility().allow_search_bots {
             tracing::debug!(app, page = info.name, "IndexNow: the page is not public, no ping");
             return Ok(());
         }
