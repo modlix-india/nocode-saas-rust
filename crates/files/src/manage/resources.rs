@@ -142,7 +142,8 @@ pub fn name_with_extension(actual: &str, name: &str) -> String {
     }
 }
 
-/// `POST /**`: the first `file` part (only the first, as in Java) under the path.
+/// `POST /**`: all `file` parts under the path (SZ-600: was first only, as in Java).
+/// Returns a single object when one file is uploaded, an array when several are.
 pub async fn upload(cx: &mut Ctx, kind: Kind, req: Request) -> AppResult<Response> {
     let mut form = read_form(req, cx.st.work_dir()).await?;
     cx.params.extend(form.texts.clone());
@@ -157,18 +158,31 @@ pub async fn upload(cx: &mut Ctx, kind: Kind, req: Request) -> AppResult<Respons
     let (rp, raw) = resolved(cx, uri_part(kind));
     require_write(cx, kind, &rp, &cc).await?;
 
-    let part = form.take_file("file").ok_or_else(|| missing("file"))?;
-    let original = part.file_name.clone().unwrap_or_default();
-    let file_name = match name {
-        None => original.clone(),
-        Some(n) => name_with_extension(&original, &n),
-    };
-    require_write_target(cx, kind, &rp, &format!("{rp}/{file_name}"), &cc).await?;
-    let fd = Fs::new(&cx.st, kind)
-        .create_from_file(&cc, &rp, Some(&file_name), &part.file.path, part.size, overwrite, "inline", None)
-        .await
-        .app()?;
-    Ok(ok_or_empty(fd.map(|d| DetailOut::of(&d).with_creation_paths(kind, &raw, &cc).json())))
+    let mut results: Vec<Value> = Vec::new();
+    while let Some(part) = form.take_file("file") {
+        let original = part.file_name.clone().unwrap_or_default();
+        let file_name = match &name {
+            None => original.clone(),
+            Some(n) => name_with_extension(&original, n),
+        };
+        require_write_target(cx, kind, &rp, &format!("{rp}/{file_name}"), &cc).await?;
+        let fd = Fs::new(&cx.st, kind)
+            .create_from_file(&cc, &rp, Some(&file_name), &part.file.path, part.size, overwrite, "inline", None)
+            .await
+            .app()?;
+        if let Some(d) = fd {
+            results.push(DetailOut::of(&d).with_creation_paths(kind, &raw, &cc).json());
+        }
+    }
+    if results.is_empty() {
+        return Err(missing("file"));
+    }
+    // Single file: return an object (backward compatible). Multiple: return an array.
+    if results.len() == 1 {
+        Ok(ok_or_empty(results.into_iter().next()))
+    } else {
+        Ok(json(&Value::Array(results)))
+    }
 }
 
 /// `POST /import/**`: the zip's folders and files under the path, in the background; the

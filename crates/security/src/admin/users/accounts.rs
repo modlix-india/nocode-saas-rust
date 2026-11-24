@@ -890,7 +890,13 @@ impl Admin {
         if user_name.is_none() && email.is_none() && phone.is_none() {
             return Err(refuse(StatusCode::BAD_REQUEST, "user_designation_mismatch", &[]));
         }
-        let from = ca.logged_in_from_client_id.unwrap_or_default();
+        // SZ-37: allow anonymous callers (registration flow); resolve client from URL host when not logged in.
+        let from = match ca.logged_in_from_client_id {
+            Some(id) => id,
+            None => self.dir().client_by_code(ca.url_client_code.as_deref().unwrap_or("")).await?
+                .map(|c| c.id())
+                .unwrap_or_default(),
+        };
         self.db.user_exists_under(from, user_name, email, phone, None, None).await
     }
 
@@ -998,7 +1004,8 @@ r!(unblock, "/users/unblockUser", |s, r, ca| {
     Ok(bool_out(s.user_unblock(&ca, id).await?))
 });
 
-r!(exists, "/users/exists", |s, r, ca| {
+// SZ-37: anonymous callers (registration flow) must be able to check if a username/email exists.
+crate::web_route!(exists, AdminState, "/users/exists", false, |s, r, ca| {
     let p = &r.params;
     Ok(bool_out(s.user_exists(&ca, p.get("username"), p.get("email"), p.get("phoneNumber")).await?))
 });
