@@ -106,9 +106,11 @@ fn build_with(condition: Option<&Condition>, resolver: &FieldResolver, skip_empt
 }
 
 /// Exactly the conditions Mongo drops: no value to compare with.
+/// An explicitly empty `multiValue` list is NOT empty: `{$in: []}` matches nothing in Mongo
+/// (SZ-642), so it reaches `positive` which returns `Cond::False` instead of being dropped.
 pub fn is_empty(fc: &FilterCondition) -> bool {
     let Some(op) = fc.operator else { return false };
-    let no_multi = fc.multi_value.as_ref().is_none_or(|m| m.is_empty());
+    let no_multi = fc.multi_value.is_none();
     match op {
         FilterOperator::IsNull | FilterOperator::IsTrue | FilterOperator::IsFalse => false,
         FilterOperator::In | FilterOperator::MatchAll => fc.value.is_none() && no_multi,
@@ -374,6 +376,11 @@ fn positive(
         FilterOperator::IsFalse => return Ok(field.is_false()),
         FilterOperator::IsNull => return Ok(field.is_null()),
         FilterOperator::In => {
+            // An explicitly empty multiValue with no fallback value: {$in: []} in Mongo
+            // matches nothing (SZ-642). Return False so the filter stays effective.
+            if fc.multi_value.as_ref().is_some_and(|m| m.is_empty()) && fc.value.is_none() {
+                return Ok(Cond::False);
+            }
             let values = multi_value(fc, field_name)?;
             let mut binds = Vec::with_capacity(values.len());
             for v in &values {
@@ -510,6 +517,16 @@ mod tests {
         assert_eq!(sql(f("s", In, " A , B ")).unwrap(), "`s` in ('A', 'B')");
         assert!(sql(f("s", In, " , ")).is_err());
         assert!(sql(fc(Some("s"), In, None)).is_err());
+        // SZ-642: an explicitly empty multiValue matches nothing ({$in: []} in Mongo).
+        let empty = fc(Some("s"), In, None).with_multi_value(vec![]);
+        assert_eq!(read(empty.clone()).unwrap(), "false");
+        // Negated: NOT IN [] = match everything (SQL: NOT FALSE).
+        assert_eq!(read(empty.negated()).unwrap(), "not false");
+        // In a read AND: the empty IN is not dropped, it stays as FALSE inside the AND.
+        assert_eq!(
+            read(and(vec![f("a", Equals, 1), fc(Some("b"), In, None).with_multi_value(vec![])])).unwrap(),
+            "(`a` = 1 and false)"
+        );
     }
 
     #[test]
