@@ -272,6 +272,22 @@ async fn universal(State(st): State<ShellState>, req: Request) -> Response {
     finish(r, "**")
 }
 
+/// An anonymous GET of one of the app's own `/api/` routes from inside the shell (a sitemap's
+/// `seo.paths.list` source): the request's host and app headers from `h`, nothing that names a
+/// user, so what a crawler is told never depends on who asked.
+pub async fn internal_get(st: &ShellState, h: &HeaderMap, uri: &str) -> Response {
+    let mut b = Request::builder().method(Method::GET).uri(uri).header(header::ACCEPT, "application/json");
+    for k in ["x-forwarded-host", "x-forwarded-port", "x-forwarded-proto", "x-forwarded-for", "x-real-ip", "appcode", "clientcode"] {
+        if let Some(v) = h.get(k) {
+            b = b.header(k, v.clone());
+        }
+    }
+    match b.body(axum::body::Body::empty()) {
+        Ok(req) => universal(State(st.clone()), req).await,
+        Err(e) => finish(Err(unknown(StatusCode::BAD_REQUEST, &format!("{e}"))), "**"),
+    }
+}
+
 struct Gateway<'a> {
     forwarded_host: &'a str,
     forwarded_port: &'a str,

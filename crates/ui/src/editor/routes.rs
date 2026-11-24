@@ -148,6 +148,7 @@ fn own_routes(st: St) -> Router {
         .route("/api/ui/applications/mobileApps/status/{status_id}", post(mobile_app_status))
         .route("/api/ui/applications/{id}/index", get(app_index))
         .route("/api/ui/applications/internal/index/{app_code}", get(internal_index))
+        .route("/api/ui/applications/{id}/sitemap", get(app_sitemap))
         .route("/api/ui/pages/{id}/components", get(read_components).post(add_component))
         .route("/api/ui/pages/{id}/components/{component_key}", patch(patch_component).delete(remove_component))
         .route("/api/ui/pages/{id}/events/{function_name}", get(read_event).put(put_event))
@@ -374,6 +375,66 @@ async fn internal_index(State(st): State<St>, Path(app): Path<String>, RawQuery(
     let p = Params::from_query(q.as_deref());
     let r = build_index(&st.index_services(), &ca, &app, p.first("forClientCode"), false).await;
     respond(R, r.map(|m| json(JValue::Object(m))))
+}
+
+/// Rust only: which of the app's live pages the generated sitemap lists for the client, and why
+/// (`crate::aeo::decide`), for the sitemap panels and the AppBuilder agent. The same access as
+/// the app's index. Pages answered by a `seo.paths.list` source are not asked here; the row
+/// names the source.
+async fn app_sitemap(State(st): State<St>, Path(app): Path<String>, RawQuery(q): RawQuery, h: HeaderMap) -> Response {
+    const R: &str = "/api/ui/applications/{appCode}/sitemap";
+    let ca = match caller(&st, &h, R).await {
+        Ok(ca) => ca,
+        Err(r) => return r,
+    };
+    let r = async {
+        let p = Params::from_query(q.as_deref());
+        let client = p.first("clientCode").filter(|c| !c.trim().is_empty());
+        st.applications.read_index_lro(&ca, &app, client).await?;
+        let cc = client.map(str::to_string).unwrap_or_else(|| ca.client_code().to_string());
+        let failed = |e: anyhow::Error| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
+        let store = &st.cx.store;
+        let props = store
+            .read(&crate::docs::ApplicationDoc, &app, &app, &cc, &cc, false)
+            .await
+            .map_err(failed)?
+            .and_then(|r| map_field(&r.entity, "properties").cloned())
+            .unwrap_or_default();
+        let info = crate::aeo::AppInfo::of(&props);
+        let (pages, aliases) = crate::shell::discovery::read_pages(store, &app, &cc, &cc).await.map_err(failed)?;
+        let mut rows: Vec<(bool, String, JValue)> = pages
+            .iter()
+            .zip(crate::aeo::decide(&info, &pages, &aliases))
+            .filter(|(p, _)| !p.name.trim().is_empty())
+            .map(|(p, d)| {
+                let opt = |v: Option<&String>| v.map_or(JValue::Null, |s| JValue::Str(s.clone()));
+                let mut m = JMap::new();
+                m.insert("name".into(), JValue::Str(p.name.clone()));
+                m.insert("title".into(), opt(p.title.as_ref()));
+                m.insert("paths".into(), JValue::Array(p.paths(&info).into_iter().map(JValue::Str).collect()));
+                m.insert("listed".into(), JValue::Bool(d.listed));
+                let setting = match d.setting {
+                    Some(true) => "include",
+                    Some(false) => "exclude",
+                    None => "auto",
+                };
+                m.insert("setting".into(), JValue::Str(setting.into()));
+                m.insert("reason".into(), JValue::Str(d.reason.code().into()));
+                m.insert("linkedFrom".into(), opt(d.linked_from.as_ref()));
+                m.insert("list".into(), opt(p.list_source.as_ref()));
+                (d.listed, p.name.to_lowercase(), JValue::Object(m))
+            })
+            .collect();
+        rows.sort_by(|a, b| (!a.0, &a.1).cmp(&(!b.0, &b.1)));
+        let mut out = JMap::new();
+        out.insert("appCode".into(), JValue::Str(app.clone()));
+        out.insert("clientCode".into(), JValue::Str(cc));
+        out.insert("defaultPage".into(), info.default_page.clone().map_or(JValue::Null, JValue::Str));
+        out.insert("pages".into(), JValue::Array(rows.into_iter().map(|r| r.2).collect()));
+        Ok(json(JValue::Object(out)))
+    }
+    .await;
+    respond(R, r)
 }
 
 // ── PageController ──────────────────────────────────────────────────
