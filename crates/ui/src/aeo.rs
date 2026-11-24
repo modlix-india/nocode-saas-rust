@@ -232,8 +232,8 @@ pub struct PageInfo {
     /// `seo.paths.list` of a path source: an `/api/` address answering every path of the page
     /// (`parse_list`).
     pub list_source: Option<String>,
-    /// The page names this page's components and events may link to (`link_names`), unfiltered:
-    /// `decide` keeps the ones that are pages.
+    /// The page names this page's components may link to (`link_names`), unfiltered: `decide`
+    /// keeps the ones that are pages. Event steps are not read.
     pub links: Vec<String>,
 }
 
@@ -262,11 +262,12 @@ impl PageInfo {
             },
             _ => None,
         };
+        // Only what a visitor (and a crawler) can follow: the components' links. A Navigate step
+        // in an event runs after a form is sent or on an error (a thank you, a cart, a not found
+        // page), so it lists nothing.
         let mut links = Vec::new();
-        for k in ["componentDefinition", "eventFunctions"] {
-            if let Some(v) = page.get(k) {
-                link_names(v, false, &mut links);
-            }
+        if let Some(v) = page.get("componentDefinition") {
+            link_names(v, false, &mut links);
         }
         links.sort();
         links.dedup();
@@ -558,7 +559,7 @@ fn segment(s: &str) -> String {
 /// The fields of a page the files read, for a projected query.
 pub fn page_projection() -> Document {
     doc! {"name": 1, "appCode": 1, "clientCode": 1, "permission": 1, "title": 1, "updatedAt": 1, "published": 1,
-        "properties.title": 1, "properties.seo": 1, "componentDefinition": 1, "eventFunctions": 1}
+        "properties.title": 1, "properties.seo": 1, "componentDefinition": 1}
 }
 
 /// The fields of a URI path the sitemap reads.
@@ -911,7 +912,8 @@ mod tests {
                 "t1": {"properties": {"text": {"value": "See [our story](/about) or <a href=\"/page/team\">the team</a>"}}},
                 "b2": {"properties": {"linkPath": {"value": "signIn"}}},
                 "b3": {"properties": {"linkPath": {"value": "ad"}}}},
-                "eventFunctions": {"go": {"steps": {"n": {"name": "Navigate", "parameterMap": {"linkPath": {"x": {"value": "blog"}}}}}}}})),
+                "eventFunctions": {"go": {"steps": {"n": {"name": "Navigate", "parameterMap": {"linkPath": {"x": {"value": "/thankYou"}}}}}}}})),
+            page(serde_json::json!({"name": "thankYou"})),
             page(serde_json::json!({"name": "pricing"})),
             page(serde_json::json!({"name": "about", "componentDefinition": {"l": {"properties": {"linkPath": {"value": "/careers"}}}}})),
             page(serde_json::json!({"name": "team"})),
@@ -942,6 +944,8 @@ mod tests {
         assert_eq!(get("legal").2, "included");
         assert_eq!(get("secret").2, "signedIn");
         assert_eq!(get("dealSettings").2, "notLinked");
+        // A Navigate step (after a form is sent) is no link.
+        assert_eq!(get("thankYou").2, "notLinked");
         assert_eq!(get("privacy"), ("privacy".into(), false, "shellOnly", Some("shell".into())));
         assert_eq!(get("blog"), ("blog".into(), true, "described", None));
         assert_eq!(get("blogPost"), ("blogPost".into(), true, "linked", Some("blog".into())));
@@ -951,7 +955,7 @@ mod tests {
         let e = entries(&a, &pages, &[], &sourced);
         let paths: Vec<&str> = e.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, vec!["/", "/about", "/blog", "/blogPost/b", "/blogPost/first%20post", "/forgot", "/legal", "/pricing", "/team"]);
-        assert!(pages[14].eligible(&a) && !pages[7].eligible(&a) && !pages[9].eligible(&a));
+        assert!(pages[15].eligible(&a) && !pages[8].eligible(&a) && !pages[10].eligible(&a));
     }
 
     #[test]
