@@ -562,7 +562,7 @@ impl SmtpProps {
         };
         SmtpProps {
             host: prop_str(props, "mail.smtp.host").or_else(|| prop_str(props, "mail.host")).unwrap_or_else(|| "localhost".into()),
-            port: prop_int(props, "mail.smtp.port").and_then(|p| u16::try_from(p).ok()).unwrap_or(25),
+            port: prop_int(props, "mail.smtp.port").or_else(|| prop_int(props, "mail.port")).and_then(|p| u16::try_from(p).ok()).unwrap_or(25),
             auth: prop_bool(props, "mail.smtp.auth"),
             starttls: prop_bool(props, "mail.smtp.starttls.enable"),
             starttls_required: prop_bool(props, "mail.smtp.starttls.required"),
@@ -1092,6 +1092,12 @@ mod tests {
         assert_eq!(p.connect_timeout, Some(DEFAULT_SMTP_TIMEOUT));
         let d = SmtpProps::from_props(&Map::new());
         assert_eq!((d.host.as_str(), d.port, d.auth), ("localhost", 25, false));
+        // SZ-874: connections store the port as mail.port; fall back when mail.smtp.port is absent.
+        let fb = SmtpProps::from_props(json!({"mail.port": "465", "mail.smtp.host": "smtp.example.com"}).as_object().unwrap());
+        assert_eq!((fb.host.as_str(), fb.port), ("smtp.example.com", 465));
+        // mail.smtp.port takes precedence over mail.port when both are present.
+        let both = SmtpProps::from_props(json!({"mail.smtp.port": 587, "mail.port": 465}).as_object().unwrap());
+        assert_eq!(both.port, 587);
         assert_eq!((d.timeout, d.connect_timeout), (Some(Duration::from_secs(60)), Some(Duration::from_secs(60))));
         // Zero or negative is not a timeout JavaMail honours either: the default.
         let z = SmtpProps::from_props(json!({"mail.smtp.timeout": 0, "mail.smtp.connectiontimeout": "-5"}).as_object().unwrap());
