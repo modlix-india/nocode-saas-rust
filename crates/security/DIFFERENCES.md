@@ -367,7 +367,10 @@ piece 1's user side of it (`admin/users/registration.rs`). Kept as Java has them
 - `client-managers/migrateTo/{uid}` answers the rows added plus the rows removed (with
   `removeManager`, moving one client answers 2).
 - `restrictClient` that cannot act (client not managed, no app access) answers 200 with no body.
-- `findUserClients` (anonymous) with no identifier lists every non-deleted user under the client.
+- `findUserClients` (anonymous) with a blank, whitespace or placeholder login and no `userId` answers `[]`
+  (Java lists every non-deleted user under the client). Deliberate change, 2026-11-25: the route is
+  anonymous, so Java's answer let anyone who knows a client code enumerate its users; a LeadZump deal
+  with no email took the first of them as its buyer (DISHA1, 2026-11-24). A `userId` alone still works.
 
 ## security-admin piece 1: not differences, but worth knowing
 
