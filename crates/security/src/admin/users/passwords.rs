@@ -524,7 +524,14 @@ impl Admin {
 
     /// `findUserClients`: every client the identity has a (non-deleted) user in, under the
     /// request's client (and app, unless `appLevel=false`), active ones only, by client name.
+    /// A blank, whitespace or placeholder login with no `userId` answers `[]`: the route is anonymous,
+    /// so listing every user of the client would let anyone who knows a client code enumerate its
+    /// users (DISHA1 wrong-buyer report, 2026-11-24; a deliberate change from Java).
     pub async fn find_user_clients(&self, r: &AuthRequest, app_code: Option<String>, client_code: Option<String>) -> AuthResult<Vec<Value>> {
+        let blank = r.user_name.as_deref().map_or(true, |n| n.trim().is_empty() || n == crate::model::PLACEHOLDER);
+        if blank && r.user_id.is_none() {
+            return Ok(Vec::new());
+        }
         let q = UserQuery {
             user_name: r.user_name.clone(),
             identifier: r.identifier(),
@@ -887,18 +894,31 @@ mod live {
         assert!(matches!(r, Ok(false)) || r.as_ref().is_err_and(|e| e.status() == StatusCode::FORBIDDEN), "{r:?}");
 
         // ---- the client picker: users of several clients, sorted by name ----
+        // One login with accounts in two clients (c and m), so the picker lists both, by name.
+        sqlx::query("UPDATE security_user SET EMAIL_ID = ? WHERE ID = ?").bind(a.email_id.clone()).bind(e.id).execute(&s.db.pool).await.unwrap();
         let ids = [a.id, e.id];
-        let picker = s.find_user_clients(&AuthRequest { user_name: None, ..Default::default() }, None, Some("ZZRUL".into())).await.unwrap();
+        let login = AuthRequest { user_name: a.email_id.clone(), ..Default::default() };
+        let picker = s.find_user_clients(&login, None, Some("ZZRUL".into())).await.unwrap();
         let listed: Vec<u64> = picker.iter().filter_map(|v| v["userId"].as_u64()).collect();
         assert!(ids.iter().all(|i| listed.contains(i)), "{listed:?}");
         let names: Vec<String> = picker.iter().map(|v| v["client"]["name"].as_str().unwrap_or("").to_lowercase()).collect();
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);
+        // A blank, whitespace or placeholder login, or an empty body, lists nobody (the route is
+        // anonymous: no enumeration of a client's users).
+        for blank in [None, Some(String::new()), Some("   ".to_string()), Some(crate::model::PLACEHOLDER.to_string())] {
+            let r = AuthRequest { user_name: blank.clone(), ..Default::default() };
+            assert!(s.find_user_clients(&r, None, Some("ZZRUL".into())).await.unwrap().is_empty(), "{blank:?}");
+        }
+        assert!(s.find_user_clients(&AuthRequest::default(), None, Some("ZZRUL".into())).await.unwrap().is_empty());
+        // A `userId` alone still finds that user's clients.
+        let by_id = s.find_user_clients(&AuthRequest { user_id: Some(a.id), ..Default::default() }, None, Some("ZZRUL".into())).await.unwrap();
+        assert!(by_id.iter().any(|v| v["userId"] == a.id), "{by_id:?}");
         // An inactive client is left out.
         let (st, _) = fx.http("GET", &format!("/clients/makeClientInActive?clientId={m}"), None).await;
         assert_eq!(st, StatusCode::OK);
-        let picker = s.find_user_clients(&AuthRequest::default(), None, Some("ZZRUL".into())).await.unwrap();
+        let picker = s.find_user_clients(&login, None, Some("ZZRUL".into())).await.unwrap();
         assert!(!picker.iter().any(|v| v["userId"] == e.id));
         fx.finish().await;
     }
