@@ -776,6 +776,9 @@ impl Admin {
         entity_changed(&self.db, None, object::USER, action::UPDATE, updated.id, Some(updated.client_id), "User", describe(&updated).as_deref());
         self.evict_manager_caches(updated.client_id, old, manager).await;
         self.evict_tokens(updated.id).await?;
+        // The cached user carries `reportingTo`; without this, `GetUserManager` (call routing, escalations)
+        // keeps answering the old manager until the entry expires (LZT-2650).
+        self.caches().service.evict_everywhere(caches::USER, &updated.id.to_string()).await;
         Ok(updated)
     }
 
