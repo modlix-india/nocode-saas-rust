@@ -7,6 +7,7 @@ use overridable::write::OverridableService;
 use overridable::{java_map, JMap, JValue};
 use platform::error::AppResult;
 use platform::security::ContextAuthentication;
+use tokio::try_join;
 
 use crate::editor::kinds::UiKind;
 
@@ -42,13 +43,15 @@ fn rows(v: Vec<JMap>) -> JValue {
 /// `buildIndex(appCode, clientCode, includeComponentVersions)`.
 pub async fn build_index(s: &IndexServices<'_>, ca: &ContextAuthentication, app: &str, client: Option<&str>, include_versions: bool) -> AppResult<JMap> {
     let c = client.filter(|c| !c.trim().is_empty());
-    let applications = s.applications.read_index_lro(ca, app, c).await?;
-    let pages = s.pages.read_index_lro(ca, app, c).await?;
-    let functions = s.functions.read_index_lro(ca, app, c).await?;
-    let schemas = s.schemas.read_index_lro(ca, app, c).await?;
-    let themes = s.themes.read_index_lro(ca, app, c).await?;
-    let styles = s.styles.read_index_lro(ca, app, c).await?;
-    let uripaths = s.uripaths.read_index_lro(ca, app, c).await?;
+    let (applications, pages, functions, schemas, themes, styles, uripaths) = try_join!(
+        s.applications.read_index_lro(ca, app, c),
+        s.pages.read_index_lro(ca, app, c),
+        s.functions.read_index_lro(ca, app, c),
+        s.schemas.read_index_lro(ca, app, c),
+        s.themes.read_index_lro(ca, app, c),
+        s.styles.read_index_lro(ca, app, c),
+        s.uripaths.read_index_lro(ca, app, c),
+    )?;
 
     let mut page_rows = summarize(&pages);
     if include_versions {
