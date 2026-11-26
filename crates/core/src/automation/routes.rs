@@ -239,15 +239,41 @@ async fn test(State(st): State<AppState>, h: HeaderMap, body: Bytes) -> Response
         let runner = event_runner(s, &app, &client, draft).await?;
         let engine = s.engine.clone();
         let auto = Value::Object(automation.clone());
+        let auto_for_labels = auto.clone();
+        let trigger_for_explain = trigger.clone();
         let user = ctx.auth.user_id();
         let run = context::with_request(runner, async move { engine.start_test(&app, &client, draft, &auto, &trigger, user).await }).await?;
         Ok(match run {
             Some(run) => json_response(&run_json(&run)),
-            None => coded(StatusCode::OK, "The trigger's filter does not hold for this record, so the automation would not start."),
+            None => {
+                let message = "The trigger's filter does not hold for this record, so the automation would not start.";
+                let labels = |field: &str| trigger_field_label(&auto_for_labels, field);
+                let why = super::expr::explain_filter(auto_for_labels.get("trigger").and_then(|t| t.get("filter")), &json!({ "trigger": trigger_for_explain }), &labels);
+                let mut body = json!({ "message": message });
+                if let (Some(Value::Object(w)), Value::Object(m)) = (why, &mut body) {
+                    m.extend(w);
+                }
+                let mut resp = (StatusCode::OK, body.to_string()).into_response();
+                resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                resp
+            }
         })
     }
     .await;
     finish(r, R)
+}
+
+/// The label the automation's trigger gives `field` (`trigger.stage` or `stage`), when it lists its fields.
+fn trigger_field_label(automation: &Value, field: &str) -> Option<String> {
+    let key = field.strip_prefix("trigger.").unwrap_or(field);
+    automation
+        .get("trigger")?
+        .get("fields")?
+        .as_array()?
+        .iter()
+        .find(|f| f.get("name").and_then(Value::as_str).is_some_and(|n| n == key || n == field))
+        .and_then(|f| f.get("label").and_then(Value::as_str))
+        .map(str::to_string)
 }
 
 /// The client's event runner on the surface a test runs on: what a test run's actions run as.
