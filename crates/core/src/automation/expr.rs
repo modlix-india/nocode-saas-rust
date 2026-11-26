@@ -177,6 +177,131 @@ pub fn holds(condition: Option<&Value>, ctx: &Value) -> bool {
     r != negate
 }
 
+/// Most failing conditions an explanation lists.
+const EXPLAIN_CAP: usize = 5;
+
+/// What a value is, in words, for a person testing an automation.
+fn shown(v: Option<&Value>) -> String {
+    match v {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(a)) => a.iter().map(text_of).collect::<Vec<_>>().join(", "),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn label_of(field: &str, labels: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(l) = labels(field).filter(|l| !l.trim().is_empty()) {
+        return l;
+    }
+    let key = field.strip_prefix("trigger.").unwrap_or(field);
+    if key.is_empty() { "The record".into() } else { key.to_string() }
+}
+
+fn leaf_failure(c: &Map<String, Value>, ctx: &Value, labels: &dyn Fn(&str) -> Option<String>) -> Value {
+    let field = c.get("field").and_then(Value::as_str).unwrap_or("");
+    let label = label_of(field, labels);
+    let actual = shown(lookup(ctx, field));
+    let expected_v = c.get("value").map(|v| render(v, ctx));
+    let mut expected = shown(expected_v.as_ref());
+    let op = c.get("operator").and_then(Value::as_str).unwrap_or("EQUALS").to_ascii_uppercase();
+    let negate = c.get("negate").and_then(Value::as_bool).unwrap_or(false);
+    if op == "BETWEEN" {
+        expected = format!("{} to {}", expected, shown(c.get("toValue").map(|v| render(v, ctx)).as_ref()));
+    }
+    let wants = match (op.as_str(), negate) {
+        ("EQUALS", false) | ("NOT_EQUALS", true) => format!("{label} = \"{expected}\""),
+        ("NOT_EQUALS", false) | ("EQUALS", true) => format!("{label} not = \"{expected}\""),
+        ("STRING_LOOSE_EQUAL", false) => format!("{label} = \"{expected}\" (ignoring case)"),
+        ("IN", false) => format!("{label} to be one of [{expected}]"),
+        ("IN", true) => format!("{label} not to be one of [{expected}]"),
+        ("LIKE" | "CONTAINS", false) => format!("{label} to contain \"{expected}\""),
+        ("LIKE" | "CONTAINS", true) => format!("{label} not to contain \"{expected}\""),
+        ("GREATER_THAN", false) => format!("{label} > {expected}"),
+        ("GREATER_THAN_EQUAL", false) => format!("{label} >= {expected}"),
+        ("LESS_THAN", false) => format!("{label} < {expected}"),
+        ("LESS_THAN_EQUAL", false) => format!("{label} <= {expected}"),
+        ("BETWEEN", false) => format!("{label} between {expected}"),
+        ("IS_EMPTY" | "IS_NULL", false) | ("IS_NOT_EMPTY" | "IS_NOT_NULL", true) => format!("{label} to be empty"),
+        ("IS_NOT_EMPTY" | "IS_NOT_NULL", false) | ("IS_EMPTY" | "IS_NULL", true) => format!("{label} to be filled"),
+        ("IS_TRUE", false) | ("IS_FALSE", true) => format!("{label} to be true"),
+        ("IS_FALSE", false) | ("IS_TRUE", true) => format!("{label} to be false"),
+        (o, _) => format!("{label} {} {o} \"{expected}\"", if negate { "NOT" } else { "" }),
+    };
+    let is = if actual.is_empty() { format!("{label} is empty") } else { format!("{label} is \"{actual}\"") };
+    let mut sentence = format!("{is}, but the filter wants {wants}.");
+    // A name where the filter holds an id: the usual way a test and a real event disagree.
+    let numeric = |t: &str| !t.is_empty() && t.trim().parse::<f64>().is_ok();
+    if matches!(op.as_str(), "EQUALS" | "IN") && !negate && numeric(&expected.replace(',', "")) && !actual.is_empty() && !numeric(&actual) {
+        sentence.push_str(" The filter compares an id here and the test sent a name.");
+    }
+    serde_json::json!({
+        "field": field, "label": label, "operator": if negate { format!("NOT {op}") } else { op },
+        "expected": expected, "actual": actual, "detail": sentence,
+    })
+}
+
+fn collect_failures(condition: &Value, ctx: &Value, labels: &dyn Fn(&str) -> Option<String>, out: &mut Vec<Value>) {
+    if holds(Some(condition), ctx) {
+        return;
+    }
+    let Value::Object(c) = condition else { return };
+    let negate = c.get("negate").and_then(Value::as_bool).unwrap_or(false);
+    match c.get("conditions") {
+        None => out.push(leaf_failure(c, ctx, labels)),
+        Some(Value::Array(parts)) => {
+            if negate {
+                out.push(serde_json::json!({
+                    "field": "", "label": "", "operator": "NOT", "expected": "", "actual": "",
+                    "detail": "A group of conditions that must NOT all hold does hold for this record.",
+                }));
+                return;
+            }
+            for p in parts {
+                collect_failures(p, ctx, labels, out);
+            }
+        }
+        Some(_) => {}
+    }
+}
+
+/// Why `condition` does not hold, in plain words: `{ failed: [{ field, label, operator,
+/// expected, actual }], detail }`. `None` when it holds. For an AND group every failing
+/// condition is listed (at most five); for an OR group, every option, since none matched.
+/// It reads the same rules `holds` does and never decides anything.
+pub fn explain_filter(condition: Option<&Value>, ctx: &Value, labels: &dyn Fn(&str) -> Option<String>) -> Option<Value> {
+    let cond = condition?;
+    if holds(Some(cond), ctx) {
+        return None;
+    }
+    let mut all = Vec::new();
+    collect_failures(cond, ctx, labels, &mut all);
+    let total = all.len();
+    let or = matches!(cond, Value::Object(c) if c.get("conditions").is_some()
+        && c.get("operator").and_then(Value::as_str).is_some_and(|o| o.eq_ignore_ascii_case("OR"))
+        && !c.get("negate").and_then(Value::as_bool).unwrap_or(false));
+    all.truncate(EXPLAIN_CAP);
+    let mut lines: Vec<String> = all.iter().filter_map(|f| f.get("detail").and_then(Value::as_str).map(str::to_string)).collect();
+    if total > EXPLAIN_CAP {
+        lines.push(format!("And {} more.", total - EXPLAIN_CAP));
+    }
+    let detail = if or && total > 1 {
+        format!("None of the filter's options matched. {}", lines.join(" "))
+    } else {
+        lines.join(" ")
+    };
+    let failed: Vec<Value> = all
+        .into_iter()
+        .map(|mut f| {
+            if let Value::Object(m) = &mut f {
+                m.remove("detail");
+            }
+            f
+        })
+        .collect();
+    Some(serde_json::json!({ "failed": failed, "detail": detail }))
+}
+
 /// A point in time as epoch milliseconds: a number (milliseconds, or seconds when it is small
 /// enough to be), or an ISO-8601 date-time or date (a date is its midnight in UTC).
 pub fn instant(v: &Value) -> Option<i64> {
@@ -251,6 +376,66 @@ mod tests {
         ]})));
         assert!(!h(json!({"operator": "AND", "negate": true, "conditions": [{"field": "trigger.dealId", "operator": "IS_NOT_NULL"}]})));
         assert!(!h(json!({"field": "trigger.dealId", "operator": "NO_SUCH"})));
+    }
+
+
+    #[test]
+    fn explains_a_filter_that_does_not_hold() {
+        let c = json!({"trigger": {"stage": "Fresh", "stageNum": 66, "status": "", "product": "P1"}});
+        let none = |_: &str| None;
+        let lab = |f: &str| (f == "trigger.stage").then(|| "Stage".to_string());
+        let eq = |f: &str, v: Value| json!({"field": f, "operator": "EQUALS", "value": v});
+
+        assert!(explain_filter(Some(&json!({"operator": "AND", "conditions": [eq("trigger.stage", json!("Fresh"))]})), &c, &none).is_none());
+        assert!(explain_filter(None, &c, &none).is_none());
+
+        // AND with one failing condition: the name where an id is wanted
+        let f = json!({"operator": "AND", "conditions": [eq("trigger.stage", json!("66")), eq("trigger.product", json!("P1"))]});
+        let e = explain_filter(Some(&f), &c, &lab).unwrap();
+        assert_eq!(e["failed"].as_array().unwrap().len(), 1);
+        assert_eq!(e["failed"][0]["label"], "Stage");
+        assert_eq!(e["failed"][0]["expected"], "66");
+        assert_eq!(e["failed"][0]["actual"], "Fresh");
+        assert!(e["detail"].as_str().unwrap().starts_with("Stage is \"Fresh\", but the filter wants Stage = \"66\"."));
+        assert!(e["detail"].as_str().unwrap().contains("an id"));
+
+        // AND with several failing; the field key stands in for a missing label
+        let f = json!({"operator": "AND", "conditions": [eq("trigger.stage", json!("66")), eq("trigger.product", json!("P2")), eq("trigger.stageNum", json!(66))]});
+        let e = explain_filter(Some(&f), &c, &none).unwrap();
+        assert_eq!(e["failed"].as_array().unwrap().len(), 2);
+        assert_eq!(e["failed"][1]["label"], "product");
+
+        // OR, none matched
+        let f = json!({"operator": "OR", "conditions": [eq("trigger.stage", json!("66")), eq("trigger.stage", json!("67"))]});
+        let e = explain_filter(Some(&f), &c, &lab).unwrap();
+        assert_eq!(e["failed"].as_array().unwrap().len(), 2);
+        assert!(e["detail"].as_str().unwrap().starts_with("None of the filter's options matched."));
+
+        // empty and missing actuals
+        let e = explain_filter(Some(&eq("trigger.status", json!("3"))), &c, &none).unwrap();
+        assert_eq!(e["failed"][0]["actual"], "");
+        assert!(e["detail"].as_str().unwrap().starts_with("status is empty, but"));
+        let e = explain_filter(Some(&eq("trigger.nothing", json!("3"))), &c, &none).unwrap();
+        assert_eq!(e["failed"][0]["actual"], "");
+
+        // '66' and 66 are equal in `holds` (both read as numbers)
+        assert!(holds(Some(&eq("trigger.stageNum", json!("66"))), &c));
+        assert!(explain_filter(Some(&eq("trigger.stageNum", json!("66"))), &c, &none).is_none());
+        let e = explain_filter(Some(&eq("trigger.stageNum", json!("67"))), &c, &none).unwrap();
+        assert_eq!(e["failed"][0]["actual"], "66");
+        assert!(!e["detail"].as_str().unwrap().contains("an id"));
+
+        // IN
+        let f = json!({"field": "trigger.stage", "operator": "IN", "value": "66, 67"});
+        let e = explain_filter(Some(&f), &c, &lab).unwrap();
+        assert_eq!(e["failed"][0]["operator"], "IN");
+        assert!(e["detail"].as_str().unwrap().contains("one of [66, 67]"));
+
+        // capped at five
+        let many: Vec<Value> = (0..8).map(|i| eq(&format!("trigger.f{i}"), json!("x"))).collect();
+        let e = explain_filter(Some(&json!({"operator": "AND", "conditions": many})), &c, &none).unwrap();
+        assert_eq!(e["failed"].as_array().unwrap().len(), 5);
+        assert!(e["detail"].as_str().unwrap().ends_with("And 3 more."));
     }
 
     #[test]
