@@ -128,6 +128,25 @@ fn members(v: &Value) -> Vec<Value> {
     }
 }
 
+/// A text pattern where `%` stands for any text (LZT-2783). Without a `%` the pattern is not a pattern:
+/// "contains" keeps meaning contains and "is like" keeps meaning equal ignoring case.
+fn wildcard(have: &str, pattern: &str) -> bool {
+    let have = have.trim().to_lowercase();
+    let parts: Vec<String> = pattern.trim().to_lowercase().split('%').map(str::to_string).collect();
+    let (first, last) = (&parts[0], &parts[parts.len() - 1]);
+    if !have.starts_with(first.as_str()) {
+        return false;
+    }
+    let mut at = first.len();
+    for part in &parts[1..parts.len() - 1] {
+        match have[at..].find(part.as_str()) {
+            Some(i) => at += i + part.len(),
+            None => return false,
+        }
+    }
+    have.len() >= at + last.len() && have[at..].ends_with(last.as_str())
+}
+
 fn leaf(c: &Map<String, Value>, ctx: &Value) -> bool {
     let field = c.get("field").and_then(Value::as_str).unwrap_or("");
     let actual = lookup(ctx, field);
@@ -137,6 +156,7 @@ fn leaf(c: &Map<String, Value>, ctx: &Value) -> bool {
     let r = match op.as_str() {
         "EQUALS" => equal(&have(), &value),
         "NOT_EQUALS" => !equal(&have(), &value),
+        "STRING_LOOSE_EQUAL" if text_of(&value).contains('%') => wildcard(&text_of(&have()), &text_of(&value)),
         "STRING_LOOSE_EQUAL" => text_of(&have()).trim().eq_ignore_ascii_case(text_of(&value).trim()),
         "GREATER_THAN" => !is_blank(actual) && compare(&have(), &value).is_gt(),
         "GREATER_THAN_EQUAL" => !is_blank(actual) && compare(&have(), &value).is_ge(),
@@ -147,6 +167,7 @@ fn leaf(c: &Map<String, Value>, ctx: &Value) -> bool {
             !is_blank(actual) && compare(&have(), &value).is_ge() && compare(&have(), &to).is_le()
         }
         "IN" => members(&value).iter().any(|m| equal(&have(), m)),
+        "LIKE" | "CONTAINS" if text_of(&value).contains('%') => wildcard(&text_of(&have()), &text_of(&value)),
         "LIKE" | "CONTAINS" => text_of(&have()).to_lowercase().contains(&text_of(&value).to_lowercase()),
         "IS_TRUE" => truth(actual) == Some(true),
         "IS_FALSE" => truth(actual) == Some(false),
@@ -366,6 +387,15 @@ mod tests {
         assert!(h(json!({"field": "trigger.stage", "operator": "IN", "value": "Won, New"})));
         assert!(h(json!({"field": "trigger.amount", "operator": "BETWEEN", "value": 1000, "toValue": 2000})));
         assert!(h(json!({"field": "trigger.name", "operator": "LIKE", "value": "ASH"})));
+        // LZT-2783: `%` makes "contains" and "is like" a pattern; without it they behave as before.
+        let name = lookup(&c, "trigger.name").map(text_of).unwrap_or_default().to_lowercase();
+        let (head, tail) = (&name[..2], &name[name.len() - 2..]);
+        assert!(h(json!({"field": "trigger.name", "operator": "LIKE", "value": format!("{head}%{tail}")})));
+        assert!(h(json!({"field": "trigger.name", "operator": "STRING_LOOSE_EQUAL", "value": format!("{head}%")})));
+        assert!(h(json!({"field": "trigger.name", "operator": "STRING_LOOSE_EQUAL", "value": "%"})));
+        assert!(!h(json!({"field": "trigger.name", "operator": "STRING_LOOSE_EQUAL", "value": format!("%{head}x%")})));
+        assert!(!h(json!({"field": "trigger.name", "operator": "LIKE", "value": format!("zz%{tail}")})));
+        assert!(h(json!({"field": "trigger.name", "operator": "STRING_LOOSE_EQUAL", "value": name.to_uppercase()})));
         assert!(h(json!({"field": "steps.hold.happened", "operator": "IS_TRUE"})));
         assert!(h(json!({"field": "trigger.missing", "operator": "IS_NULL"})));
         assert!(!h(json!({"field": "trigger.missing", "operator": "LESS_THAN", "value": 5})), "a missing value is never less");
